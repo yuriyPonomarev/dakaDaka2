@@ -1,0 +1,39 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 21f3b0879b0b43d4483b1b6d11955596, type: 3}
+  m_Name: Class_Archer
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.CharacterClassData
+  classId: archer
+  displayName: Archer
+  description: Quick and fragile. Wins by distance, and by leaving before the thing
+    reaches you.
+  accentColor: {r: 0.35, g: 0.72, b: 0.62, a: 1}
+  maxHealth: 100
+  healthRegenPerSecond: 2
+  regenDelay: 7
+  moveSpeed: 4.4
+  sprintSpeed: 6.4
+  crouchSpeed: 2.1
+  jumpHeight: 1.25
+  standHeight: 1.75
+  crouchHeight: 1.1
+  standEyeHeight: 1.64
+  crouchEyeHeight: 1
+  primaryWeapon: {fileID: 11400000, guid: dca3d38c514ab8b4bbcc0fc514ad00cb, type: 2}
+  startingItems:
+  - {fileID: 11400000, guid: d8388f34120eab247b8c3af01f264b41, type: 2}
+  - {fileID: 11400000, guid: c6fda9df47fce4e4da019554ee948f03, type: 2}
+  startingReserveAmmo: 20
+  maxReserveAmmo: 34
+  blockReduction: 0
+  blockArc: 90
+  guardSpeedMultiplier: 1

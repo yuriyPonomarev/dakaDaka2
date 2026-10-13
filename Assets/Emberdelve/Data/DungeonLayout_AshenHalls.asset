@@ -1,0 +1,159 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2ec7a9fd629fb534abcb369f06cd0850, type: 3}
+  m_Name: DungeonLayout_AshenHalls
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Level.DungeonLayoutData
+  levelName: The Ashen Halls
+  gridWidth: 26
+  gridHeight: 22
+  cellSize: 2
+  wallHeight: 3.6
+  wallThickness: 0.45
+  origin: {x: 0, y: 0, z: 0}
+  floorThickness: 0.5
+  ceilingThickness: 0.4
+  rooms:
+  - roomName: Entry Hall
+    minCell: {x: 2, y: 2}
+    maxCell: {x: 6, y: 5}
+  - roomName: Library
+    minCell: {x: 11, y: 2}
+    maxCell: {x: 15, y: 5}
+  - roomName: Central Hall
+    minCell: {x: 10, y: 8}
+    maxCell: {x: 16, y: 14}
+  - roomName: Armory
+    minCell: {x: 2, y: 9}
+    maxCell: {x: 6, y: 13}
+  - roomName: Chapel
+    minCell: {x: 19, y: 8}
+    maxCell: {x: 23, y: 13}
+  - roomName: Crypt
+    minCell: {x: 3, y: 16}
+    maxCell: {x: 9, y: 20}
+  - roomName: Ember Gate
+    minCell: {x: 18, y: 16}
+    maxCell: {x: 23, y: 20}
+  corridors:
+  - corridorName: Entry to Library
+    fromCell: {x: 6, y: 3}
+    toCell: {x: 11, y: 3}
+    width: 2
+  - corridorName: Entry to Central
+    fromCell: {x: 4, y: 5}
+    toCell: {x: 4, y: 8}
+    width: 2
+  - corridorName: Library to Central
+    fromCell: {x: 13, y: 5}
+    toCell: {x: 13, y: 8}
+    width: 2
+  - corridorName: Armory to Central
+    fromCell: {x: 6, y: 11}
+    toCell: {x: 10, y: 11}
+    width: 2
+  - corridorName: Central to Chapel
+    fromCell: {x: 16, y: 11}
+    toCell: {x: 19, y: 11}
+    width: 2
+  - corridorName: Central to Crypt
+    fromCell: {x: 12, y: 14}
+    toCell: {x: 12, y: 16}
+    width: 2
+  - corridorName: Crypt to Gate
+    fromCell: {x: 9, y: 18}
+    toCell: {x: 18, y: 18}
+    width: 2
+  - corridorName: Chapel to Gate
+    fromCell: {x: 21, y: 13}
+    toCell: {x: 21, y: 16}
+    width: 2
+  playerStartCell: {x: 4, y: 3}
+  extractionCell: {x: 21, y: 19}
+  lootSpawns:
+  - cell: {x: 3, y: 4}
+    item: {fileID: 11400000, guid: a26d2da41162d874ab729a17979af148, type: 2}
+    amount: 3
+  - cell: {x: 13, y: 3}
+    item: {fileID: 11400000, guid: d8388f34120eab247b8c3af01f264b41, type: 2}
+    amount: 1
+  - cell: {x: 5, y: 11}
+    item: {fileID: 11400000, guid: c6fda9df47fce4e4da019554ee948f03, type: 2}
+    amount: 1
+  - cell: {x: 12, y: 10}
+    item: {fileID: 11400000, guid: a26d2da41162d874ab729a17979af148, type: 2}
+    amount: 2
+  - cell: {x: 21, y: 10}
+    item: {fileID: 11400000, guid: 0c59f5f911e934a4e92752eb0e343e3c, type: 2}
+    amount: 1
+  - cell: {x: 5, y: 18}
+    item: {fileID: 11400000, guid: 0c59f5f911e934a4e92752eb0e343e3c, type: 2}
+    amount: 1
+  - cell: {x: 14, y: 13}
+    item: {fileID: 11400000, guid: d8388f34120eab247b8c3af01f264b41, type: 2}
+    amount: 1
+  - cell: {x: 11, y: 9}
+    item: {fileID: 11400000, guid: c6fda9df47fce4e4da019554ee948f03, type: 2}
+    amount: 1
+  enemySpawns:
+  - cell: {x: 13, y: 11}
+    enemy: {fileID: 11400000, guid: 2ecbc00124e2f1947972ef2bea0e2ade, type: 2}
+  - cell: {x: 13, y: 4}
+    enemy: {fileID: 11400000, guid: 2ecbc00124e2f1947972ef2bea0e2ade, type: 2}
+  - cell: {x: 4, y: 11}
+    enemy: {fileID: 11400000, guid: 2ecbc00124e2f1947972ef2bea0e2ade, type: 2}
+  - cell: {x: 6, y: 18}
+    enemy: {fileID: 11400000, guid: 2ecbc00124e2f1947972ef2bea0e2ade, type: 2}
+  - cell: {x: 21, y: 12}
+    enemy: {fileID: 11400000, guid: 00a4b494a2dc70b4583b4780f2e56c90, type: 2}
+  - cell: {x: 19, y: 17}
+    enemy: {fileID: 11400000, guid: 2ecbc00124e2f1947972ef2bea0e2ade, type: 2}
+  torches:
+  - cell: {x: 3, y: 2}
+    height: 2.5
+    range: 9
+    intensity: 13
+  - cell: {x: 14, y: 2}
+    height: 2.5
+    range: 9
+    intensity: 13
+  - cell: {x: 10, y: 8}
+    height: 2.6
+    range: 11
+    intensity: 16
+  - cell: {x: 16, y: 14}
+    height: 2.6
+    range: 11
+    intensity: 16
+  - cell: {x: 3, y: 13}
+    height: 2.5
+    range: 9
+    intensity: 13
+  - cell: {x: 22, y: 9}
+    height: 2.5
+    range: 10
+    intensity: 15
+  - cell: {x: 4, y: 19}
+    height: 2.5
+    range: 9
+    intensity: 13
+  - cell: {x: 9, y: 17}
+    height: 2.4
+    range: 8
+    intensity: 11
+  - cell: {x: 18, y: 20}
+    height: 2.6
+    range: 10
+    intensity: 15
+  - cell: {x: 4, y: 7}
+    height: 2.3
+    range: 7
+    intensity: 10

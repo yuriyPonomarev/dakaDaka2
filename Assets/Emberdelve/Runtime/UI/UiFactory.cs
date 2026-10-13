@@ -1,0 +1,198 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.InputSystem.UI;
+using UnityEngine.UI;
+
+namespace Emberdelve.UI
+{
+    /// <summary>
+    /// Builds the prototype HUD from uGUI primitives in code. Keeping the UI code-built means the
+    /// scenes stay tiny and every panel can later be replaced by an authored prefab: only the
+    /// references inside HudController change, the event subscriptions do not.
+    /// Legacy Text is used on purpose so the HUD needs no font asset to be present.
+    /// </summary>
+    public static class UiFactory
+    {
+        private static Font _font;
+        private static readonly Dictionary<Color, Texture2D> _solidTextures = new Dictionary<Color, Texture2D>();
+
+        public static Font Font
+        {
+            get
+            {
+                if (_font == null)
+                {
+                    _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                    if (_font == null) _font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+                }
+
+                return _font;
+            }
+        }
+
+        public static Canvas EnsureCanvas(string name, int sortingOrder)
+        {
+            Canvas canvas = Object.FindFirstObjectByType<Canvas>();
+
+            if (canvas == null)
+            {
+                GameObject root = new GameObject(name);
+                canvas = root.AddComponent<Canvas>();
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            }
+
+            canvas.name = name;
+            canvas.sortingOrder = sortingOrder;
+
+            if (canvas.GetComponent<GraphicRaycaster>() == null) canvas.gameObject.AddComponent<GraphicRaycaster>();
+            EnsureEventSystem();
+
+            return canvas;
+        }
+
+        public static void EnsureEventSystem()
+        {
+            if (Object.FindFirstObjectByType<EventSystem>() != null) return;
+
+            GameObject es = new GameObject("EventSystem");
+            es.AddComponent<EventSystem>();
+            es.AddComponent<InputSystemUIInputModule>();
+        }
+
+        public static RectTransform CreatePanel(Transform parent, string name, Color color)
+        {
+            GameObject root = new GameObject(name);
+            root.transform.SetParent(parent, false);
+
+            Image image = root.AddComponent<Image>();
+            image.color = color;
+            image.sprite = null;
+
+            RectTransform rect = image.rectTransform;
+            Stretch(rect);
+            return rect;
+        }
+
+        public static RectTransform CreateGroup(Transform parent, string name)
+        {
+            GameObject root = new GameObject(name);
+            root.transform.SetParent(parent, false);
+            RectTransform rect = root.AddComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.sizeDelta = Vector2.zero;
+            return rect;
+        }
+
+        public static Text CreateText(Transform parent, string name, string content, int fontSize, Color color,
+            TextAnchor anchor = TextAnchor.MiddleCenter, FontStyle style = FontStyle.Normal)
+        {
+            GameObject root = new GameObject(name);
+            root.transform.SetParent(parent, false);
+
+            Text text = root.AddComponent<Text>();
+            text.font = Font;
+            text.fontSize = Mathf.Max(8, fontSize);
+            text.color = color;
+            text.alignment = anchor;
+            text.fontStyle = style;
+            text.horizontalOverflow = HorizontalWrapMode.Overflow;
+            text.verticalOverflow = VerticalWrapMode.Overflow;
+            text.supportRichText = false;
+            text.text = content;
+            return text;
+        }
+
+        public static Image CreateImage(Transform parent, string name, Color color, Vector2 size, Vector2 anchoredPosition,
+            Vector2 anchorMin, Vector2 anchorMax, Image.Type type = Image.Type.Simple, float fillAmount = 1f)
+        {
+            GameObject root = new GameObject(name);
+            root.transform.SetParent(parent, false);
+
+            Image image = root.AddComponent<Image>();
+            image.color = color;
+            image.sprite = null;
+            image.type = type;
+            image.fillAmount = Mathf.Clamp01(fillAmount);
+
+            RectTransform rect = image.rectTransform;
+            rect.anchorMin = anchorMin;
+            rect.anchorMax = anchorMax;
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.sizeDelta = size;
+            rect.anchoredPosition = anchoredPosition;
+
+            return image;
+        }
+
+        public static Button CreateButton(Transform parent, string name, string label, UnityEngine.Events.UnityAction onClick,
+            Vector2 size, Color background, Color textColor, int fontSize = 20)
+        {
+            GameObject root = new GameObject(name);
+            root.transform.SetParent(parent, false);
+
+            Image image = root.AddComponent<Image>();
+            image.color = background;
+
+            RectTransform rect = image.rectTransform;
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.sizeDelta = size;
+
+            Button button = root.AddComponent<Button>();
+            ColorBlock colors = button.colors;
+            colors.highlightedColor = new Color(1f, 1f, 1f, 0.25f);
+            colors.pressedColor = new Color(1f, 1f, 1f, 0.4f);
+            colors.selectedColor = background;
+            button.colors = colors;
+            button.targetGraphic = image;
+
+            Text text = CreateText(root.transform, "Label", label, fontSize, textColor);
+            Stretch(text.rectTransform);
+
+            if (onClick != null) button.onClick.AddListener(onClick);
+
+            return button;
+        }
+
+        public static void Stretch(RectTransform rect)
+        {
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+        }
+
+        public static void SetRect(RectTransform rect, Vector2 anchorMin, Vector2 anchorMax, Vector2 sizeDelta, Vector2 anchoredPosition)
+        {
+            rect.anchorMin = anchorMin;
+            rect.anchorMax = anchorMax;
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.sizeDelta = sizeDelta;
+            rect.anchoredPosition = anchoredPosition;
+        }
+
+        public static Texture2D Solid(Color color)
+        {
+            if (_solidTextures.TryGetValue(color, out Texture2D existing) && existing != null) return existing;
+
+            Texture2D texture = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            texture.SetPixel(0, 0, color);
+            texture.Apply();
+            texture.hideFlags = HideFlags.HideAndDontSave;
+            _solidTextures[color] = texture;
+            return texture;
+        }
+
+        public static void SetAlphaMask(Image image, float alpha)
+        {
+            if (image == null) return;
+            Color color = image.color;
+            color.a = Mathf.Clamp01(alpha);
+            image.color = color;
+        }
+    }
+}

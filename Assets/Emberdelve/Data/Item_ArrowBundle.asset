@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a69090fdcbb9784688d25194e1e5755, type: 3}
+  m_Name: Item_ArrowBundle
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.ItemData
+  itemId: arrow_bundle
+  displayName: Arrow Bundle
+  description: Eight fletched shafts. Press 1-4 to restock the quiver.
+  kind: 3
+  value: 10
+  maxStack: 4
+  healAmount: 0
+  ammoGrant: 8
+  iconColor: {r: 0.6, g: 0.62, b: 0.55, a: 1}
+  worldMaterial: {fileID: 2100000, guid: 4d4684ae3afb2f946a71c4c8d7baf8e5, type: 2}
+  worldSize: {x: 0.26, y: 0.26, z: 0.26}

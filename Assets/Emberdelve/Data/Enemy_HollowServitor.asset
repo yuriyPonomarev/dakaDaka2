@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b3fa64b890e112d408f2abdcfe0fdf26, type: 3}
+  m_Name: Enemy_HollowServitor
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.EnemyData
+  enemyId: hollow_servitor
+  displayName: Hollow Servitor
+  isElite: 0
+  maxHealth: 70
+  attackWeapon: {fileID: 11400000, guid: 5c1a46164ef9ab44e83e65d690f7b3a8, type: 2}
+  attackRange: 2.2
+  attackWindup: 0.6
+  attackCooldown: 2
+  attackTelegraphHeight: 0.5
+  patrolSpeed: 1.05
+  chaseSpeed: 2.7
+  patrolRadius: 6
+  turnRate: 380
+  sightRange: 14
+  sightCone: 130
+  hearingRange: 8
+  memoryDuration: 6
+  investigateTime: 3.5
+  lootTable:
+  - {fileID: 11400000, guid: a26d2da41162d874ab729a17979af148, type: 2}
+  - {fileID: 11400000, guid: c6fda9df47fce4e4da019554ee948f03, type: 2}
+  - {fileID: 11400000, guid: d8388f34120eab247b8c3af01f264b41, type: 2}
+  lootRolls: 2
+  lootDropChance: 0.8
+  bodyMaterial: {fileID: 2100000, guid: a7da9241dac119741abadf84b220bbfa, type: 2}
+  eliteTint: {r: 1, g: 0.45, b: 0.35, a: 1}

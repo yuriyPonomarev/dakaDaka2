@@ -1,0 +1,38 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 21f3b0879b0b43d4483b1b6d11955596, type: 3}
+  m_Name: Class_Warrior
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.CharacterClassData
+  classId: warrior
+  displayName: Warrior
+  description: Slow, heavy, hard to kill. Holds a shield-line of steel and walks
+    out with what he carried in.
+  accentColor: {r: 0.85, g: 0.42, b: 0.22, a: 1}
+  maxHealth: 150
+  healthRegenPerSecond: 1.5
+  regenDelay: 8
+  moveSpeed: 3.5
+  sprintSpeed: 5.2
+  crouchSpeed: 1.7
+  jumpHeight: 1.1
+  standHeight: 1.8
+  crouchHeight: 1.15
+  standEyeHeight: 1.66
+  crouchEyeHeight: 1.05
+  primaryWeapon: {fileID: 11400000, guid: 61fcdd9150fffb04da2f52cf24d63e2a, type: 2}
+  startingItems:
+  - {fileID: 11400000, guid: c6fda9df47fce4e4da019554ee948f03, type: 2}
+  startingReserveAmmo: 0
+  maxReserveAmmo: 0
+  blockReduction: 0.7
+  blockArc: 140
+  guardSpeedMultiplier: 0.45

@@ -1,0 +1,43 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 952e899e7e77b5d4f946c27199f8a5fa, type: 3}
+  m_Name: EmberdelveGameConfig
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Core.GameConfig
+  lobbySceneName: Lobby
+  dungeonSceneName: Emberdelve_Level01
+  levelTitle: The Ashen Halls
+  objectiveText: Recover at least one relic, then hold [E] at the Ember Gate.
+  requireLootToExtract: 1
+  extractionHoldDuration: 3
+  interactionRange: 2.4
+  interactSphereRadius: 0.45
+  inventoryCapacity: 8
+  mouseSensitivity: 1.2
+  fieldOfView: 68
+  levelMask:
+    serializedVersion: 2
+    m_Bits: 16384
+  playerMask:
+    serializedVersion: 2
+    m_Bits: 32768
+  enemyMask:
+    serializedVersion: 2
+    m_Bits: 65536
+  interactMask:
+    serializedVersion: 2
+    m_Bits: 393216
+  hitMask:
+    serializedVersion: 2
+    m_Bits: 98304
+  projectileMask:
+    serializedVersion: 2
+    m_Bits: 524288

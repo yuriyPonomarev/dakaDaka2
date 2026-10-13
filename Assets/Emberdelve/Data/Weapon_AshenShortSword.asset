@@ -1,0 +1,41 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 773782a5953fad9409cd7c7ec700834c, type: 3}
+  m_Name: Weapon_AshenShortSword
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.WeaponData
+  weaponId: ashen_short_sword
+  displayName: Ashen Short Sword
+  kind: 0
+  baseDamage: 26
+  damageType: 0
+  windupTime: 0.24
+  activeWindow: 0.14
+  recoveryTime: 0.3
+  cooldown: 0.92
+  reach: 2.3
+  arcAngle: 120
+  hitSphereRadius: 0.6
+  rangedRange: 42
+  projectileSpeed: 36
+  projectileRadius: 0.07
+  projectileLength: 0.9
+  drawTime: 0.8
+  minChargeToFire: 0.18
+  minChargeDamageScale: 0.45
+  magazineSize: 7
+  reloadTime: 1.7
+  falloffStartRange: 16
+  falloffEndRange: 42
+  falloffMinScale: 0.45
+  shaftMaterial: {fileID: 2100000, guid: f4115d57bd8d322489a672ab46a79b43, type: 2}
+  edgeMaterial: {fileID: 2100000, guid: f4115d57bd8d322489a672ab46a79b43, type: 2}
+  gripMaterial: {fileID: 2100000, guid: dbbcb94c1c991e3418d36e4675a2dfda, type: 2}
