@@ -155,8 +155,31 @@ namespace Emberdelve.Combat
             GameEvents.RaiseAmmo(_magazine, _reserve);
         }
 
-        private void CancelDraw()
+        /// <summary>
+        /// Ammunition check for skills and tools: the magazine is the only pool, so a skill that wants N
+        /// rounds has to find N rounds in the weapon the player is actually holding.
+        /// </summary>
+        public bool HasAmmo(int count) => _weapon != null && _weapon.IsRanged && _magazine >= Mathf.Max(0, count);
+
+        /// <summary>
+        /// Spends rounds from the magazine without reloading and without refilling anything. Returns false
+        /// and changes nothing when the magazine cannot cover the request.
+        /// </summary>
+        public bool TryConsumeAmmo(int count)
         {
+            int needed = Mathf.Max(0, count);
+            if (needed == 0) return true;
+            if (!HasAmmo(needed)) return false;
+
+            _magazine -= needed;
+            GameEvents.RaiseAmmo(_magazine, _reserve);
+            return true;
+        }
+
+        /// <summary>Abandons an in-progress draw, e.g. because a skill is about to fire instead.</summary>
+        public void CancelDraw()
+        {
+            if (!_drawing) return;
             _drawing = false;
             if (rig != null) rig.SetDrawVisual(0f);
         }

@@ -41,6 +41,12 @@ namespace Emberdelve.Core
             BlockReduction = blockReduction;
         }
 
+        /// <summary>What a resolver returns when the request could not produce any damage at all.</summary>
+        public static DamageInfo Invalid => new DamageInfo(0f, Vector3.zero, Vector3.zero, Vector3.zero,
+            -1, EntityKind.Neutral, DamageType.Physical, false, false, 0f);
+
+        public bool IsValid => Amount > 0f && SourceCombatId >= 0;
+
         public DamageInfo WithReduction(float reduction, out bool blocked)
         {
             blocked = reduction > 0f;
@@ -79,6 +85,68 @@ namespace Emberdelve.Core
         int CombatId { get; }
         Vector3 CombatCenter { get; }
         Collider HeadCollider { get; }
+
+        /// <summary>
+        /// Who this entity fights for. Local and remote players share a team so friendly fire rules
+        /// already exist before any networking does; monsters are a different team. 0 is the player team.
+        /// </summary>
+        int TeamId { get; }
+    }
+
+    /// <summary>
+    /// Attackers expose their outgoing damage multipliers here instead of multiplying damage themselves.
+    /// The combat authority reads it when it resolves a hit, which is the same information a server
+    /// would read from its own replicated stats.
+    /// </summary>
+    public interface IDamageOutgoingProvider
+    {
+        float GetOutgoingDamageMultiplier(Emberdelve.Data.WeaponData weapon);
+    }
+
+    /// <summary>
+    /// One skill slot as the HUD needs to see it. A value type built by the skill system, so the HUD
+    /// never has to reach into a rig, a cooldown timer or a mana pool.
+    /// </summary>
+    public readonly struct SkillSnapshot
+    {
+        public readonly int Slot;
+        public readonly bool HasSkill;
+        public readonly string SkillId;
+        public readonly string DisplayName;
+        public readonly string Description;
+        public readonly string Summary;
+        public readonly int ManaCost;
+        public readonly float CooldownSeconds;
+        public readonly float CooldownRemaining;
+        public readonly bool Ready;
+        public readonly bool Castable;
+        public readonly string KeyLabel;
+        public readonly UnityEngine.Color AccentColor;
+
+        public SkillSnapshot(int slot, bool hasSkill, string skillId, string displayName, string description,
+            string summary, int manaCost, float cooldownSeconds, float cooldownRemaining, bool ready,
+            bool castable, string keyLabel, UnityEngine.Color accentColor)
+        {
+            Slot = slot;
+            HasSkill = hasSkill;
+            SkillId = skillId ?? string.Empty;
+            DisplayName = displayName ?? string.Empty;
+            Description = description ?? string.Empty;
+            Summary = summary ?? string.Empty;
+            ManaCost = manaCost;
+            CooldownSeconds = cooldownSeconds;
+            CooldownRemaining = cooldownRemaining;
+            Ready = ready;
+            Castable = castable;
+            KeyLabel = keyLabel ?? string.Empty;
+            AccentColor = accentColor;
+        }
+
+        public static SkillSnapshot Empty(int slot) =>
+            new SkillSnapshot(slot, false, string.Empty, string.Empty, string.Empty, string.Empty, 0, 0f, 0f, false, false, string.Empty, UnityEngine.Color.gray);
+
+        /// <summary>0 when off cooldown, 1 just after a cast.</summary>
+        public float CooldownFraction => CooldownSeconds > 0f ? Mathf.Clamp01(CooldownRemaining / CooldownSeconds) : 0f;
     }
 
     /// <summary>One object that is both damageable and a combat participant (player rig, enemy agent).</summary>

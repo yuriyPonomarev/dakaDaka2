@@ -16,6 +16,7 @@ using Emberdelve.Items;
 using Emberdelve.Level;
 using Emberdelve.Movement;
 using Emberdelve.Player;
+using Emberdelve.Skills;
 using Emberdelve.UI;
 
 namespace Emberdelve.EditorTools
@@ -335,6 +336,15 @@ namespace Emberdelve.EditorTools
             RangedCombat ranged = rigGo.AddComponent<RangedCombat>();
             Interactor interactor = rigGo.AddComponent<Interactor>();
             HotbarController hotbar = rigGo.AddComponent<HotbarController>();
+
+            // Vitals and kit state the skill system owns. PlayerRig also creates these on demand, so a rig
+            // authored before this milestone still works; a rebuilt scene has them serialized instead.
+            ManaComponent mana = rigGo.AddComponent<ManaComponent>();
+            StatusComponent status = rigGo.AddComponent<StatusComponent>();
+            SkillCaster skills = rigGo.AddComponent<SkillCaster>();
+            mana.name = "Mana";
+            status.name = "Status";
+            skills.name = "SkillCaster";
 
             GameObject pivot = new GameObject("Look_Pivot");
             pivot.transform.SetParent(rigGo.transform, false);

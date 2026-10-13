@@ -20,6 +20,9 @@ MonoBehaviour:
   maxHealth: 100
   healthRegenPerSecond: 2
   regenDelay: 7
+  maxMana: 100
+  manaRegenPerSecond: 10
+  manaRegenDelay: 3
   moveSpeed: 4.4
   sprintSpeed: 6.4
   crouchSpeed: 2.1
@@ -31,6 +34,12 @@ MonoBehaviour:
   primaryWeapon: {fileID: 11400000, guid: dca3d38c514ab8b4bbcc0fc514ad00cb, type: 2}
   offhandShield: {fileID: 0}
   secondaryWeapon: {fileID: 11400000, guid: b8b3d75fc5fe06f4d87c57560bc437c6, type: 2}
+  activeSkills:
+  - {fileID: 11400000, guid: 39baf15ae07459347baed8857ddaf7c3, type: 2}
+  - {fileID: 11400000, guid: 544278fe17c4d3a45bd7d31647eb89a2, type: 2}
+  passiveSkills:
+  - {fileID: 11400000, guid: 3b8ecc0ad783d874fa1689db36ea8f14, type: 2}
+  - {fileID: 11400000, guid: 7454327c2f8eb0246a9ae5b49fd4a8b1, type: 2}
   startingItems:
   - {fileID: 11400000, guid: d8388f34120eab247b8c3af01f264b41, type: 2}
   - {fileID: 11400000, guid: c6fda9df47fce4e4da019554ee948f03, type: 2}

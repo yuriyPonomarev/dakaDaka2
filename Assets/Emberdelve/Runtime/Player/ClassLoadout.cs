@@ -4,6 +4,7 @@ using Emberdelve.Core;
 using Emberdelve.Combat;
 using Emberdelve.Data;
 using Emberdelve.InputLayer;
+using Emberdelve.Skills;
 
 namespace Emberdelve.Player
 {
@@ -58,10 +59,25 @@ namespace Emberdelve.Player
             _appliedClass = data;
             _rig = rig;
 
+            // The skill kit goes first: its passives decide the numbers everything below configures, so a
+            // passive that raises health, mana or movement is already counted when those pools are built.
+            if (rig.Skills != null) rig.Skills.ApplyClass(data, config);
+            CharacterStatStack stats = rig.Stats;
+
             rig.Movement.ApplyClass(data, config.levelMask);
+            rig.Movement.ApplyStatStack(stats);
             rig.Look.ApplyClass(data);
             rig.Look.ConfigureSensitivity(config.mouseSensitivity);
-            rig.Health.Configure(data.maxHealth, data.healthRegenPerSecond, data.regenDelay);
+
+            int maxHealth = Mathf.Max(1, Mathf.RoundToInt(stats != null ? stats.Get(SkillStat.MaxHealth, data.maxHealth) : data.maxHealth));
+            rig.Health.Configure(maxHealth, data.healthRegenPerSecond, data.regenDelay);
+
+            if (rig.Mana != null)
+            {
+                int maxMana = Mathf.Max(1, Mathf.RoundToInt(stats != null ? stats.Get(SkillStat.MaxMana, data.maxMana) : data.maxMana));
+                float manaRegen = stats != null ? stats.Get(SkillStat.ManaRegen, data.manaRegenPerSecond) : data.manaRegenPerSecond;
+                rig.Mana.Configure(maxMana, manaRegen, data.manaRegenDelay);
+            }
 
             if (rig.Inventory != null)
             {

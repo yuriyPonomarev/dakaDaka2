@@ -27,6 +27,15 @@ namespace Emberdelve.EditorTools
         public static ItemData Draught;
         public static ItemData Relic;
         public static ItemData ArrowBundle;
+        public static SkillData WarriorDash;
+        public static SkillData WarriorBattleCry;
+        public static SkillData WarriorMight;
+        public static SkillData WarriorBulwark;
+        public static SkillData ArcherMultiShot;
+        public static SkillData ArcherPiercingShot;
+        public static SkillData ArcherFarshot;
+        public static SkillData ArcherFleet;
+
         public static EnemyData Servitor;
         public static EnemyData Warden;
         public static DungeonLayoutData Layout;
@@ -39,8 +48,10 @@ namespace Emberdelve.EditorTools
             EmberdelveMaterials.BuildAll();
             BuildWeapons();
             BuildItems();
+            BuildSkills();
             BuildClasses();
             ApplyDefenseKit();
+            ApplySkillKit();
             BuildEnemies();
             BuildLayout();
             BuildNavGrid();
@@ -278,6 +289,36 @@ namespace Emberdelve.EditorTools
             AssetDatabase.SaveAssets();
         }
 
+        /// <summary>
+        /// Idempotent pass that writes the skill kits and mana pools onto the class assets that existed
+        /// before those fields were added, in the same way ApplyDefenseKit does for defense. Exactly two
+        /// active and exactly two passive skills per class, which is the contract SkillCaster validates.
+        /// </summary>
+        private static void ApplySkillKit()
+        {
+            if (Warrior != null)
+            {
+                Warrior.activeSkills = new[] { WarriorDash, WarriorBattleCry };
+                Warrior.passiveSkills = new[] { WarriorMight, WarriorBulwark };
+                Warrior.maxMana = 120;
+                Warrior.manaRegenPerSecond = 8f;
+                Warrior.manaRegenDelay = 3.5f;
+                EditorUtility.SetDirty(Warrior);
+            }
+
+            if (Archer != null)
+            {
+                Archer.activeSkills = new[] { ArcherMultiShot, ArcherPiercingShot };
+                Archer.passiveSkills = new[] { ArcherFarshot, ArcherFleet };
+                Archer.maxMana = 100;
+                Archer.manaRegenPerSecond = 10f;
+                Archer.manaRegenDelay = 3f;
+                EditorUtility.SetDirty(Archer);
+            }
+
+            AssetDatabase.SaveAssets();
+        }
+
         private static void SetDefense(WeaponData weapon, DefenseRole role, DefenseCapability capabilities,
             float reductionOverride, float arcOverride, bool twoHanded)
         {
@@ -296,6 +337,134 @@ namespace Emberdelve.EditorTools
                 weapon.blockArcOverride = arcOverride;
                 EditorUtility.SetDirty(weapon);
             }
+        }
+
+        /// <summary>
+        /// The two kits, as data. Every number a skill needs lives on these assets, and the runtime picks
+        /// its behavior from SkillData.effect through SkillBehaviorCatalog, so a new skill that reuses an
+        /// existing effect kind needs no code at all.
+        /// </summary>
+        private static void BuildSkills()
+        {
+            WarriorDash = LoadOrCreate<SkillData>(EmberdelvePaths.Data + "/Skill_WarriorDash.asset", s =>
+            {
+                s.skillId = "warrior_dash";
+                s.displayName = "Dash";
+                s.description = "A short forward burst. It collides, so a dash into a wall ends at the wall.";
+                s.iconColor = new Color(0.85f, 0.42f, 0.22f);
+                s.slot = SkillSlot.Active;
+                s.effect = SkillEffectKind.Dash;
+                s.manaCost = 24;
+                s.cooldownSeconds = 7f;
+                s.dashDistance = 4.6f;
+                s.dashDuration = 0.22f;
+            });
+
+            WarriorBattleCry = LoadOrCreate<SkillData>(EmberdelvePaths.Data + "/Skill_WarriorBattleCry.asset", s =>
+            {
+                s.skillId = "warrior_battle_cry";
+                s.displayName = "Battle Cry";
+                s.description = "Rings the hall. Everything nearby is hurt and slowed, and your own steel hits harder for a while.";
+                s.iconColor = new Color(0.95f, 0.55f, 0.25f);
+                s.slot = SkillSlot.Active;
+                s.effect = SkillEffectKind.AreaCry;
+                s.manaCost = 32;
+                s.cooldownSeconds = 14f;
+                s.radius = 6f;
+                s.maxTargets = 4;
+                s.flatDamage = 14f;
+                s.targetStatus = StatusKind.Slow;
+                s.targetStatusDuration = 4f;
+                s.targetStatusMagnitude = 0.55f;
+                s.affectsSelf = true;
+                s.selfStatus = StatusKind.Empowered;
+                s.selfStatusDuration = 6f;
+                s.selfStatusMagnitude = 1.25f;
+            });
+
+            WarriorMight = LoadOrCreate<SkillData>(EmberdelvePaths.Data + "/Skill_WarriorAshenMight.asset", s =>
+            {
+                s.skillId = "warrior_ashen_might";
+                s.displayName = "Ashen Might";
+                s.description = "Years of swinging heavy things. Melee weapons hit 20% harder.";
+                s.iconColor = new Color(0.72f, 0.34f, 0.2f);
+                s.slot = SkillSlot.Passive;
+                s.effect = SkillEffectKind.PassiveStat;
+                s.modifiers = new[] { new StatModifier(SkillStat.MeleeDamage, SkillModifierMode.Multiplier, 1.2f) };
+            });
+
+            WarriorBulwark = LoadOrCreate<SkillData>(EmberdelvePaths.Data + "/Skill_WarriorBulwarkTraining.asset", s =>
+            {
+                s.skillId = "warrior_bulwark_training";
+                s.displayName = "Bulwark Training";
+                s.description = "A shield held properly. Guard blocks 12% more of what it is facing.";
+                s.iconColor = new Color(0.55f, 0.5f, 0.42f);
+                s.slot = SkillSlot.Passive;
+                s.effect = SkillEffectKind.PassiveStat;
+                s.modifiers = new[] { new StatModifier(SkillStat.BlockReduction, SkillModifierMode.Flat, 0.12f) };
+            });
+
+            ArcherMultiShot = LoadOrCreate<SkillData>(EmberdelvePaths.Data + "/Skill_ArcherMultiShot.asset", s =>
+            {
+                s.skillId = "archer_multi_shot";
+                s.displayName = "Multi-shot";
+                s.description = "Three arrows, fanned out. Each one spends an arrow from the quiver and finds its own target.";
+                s.iconColor = new Color(0.35f, 0.72f, 0.62f);
+                s.slot = SkillSlot.Active;
+                s.effect = SkillEffectKind.SpreadShot;
+                s.manaCost = 26;
+                s.cooldownSeconds = 9f;
+                s.requiresRangedWeapon = true;
+                s.consumesAmmoPerProjectile = true;
+                s.projectileCount = 3;
+                s.spreadDegrees = 26f;
+                s.projectileMaxTargets = 1;
+                s.damageMultiplier = 0.7f;
+            });
+
+            ArcherPiercingShot = LoadOrCreate<SkillData>(EmberdelvePaths.Data + "/Skill_ArcherPiercingShot.asset", s =>
+            {
+                s.skillId = "archer_piercing_shot";
+                s.displayName = "Piercing Shot";
+                s.description = "One heavy arrow that keeps going through two bodies, and never through the same one twice.";
+                s.iconColor = new Color(0.4f, 0.8f, 0.7f);
+                s.slot = SkillSlot.Active;
+                s.effect = SkillEffectKind.PiercingShot;
+                s.manaCost = 22;
+                s.cooldownSeconds = 11f;
+                s.requiresRangedWeapon = true;
+                s.consumesAmmoPerProjectile = true;
+                s.projectileCount = 1;
+                s.spreadDegrees = 0f;
+                s.projectileMaxTargets = 2;
+                s.damageMultiplier = 1.35f;
+            });
+
+            ArcherFarshot = LoadOrCreate<SkillData>(EmberdelvePaths.Data + "/Skill_ArcherFarshot.asset", s =>
+            {
+                s.skillId = "archer_farshot";
+                s.displayName = "Farshot";
+                s.description = "Shafts cut deeper at distance. Ranged damage is 18% higher.";
+                s.iconColor = new Color(0.3f, 0.6f, 0.55f);
+                s.slot = SkillSlot.Passive;
+                s.effect = SkillEffectKind.PassiveStat;
+                s.modifiers = new[] { new StatModifier(SkillStat.RangedDamage, SkillModifierMode.Multiplier, 1.18f) };
+            });
+
+            ArcherFleet = LoadOrCreate<SkillData>(EmberdelvePaths.Data + "/Skill_ArcherFleetFooting.asset", s =>
+            {
+                s.skillId = "archer_fleet_footing";
+                s.displayName = "Fleet Footing";
+                s.description = "Light boots, long stride. Move and sprint 15% faster.";
+                s.iconColor = new Color(0.45f, 0.65f, 0.5f);
+                s.slot = SkillSlot.Passive;
+                s.effect = SkillEffectKind.PassiveStat;
+                s.modifiers = new[]
+                {
+                    new StatModifier(SkillStat.MoveSpeed, SkillModifierMode.Multiplier, 1.15f),
+                    new StatModifier(SkillStat.SprintSpeed, SkillModifierMode.Multiplier, 1.15f),
+                };
+            });
         }
 
         private static void BuildItems()

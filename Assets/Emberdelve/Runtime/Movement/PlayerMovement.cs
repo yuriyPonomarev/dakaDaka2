@@ -1,7 +1,9 @@
 using UnityEngine;
 using Emberdelve.Core;
+using Emberdelve.Combat;
 using Emberdelve.Data;
 using Emberdelve.InputLayer;
+using Emberdelve.Skills;
 
 namespace Emberdelve.Movement
 {
@@ -29,6 +31,8 @@ namespace Emberdelve.Movement
         [SerializeField] private float crouchTransitionSpeed = 9f;
 
         private CharacterClassData _class;
+        private CharacterStatStack _stats;
+        private StatusComponent _status;
         private float _horizontalSpeed;
         private float _verticalVelocity;
         private float _terminalVelocity = 55f;
@@ -38,12 +42,27 @@ namespace Emberdelve.Movement
         private float _speedPenalty = 1f;
         private float _jumpCooldown;
 
+        // Dash state. The dash is a movement mode, not a teleport: it goes through the same
+        // CharacterController.Move call as walking, so walls stop it and the grounded check still applies.
+        private Vector3 _dashDirection;
+        private float _dashSpeed;
+        private float _dashTimeRemaining;
+        private bool _dashBlocked;
+
         public bool IsCrouched => _crouched;
         public bool IsGrounded { get; private set; }
         public bool IsMoving { get; private set; }
+        public bool IsDashing => _dashTimeRemaining > 0f;
+
+        /// <summary>True when the current or most recent dash was stopped by geometry instead of finishing.</summary>
+        public bool DashWasBlocked => _dashBlocked;
+        public float DashProgress => _dashTimeRemaining > 0f ? 1f - Mathf.Clamp01(_dashTimeRemaining / Mathf.Max(0.01f, _dashDurationHint)) : 0f;
         public Vector3 Velocity => controller.velocity;
         public Vector3 DesiredMoveIntent { get; private set; }
         public float SpeedMultiplier { get; private set; } = 1f;
+
+        /// <summary>Seconds of dash the last cast asked for, kept for progress reporting only.</summary>
+        private float _dashDurationHint = 0.22f;
 
         private void Awake()
         {
@@ -69,6 +88,83 @@ namespace Emberdelve.Movement
             controller.radius = 0.34f;
             controller.center = new Vector3(0f, _currentHeight * 0.5f, 0f);
             groundedRadius = controller.radius;
+        }
+
+        /// <summary>Passive movement modifiers from the class kit. Null clears them.</summary>
+        public void ApplyStatStack(CharacterStatStack stats) => _stats = stats;
+
+        /// <summary>
+        /// The ground speed this character is allowed to produce for a given input state, with passives,
+        /// guard and any temporary slow already folded in.
+        ///
+        /// Public and side-effect free on purpose: it is the number a future server compares a client's
+        /// reported movement against, and it is the number tools can assert without needing input devices.
+        /// </summary>
+        public float ResolveGroundSpeed(bool sprintHeld, bool crouched)
+        {
+            if (_class == null) return 0f;
+
+            float speed;
+            if (crouched)
+            {
+                speed = _stats != null ? _stats.Get(SkillStat.CrouchSpeed, _class.crouchSpeed) : _class.crouchSpeed;
+            }
+            else if (sprintHeld)
+            {
+                speed = _stats != null ? _stats.Get(SkillStat.SprintSpeed, _class.sprintSpeed) : _class.sprintSpeed;
+            }
+            else
+            {
+                speed = _stats != null ? _stats.Get(SkillStat.MoveSpeed, _class.moveSpeed) : _class.moveSpeed;
+            }
+
+            if (_guardActive) speed *= _class.guardSpeedMultiplier;
+            speed *= _speedPenalty;
+            speed *= StatusSpeedMultiplier();
+
+            return Mathf.Max(0f, speed);
+        }
+
+        private float StatusSpeedMultiplier()
+        {
+            if (_status == null) _status = GetComponent<StatusComponent>();
+            return _status != null ? _status.SpeedMultiplier : 1f;
+        }
+
+        /// <summary>
+        /// Starts a dash. The direction is flattened to the ground plane, the speed is distance / duration,
+        /// and nothing here moves the transform: Move() feeds the dash through the controller, which is what
+        /// makes walls and ledges real obstacles instead of suggestions.
+        /// </summary>
+        public bool TryStartDash(Vector3 direction, float distance, float duration)
+        {
+            if (controller == null || _class == null) return false;
+
+            Vector3 flat = new Vector3(direction.x, 0f, direction.z);
+            if (flat.sqrMagnitude < 0.0001f) flat = FlatForward(transform.forward);
+            flat.Normalize();
+
+            _dashDurationHint = Mathf.Clamp(duration, 0.05f, 2f);
+            float seconds = _dashDurationHint;
+            float meters = Mathf.Clamp(distance, 0.5f, 20f);
+
+            // Capped so a dash cannot out-run the physics step that has to resolve its collisions.
+            _dashSpeed = Mathf.Min(meters / seconds, 24f);
+            _dashDirection = flat;
+            _dashTimeRemaining = seconds;
+            _dashBlocked = false;
+            return true;
+        }
+
+        public void CancelDash()
+        {
+            _dashTimeRemaining = 0f;
+        }
+
+        private static Vector3 FlatForward(Vector3 forward)
+        {
+            Vector3 flat = new Vector3(forward.x, 0f, forward.z);
+            return flat.sqrMagnitude < 0.0001f ? Vector3.forward : flat.normalized;
         }
 
         public void SetGuardActive(bool active) => _guardActive = active;
@@ -127,18 +223,19 @@ namespace Emberdelve.Movement
 
         private void Move(float dt)
         {
+            if (IsDashing)
+            {
+                MoveDash(dt);
+                return;
+            }
+
             Vector2 raw = input.Move;
             if (raw.sqrMagnitude > 1f) raw = raw.normalized;
 
             float targetSpeed = 0f;
             if (raw.sqrMagnitude > 0.01f)
             {
-                if (_crouched) targetSpeed = _class.crouchSpeed;
-                else if (input.SprintHeld) targetSpeed = _class.sprintSpeed;
-                else targetSpeed = _class.moveSpeed;
-
-                if (_guardActive) targetSpeed *= _class.guardSpeedMultiplier;
-                targetSpeed *= _speedPenalty;
+                targetSpeed = ResolveGroundSpeed(input.SprintHeld, _crouched);
             }
 
             float currentHorizontal = new Vector3(controller.velocity.x, 0f, controller.velocity.z).magnitude;
@@ -152,7 +249,7 @@ namespace Emberdelve.Movement
             }
 
             IsMoving = targetSpeed > 0.05f;
-            SpeedMultiplier = _class.moveSpeed > 0f ? _horizontalSpeed / _class.moveSpeed : 0f;
+            SpeedMultiplier = BaseMoveSpeed > 0f ? _horizontalSpeed / BaseMoveSpeed : 0f;
 
             Vector3 direction = ViewRelativeDirection(raw, viewTransform != null ? viewTransform : transform);
             Vector3 desired = direction * _horizontalSpeed;
@@ -161,6 +258,34 @@ namespace Emberdelve.Movement
             Vector3 motion = desired * dt + new Vector3(0f, _verticalVelocity, 0f) * dt;
             if (motion.sqrMagnitude > 0f) controller.Move(motion);
         }
+
+        /// <summary>
+        /// Dash movement. Same controller call, same gravity, same grounded check as walking, so a dash into
+        /// a wall is stopped by the wall and reports it. The dash ends early on a side collision rather than
+        /// pushing through or sliding along an unintended path.
+        /// </summary>
+        private void MoveDash(float dt)
+        {
+            _dashTimeRemaining -= dt;
+
+            Vector3 desired = _dashDirection * _dashSpeed;
+            DesiredMoveIntent = desired;
+            IsMoving = true;
+            _horizontalSpeed = _dashSpeed;
+            SpeedMultiplier = BaseMoveSpeed > 0f ? _dashSpeed / BaseMoveSpeed : 0f;
+
+            CollisionFlags flags = controller.Move(desired * dt + new Vector3(0f, _verticalVelocity, 0f) * dt);
+
+            if ((flags & CollisionFlags.Sides) != 0)
+            {
+                _dashBlocked = true;
+                _dashTimeRemaining = 0f;
+                _horizontalSpeed = 0f;
+            }
+        }
+
+        /// <summary>Unmodified class move speed, so speed ratios stay comparable across classes with passives.</summary>
+        private float BaseMoveSpeed => _stats != null ? _stats.Get(SkillStat.MoveSpeed, _class.moveSpeed) : _class.moveSpeed;
 
         /// <summary>
         /// Maps raw move input (x = strafe, y = forward) into a world-space direction relative to the

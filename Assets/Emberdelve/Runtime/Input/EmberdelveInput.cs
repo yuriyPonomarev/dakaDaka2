@@ -32,6 +32,8 @@ namespace Emberdelve.InputLayer
         private InputAction _interact;
         private InputAction _reload;
         private InputAction _swap;
+        private InputAction _skill1;
+        private InputAction _skill2;
         private InputAction _inventory;
         private InputAction _pause;
         private InputAction _inventorySystem;
@@ -52,6 +54,27 @@ namespace Emberdelve.InputLayer
         public bool InteractHeld => _interact != null && _interact.IsPressed();
         public bool ReloadPressed => _reload != null && _reload.WasPressedThisFrame();
         public bool SwapPressed => _swap != null && _swap.WasPressedThisFrame();
+        public bool Skill1Pressed => _skill1 != null && _skill1.WasPressedThisFrame();
+        public bool Skill2Pressed => _skill2 != null && _skill2.WasPressedThisFrame();
+
+        /// <summary>
+        /// What the player actually has to press for a skill slot, read from the bindings themselves so the
+        /// HUD label can never disagree with the asset.
+        /// </summary>
+        public string SkillKeyLabel(int slot)
+        {
+            InputAction action = slot == 0 ? _skill1 : slot == 1 ? _skill2 : null;
+            if (action == null || action.bindings.Count == 0) return slot == 0 ? "F" : "G";
+
+            for (int i = 0; i < action.bindings.Count; i++)
+            {
+                InputBinding binding = action.bindings[i];
+                if (binding.groups != null && binding.groups.Contains("Keyboard")) return action.GetBindingDisplayString(i);
+            }
+
+            return action.GetBindingDisplayString(0);
+        }
+
         public bool InventoryPressed => (_inventorySystem != null && _inventorySystem.WasPressedThisFrame())
                                         || (_inventory != null && _inventory.WasPressedThisFrame());
         public bool PausePressed => (_pauseSystem != null && _pauseSystem.WasPressedThisFrame())
@@ -91,6 +114,8 @@ namespace Emberdelve.InputLayer
             _interact = _playerMap.FindAction("Interact");
             _reload = _playerMap.FindAction("Reload");
             _swap = _playerMap.FindAction("SwapWeapon");
+            _skill1 = _playerMap.FindAction("Skill1");
+            _skill2 = _playerMap.FindAction("Skill2");
             _inventory = _playerMap.FindAction("Inventory");
             _pause = _playerMap.FindAction("Pause");
 

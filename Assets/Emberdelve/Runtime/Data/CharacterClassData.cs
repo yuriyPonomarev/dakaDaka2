@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Emberdelve.Data
@@ -22,6 +23,13 @@ namespace Emberdelve.Data
         [Tooltip("Seconds without damage before regeneration starts.")]
         public float regenDelay = 6f;
 
+        [Header("Mana")]
+        public int maxMana = 100;
+        [Tooltip("Mana restored per second once the regen delay has passed.")]
+        public float manaRegenPerSecond = 7f;
+        [Tooltip("Seconds after spending mana before regeneration resumes.")]
+        public float manaRegenDelay = 3f;
+
         [Header("Movement")]
         public float moveSpeed = 3.6f;
         public float sprintSpeed = 5.4f;
@@ -38,6 +46,12 @@ namespace Emberdelve.Data
         public WeaponData offhandShield;
         [Tooltip("Off-hand / secondary weapon the class can switch to at runtime (Warrior crossbow, Archer rapier).")]
         public WeaponData secondaryWeapon;
+
+        [Tooltip("Exactly two active skills, in the order they appear on the skill bar.")]
+        public SkillData[] activeSkills = new SkillData[2];
+        [Tooltip("Exactly two passive skills. Each one must actually change something.")]
+        public SkillData[] passiveSkills = new SkillData[2];
+
         public ItemData[] startingItems;
 
         [Header("Ranged reserve (ignored by classes without a ranged weapon)")]
@@ -57,5 +71,92 @@ namespace Emberdelve.Data
         [Range(0.1f, 1f)] public float guardSpeedMultiplier = 0.45f;
 
         public bool CanGuard => blockReduction > 0f;
+
+        public int EffectiveMaxMana => Mathf.Max(1, maxMana);
+
+        /// <summary>
+        /// The kit contract every class must satisfy, checked once at class-apply time and reported as
+        /// data problems instead of being patched around in code. Fills the caller's slot arrays so the
+        /// caller never has to guess how many skills were declared.
+        /// </summary>
+        public static void ValidateKit(CharacterClassData data, SkillData[] activeOut, SkillData[] passiveOut,
+            int activeCapacity, int passiveCapacity, List<string> problems)
+        {
+            if (data == null)
+            {
+                problems.Add("no CharacterClassData to validate");
+                return;
+            }
+
+            Collect(data.activeSkills, activeOut, activeCapacity, SkillSlot.Active, "active", problems);
+            Collect(data.passiveSkills, passiveOut, passiveCapacity, SkillSlot.Passive, "passive", problems);
+
+            for (int i = 0; i < activeOut.Length; i++)
+            {
+                for (int j = i + 1; j < activeOut.Length; j++)
+                {
+                    if (activeOut[i] == null || activeOut[j] == null) continue;
+                    if (activeOut[i] == activeOut[j])
+                    {
+                        problems.Add($"{data.displayName} lists '{activeOut[i].displayName}' twice in its active kit");
+                    }
+                }
+            }
+
+            for (int i = 0; i < passiveOut.Length; i++)
+            {
+                for (int j = i + 1; j < passiveOut.Length; j++)
+                {
+                    if (passiveOut[i] == null || passiveOut[j] == null) continue;
+                    if (passiveOut[i] == passiveOut[j])
+                    {
+                        problems.Add($"{data.displayName} lists '{passiveOut[i].displayName}' twice in its passive kit");
+                    }
+                }
+            }
+        }
+
+        private static void Collect(SkillData[] declared, SkillData[] target, int capacity, SkillSlot expected,
+            string label, List<string> problems)
+        {
+            if (declared == null || declared.Length != capacity)
+            {
+                int actual = declared != null ? declared.Length : 0;
+                problems.Add($"a kit must declare exactly {capacity} {label} skills, found {actual}");
+            }
+
+            int slots = target != null ? target.Length : 0;
+            for (int i = 0; i < slots; i++)
+            {
+                if (declared == null || i >= declared.Length) continue;
+
+                SkillData skill = declared[i];
+                if (skill == null)
+                {
+                    problems.Add($"{label} skill slot {i + 1} is empty");
+                    continue;
+                }
+
+                if (skill.slot != expected)
+                {
+                    problems.Add($"'{skill.displayName}' [{skill.skillId}] is a {skill.slot} skill but sits in a {label} slot");
+                    continue;
+                }
+
+                target[i] = skill;
+            }
+        }
+
+        private void OnValidate()
+        {
+            maxMana = Mathf.Max(1, maxMana);
+            manaRegenPerSecond = Mathf.Max(0f, manaRegenPerSecond);
+            manaRegenDelay = Mathf.Max(0f, manaRegenDelay);
+
+            if (activeSkills == null || activeSkills.Length != 2)
+                Debug.LogWarning($"[CharacterClassData] {displayName} must declare exactly 2 active skills.", this);
+            if (passiveSkills == null || passiveSkills.Length != 2)
+                Debug.LogWarning($"[CharacterClassData] {displayName} must declare exactly 2 passive skills.", this);
+        }
     }
 }

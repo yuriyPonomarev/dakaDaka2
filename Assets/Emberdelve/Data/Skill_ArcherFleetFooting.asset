@@ -1,0 +1,48 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d6368fa56cc2f7e449660703232b2aa3, type: 3}
+  m_Name: Skill_ArcherFleetFooting
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.SkillData
+  skillId: archer_fleet_footing
+  displayName: Fleet Footing
+  description: Light boots, long stride. Move and sprint 15% faster.
+  iconColor: {r: 0.45, g: 0.65, b: 0.5, a: 1}
+  slot: 1
+  effect: 5
+  manaCost: 0
+  cooldownSeconds: 6
+  requiresRangedWeapon: 0
+  requiresMeleeWeapon: 0
+  consumesAmmoPerProjectile: 0
+  radius: 5
+  maxTargets: 4
+  dashDistance: 4.5
+  dashDuration: 0.22
+  projectileCount: 1
+  spreadDegrees: 24
+  projectileMaxTargets: 1
+  damageMultiplier: 1
+  flatDamage: -1
+  targetStatus: 0
+  targetStatusDuration: 4
+  targetStatusMagnitude: 0.6
+  affectsSelf: 0
+  selfStatus: 0
+  selfStatusDuration: 6
+  selfStatusMagnitude: 1.2
+  modifiers:
+  - stat: 0
+    mode: 0
+    value: 1.15
+  - stat: 1
+    mode: 0
+    value: 1.15

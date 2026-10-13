@@ -5,6 +5,7 @@ using Emberdelve.Data;
 using Emberdelve.InputLayer;
 using Emberdelve.Items;
 using Emberdelve.Movement;
+using Emberdelve.Skills;
 
 namespace Emberdelve.Player
 {
@@ -17,13 +18,16 @@ namespace Emberdelve.Player
     [RequireComponent(typeof(PlayerMovement))]
     [RequireComponent(typeof(PlayerLook))]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider
+    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider
     {
         [Header("Components")]
         [SerializeField] private EmberdelveInput input;
         [SerializeField] private PlayerMovement movement;
         [SerializeField] private PlayerLook look;
         [SerializeField] private HealthComponent health;
+        [SerializeField] private ManaComponent mana;
+        [SerializeField] private StatusComponent status;
+        [SerializeField] private SkillCaster skills;
         [SerializeField] private Inventory inventory;
         [SerializeField] private ClassLoadout loadout;
 
@@ -35,6 +39,7 @@ namespace Emberdelve.Player
 
         public EntityKind Kind => EntityKind.LocalPlayer;
         public int CombatId => _combatId;
+        public int TeamId => CombatTeams.PlayerTeam;
         public Vector3 CombatCenter => transform.position + Vector3.up * 1.1f;
         public Collider HeadCollider => null;
 
@@ -51,10 +56,16 @@ namespace Emberdelve.Player
         public PlayerMovement Movement => movement;
         public PlayerLook Look => look;
         public HealthComponent Health => health;
+        public ManaComponent Mana => mana;
+        public StatusComponent Status => status;
+        public SkillCaster Skills => skills;
         public Inventory Inventory => inventory;
         public ClassLoadout Loadout => loadout;
         public CharacterClassData Class => _class;
         public WeaponData MainHandWeapon => _mainHand;
+
+        /// <summary>Passive modifiers resolved from the class kit. Null until the class has been applied.</summary>
+        public CharacterStatStack Stats => skills != null ? skills.Stats : null;
         public Vector3 AimOrigin => look != null ? look.AimOrigin : transform.position;
         public Vector3 AimDirection => look != null ? look.AimDirection : transform.forward;
         public Vector3 Facing => transform.forward;
@@ -68,13 +79,29 @@ namespace Emberdelve.Player
             if (inventory == null) inventory = GetComponent<Inventory>();
             if (loadout == null) loadout = GetComponent<ClassLoadout>();
 
+            // Mana, status state and the skill kit are created here rather than required in the scene, so a
+            // rig built before this milestone still gets them, and a rebuilt scene simply has them already.
+            if (mana == null) mana = ManaComponent.Ensure(gameObject);
+            if (status == null) status = StatusComponent.Ensure(gameObject);
+            if (skills == null)
+            {
+                skills = GetComponent<SkillCaster>();
+                if (skills == null) skills = gameObject.AddComponent<SkillCaster>();
+            }
+
             _combatId = CombatRegistry.AllocateId();
             CombatRegistry.Register(_combatId, this);
 
             // HealthComponent only knows its own pool; GameEvents is what the HUD listens to. This rig is
             // the local player's composition root, so it is the place that turns local health into the
             // player-health event. Enemies keep their own Changed subscriptions and raise nothing here.
-            if (health != null) health.Changed += OnHealthChanged;
+            if (health != null)
+            {
+                health.Changed += OnHealthChanged;
+                health.Died += OnPlayerDied;
+            }
+
+            if (mana != null) mana.Changed += OnManaChanged;
         }
 
         private void OnHealthChanged(float current, float max)
@@ -82,9 +109,33 @@ namespace Emberdelve.Player
             GameEvents.RaisePlayerHealth(current, max);
         }
 
+        private void OnManaChanged(float current, float max)
+        {
+            GameEvents.RaisePlayerMana(current, max);
+        }
+
+        /// <summary>
+        /// Death is handled as state, not as damage: the kit is cleared, the dash is cancelled, temporary
+        /// statuses come off, and mana stops regenerating. RunDirector still owns the run outcome.
+        /// </summary>
+        private void OnPlayerDied()
+        {
+            if (skills != null) skills.HandleDeath();
+            if (movement != null) movement.CancelDash();
+            if (status != null) status.ClearStatuses();
+            SetGuardHeld(false);
+        }
+
         private void OnDestroy()
         {
-            if (health != null) health.Changed -= OnHealthChanged;
+            if (health != null)
+            {
+                health.Changed -= OnHealthChanged;
+                health.Died -= OnPlayerDied;
+            }
+
+            if (mana != null) mana.Changed -= OnManaChanged;
+
             CombatRegistry.Unregister(_combatId, this);
         }
 
@@ -92,8 +143,24 @@ namespace Emberdelve.Player
         {
             _class = data;
             _mainHand = data != null ? data.primaryWeapon : null;
-            _defense = DefenseProfile.Resolve(data, _mainHand, data != null ? data.offhandShield : null);
+
+            // ClassLoadout is the single class-application point: it configures vitals, mana, the skill kit
+            // and the weapon slots, and equipping the primary weapon calls back into ApplyMainHandWeapon.
             if (loadout != null) loadout.Apply(data, config, this);
+
+            _defense = ResolveDefense(_mainHand);
+        }
+
+        private DefenseProfile ResolveDefense(WeaponData weapon)
+        {
+            if (_class == null) return DefenseProfile.Empty;
+
+            CharacterStatStack stats = Stats;
+            float passiveBlockBonus = stats != null
+                ? stats.Bonus(SkillStat.BlockReduction, _class.blockReduction)
+                : 0f;
+
+            return DefenseProfile.Resolve(_class, weapon, _class.offhandShield, passiveBlockBonus);
         }
 
         /// <summary>
@@ -105,9 +172,44 @@ namespace Emberdelve.Player
         public void ApplyMainHandWeapon(WeaponData weapon)
         {
             _mainHand = weapon;
-            _defense = DefenseProfile.Resolve(_class, _mainHand, _class != null ? _class.offhandShield : null);
+            _defense = ResolveDefense(weapon);
             if (movement != null) movement.SetGuardActive(IsGuarding);
         }
+
+        /// <summary>
+        /// Outgoing damage multipliers the authority is allowed to apply: permanent passive modifiers plus
+        /// any temporary buff. The attacker never multiplies its own damage.
+        /// </summary>
+        public float GetOutgoingDamageMultiplier(WeaponData weapon)
+        {
+            float multiplier = 1f;
+            CharacterStatStack stats = Stats;
+
+            if (stats != null && weapon != null)
+            {
+                multiplier *= weapon.IsRanged
+                    ? stats.Multiplier(SkillStat.RangedDamage)
+                    : stats.Multiplier(SkillStat.MeleeDamage);
+            }
+
+            if (status != null) multiplier *= status.OutgoingDamageMultiplier;
+
+            return Mathf.Max(0f, multiplier);
+        }
+
+        public void ApplyStatus(StatusSpec spec, int sourceCombatId)
+        {
+            if (status == null || IsDead) return;
+            status.ApplyStatus(spec, sourceCombatId);
+        }
+
+        public void ClearStatuses()
+        {
+            if (status == null) return;
+            status.ClearStatuses();
+        }
+
+        public bool HasStatus(StatusKind kind) => status != null && status.HasStatus(kind);
 
         /// <summary>
         /// Only the combat authority calls this. A player object never applies damage to itself,

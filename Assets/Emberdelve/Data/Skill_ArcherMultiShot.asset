@@ -1,0 +1,43 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d6368fa56cc2f7e449660703232b2aa3, type: 3}
+  m_Name: Skill_ArcherMultiShot
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.SkillData
+  skillId: archer_multi_shot
+  displayName: Multi-shot
+  description: Three arrows, fanned out. Each one spends an arrow from the quiver
+    and finds its own target.
+  iconColor: {r: 0.35, g: 0.72, b: 0.62, a: 1}
+  slot: 0
+  effect: 3
+  manaCost: 26
+  cooldownSeconds: 9
+  requiresRangedWeapon: 1
+  requiresMeleeWeapon: 0
+  consumesAmmoPerProjectile: 1
+  radius: 5
+  maxTargets: 4
+  dashDistance: 4.5
+  dashDuration: 0.22
+  projectileCount: 3
+  spreadDegrees: 26
+  projectileMaxTargets: 1
+  damageMultiplier: 0.7
+  flatDamage: -1
+  targetStatus: 0
+  targetStatusDuration: 4
+  targetStatusMagnitude: 0.6
+  affectsSelf: 0
+  selfStatus: 0
+  selfStatusDuration: 6
+  selfStatusMagnitude: 1.2
+  modifiers: []

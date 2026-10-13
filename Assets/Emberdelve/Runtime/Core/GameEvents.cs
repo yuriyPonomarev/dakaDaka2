@@ -24,6 +24,10 @@ namespace Emberdelve.Core
         public static event Action<string> ObjectiveChanged;
         public static event Action<string> StatusLineChanged;
         public static event Action<WeaponData> ActiveWeaponChanged;
+        public static event Action<float, float> PlayerManaChanged;
+        public static event Action<SkillSnapshot> SkillStateChanged;
+        public static event Action<SkillSnapshot, string> SkillCastRejected;
+        public static event Action<int, Data.StatusKind, float> StatusChanged;
         public static event Action<string> ToastRaised;
         public static event Action<RunResult> RunEnded;
         public static event Action<bool> PauseChanged;
@@ -40,6 +44,10 @@ namespace Emberdelve.Core
         public static void RaiseObjective(string objective) => ObjectiveChanged?.Invoke(objective);
         public static void RaiseStatusLine(string status) => StatusLineChanged?.Invoke(status);
         public static void RaiseActiveWeapon(WeaponData weapon) => ActiveWeaponChanged?.Invoke(weapon);
+        public static void RaisePlayerMana(float current, float max) => PlayerManaChanged?.Invoke(current, max);
+        public static void RaiseSkillState(SkillSnapshot snapshot) => SkillStateChanged?.Invoke(snapshot);
+        public static void RaiseSkillRejected(SkillSnapshot snapshot, string reason) => SkillCastRejected?.Invoke(snapshot, reason);
+        public static void RaiseStatusChanged(int combatId, Data.StatusKind kind, float duration) => StatusChanged?.Invoke(combatId, kind, duration);
         public static void RaiseToast(string message) => ToastRaised?.Invoke(message);
         public static void RaiseRunEnded(RunResult result) => RunEnded?.Invoke(result);
         public static void RaisePause(bool paused) => PauseChanged?.Invoke(paused);

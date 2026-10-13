@@ -15,7 +15,7 @@ namespace Emberdelve.AI
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class EnemyAgent : MonoBehaviour, ICombatEntity
+    public sealed class EnemyAgent : MonoBehaviour, ICombatEntity, IStatusTarget, IDamageOutgoingProvider
     {
         [Header("Data")]
         [SerializeField] private EnemyData data;
@@ -45,10 +45,12 @@ namespace Emberdelve.AI
         private Vector3 _bodyHomePosition;
         private Quaternion _lookRotation;
         private AttackTelegraphVisual _telegraph;
+        private StatusComponent _status;
         private float _whiffTimer;
 
         public EntityKind Kind => EntityKind.Enemy;
         public int CombatId => _combatId;
+        public int TeamId => CombatTeams.MonsterTeam;
         public Vector3 CombatCenter => transform.position + Vector3.up * 1.15f;
         public Collider HeadCollider => headCollider;
         public bool IsDead => _health != null && _health.IsDead;
@@ -56,14 +58,23 @@ namespace Emberdelve.AI
         public float MaxHealth => _health != null ? _health.MaxHealth : 0f;
         public EnemyData Data => data;
         public EnemyBrain Brain => _brain;
+        public HealthComponent Health => _health;
 
         /// <summary>True when the last committed swing warned a wedge the player was not inside, so nothing was submitted.</summary>
         public bool LastAttackWhiffed { get; private set; }
         public bool IsWindingUp => _brain != null && _brain.IsWindingUp;
 
+        public StatusComponent Status => _status;
+
+        /// <summary>Chase speed after whatever the authority has currently done to this monster, e.g. a Battle Cry slow.</summary>
+        public float EffectiveChaseSpeed => data != null
+            ? data.chaseSpeed * (_status != null ? _status.SpeedMultiplier : 1f)
+            : 0f;
+
         private void Awake()
         {
             _health = GetComponent<HealthComponent>();
+            _status = StatusComponent.Ensure(gameObject);
             _combatId = CombatRegistry.AllocateId();
             CombatRegistry.Register(_combatId, this);
             _lookRotation = transform.rotation;
@@ -106,6 +117,23 @@ namespace Emberdelve.AI
             _health.ApplyDamage(damage);
         }
 
+        /// <summary>Statuses only ever arrive here, from the combat authority.</summary>
+        public void ApplyStatus(StatusSpec spec, int sourceCombatId)
+        {
+            if (_status == null || IsDead) return;
+            _status.ApplyStatus(spec, sourceCombatId);
+        }
+
+        public void ClearStatuses()
+        {
+            if (_status == null) return;
+            _status.ClearStatuses();
+        }
+
+        public bool HasStatus(StatusKind kind) => _status != null && _status.HasStatus(kind);
+
+        public float GetOutgoingDamageMultiplier(WeaponData weapon) => _status != null ? _status.OutgoingDamageMultiplier : 1f;
+
         private void HandleDamaged(DamageInfo damage)
         {
             _brain?.NotifyDamaged(damage);
@@ -115,6 +143,7 @@ namespace Emberdelve.AI
         private void HandleDeath()
         {
             _brain?.MarkDead();
+            _status?.ClearStatuses();
             _path.Clear();
             _telegraph?.SetState(false, 0f, Vector3.zero, 1f, false);
 
@@ -197,7 +226,12 @@ namespace Emberdelve.AI
 
             if (flat.sqrMagnitude < 0.01f) return;
 
-            float step = Mathf.Min(order.Speed, 12f) * dt;
+            // The brain asked for its own speed; whatever the authority has currently done to this monster
+            // (a Battle Cry slow, for example) is applied here rather than inside the decision making.
+            float statusMultiplier = _status != null ? _status.SpeedMultiplier : 1f;
+            float step = Mathf.Min(order.Speed, 12f) * statusMultiplier * dt;
+            if (step <= 0.0001f) return;
+
             Vector3 next = transform.position + flat.normalized * step;
             next.y = groundHeight;
             transform.position = next;

@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 using Emberdelve.Core;
+using Emberdelve.InputLayer;
 
 namespace Emberdelve.EditorTools
 {
@@ -51,6 +52,47 @@ namespace Emberdelve.EditorTools
             EmberdelveProjectSetup.EnsureInputAsset();
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
+        }
+
+        /// <summary>
+        /// Rewrites the authored .inputactions asset from EmberdelveInputFallback, which is the single
+        /// source of truth for bindings. Callable headless so a binding change can be applied without an
+        /// open Editor; the .meta is kept, so scene references to the asset survive.
+        /// </summary>
+        [MenuItem(Menu + "Regenerate Input Actions Asset")]
+        public static void RegenerateInputAsset()
+        {
+            EmberdelveProjectSetup.RebuildInputAsset();
+            InputActionAsset asset = AssetDatabase.LoadAssetAtPath<InputActionAsset>(EmberdelvePaths.InputAssetPath);
+            if (asset == null)
+            {
+                Debug.LogError("[Emberdelve] Input actions asset missing after regeneration.");
+                return;
+            }
+
+            InputActionMap map = asset.FindActionMap(EmberdelveInputFallback.PlayerMapName);
+            if (map == null)
+            {
+                Debug.LogError("[Emberdelve] Regenerated input asset has no Player map.");
+                return;
+            }
+
+            string[] required = { "Move", "Look", "PrimaryAttack", "SecondaryAction", "Reload", "SwapWeapon", "Skill1", "Skill2" };
+            int missing = 0;
+            for (int i = 0; i < required.Length; i++)
+            {
+                InputAction action = map.FindAction(required[i]);
+                if (action == null)
+                {
+                    missing++;
+                    Debug.LogError($"[Emberdelve] Input asset is missing action '{required[i]}'.");
+                    continue;
+                }
+
+                Debug.Log($"[Emberdelve] input action {required[i]} -> {action.GetBindingDisplayString(0)}");
+            }
+
+            if (missing > 0) Debug.LogError($"[Emberdelve] {missing} required input action(s) missing.");
         }
 
         [MenuItem(Menu + "Build Dungeon Scene Only")]

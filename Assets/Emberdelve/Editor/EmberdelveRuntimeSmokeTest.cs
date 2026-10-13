@@ -16,6 +16,7 @@ using Emberdelve.Interaction;
 using Emberdelve.Items;
 using Emberdelve.Level;
 using Emberdelve.Player;
+using Emberdelve.Skills;
 
 namespace Emberdelve.EditorTools
 {
@@ -447,6 +448,7 @@ namespace Emberdelve.EditorTools
                 yield return DroppedLootFlow();
                 yield return LootFlow();
                 yield return DefenseFlow();
+                yield return WarriorSkillFlow();
             }
 
             // ---------------------------------------------------------------- loadout switching
@@ -1000,6 +1002,26 @@ namespace Emberdelve.EditorTools
                 Check(GameObject.Find("Emberdelve_Result") != null, "result screen built after death");
                 Check(RunContext.HasResult && RunContext.LastResult.Outcome == RunState.Dead,
                     "death recorded in the run result");
+
+                // ---- Milestone 4: death has to shut the kit down, not leave it running
+                ManaComponent mana = _rig.Mana;
+                SkillCaster caster = _rig.Skills;
+                Check(mana != null && caster != null, "dead rig still exposes its mana pool and skill caster");
+                if (mana != null && caster != null)
+                {
+                    float manaAtDeath = mana.CurrentMana;
+                    Check(!caster.CanCastSlot(0, out string deathReason) && deathReason == "dead",
+                        $"skills are refused while dead ({deathReason})");
+                    Check(!caster.TryCastSlot(0), "a dead player cannot cast");
+                    Check(!caster.TryCastSlot(1), "a dead player cannot cast the second skill either");
+                    Check(!_rig.Movement.IsDashing, "death cancelled any dash in progress");
+                    Check(!mana.RegenerationAllowed, "death suspended mana regeneration");
+                    Check(_rig.Status == null || _rig.Status.ActiveCount == 0, "death cleared the player's statuses");
+
+                    yield return WaitSeconds(2f);
+                    Check(Mathf.Abs(mana.CurrentMana - manaAtDeath) < 0.01f,
+                        $"mana regeneration is stopped while dead ({manaAtDeath:F0} -> {mana.CurrentMana:F0})");
+                }
             }
 
             // ---------------------------------------------------------------- lobby -> dungeon
@@ -1160,6 +1182,7 @@ namespace Emberdelve.EditorTools
                 Check(projectiles != null && projectiles.Length > 0, "projectile visual spawned in the world");
 
                 yield return ArcherLoadoutFlow();
+                yield return ArcherSkillFlow();
 
                 // Bow shot then rapier thrust: one combat entity, two components, one allocator. The
                 // sequences must strictly increase or the authority would treat the rapier as a replay.
@@ -1324,6 +1347,17 @@ namespace Emberdelve.EditorTools
                 Check(GameObject.Find("Emberdelve_Result") == null, "previous result screen is gone");
                 Check(GameObject.Find("Emberdelve_Hud") != null, "HUD rebuilt for the new run");
 
+                if (_rig.Mana != null && _rig.Skills != null)
+                {
+                    Check(_rig.Mana.MaxMana == (_rig.Class != null ? _rig.Class.EffectiveMaxMana : _rig.Mana.MaxMana),
+                        $"fresh run reconfigured the mana pool ({_rig.Mana.CurrentMana:F0}/{_rig.Mana.MaxMana})");
+                    Check(_rig.Mana.CurrentMana >= _rig.Mana.MaxMana - 0.5f, "fresh run starts with full mana");
+                    Check(_rig.Skills.KitValid && _rig.Skills.KitProblems.Count == 0, "fresh run resolved a valid skill kit");
+                    Check(_rig.Skills.IsReady(0) && _rig.Skills.IsReady(1),
+                        $"fresh run starts with both skills off cooldown ({_rig.Skills.CooldownRemaining(0):F1}/{_rig.Skills.CooldownRemaining(1):F1})");
+                    Check(_rig.Status == null || _rig.Status.ActiveCount == 0, "fresh run starts with no statuses");
+                }
+
                 if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority resolved)) resolved = null;
                 _authority = resolved;
                 _localAuthority = resolved as LocalCombatAuthority;
@@ -1373,9 +1407,1018 @@ namespace Emberdelve.EditorTools
                 return null;
             }
 
+            // ---------------------------------------------------------------- warrior skills
+
+            /// <summary>
+            /// Milestone 4 assertions for the Warrior kit: the exactly-two kit rule, the mana pool, Dash as
+            /// real collision-respecting movement, Battle Cry as authority-applied area damage plus a status,
+            /// both passives as measurable numbers, and mana spend / refusal / regen.
+            /// Runs last so it cannot disturb the Milestone 1-3 assertions before them.
+            /// </summary>
+            private IEnumerator WarriorSkillFlow()
+            {
+                SkillCaster caster = _rig.Skills;
+                ManaComponent mana = _rig.Mana;
+                CharacterClassData classData = _rig.Class;
+                MeleeCombat melee = _rig.GetComponent<MeleeCombat>();
+                WeaponData sword = _rig.Loadout != null ? _rig.Loadout.Primary : null;
+
+                Check(caster != null, "warrior rig exposes a skill caster");
+                Check(mana != null, "warrior rig exposes a mana pool");
+                if (caster == null || mana == null) yield break;
+
+                Check(caster.KitValid && caster.KitProblems.Count == 0,
+                    $"warrior kit satisfies the exactly-two rule ({caster.KitProblems.Count} problems)");
+                Check(classData.activeSkills != null && classData.activeSkills.Length == 2 &&
+                      classData.passiveSkills != null && classData.passiveSkills.Length == 2,
+                      "warrior class asset declares 2 active and 2 passive skills");
+
+                SkillData dash = caster.ActiveSkill(0);
+                SkillData cry = caster.ActiveSkill(1);
+                Check(dash != null && dash.skillId == "warrior_dash", $"warrior active 1 is Dash ({SkillName(dash)})");
+                Check(cry != null && cry.skillId == "warrior_battle_cry", $"warrior active 2 is Battle Cry ({SkillName(cry)})");
+                Check(dash != null && cry != null && dash.effect == SkillEffectKind.Dash &&
+                      cry.effect == SkillEffectKind.AreaCry, "warrior actives select two different effect behaviors");
+
+                List<string> passiveIds = new List<string>();
+                foreach (SkillData passive in caster.PassiveSkills) if (passive != null) passiveIds.Add(passive.skillId);
+                Check(passiveIds.Count == 2, $"warrior exposes two passive skills ({passiveIds.Count})");
+                Check(passiveIds.Contains("warrior_ashen_might"), "warrior passive 1 is Ashen Might");
+                Check(passiveIds.Contains("warrior_bulwark_training"), "warrior passive 2 is Bulwark Training");
+                Check(caster.PassiveSkills[0] != null && !string.IsNullOrEmpty(caster.PassiveSkills[0].displayName) &&
+                      !string.IsNullOrEmpty(caster.PassiveSkills[0].description), "passives expose a name and a description");
+
+                Check(mana.MaxMana == classData.EffectiveMaxMana,
+                    $"mana pool comes from the class asset ({mana.MaxMana} vs {classData.EffectiveMaxMana})");
+                Check(mana.CurrentMana >= mana.MaxMana - 0.5f, $"mana starts full ({mana.CurrentMana:F0}/{mana.MaxMana})");
+                Check(mana.RegenPerSecond > 0f, $"mana regen configured ({mana.RegenPerSecond:F1}/s)");
+
+                GameObject hud = GameObject.Find("Emberdelve_Hud");
+                Transform hudRoot = hud != null ? hud.transform.Find("HudRoot") : null;
+                Transform skillBar = hudRoot != null ? hudRoot.Find("SkillBar") : null;
+                Check(skillBar != null && skillBar.childCount == 2,
+                    $"HUD builds a two-slot skill bar ({(skillBar != null ? skillBar.childCount : 0)} slots)");
+                Check(hudRoot != null && hudRoot.Find("ManaFill") != null, "HUD builds a mana bar");
+                Text manaLabel = hudRoot != null ? FindChildText(hudRoot, "ManaLabel") : null;
+                Check(manaLabel != null && manaLabel.text.Contains("Mana"), $"HUD mana readout ({(manaLabel != null ? manaLabel.text : "none")})");
+                Text kitLabel = hudRoot != null ? FindChildText(hudRoot, "KitLabel") : null;
+                Check(kitLabel != null && kitLabel.text.Contains("Ashen Might") && kitLabel.text.Contains("Bulwark Training"),
+                    "HUD names both passives");
+                Check(!string.IsNullOrEmpty(caster.KeyLabel(0)) && caster.KeyLabel(0) != "?",
+                    $"skill slot 1 reports its real binding ({caster.KeyLabel(0)})");
+
+                // ---- passive 1: Ashen Might, measured as the authority's own damage number
+                float outgoingMelee = _rig.GetOutgoingDamageMultiplier(sword);
+                float outgoingRanged = _rig.GetOutgoingDamageMultiplier(_rig.Loadout != null ? _rig.Loadout.Secondary : null);
+                Check(Mathf.Abs(outgoingMelee - 1.2f) < 0.03f, $"Ashen Might multiplies melee damage by 1.20 ({outgoingMelee:F2})");
+                Check(Mathf.Abs(outgoingRanged - 1f) < 0.03f, $"Ashen Might does not touch ranged damage ({outgoingRanged:F2})");
+
+                EnemyAgent mightTarget = PickAliveEnemy();
+                Check(mightTarget != null, "an enemy is available for the Ashen Might swing");
+                if (mightTarget != null && melee != null && melee.enabled && sword != null)
+                {
+                    Check(PlacePlayerAtSpawnFacing(1), "player re-seated at the spawn cell for the skill tests");
+                    mightTarget.enabled = false;
+                    PlaceCombatCenterInRange(mightTarget, _rig.AimOrigin, _rig.transform.position,
+                        _rig.transform.position + FlatForward(_rig.transform) * 2f, 1.9f);
+                    _rig.transform.rotation = Quaternion.LookRotation(mightTarget.CombatCenter - _rig.AimOrigin);
+                    Physics.SyncTransforms();
+                    yield return WaitFrames(2);
+
+                    // The Milestone 1 validation tests deliberately stamp synthetic future timestamps, and the
+                    // authority records the last accepted attack per combat id, so a real-time swing fired too
+                    // soon after them is correctly refused as faster than the cooldown. Wait for the authority's
+                    // own clock to clear instead of pretending the rejection did not happen.
+                    float weaponClock = _localAuthority != null ? _localAuthority.WeaponCooldownRemaining(_rig.CombatId, sword) : 0f;
+                    if (weaponClock > 0f)
+                    {
+                        Debug.Log($"[Emberdelve][Smoke:{Mode}] authority weapon clock for #{_rig.CombatId} is {weaponClock:F1}s ahead from the synthetic validation stamps; waiting for it to clear before the passive swing");
+                        yield return WaitUntil(() => _localAuthority == null || _localAuthority.WeaponCooldownRemaining(_rig.CombatId, sword) <= 0f, weaponClock + 4f);
+                    }
+
+                    Check(_localAuthority == null || _localAuthority.WeaponCooldownRemaining(_rig.CombatId, sword) <= 0f,
+                        "the authority's weapon cooldown clock accepts a real-time swing now");
+
+                    float healthBefore = mightTarget.CurrentHealth;
+                    int acceptedBefore = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
+                    DamageInfo captured = DamageInfo.Invalid;
+                    System.Action<DamageInfo> onDamaged = damage => captured = damage;
+                    if (mightTarget.Health != null) mightTarget.Health.Damaged += onDamaged;
+
+                    melee.BeginSwing();
+                    yield return WaitSeconds(1.1f);
+
+                    if (mightTarget.Health != null) mightTarget.Health.Damaged -= onDamaged;
+                    ParkEnemyFar(mightTarget, "keep the Dash corridor clear of the melee test target");
+
+                    bool damaged = captured.IsValid && mightTarget.CurrentHealth < healthBefore;
+                    Check(damaged, $"Ashen Might swing damaged the enemy through the authority ({healthBefore:F0} -> {mightTarget.CurrentHealth:F0})");
+                    if (damaged)
+                    {
+                        float expected = sword.baseDamage * (captured.Headshot ? DamageResolver.HeadshotMultiplier : 1f) * outgoingMelee;
+                        Check(Mathf.Abs(captured.Amount - expected) < 0.8f,
+                            $"melee damage is weapon base x passive ({captured.Amount:F1} vs expected {expected:F1}, headshot={captured.Headshot})");
+                        Check(captured.Amount > sword.baseDamage + 1f,
+                            $"the passive made the swing hit harder than the weapon alone ({captured.Amount:F1} > {sword.baseDamage:F1})");
+                        Check(captured.SourceCombatId == _rig.CombatId && captured.SourceKind == EntityKind.LocalPlayer,
+                            "the authority attributes the damage to the local player");
+                        Check(_localAuthority != null && _localAuthority.AcceptedCount > acceptedBefore, "authority accepted the passive swing");
+                    }
+                }
+
+                // ---- active 1: Dash in an open corridor
+                if (dash != null)
+                {
+                    // Dash asks for 4.6m, so the test needs a corridor at least that long: three clear cells.
+                    Check(PlacePlayerAtSpawnFacing(3), "player re-seated with three clear cells for the full Dash distance");
+                    ClearEnemiesNear(_rig.transform.position, 9f, "the Dash corridor");
+                    ClearCorridorAhead(_rig.transform.position, FlatForward(_rig.transform), dash.dashDistance, 0.6f, "the Dash corridor");
+                    yield return WaitFrames(3);
+
+                    ReportObstaclesAhead("pre-dash");
+                    bool corridorClear = CorridorIsClear(_rig.transform.position, FlatForward(_rig.transform), dash.dashDistance + 0.6f, 0.6f, "the Dash corridor");
+                    Check(corridorClear, "the Dash corridor is physically clear for the distance the skill asks for");
+
+                    if (!corridorClear)
+                    {
+                        Debug.Log($"[Emberdelve][Smoke:{Mode}] open-corridor Dash precondition failed, skipping its movement assertions rather than reporting a movement bug; the wall case below still runs");
+                    }
+
+                    Vector3 before = _rig.transform.position;
+                    float manaBefore = mana.CurrentMana;
+                    int cost = dash.EffectiveManaCost;
+
+                    Check(mana.HasAmount(cost), $"warrior can afford Dash ({cost} MP)");
+                    Check(caster.TryCastSlot(0), "Dash cast accepted");
+                    Check(_rig.Movement.IsDashing, "movement reports a dash in progress");
+                    Check(Mathf.Abs(manaBefore - mana.CurrentMana - cost) < 0.6f,
+                        $"Dash spent exactly its mana ({manaBefore:F0} -> {mana.CurrentMana:F0}, cost {cost})");
+                    Check(!caster.IsReady(0) && caster.CooldownRemaining(0) > 0f,
+                        $"Dash goes on cooldown ({caster.CooldownRemaining(0):F1}s of {dash.EffectiveCooldown:F1}s)");
+
+                    yield return WaitSeconds(0.7f);
+
+                    if (corridorClear)
+                    {
+                        float moved = Vector3.Distance(before, _rig.transform.position);
+                        Check(moved > 3.0f && moved < dash.dashDistance + 1.5f,
+                            $"Dash moved the player {moved:F2}m (asked for {dash.dashDistance:F1}m)");
+                        Check(!_rig.Movement.DashWasBlocked, "the corridor dash was not blocked by geometry");
+                        Check(_rig.Movement.IsGrounded, "Dash did not launch the player off the ground");
+                        Vector2Int landed = _layout.CellFromWorld(_rig.transform.position);
+                        Check(_grid.IsWalkable(landed.x, landed.y), $"Dash ended on walkable ground (cell {landed})");
+                    }
+
+                    RestoreClearedCorridor();
+
+                    // cooldown refusal, reported to the HUD with a reason
+                    string capturedReason = null;
+                    int capturedSlot = -2;
+                    System.Action<SkillSnapshot, string> onReject = (snapshot, reason) =>
+                    {
+                        capturedSlot = snapshot.Slot;
+                        capturedReason = reason;
+                    };
+                    GameEvents.SkillCastRejected += onReject;
+
+                    Check(!caster.CanCastSlot(0, out string cooldownReason), "Dash is refused while on cooldown");
+                    Check(cooldownReason != null && cooldownReason.ToLower().Contains("cooldown"),
+                        $"the refusal names the cooldown ({cooldownReason})");
+
+                    float manaBeforeRefusal = mana.CurrentMana;
+                    Check(!caster.TryCastSlot(0), "a cooldown-blocked cast is refused");
+                    Check(Mathf.Abs(mana.CurrentMana - manaBeforeRefusal) < 0.001f, "a refused cast spends no mana");
+                    Check(caster.CooldownRemaining(0) > 0f, "a refused cast does not restart or shorten the cooldown");
+                    GameEvents.SkillCastRejected -= onReject;
+                    Check(capturedSlot == 0 && capturedReason != null && capturedReason.ToLower().Contains("cooldown"),
+                        $"the refusal is reported to the HUD (slot {capturedSlot}: {capturedReason})");
+
+                    Text cooldownLabel = skillBar != null ? FindChildText(skillBar, "CooldownLabel") : null;
+                    Check(cooldownLabel != null && cooldownLabel.text.Contains("s"),
+                        $"the skill slot shows the remaining cooldown ({(cooldownLabel != null ? cooldownLabel.text : "none")})");
+
+                    yield return WaitUntil(() => caster.IsReady(0), dash.EffectiveCooldown + 6f);
+                    Check(caster.IsReady(0), "Dash is ready again when its cooldown expires");
+
+                    // Dash into a wall: the wall decides how far it goes
+                    if (TryFindWalkableCellFacingAWall(out Vector2Int wallCell, out Vector2Int blockedDirection))
+                    {
+                        _rig.transform.position = _layout.CellCenterWorld(wallCell) + Vector3.up * 0.15f;
+                        _rig.transform.rotation = Quaternion.LookRotation(new Vector3(blockedDirection.x, 0f, blockedDirection.y));
+                        Physics.SyncTransforms();
+                        yield return WaitFrames(4);
+
+                        Vector3 wallBefore = _rig.transform.position;
+                        float manaBeforeWall = mana.CurrentMana;
+                        Check(caster.TryCastSlot(0), "Dash cast accepted against a wall");
+                        yield return WaitSeconds(0.7f);
+
+                        float wallMoved = Vector3.Distance(wallBefore, _rig.transform.position);
+                        Check(_rig.Movement.DashWasBlocked, "Dash reports that geometry stopped it");
+                        Check(wallMoved < dash.dashDistance * 0.6f,
+                            $"Dash did not pass through the wall ({wallMoved:F2}m of {dash.dashDistance:F1}m asked for)");
+                        Vector2Int stillIn = _layout.CellFromWorld(_rig.transform.position);
+                        Check(_grid.IsWalkable(stillIn.x, stillIn.y), $"the player is still inside walkable bounds (cell {stillIn})");
+                        Check(Mathf.Abs(manaBeforeWall - mana.CurrentMana - cost) < 0.6f,
+                            "a wall-blocked Dash still costs its mana: the cast happened, the wall decided the distance");
+                    }
+                    else
+                    {
+                        Check(false, "no walkable cell with a blocked neighbour found, cannot test Dash collision");
+                    }
+                }
+
+                // ---- active 2: Battle Cry
+                if (cry != null)
+                {
+                    Check(PlacePlayerAtSpawnFacing(1), "player re-seated for Battle Cry");
+                    ClearEnemiesNear(_rig.transform.position, 9f, "the Battle Cry area");
+                    ClearCorridorAhead(_rig.transform.position, FlatForward(_rig.transform), 7f, 2.5f, "the Battle Cry area");
+                    yield return WaitFrames(2);
+
+                    EnemyAgent cryTarget = PickAliveEnemy();
+                    Check(cryTarget != null, "an enemy is available for Battle Cry");
+                    if (cryTarget == null) yield break;
+
+                    cryTarget.enabled = false;
+                    PlaceEnemyAhead(cryTarget, 4.0f, 0f);
+                    cryTarget.enabled = true;
+                    Physics.SyncTransforms();
+                    yield return WaitFrames(2);
+
+                    EnemyAgent farTarget = PickAliveEnemyExcept(cryTarget);
+                    if (farTarget != null)
+                    {
+                        farTarget.enabled = false;
+                        farTarget.transform.position = _layout.CellCenterWorld(FindFarWalkableCell(_layout.CellFromWorld(_rig.transform.position))) + Vector3.up * 0.1f;
+                        Physics.SyncTransforms();
+                        yield return WaitFrames(2);
+                    }
+
+                    float cryManaBefore = mana.CurrentMana;
+                    float cryHealthBefore = cryTarget.CurrentHealth;
+                    float farHealthBefore = farTarget != null ? farTarget.CurrentHealth : 0f;
+                    float playerHealthBefore = _rig.CurrentHealth;
+                    int acceptedBeforeCry = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
+                    int consumedBeforeCry = _localAuthority != null ? _localAuthority.LastSequenceFor(_rig.CombatId) : -1;
+
+                    DamageInfo cryDamage = DamageInfo.Invalid;
+                    System.Action<DamageInfo> cryOnDamaged = damage => cryDamage = damage;
+                    if (cryTarget.Health != null) cryTarget.Health.Damaged += cryOnDamaged;
+
+                    Check(caster.TryCastSlot(1), "Battle Cry cast accepted");
+                    yield return WaitFrames(3);
+
+                    if (cryTarget.Health != null) cryTarget.Health.Damaged -= cryOnDamaged;
+
+                    Check(Mathf.Abs(cryManaBefore - mana.CurrentMana - cry.EffectiveManaCost) < 0.6f,
+                        $"Battle Cry spent its mana ({cryManaBefore:F0} -> {mana.CurrentMana:F0}, cost {cry.EffectiveManaCost})");
+                    Check(cryDamage.IsValid, "Battle Cry damage arrived as an authority DamageInfo, not a direct health write");
+                    Check(cryTarget.CurrentHealth < cryHealthBefore,
+                        $"Battle Cry damaged the hostile inside its radius ({cryHealthBefore:F0} -> {cryTarget.CurrentHealth:F0})");
+                    Check(_localAuthority != null && _localAuthority.AcceptedCount > acceptedBeforeCry,
+                        "authority accepted the Battle Cry hit");
+                    Check(_localAuthority != null && _localAuthority.LastSequenceFor(_rig.CombatId) > consumedBeforeCry,
+                        $"Battle Cry claimed a fresh command sequence ({consumedBeforeCry} -> {(_localAuthority != null ? _localAuthority.LastSequenceFor(_rig.CombatId) : -1)})");
+                    Check(_rig.CurrentHealth >= playerHealthBefore - 0.01f,
+                        $"Battle Cry does not damage its own caster ({playerHealthBefore:F0} -> {_rig.CurrentHealth:F0})");
+
+                    if (farTarget != null)
+                    {
+                        float farDistance = Vector3.Distance(_rig.CombatCenter, farTarget.CombatCenter);
+                        Check(farDistance > cry.radius + 1f, $"the second enemy is outside the cry radius ({farDistance:F1}m vs {cry.radius:F1}m)");
+                        Check(farTarget.CurrentHealth >= farHealthBefore - 0.01f,
+                            $"Battle Cry does not reach outside its radius ({farHealthBefore:F0} -> {farTarget.CurrentHealth:F0})");
+                    }
+
+                    Check(cryTarget.HasStatus(StatusKind.Slow), "Battle Cry leaves the target slowed");
+                    float slowMultiplier = cryTarget.Status != null ? cryTarget.Status.SpeedMultiplier : 1f;
+                    Check(slowMultiplier < 0.95f, $"the slowed monster's speed multiplier is reduced ({slowMultiplier:F2})");
+                    Check(cryTarget.EffectiveChaseSpeed < cryTarget.Data.chaseSpeed - 0.5f,
+                        $"the slow lowers effective chase speed ({cryTarget.EffectiveChaseSpeed:F2} vs {cryTarget.Data.chaseSpeed:F2})");
+                    Check(_rig.HasStatus(StatusKind.Empowered), "Battle Cry empowers the caster");
+
+                    float buffed = _rig.GetOutgoingDamageMultiplier(sword);
+                    Check(buffed > outgoingMelee + 0.05f, $"the self buff raises outgoing damage ({outgoingMelee:F2} -> {buffed:F2})");
+                    Check(!caster.IsReady(1), $"Battle Cry goes on cooldown ({caster.CooldownRemaining(0):F1}/{caster.CooldownRemaining(1):F1}s)");
+
+                    // The slow has to change how far the monster actually gets.
+                    Check(PlacePlayerAtSpawnFacing(3), "player re-seated with a corridor three cells clear");
+                    ClearEnemiesNear(_rig.transform.position, 9f, "the slow chase corridor");
+                    ClearCorridorAhead(_rig.transform.position, FlatForward(_rig.transform), 7f, 2.0f, "the slow chase corridor");
+                    cryTarget.enabled = false;
+                    PlaceEnemyAhead(cryTarget, 6.0f, 0f);
+                    cryTarget.transform.rotation = Quaternion.LookRotation(_rig.transform.position - cryTarget.transform.position);
+                    cryTarget.enabled = true;
+                    Physics.SyncTransforms();
+                    yield return WaitFrames(2);
+
+                    float distanceBeforeChase = Vector3.Distance(cryTarget.transform.position, _rig.transform.position);
+                    yield return WaitSeconds(1.5f);
+                    float distanceAfterChase = Vector3.Distance(cryTarget.transform.position, _rig.transform.position);
+                    float closed = distanceBeforeChase - distanceAfterChase;
+                    float unslowedWouldClose = cryTarget.Data.chaseSpeed * 1.5f;
+                    Debug.Log($"[Emberdelve][Smoke:{Mode}] battle cry diag: start={distanceBeforeChase:F2} end={distanceAfterChase:F2} closed={closed:F2} unslowed={unslowedWouldClose:F2} slow={slowMultiplier:F2}");
+                    Check(closed > 0.4f, $"the slowed monster still moves ({closed:F2}m closed in 1.5s)");
+                    Check(closed < unslowedWouldClose * 0.8f,
+                        $"the slow measurably reduces the distance it closes ({closed:F2}m < {unslowedWouldClose:F2}m unslowed)");
+
+                    RestoreClearedCorridor();
+                }
+
+                // ---- passive 2: Bulwark Training
+                Check(_rig.Defense.CanBlock, "warrior still resolves a block capability");
+                Check(_rig.Defense.BlockReduction > classData.blockReduction + 0.05f,
+                    $"Bulwark Training raises guard reduction above the class value ({_rig.Defense.BlockReduction:F2} vs {_rig.Class.blockReduction:F2})");
+                Check(Mathf.Abs(_rig.Defense.BlockReduction - (classData.blockReduction + 0.12f)) < 0.03f,
+                    $"Bulwark Training adds exactly its declared 0.12 ({_rig.Defense.BlockReduction:F2})");
+
+                // ---- insufficient mana. The runtime reports a cooldown before mana, so the mana rule is
+                // tested on slots that are genuinely off cooldown; a refused cast must then leave none behind.
+                yield return WaitUntil(() => caster.IsReady(0) && caster.IsReady(1), 16f);
+                Check(caster.CooldownRemaining(0) <= 0f && caster.CooldownRemaining(1) <= 0f,
+                    $"both warrior skills are off cooldown before the mana refusal test ({caster.CooldownRemaining(0):F1}/{caster.CooldownRemaining(1):F1}s)");
+
+                mana.TrySpend((int)mana.CurrentMana);
+                Check(mana.CurrentMana < dash.EffectiveManaCost, $"mana drained below the kit's cheapest cost ({mana.CurrentMana:F0})");
+                Check(!caster.CanCastSlot(0, out string manaReason), "Dash is refused when mana cannot cover it");
+                Check(manaReason != null && manaReason.ToLower().Contains("mana"), $"the refusal names mana ({manaReason})");
+
+                float manaBeforeManaRefusal = mana.CurrentMana;
+                Vector3 positionBeforeManaRefusal = _rig.transform.position;
+                int acceptedBeforeManaRefusal = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
+                Check(!caster.TryCastSlot(0), "an unaffordable cast is refused");
+                Check(Mathf.Abs(mana.CurrentMana - manaBeforeManaRefusal) < 0.001f, "an unaffordable cast spends nothing");
+                Check(Vector3.Distance(_rig.transform.position, positionBeforeManaRefusal) < 0.01f,
+                    "an unaffordable cast does not move the player");
+                Check(!_rig.Movement.IsDashing, "an unaffordable cast does not start a dash");
+                Check(caster.CooldownRemaining(0) <= 0f, "an unaffordable cast does not start a cooldown");
+                Check(_localAuthority != null && _localAuthority.AcceptedCount == acceptedBeforeManaRefusal,
+                    "an unaffordable cast submits nothing to the authority");
+
+                // ---- regen
+                mana.Restore(mana.MaxMana);
+                Check(mana.CurrentMana >= mana.MaxMana - 0.01f, $"mana can be restored to full ({mana.CurrentMana:F0}/{mana.MaxMana})");
+                Check(mana.TrySpend(30), "mana spend accepted for the regen measurement");
+                float afterSpend = mana.CurrentMana;
+                Check(mana.RegenDelayRemaining > 0f, "spending mana pauses regeneration");
+                yield return WaitSeconds(classData.manaRegenDelay + 1.5f);
+                Check(mana.CurrentMana > afterSpend + 0.5f, $"mana regenerates after its delay ({afterSpend:F0} -> {mana.CurrentMana:F0})");
+                Check(mana.CurrentMana <= mana.MaxMana + 0.01f, $"mana regen does not overshoot the pool ({mana.CurrentMana:F0}/{mana.MaxMana})");
+
+                string warriorPassives = caster.Stats != null ? caster.Stats.Describe() : "none";
+                Debug.Log($"[Emberdelve][Smoke:{Mode}] warrior skill diag: kit={caster.KitValid} mana={mana.CurrentMana:F0}/{mana.MaxMana} defense={_rig.Defense} passives={warriorPassives}");
+            }
+
+            /// <summary>
+            /// Milestone 4 assertions for the Archer kit: the kit rule, Fleet Footing through the same speed
+            /// rule a server would validate, Farshot through the authority's damage number, Multi-shot as a
+            /// real three-arrow volley that spends real arrows and hits each target once, Piercing Shot as
+            /// penetration with a target cap and no duplicate hits, and the ammo / mana / weapon refusals.
+            /// </summary>
+            private IEnumerator ArcherSkillFlow()
+            {
+                SkillCaster caster = _rig.Skills;
+                ManaComponent mana = _rig.Mana;
+                RangedCombat ranged = _rig.GetComponent<RangedCombat>();
+                ClassLoadout loadout = _rig.Loadout;
+                CharacterClassData classData = _rig.Class;
+                WeaponData bow = loadout != null ? loadout.Primary : null;
+
+                Check(caster != null && mana != null && ranged != null, "archer rig exposes a skill caster, a mana pool and ranged combat");
+                if (caster == null || mana == null || ranged == null) yield break;
+
+                // The skill tests need a living player and a lane nobody wanders into. Enemies are parked,
+                // not removed, and the ones each test needs are placed explicitly afterwards.
+                ClearEnemiesNear(_rig.transform.position, 80f, "the archer skill tests");
+                if (_rig.IsDead)
+                {
+                    Check(false, "archer died before its skill tests, later results would be about a corpse rather than the kit");
+                    yield break;
+                }
+
+                if (_rig.Health != null && _rig.CurrentHealth < _rig.MaxHealth)
+                {
+                    _rig.Health.Heal(_rig.MaxHealth);
+                    Debug.Log($"[Emberdelve][Smoke:{Mode}] archer healed to {_rig.CurrentHealth:F0}/{_rig.MaxHealth} before the skill tests");
+                }
+
+                Check(caster.KitValid && caster.KitProblems.Count == 0,
+                    $"archer kit satisfies the exactly-two rule ({caster.KitProblems.Count} problems)");
+
+                SkillData multi = caster.ActiveSkill(0);
+                SkillData pierce = caster.ActiveSkill(1);
+                Check(multi != null && multi.skillId == "archer_multi_shot", $"archer active 1 is Multi-shot ({SkillName(multi)})");
+                Check(pierce != null && pierce.skillId == "archer_piercing_shot", $"archer active 2 is Piercing Shot ({SkillName(pierce)})");
+                Check(multi != null && pierce != null && multi.effect == SkillEffectKind.SpreadShot &&
+                      pierce.effect == SkillEffectKind.PiercingShot, "archer actives select two different projectile behaviors");
+                Check(multi != null && multi.projectileCount == 3 && pierce != null && pierce.projectileMaxTargets == 2,
+                    $"the projectile skills declare their own counts (volley {multi.projectileCount}, pierce {pierce.projectileMaxTargets})");
+
+                List<string> passiveIds = new List<string>();
+                foreach (SkillData passive in caster.PassiveSkills) if (passive != null) passiveIds.Add(passive.skillId);
+                Check(passiveIds.Count == 2, $"archer exposes two passive skills ({passiveIds.Count})");
+                Check(passiveIds.Contains("archer_farshot"), "archer passive 1 is Farshot");
+                Check(passiveIds.Contains("archer_fleet_footing"), "archer passive 2 is Fleet Footing");
+
+                // ---- passive 1: Fleet Footing, measured through the resolved speed rule
+                float walk = _rig.Movement.ResolveGroundSpeed(false, false);
+                float sprint = _rig.Movement.ResolveGroundSpeed(true, false);
+                Check(Mathf.Abs(walk - classData.moveSpeed * 1.15f) < 0.06f,
+                    $"Fleet Footing raises walk speed ({walk:F2} vs class {classData.moveSpeed:F2})");
+                Check(Mathf.Abs(sprint - classData.sprintSpeed * 1.15f) < 0.06f,
+                    $"Fleet Footing raises sprint speed ({sprint:F2} vs class {classData.sprintSpeed:F2})");
+                Check(sprint > walk + 0.1f, $"the resolved speed rule still distinguishes sprint from walk ({sprint:F2} > {walk:F2})");
+
+                // ---- passive 2: Farshot
+                float outgoingRanged = _rig.GetOutgoingDamageMultiplier(bow);
+                float outgoingMelee = _rig.GetOutgoingDamageMultiplier(loadout != null ? loadout.Secondary : null);
+                Check(Mathf.Abs(outgoingRanged - 1.18f) < 0.03f, $"Farshot multiplies ranged damage by 1.18 ({outgoingRanged:F2})");
+                Check(Mathf.Abs(outgoingMelee - 1f) < 0.03f, $"Farshot does not touch melee damage ({outgoingMelee:F2})");
+
+                // ---- ammo refusal: a skill cannot fire without the rounds the weapon actually holds
+                int magazineStart = ranged.Magazine;
+                Check(ranged.TryConsumeAmmo(ranged.Magazine), $"magazine emptied for the ammo refusal test ({magazineStart} -> {ranged.Magazine})");
+                float manaBeforeAmmoRefusal = mana.CurrentMana;
+                int acceptedBeforeAmmoRefusal = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
+                Check(!caster.CanCastSlot(0, out string ammoReason), "Multi-shot is refused with an empty magazine");
+                Check(ammoReason != null && (ammoReason.ToLower().Contains("arrow") || ammoReason.ToLower().Contains("ammo")),
+                    $"the refusal names the missing ammunition ({ammoReason})");
+                Check(!caster.TryCastSlot(0), "an unarmable volley is refused");
+                Check(Mathf.Abs(mana.CurrentMana - manaBeforeAmmoRefusal) < 0.001f, "a refused volley spends no mana");
+                Check(_localAuthority != null && _localAuthority.AcceptedCount == acceptedBeforeAmmoRefusal,
+                    "a refused volley submits nothing to the authority");
+
+                ClassLoadout.RangedAmmoState bowAmmo = loadout != null ? loadout.GetAmmoState(bow) : null;
+                ranged.Initialize(bow, bowAmmo != null ? bowAmmo.reserve : ranged.Reserve,
+                    bowAmmo != null ? bowAmmo.maxReserve : 0, Mathf.Max(1, bow.magazineSize));
+                Check(ranged.Magazine == bow.magazineSize, $"re-equipping the bow restores its magazine ({ranged.Magazine}/{bow.magazineSize})");
+
+                // ---- mana refusal, before any of the skills are on cooldown
+                mana.TrySpend((int)mana.CurrentMana);
+                Check(mana.CurrentMana < multi.EffectiveManaCost, $"mana drained below the kit's costs ({mana.CurrentMana:F0})");
+                Check(!caster.CanCastSlot(0, out string manaReason), "Multi-shot is refused when mana cannot cover it");
+                Check(manaReason != null && manaReason.ToLower().Contains("mana"), $"the refusal names mana ({manaReason})");
+                float manaBeforeManaRefusal = mana.CurrentMana;
+                int magazineBeforeManaRefusal = ranged.Magazine;
+                Check(!caster.TryCastSlot(0), "an unaffordable volley is refused");
+                Check(Mathf.Abs(mana.CurrentMana - manaBeforeManaRefusal) < 0.001f, "an unaffordable volley spends no mana");
+                Check(ranged.Magazine == magazineBeforeManaRefusal, "an unaffordable volley spends no arrows");
+                mana.Restore(mana.MaxMana);
+                Check(mana.CurrentMana >= mana.MaxMana - 0.01f, $"mana restored for the skill tests ({mana.CurrentMana:F0}/{mana.MaxMana})");
+
+                // ---- active 1: Multi-shot, three arrows into three separate targets
+                Check(PlacePlayerAtSpawnFacing(1), "player re-seated facing a clear corridor for the volley");
+                ClearEnemiesNear(_rig.transform.position, 10f, "the volley corridor");
+
+                // The lane the volley actually needs comes from the skill's own spread angle, not from a
+                // guess: at depth d the outer arrows sit at d * tan(spread / 2) to either side.
+                float volleyDepth = 4.0f;
+                float volleyLateral = volleyDepth * Mathf.Tan(Mathf.Max(1f, multi.spreadDegrees) * 0.5f * Mathf.Deg2Rad);
+                float volleyLaneHalf = volleyLateral + 0.7f;
+
+                ClearCorridorAhead(_rig.transform.position, FlatForward(_rig.transform), volleyDepth + 1.5f, volleyLaneHalf, "the volley corridor");
+                yield return WaitFrames(2);
+
+                bool volleyLaneClear = CorridorIsClear(_rig.transform.position, FlatForward(_rig.transform),
+                    volleyDepth + 0.4f, volleyLaneHalf, "the volley corridor");
+                Check(volleyLaneClear,
+                    $"the volley lane is clear for a {multi.spreadDegrees:F0} degree spread out to {volleyDepth:F1}m (lane half width {volleyLaneHalf:F2}m)");
+
+                EnemyAgent shotA = PickAliveEnemy();
+                EnemyAgent shotB = PickAliveEnemyExcept(shotA);
+                EnemyAgent shotC = PickAliveEnemyExcept(shotA, shotB);
+                Check(shotA != null && shotB != null && shotC != null,
+                    $"three live enemies are available for the volley ({(shotA != null ? 1 : 0) + (shotB != null ? 1 : 0) + (shotC != null ? 1 : 0)})");
+                if (shotA == null || shotB == null || shotC == null) yield break;
+
+                foreach (EnemyAgent target in new[] { shotA, shotB, shotC }) target.enabled = false;
+                PlaceEnemyAhead(shotA, volleyDepth, 0f);
+                PlaceEnemyAhead(shotB, volleyDepth, volleyLateral);
+                PlaceEnemyAhead(shotC, volleyDepth, -volleyLateral);
+                AimAtPoint(_rig.transform.position + FlatForward(_rig.transform) * volleyDepth + Vector3.up * 1.15f);
+                yield return WaitFrames(3);
+
+                Debug.Log($"[Emberdelve][Smoke:{Mode}] volley geometry diag: spread={multi.spreadDegrees:F0} deg lateral={volleyLateral:F2}m depth={volleyDepth:F1}m A={shotA.transform.position} B={shotB.transform.position} C={shotC.transform.position} muzzle={_rig.GetMuzzlePosition()} aim={_rig.AimDirection}");
+
+                int volleyBefore = ranged.Magazine;
+                int acceptedBeforeVolley = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
+                int consumedBeforeVolley = _localAuthority != null ? _localAuthority.LastSequenceFor(_rig.CombatId) : -1;
+                int arrowsBefore = CountProjectileVisuals();
+                float manaBeforeVolley = mana.CurrentMana;
+
+                Dictionary<EnemyAgent, DamageInfo> volleyDamage = new Dictionary<EnemyAgent, DamageInfo>();
+                System.Action<EnemyAgent, DamageInfo> recorder = (target, damage) => volleyDamage[target] = damage;
+                System.Action<DamageInfo> handlerA = damage => recorder(shotA, damage);
+                System.Action<DamageInfo> handlerB = damage => recorder(shotB, damage);
+                System.Action<DamageInfo> handlerC = damage => recorder(shotC, damage);
+                if (shotA.Health != null) shotA.Health.Damaged += handlerA;
+                if (shotB.Health != null) shotB.Health.Damaged += handlerB;
+                if (shotC.Health != null) shotC.Health.Damaged += handlerC;
+
+                Check(caster.TryCastSlot(0), "Multi-shot cast accepted");
+                yield return WaitSeconds(0.6f);
+
+                int arrowsAfter = CountProjectileVisuals();
+                Check(ranged.Magazine == volleyBefore - multi.projectileCount,
+                    $"Multi-shot spent one arrow per projectile from the magazine ({volleyBefore} -> {ranged.Magazine}, volley {multi.projectileCount})");
+                Check(Mathf.Abs(manaBeforeVolley - mana.CurrentMana - multi.EffectiveManaCost) < 0.6f,
+                    $"Multi-shot spent its mana ({manaBeforeVolley:F0} -> {mana.CurrentMana:F0})");
+                Check(arrowsAfter >= arrowsBefore + multi.projectileCount,
+                    $"Multi-shot spawned one arrow visual per projectile ({arrowsBefore} -> {arrowsAfter})");
+
+                int hitTargets = 0;
+                if (volleyLaneClear)
+                {
+                    Check(_localAuthority != null && _localAuthority.AcceptedCount == acceptedBeforeVolley + 3,
+                        $"the authority accepted exactly one hit per arrow ({acceptedBeforeVolley} -> {(_localAuthority != null ? _localAuthority.AcceptedCount : -1)})");
+                    Check(_localAuthority != null && _localAuthority.LastSequenceFor(_rig.CombatId) == consumedBeforeVolley + 3,
+                        $"each arrow claimed its own fresh sequence ({consumedBeforeVolley} -> {(_localAuthority != null ? _localAuthority.LastSequenceFor(_rig.CombatId) : -1)})");
+
+                    foreach (KeyValuePair<EnemyAgent, DamageInfo> pair in volleyDamage)
+                    {
+                        if (!pair.Value.IsValid) continue;
+                        hitTargets++;
+                        float expected = bow.DamageAtRange(Vector3.Distance(pair.Value.SourcePosition, pair.Value.Point))
+                                         * multi.damageMultiplier * outgoingRanged
+                                         * (pair.Value.Headshot ? DamageResolver.HeadshotMultiplier : 1f);
+                        Check(Mathf.Abs(pair.Value.Amount - expected) < 0.9f,
+                            $"target {pair.Key.name} took one arrow's damage ({pair.Value.Amount:F1} vs expected {expected:F1}), not several");
+                    }
+
+                    Check(hitTargets == 3, $"the spread hit three separate targets ({hitTargets}/3)");
+                }
+                else
+                {
+                    Debug.Log($"[Emberdelve][Smoke:{Mode}] volley lane precondition failed, skipping its hit assertions rather than reporting a projectile bug");
+                }
+
+                RestoreClearedCorridor();
+
+                foreach (EnemyAgent target in new[] { shotA, shotB, shotC })
+                {
+                    if (target.Health != null) target.Health.Damaged -= target == shotA ? handlerA : (target == shotB ? handlerB : handlerC);
+                    ParkEnemyFar(target, "the volley targets must not chase the player during later tests");
+                }
+
+                // ---- active 2: Piercing Shot, penetration with a cap and no duplicate hits
+                Check(PlacePlayerAtSpawnFacing(3), "player re-seated with three cells of clear corridor");
+                ClearEnemiesNear(_rig.transform.position, 12f, "the piercing line");
+                ClearCorridorAhead(_rig.transform.position, FlatForward(_rig.transform), 8f, 0.5f, "the piercing line");
+                yield return WaitFrames(2);
+
+                bool pierceLaneClear = CorridorIsClear(_rig.transform.position, FlatForward(_rig.transform),
+                    7.4f, 0.5f, "the piercing line");
+                Check(pierceLaneClear, "the piercing line is clear for the distance the shot must travel");
+
+                EnemyAgent lineA = PickAliveEnemy();
+                EnemyAgent lineB = PickAliveEnemyExcept(lineA);
+                EnemyAgent lineC = PickAliveEnemyExcept(lineA, lineB);
+                Check(lineA != null && lineB != null && lineC != null, "three live enemies are available for the piercing line");
+                if (lineA == null || lineB == null || lineC == null) yield break;
+
+                foreach (EnemyAgent target in new[] { lineA, lineB, lineC }) target.enabled = false;
+                PlaceEnemyAhead(lineA, 3.0f, 0f);
+                PlaceEnemyAhead(lineB, 5.0f, 0f);
+                PlaceEnemyAhead(lineC, 7.0f, 0f);
+                AimAtPoint(_rig.transform.position + FlatForward(_rig.transform) * 5.0f + Vector3.up * 1.0f);
+                yield return WaitFrames(3);
+
+                int pierceMagazineBefore = ranged.Magazine;
+                int acceptedBeforePierce = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
+                float pierceManaBefore = mana.CurrentMana;
+                float healthA = lineA.CurrentHealth;
+                float healthB = lineB.CurrentHealth;
+                float healthC = lineC.CurrentHealth;
+
+                DamageInfo pierceDamageA = DamageInfo.Invalid;
+                DamageInfo pierceDamageB = DamageInfo.Invalid;
+                DamageInfo pierceDamageC = DamageInfo.Invalid;
+                int hitsA = 0;
+                int hitsB = 0;
+                System.Action<DamageInfo> pierceA = damage => { pierceDamageA = damage; hitsA++; };
+                System.Action<DamageInfo> pierceB = damage => { pierceDamageB = damage; hitsB++; };
+                System.Action<DamageInfo> pierceC = damage => pierceDamageC = damage;
+                if (lineA.Health != null) lineA.Health.Damaged += pierceA;
+                if (lineB.Health != null) lineB.Health.Damaged += pierceB;
+                if (lineC.Health != null) lineC.Health.Damaged += pierceC;
+
+                Check(caster.TryCastSlot(1), "Piercing Shot cast accepted");
+                yield return WaitSeconds(0.6f);
+
+                if (lineA.Health != null) lineA.Health.Damaged -= pierceA;
+                if (lineB.Health != null) lineB.Health.Damaged -= pierceB;
+                if (lineC.Health != null) lineC.Health.Damaged -= pierceC;
+                foreach (EnemyAgent target in new[] { lineA, lineB, lineC }) ParkEnemyFar(target, "the piercing line targets must not chase the player during later tests");
+
+                Check(ranged.Magazine == pierceMagazineBefore - 1, $"Piercing Shot spent exactly one arrow ({pierceMagazineBefore} -> {ranged.Magazine})");
+                Check(Mathf.Abs(pierceManaBefore - mana.CurrentMana - pierce.EffectiveManaCost) < 0.6f, "Piercing Shot spent its mana");
+
+                if (pierceLaneClear)
+                {
+                    Check(lineA.CurrentHealth < healthA, $"Piercing Shot hit the first body ({healthA:F0} -> {lineA.CurrentHealth:F0})");
+                    Check(lineB.CurrentHealth < healthB, $"Piercing Shot penetrated to the second body ({healthB:F0} -> {lineB.CurrentHealth:F0})");
+                    Check(hitsA == 1 && hitsB == 1, $"no entity was hit twice by the same arrow (A {hitsA}, B {hitsB})");
+                    Check(lineC.CurrentHealth >= healthC - 0.01f,
+                        $"the shot stopped at its target cap ({pierce.projectileMaxTargets}) and did not reach the third body ({healthC:F0} -> {lineC.CurrentHealth:F0})");
+                    Check(_localAuthority != null && _localAuthority.AcceptedCount == acceptedBeforePierce + pierce.projectileMaxTargets,
+                        $"the authority accepted both hits of the one activation ({acceptedBeforePierce} -> {(_localAuthority != null ? _localAuthority.AcceptedCount : -1)}, cap {pierce.projectileMaxTargets})");
+
+                    // The two accepted hits share one activation id. A second button press is a new activation,
+                    // and the authority must refuse it while the skill's own cooldown is still running.
+                    Check(!caster.TryCastSlot(1), "the skill key cannot fire Piercing Shot again during its cooldown");
+                    Check(caster.CanCastSlot(1, out string pierceCooldownReason) == false &&
+                          pierceCooldownReason != null && pierceCooldownReason.ToLower().Contains("cooldown"),
+                          $"the refusal names the cooldown ({pierceCooldownReason})");
+
+                    if (lineA != null && !lineA.IsDead && _authority != null)
+                    {
+                        Vector3 muzzle = _rig.GetMuzzlePosition();
+                        Vector3 toward = lineA.CombatCenter - muzzle;
+                        if (toward.sqrMagnitude > 0.0001f)
+                        {
+                            int forgedSequence = CombatRegistry.NextSequence(_rig.CombatId);
+                            SkillIntent forged = new SkillIntent(_rig.CombatId, EntityKind.LocalPlayer, pierce, bow,
+                                muzzle, toward.normalized, Mathf.Max(1f, bow.rangedRange), forgedSequence, Time.time,
+                                pierce.TargetStatusSpec, CombatRegistry.NextActivationId());
+
+                            int acceptedBeforeForged = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
+                            bool forgedAccepted = _authority.SubmitSkill(forged, new HitCandidate(lineA.CombatId, lineA.CombatCenter, false));
+
+                            Check(!forgedAccepted, "the authority refuses a new activation of the same skill while its cooldown runs");
+                            Check(_localAuthority != null && _localAuthority.AcceptedCount == acceptedBeforeForged,
+                                "the refused activation added no accepted hit");
+                        }
+                    }
+                }
+                else
+                {
+                    Debug.Log($"[Emberdelve][Smoke:{Mode}] piercing lane precondition failed, skipping its hit assertions rather than reporting a projectile bug");
+                }
+
+                if (pierceDamageA.IsValid)
+                {
+                    float expected = bow.DamageAtRange(Vector3.Distance(pierceDamageA.SourcePosition, pierceDamageA.Point))
+                                     * pierce.damageMultiplier * outgoingRanged
+                                     * (pierceDamageA.Headshot ? DamageResolver.HeadshotMultiplier : 1f);
+                    Check(Mathf.Abs(pierceDamageA.Amount - expected) < 0.9f,
+                        $"the piercing arrow's damage is weapon falloff x skill multiplier x Farshot ({pierceDamageA.Amount:F1} vs expected {expected:F1})");
+                    Check(pierceDamageA.Amount > bow.baseDamage * 0.9f,
+                        $"the piercing multiplier made it a heavy arrow ({pierceDamageA.Amount:F1} vs bow base {bow.baseDamage:F1})");
+                }
+
+                // ---- the projectile skills respect what is in hand. Both are on cooldown from the tests
+                // above, so wait for them to be genuinely ready before asserting the weapon rule.
+                yield return WaitUntil(() => caster.IsReady(0) && caster.IsReady(1), 16f);
+                Check(!_rig.IsDead, "the archer is still alive, so a refusal can be attributed to the rules and not to death");
+                Check(_rig.Mana != null && _rig.Mana.RegenerationAllowed,
+                    "mana regeneration is still allowed for this living archer");
+                Check(caster.IsReady(0) && caster.IsReady(1),
+                    $"both archer skills are off cooldown before the weapon requirement test ({caster.CooldownRemaining(0):F1}/{caster.CooldownRemaining(1):F1}s)");
+
+                Check(loadout != null && loadout.SwitchWeapon(), "archer can switch to the rapier");
+                Check(!caster.CanCastSlot(0, out string weaponReason), "Multi-shot is refused without a ranged weapon in hand");
+                Check(weaponReason != null && weaponReason.ToLower().Contains("ranged"), $"the refusal names the weapon requirement ({weaponReason})");
+                float manaBeforeWeaponRefusal = mana.CurrentMana;
+                Check(!caster.TryCastSlot(0), "an unweapon-appropriate cast is refused");
+                Check(Mathf.Abs(mana.CurrentMana - manaBeforeWeaponRefusal) < 0.001f, "a weapon-refused cast spends no mana");
+                Check(!caster.TryCastSlot(1), "Piercing Shot is refused without a ranged weapon too");
+                Check(loadout.SwitchToSlot(0), "archer switches back to the bow");
+                Check(ranged.enabled, "ranged combat is live again for the bow");
+
+                // ---- mana regen
+                Check(mana.TrySpend(40), "mana spend accepted for the regen measurement");
+                float afterSpend = mana.CurrentMana;
+                Check(mana.RegenDelayRemaining > 0f, "spending mana pauses regeneration");
+                yield return WaitSeconds(classData.manaRegenDelay + 1.5f);
+                Check(mana.CurrentMana > afterSpend + 0.5f, $"mana regenerates after its delay ({afterSpend:F0} -> {mana.CurrentMana:F0})");
+                Check(mana.CurrentMana <= mana.MaxMana + 0.01f, $"mana regen does not overshoot ({mana.CurrentMana:F0}/{mana.MaxMana})");
+
+                string archerPassives = caster.Stats != null ? caster.Stats.Describe() : "none";
+                Debug.Log($"[Emberdelve][Smoke:{Mode}] archer skill diag: kit={caster.KitValid} mana={mana.CurrentMana:F0}/{mana.MaxMana} mag={ranged.Magazine}/{ranged.Reserve} walk={walk:F2} sprint={sprint:F2} passives={archerPassives}");
+            }
+
+            private static string SkillName(SkillData skill)
+            {
+                return skill != null ? skill.displayName + " [" + skill.skillId + "]" : "none";
+            }
+
+            private int CountProjectileVisuals()
+            {
+                ProjectileVisual[] visuals = FindObjectsByType<ProjectileVisual>(FindObjectsSortMode.None);
+                return visuals != null ? visuals.Length : 0;
+            }
+
+            private void AimAtPoint(Vector3 point)
+            {
+                Vector3 direction = point - _rig.AimOrigin;
+                if (direction.sqrMagnitude < 0.0001f) direction = _rig.transform.forward;
+                _rig.transform.rotation = Quaternion.LookRotation(direction);
+                Physics.SyncTransforms();
+            }
+
+            /// <summary>Places an enemy at a chosen distance ahead of, and beside, the player.</summary>
+            private void PlaceEnemyAhead(EnemyAgent enemy, float depth, float lateral)
+            {
+                Vector3 forward = FlatForward(_rig.transform);
+                Vector3 right = Vector3.Cross(Vector3.up, forward);
+                if (right.sqrMagnitude < 0.0001f) right = Vector3.right;
+                right.Normalize();
+
+                Vector3 position = _rig.transform.position + forward * depth + right * lateral;
+                position.y = 0f;
+                enemy.transform.position = position;
+
+                // Face the target at the player, so its collider footprint is predictable from the player's
+                // point of view instead of whatever direction it happened to be wandering when it was moved.
+                Vector3 face = _rig.transform.position - position;
+                face.y = 0f;
+                if (face.sqrMagnitude > 0.0001f) enemy.transform.rotation = Quaternion.LookRotation(face);
+
+                Physics.SyncTransforms();
+            }
+
+            /// <summary>Re-seats the player at the level's spawn cell, facing a direction with clear walkable ground.</summary>
+            private bool PlacePlayerAtSpawnFacing(int clearCells)
+            {
+                if (_rig == null || _layout == null || _grid == null) return false;
+
+                Vector2Int start = _layout.playerStartCell;
+                Vector2Int[] candidates =
+                {
+                    new Vector2Int(0, 1), new Vector2Int(1, 0), new Vector2Int(-1, 0), new Vector2Int(0, -1)
+                };
+
+                for (int i = 0; i < candidates.Length; i++)
+                {
+                    bool clear = true;
+                    for (int step = 1; step <= clearCells; step++)
+                    {
+                        Vector2Int cell = start + candidates[i] * step;
+                        if (!_grid.IsWalkable(cell.x, cell.y)) { clear = false; break; }
+                    }
+
+                    if (!clear) continue;
+
+                    _rig.transform.position = _layout.CellCenterWorld(start) + Vector3.up * 0.15f;
+                    _rig.transform.rotation = Quaternion.LookRotation(new Vector3(candidates[i].x, 0f, candidates[i].y));
+                    Physics.SyncTransforms();
+                    return true;
+                }
+
+                return false;
+            }
+
+            /// <summary>Finds the walkable cell nearest the player that has a blocked neighbour, for the Dash collision test.</summary>
+            private bool TryFindWalkableCellFacingAWall(out Vector2Int walkableCell, out Vector2Int blockedDirection)
+            {
+                walkableCell = Vector2Int.zero;
+                blockedDirection = Vector2Int.zero;
+
+                if (_layout == null || _grid == null) return false;
+
+                Vector2Int reference = _layout.CellFromWorld(_rig != null ? _rig.transform.position : Vector3.zero);
+                float best = float.MaxValue;
+
+                Vector2Int[] directions =
+                {
+                    new Vector2Int(1, 0), new Vector2Int(-1, 0), new Vector2Int(0, 1), new Vector2Int(0, -1)
+                };
+
+                for (int y = 0; y < _grid.height; y++)
+                {
+                    for (int x = 0; x < _grid.width; x++)
+                    {
+                        if (!_grid.IsWalkable(x, y)) continue;
+
+                        float distance = (x - reference.x) * (x - reference.x) + (y - reference.y) * (y - reference.y);
+                        if (distance >= best) continue;
+
+                        for (int d = 0; d < directions.Length; d++)
+                        {
+                            if (_grid.IsWalkable(x + directions[d].x, y + directions[d].y)) continue;
+
+                            best = distance;
+                            walkableCell = new Vector2Int(x, y);
+                            blockedDirection = directions[d];
+                            break;
+                        }
+                    }
+                }
+
+                return blockedDirection != Vector2Int.zero;
+            }
+
+            /// <summary>The walkable cell furthest from a reference cell, used to park test enemies.</summary>
+            private void ReportObstaclesAhead(string label)
+            {
+                if (_rig == null) return;
+
+                Vector3 forward = FlatForward(_rig.transform);
+                Vector3 right = Vector3.Cross(Vector3.up, forward);
+                if (right.sqrMagnitude < 0.0001f) right = Vector3.right;
+                right.Normalize();
+
+                Debug.Log($"[Emberdelve][Smoke:{Mode}] {label} obstacle scan from {_rig.transform.position} facing {forward}");
+
+                for (float height = 0.3f; height <= 1.7f; height += 0.35f)
+                {
+                    Vector3 origin = _rig.transform.position + Vector3.up * height;
+                    for (int side = -1; side <= 1; side++)
+                    {
+                        Vector3 rayOrigin = origin + right * (side * 0.55f);
+                        RaycastHit hit;
+                        if (!Physics.Raycast(rayOrigin, forward, out hit, 6f, ~0, QueryTriggerInteraction.Ignore)) continue;
+
+                        Debug.Log($"[Emberdelve][Smoke:{Mode}] {label} hit h={height:F2} side={side} d={hit.distance:F2} collider='{hit.collider.name}' of '{hit.collider.transform.root.name}' layer={hit.collider.gameObject.layer} pos={hit.point}");
+                    }
+                }
+            }
+
+            /// <summary>
+            /// Moves loot pickups out of the strip a movement or projectile test is about to use. Harness
+            /// bookkeeping only - the pickups still exist, they are simply not lying in the test corridor.
+            /// </summary>
+            private void ClearCorridorAhead(Vector3 anchor, Vector3 forward, float length, float halfWidth, string reason)
+            {
+                if (_layout == null) return;
+
+                LootPickup[] pickups = FindObjectsByType<LootPickup>(FindObjectsSortMode.None);
+                if (pickups == null) return;
+
+                Vector2Int far = FindFarWalkableCell(_layout.CellFromWorld(anchor));
+                int moved = 0;
+
+                for (int i = 0; i < pickups.Length; i++)
+                {
+                    LootPickup pickup = pickups[i];
+                    if (pickup == null) continue;
+
+                    Vector3 original = pickup.transform.position;
+                    Vector3 offset = original - anchor;
+                    float depth = Vector3.Dot(offset, forward);
+                    if (depth < -0.6f || depth > length + 0.6f) continue;
+
+                    Vector3 lateral = offset - forward * depth;
+                    if (lateral.magnitude > halfWidth + 0.7f) continue;
+
+                    pickup.gameObject.SetActive(false);
+                    pickup.transform.position = _layout.CellCenterWorld(far) + Vector3.up * 0.45f;
+                    // LootPickup.Update snaps the pickup back to its home position every frame, so the whole
+                    // GameObject has to come out of the scene: that takes its colliders with it.
+                    pickup.enabled = false;
+                    Physics.SyncTransforms();
+                    _clearedLoot.Add(new KeyValuePair<LootPickup, Vector3>(pickup, original));
+                    Debug.Log($"[Emberdelve][Smoke:{Mode}] moved loot '{pickup.name}' out of {reason} (was {depth:F1}m ahead, {lateral.magnitude:F1}m to the side)");
+                    moved++;
+                }
+
+                if (moved > 0) Debug.Log($"[Emberdelve][Smoke:{Mode}] cleared {moved} loot pickup(s) from {reason}");
+            }
+
+            /// <summary>
+            /// True when nothing solid stands in a strip of ground, checked at several heights so a low prop
+            /// cannot be missed. Used to prove a test's precondition before it asserts what movement did.
+            /// </summary>
+            /// <summary>Puts loot pickups cleared by ClearCorridorAhead back where the level put them.</summary>
+            private void RestoreClearedCorridor()
+            {
+                if (_clearedLoot.Count == 0) return;
+
+                int restored = 0;
+                for (int i = 0; i < _clearedLoot.Count; i++)
+                {
+                    LootPickup pickup = _clearedLoot[i].Key;
+                    if (pickup == null) continue;
+
+                    pickup.transform.position = _clearedLoot[i].Value;
+                    pickup.gameObject.SetActive(true);
+                    pickup.enabled = true;
+                    restored++;
+                }
+
+                _clearedLoot.Clear();
+                Physics.SyncTransforms();
+                Debug.Log($"[Emberdelve][Smoke:{Mode}] restored {restored} loot pickup(s) to their level positions");
+            }
+
+            private bool CorridorIsClear(Vector3 anchor, Vector3 forward, float length, float halfWidth, string reason)
+            {
+                bool clear = true;
+
+                for (float height = 0.3f; height <= 1.7f; height += 0.35f)
+                {
+                    for (int side = -2; side <= 2; side++)
+                    {
+                        Vector3 right = Vector3.Cross(Vector3.up, forward);
+                        if (right.sqrMagnitude < 0.0001f) right = Vector3.right;
+                        right.Normalize();
+
+                        Vector3 origin = anchor + Vector3.up * height + right * (side * halfWidth * 0.5f);
+                        RaycastHit hit;
+                        if (!Physics.Raycast(origin, forward, out hit, length, ~0, QueryTriggerInteraction.Ignore)) continue;
+                        if (hit.collider is CharacterController) continue;
+
+                        clear = false;
+                        Debug.Log($"[Emberdelve][Smoke:{Mode}] {reason} is not clear: h={height:F2} side={side} d={hit.distance:F2} collider='{hit.collider.name}' of '{hit.collider.transform.root.name}' layer={hit.collider.gameObject.layer}");
+                    }
+                }
+
+                return clear;
+            }
+
+            private Vector2Int FindFarWalkableCell(Vector2Int reference)
+            {
+                Vector2Int best = reference;
+                float bestScore = -1f;
+
+                if (_grid == null || _layout == null) return best;
+
+                for (int y = 0; y < _grid.height; y++)
+                {
+                    for (int x = 0; x < _grid.width; x++)
+                    {
+                        if (!_grid.IsWalkable(x, y)) continue;
+
+                        int dx = x - reference.x;
+                        int dy = y - reference.y;
+                        float score = dx * dx + dy * dy;
+                        if (score > bestScore)
+                        {
+                            bestScore = score;
+                            best = new Vector2Int(x, y);
+                        }
+                    }
+                }
+
+                return best;
+            }
+
+            /// <summary>
+            /// Moves an enemy out of the area a skill test is about to measure, and leaves it frozen. Harness
+            /// bookkeeping only: the enemy is still a live combatant, it is simply not standing in the way.
+            /// </summary>
+            private void ParkEnemyFar(EnemyAgent enemy, string reason)
+            {
+                if (enemy == null || _layout == null) return;
+
+                enemy.enabled = false;
+                Vector2Int far = FindFarWalkableCell(_layout.CellFromWorld(_rig != null ? _rig.transform.position : Vector3.zero));
+                enemy.transform.position = _layout.CellCenterWorld(far) + Vector3.up * 0.1f;
+                Physics.SyncTransforms();
+                Debug.Log($"[Emberdelve][Smoke:{Mode}] parked enemy #{enemy.CombatId} at cell {far}: {reason}");
+            }
+
+            private void ClearEnemiesNear(Vector3 anchor, float radius, string reason)
+            {
+                EnemyAgent[] all = FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None);
+                int parked = 0;
+                for (int i = 0; i < all.Length; i++)
+                {
+                    if (all[i] == null) continue;
+                    if (Vector3.Distance(all[i].transform.position, anchor) > radius) continue;
+
+                    // Corpses count: a slain agent's colliders stay in the level, and a harness-placed one is
+                    // standing exactly where a corridor test now wants to move.
+                    ParkEnemyFar(all[i], reason + (all[i].IsDead ? " (corpse)" : string.Empty));
+                    parked++;
+                }
+
+                if (parked > 0) Debug.Log($"[Emberdelve][Smoke:{Mode}] cleared {parked} enemy agent(s) from {reason}");
+            }
+
+            private EnemyAgent PickAliveEnemyExcept(params EnemyAgent[] skip)            {
+                EnemyAgent[] all = FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None);
+                EnemyAgent best = null;
+                float bestDistance = float.MaxValue;
+                Vector3 reference = _rig != null ? _rig.transform.position : transform.position;
+
+                for (int i = 0; i < all.Length; i++)
+                {
+                    if (all[i] == null || all[i].IsDead) continue;
+
+                    bool excluded = false;
+                    for (int s = 0; s < skip.Length; s++)
+                    {
+                        if (skip[s] == all[i]) { excluded = true; break; }
+                    }
+                    if (excluded) continue;
+
+                    float distance = Vector3.Distance(all[i].transform.position, reference);
+                    if (distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        best = all[i];
+                    }
+                }
+
+                return best;
+            }
+
             // ---------------------------------------------------------------- helpers
 
             private LootPickup _sceneLoot;
+            private readonly List<KeyValuePair<LootPickup, Vector3>> _clearedLoot = new List<KeyValuePair<LootPickup, Vector3>>();
 
             private EnemyAgent PickAliveEnemy()
             {

@@ -96,6 +96,16 @@ namespace Emberdelve.InputLayer
             swap.AddBinding("<Keyboard>/q", groups: "Keyboard&Mouse");
             swap.AddBinding("<Gamepad>/rightShoulder", groups: "Gamepad");
 
+            // Skill slots are deliberately not 1-4: those are the item hotbar. F and G sit under the left
+            // hand next to the movement keys and are free of every existing binding.
+            InputAction skill1 = map.AddAction("Skill1", type: InputActionType.Button, expectedControlLayout: "Button");
+            skill1.AddBinding("<Keyboard>/f", groups: "Keyboard&Mouse");
+            skill1.AddBinding("<Gamepad>/leftShoulder", groups: "Gamepad");
+
+            InputAction skill2 = map.AddAction("Skill2", type: InputActionType.Button, expectedControlLayout: "Button");
+            skill2.AddBinding("<Keyboard>/g", groups: "Keyboard&Mouse");
+            skill2.AddBinding("<Gamepad>/buttonWest", groups: "Gamepad");
+
             InputAction inventory = map.AddAction("Inventory", type: InputActionType.Button, expectedControlLayout: "Button");
             inventory.AddBinding("<Keyboard>/i", groups: "Keyboard&Mouse");
             inventory.AddBinding("<Keyboard>/tab", groups: "Keyboard&Mouse");

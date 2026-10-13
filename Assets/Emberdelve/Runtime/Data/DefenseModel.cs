@@ -58,7 +58,8 @@ namespace Emberdelve.Data
             return isShield ? capabilities & ~DefenseCapability.Parry : capabilities;
         }
 
-        public static DefenseProfile Resolve(CharacterClassData data, WeaponData primary, WeaponData shield)
+        public static DefenseProfile Resolve(CharacterClassData data, WeaponData primary, WeaponData shield,
+            float passiveBlockBonus = 0f)
         {
             // A two-handed main hand occupies both hands, so an off-hand shield contributes nothing for as
             // long as that weapon is held. This is why a Warrior on the crossbow cannot block, and why the
@@ -77,6 +78,10 @@ namespace Emberdelve.Data
             // being carried in a free hand.
             if (shieldContributes && shield.blockReductionOverride >= 0f) reduction = shield.blockReductionOverride;
             if (shieldContributes && shield.blockArcOverride >= 0f) arc = shield.blockArcOverride;
+
+            // Passive training is applied last so it improves whatever the kit actually resolved, class
+            // numbers or shield numbers, instead of being tied to one of them.
+            reduction += Mathf.Max(0f, passiveBlockBonus);
 
             return new DefenseProfile(capabilities, reduction, arc, hasShield);
         }
