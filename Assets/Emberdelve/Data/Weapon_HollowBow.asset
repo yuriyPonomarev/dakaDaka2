@@ -24,6 +24,8 @@ MonoBehaviour:
   reach: 1.2
   arcAngle: 60
   hitSphereRadius: 0.2
+  twoHanded: 1
+  ammoDisplayName: Ammo
   rangedRange: 46
   projectileSpeed: 42
   projectileRadius: 0.05

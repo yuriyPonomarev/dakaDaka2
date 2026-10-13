@@ -30,6 +30,13 @@ namespace Emberdelve.Combat
         public int AcceptedCount { get; private set; }
         public int RejectedCount { get; private set; }
 
+        /// <summary>
+        /// Read-only view of the anti-replay state for one combat id (-1 when that entity has never had a
+        /// sequence accepted). The rule itself stays private: this only lets tools and tests observe which
+        /// sequence the authority has actually consumed instead of guessing it from counters.
+        /// </summary>
+        public int LastSequenceFor(int combatId) => _lastSequence.TryGetValue(combatId, out int last) ? last : -1;
+
         private void Awake()
         {
             if (config != null) config.EnsureValid();

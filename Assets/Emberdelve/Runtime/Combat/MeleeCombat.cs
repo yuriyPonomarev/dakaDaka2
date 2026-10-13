@@ -28,7 +28,6 @@ namespace Emberdelve.Combat
         private Phase _phase = Phase.Idle;
         private float _phaseTimer;
         private float _readyTime;
-        private int _sequence;
         private AttackIntent _pendingIntent;
         private readonly List<HitCandidate> _hits = new List<HitCandidate>(8);
 
@@ -115,14 +114,17 @@ namespace Emberdelve.Combat
         /// </summary>
         public void BeginSwing()
         {
-            _sequence++;
+            // Sequence comes from the combat registry, keyed by combat id: the same player can swing a
+            // sword and shoot a crossbow, and a private counter here would make one weapon's first attack
+            // look like a replay of the other's.
+            int sequence = CombatRegistry.NextSequence(rig.CombatId);
 
             Vector3 origin = rig.AimOrigin;
             Vector3 direction = rig.AimDirection;
             float maxRange = _weapon.reach + _weapon.hitSphereRadius;
 
             _pendingIntent = new AttackIntent(rig.CombatId, rig.Kind, _weapon, 1f, origin, direction,
-                maxRange, _sequence, Time.time);
+                maxRange, sequence, Time.time);
 
             _phase = Phase.Windup;
             _phaseTimer = Mathf.Max(0.02f, _weapon.windupTime);

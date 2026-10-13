@@ -52,6 +52,7 @@ namespace Emberdelve.Player
         public PlayerLook Look => look;
         public HealthComponent Health => health;
         public Inventory Inventory => inventory;
+        public ClassLoadout Loadout => loadout;
         public CharacterClassData Class => _class;
         public WeaponData MainHandWeapon => _mainHand;
         public Vector3 AimOrigin => look != null ? look.AimOrigin : transform.position;
@@ -90,7 +91,22 @@ namespace Emberdelve.Player
         public void ApplyClass(CharacterClassData data, GameConfig config)
         {
             _class = data;
+            _mainHand = data != null ? data.primaryWeapon : null;
+            _defense = DefenseProfile.Resolve(data, _mainHand, data != null ? data.offhandShield : null);
             if (loadout != null) loadout.Apply(data, config, this);
+        }
+
+        /// <summary>
+        /// Called by ClassLoadout whenever a different weapon ends up in the main hand. Defensive
+        /// capability belongs to the weapon actually held, not to the class as a whole, so switching a
+        /// sword for a crossbow legitimately removes the block and switching a bow for a rapier can
+        /// legitimately introduce a Parry flag.
+        /// </summary>
+        public void ApplyMainHandWeapon(WeaponData weapon)
+        {
+            _mainHand = weapon;
+            _defense = DefenseProfile.Resolve(_class, _mainHand, _class != null ? _class.offhandShield : null);
+            if (movement != null) movement.SetGuardActive(IsGuarding);
         }
 
         /// <summary>

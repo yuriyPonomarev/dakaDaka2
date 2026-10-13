@@ -20,6 +20,9 @@ namespace Emberdelve.EditorTools
         public static WeaponData Bow;
         public static WeaponData Claw;
         public static WeaponData ClawElite;
+        public static WeaponData Shield;
+        public static WeaponData Crossbow;
+        public static WeaponData Rapier;
         public static ItemData Coin;
         public static ItemData Draught;
         public static ItemData Relic;
@@ -37,6 +40,7 @@ namespace Emberdelve.EditorTools
             BuildWeapons();
             BuildItems();
             BuildClasses();
+            ApplyDefenseKit();
             BuildEnemies();
             BuildLayout();
             BuildNavGrid();
@@ -143,6 +147,155 @@ namespace Emberdelve.EditorTools
                 w.edgeMaterial = EmberdelveMaterials.EnemyHead;
                 w.gripMaterial = EmberdelveMaterials.EliteBody;
             });
+
+            Shield = LoadOrCreate<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberbulwarkShield.asset", w =>
+            {
+                w.weaponId = "emberbulwark_shield";
+                w.displayName = "Emberbulwark Shield";
+                w.kind = WeaponKind.Melee;
+                w.baseDamage = 9f;
+                w.damageType = DamageType.Physical;
+                w.windupTime = 0.3f;
+                w.activeWindow = 0.12f;
+                w.recoveryTime = 0.35f;
+                w.cooldown = 1.4f;
+                w.reach = 1.4f;
+                w.arcAngle = 90f;
+                w.hitSphereRadius = 0.45f;
+                w.shaftMaterial = EmberdelveMaterials.Blade;
+                w.edgeMaterial = EmberdelveMaterials.Blade;
+                w.gripMaterial = EmberdelveMaterials.Grip;
+            });
+
+            Crossbow = LoadOrCreate<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberCrossbow.asset", w =>
+            {
+                w.weaponId = "ember_crossbow";
+                w.displayName = "Ember Crossbow";
+                w.kind = WeaponKind.Ranged;
+                w.baseDamage = 24f;
+                w.damageType = DamageType.Pierce;
+                w.ammoDisplayName = "Bolts";
+                w.windupTime = 0.05f;
+                w.activeWindow = 0.08f;
+                w.recoveryTime = 0.2f;
+                w.cooldown = 1.1f;
+                w.reach = 1.2f;
+                w.arcAngle = 60f;
+                w.hitSphereRadius = 0.2f;
+                w.rangedRange = 34f;
+                w.projectileSpeed = 54f;
+                w.projectileRadius = 0.05f;
+                w.projectileLength = 0.5f;
+                w.drawTime = 0.3f;
+                w.minChargeToFire = 0.12f;
+                w.minChargeDamageScale = 0.55f;
+                w.magazineSize = 4;
+                w.reloadTime = 2.2f;
+                w.falloffStartRange = 12f;
+                w.falloffEndRange = 34f;
+                w.falloffMinScale = 0.5f;
+                w.shaftMaterial = EmberdelveMaterials.BowWood;
+                w.edgeMaterial = EmberdelveMaterials.Blade;
+                w.gripMaterial = EmberdelveMaterials.Grip;
+            });
+
+            Rapier = LoadOrCreate<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberRapier.asset", w =>
+            {
+                w.weaponId = "ember_rapier";
+                w.displayName = "Ember Rapier";
+                w.kind = WeaponKind.Melee;
+                w.baseDamage = 19f;
+                w.damageType = DamageType.Pierce;
+                w.windupTime = 0.16f;
+                w.activeWindow = 0.12f;
+                w.recoveryTime = 0.22f;
+                w.cooldown = 0.68f;
+                w.reach = 2.7f;
+                w.arcAngle = 70f;
+                w.hitSphereRadius = 0.45f;
+                w.shaftMaterial = EmberdelveMaterials.Blade;
+                w.edgeMaterial = EmberdelveMaterials.Blade;
+                w.gripMaterial = EmberdelveMaterials.Grip;
+            });
+        }
+
+        /// <summary>
+        /// Idempotent pass that writes the defense capability model onto assets that already existed
+        /// before the fields were added. LoadOrCreate only configures a brand new asset, so without
+        /// this pass the pre-existing sword, bow and claws would all still have no capabilities at all.
+        ///
+        /// Rules encoded here: a shield blocks and can never parry; a main-hand weapon is the only
+        /// place Parry may be declared, and it is declared nowhere yet because the parry timing system
+        /// is a later milestone.
+        /// </summary>
+        private static void ApplyDefenseKit()
+        {
+            SetDefense(Sword, DefenseRole.Weapon, DefenseCapability.Block, -1f, -1f, false);
+            SetDefense(Bow, DefenseRole.Weapon, DefenseCapability.None, -1f, -1f, true);
+            SetDefense(Claw, DefenseRole.Weapon, DefenseCapability.None, -1f, -1f, false);
+            SetDefense(ClawElite, DefenseRole.Weapon, DefenseCapability.None, -1f, -1f, false);
+            SetDefense(Crossbow, DefenseRole.Weapon, DefenseCapability.None, -1f, -1f, true);
+
+            // The rapier is the first asset to actually claim Parry. It is still only a capability flag:
+            // there is no parry timing window, animation or parry damage anywhere in the runtime yet.
+            SetDefense(Rapier, DefenseRole.Weapon, DefenseCapability.Block | DefenseCapability.Parry, -1f, -1f, false);
+
+            // Deliberately declares Parry to prove the shield rule masks it back off.
+            SetDefense(Shield, DefenseRole.Shield, DefenseCapability.Block | DefenseCapability.Parry, -1f, -1f, false);
+
+            if (Warrior != null && Warrior.offhandShield != Shield)
+            {
+                Warrior.offhandShield = Shield;
+                EditorUtility.SetDirty(Warrior);
+            }
+
+            if (Warrior != null && (Warrior.secondaryWeapon != Crossbow
+                                    || Warrior.secondaryStartingReserveAmmo != 6
+                                    || Warrior.secondaryMaxReserveAmmo != 16))
+            {
+                Warrior.secondaryWeapon = Crossbow;
+                Warrior.secondaryStartingReserveAmmo = 6;
+                Warrior.secondaryMaxReserveAmmo = 16;
+                EditorUtility.SetDirty(Warrior);
+            }
+
+            if (Archer != null && (Archer.secondaryWeapon != Rapier
+                                   || Archer.secondaryStartingReserveAmmo != 0
+                                   || Archer.secondaryMaxReserveAmmo != 0))
+            {
+                Archer.secondaryWeapon = Rapier;
+                Archer.secondaryStartingReserveAmmo = 0;
+                Archer.secondaryMaxReserveAmmo = 0;
+                EditorUtility.SetDirty(Archer);
+            }
+
+            if (Archer != null && Archer.offhandShield != null)
+            {
+                Archer.offhandShield = null;
+                EditorUtility.SetDirty(Archer);
+            }
+
+            AssetDatabase.SaveAssets();
+        }
+
+        private static void SetDefense(WeaponData weapon, DefenseRole role, DefenseCapability capabilities,
+            float reductionOverride, float arcOverride, bool twoHanded)
+        {
+            if (weapon == null) return;
+
+            if (weapon.defenseRole != role
+                || weapon.capabilities != capabilities
+                || weapon.twoHanded != twoHanded
+                || !Mathf.Approximately(weapon.blockReductionOverride, reductionOverride)
+                || !Mathf.Approximately(weapon.blockArcOverride, arcOverride))
+            {
+                weapon.defenseRole = role;
+                weapon.capabilities = capabilities;
+                weapon.twoHanded = twoHanded;
+                weapon.blockReductionOverride = reductionOverride;
+                weapon.blockArcOverride = arcOverride;
+                EditorUtility.SetDirty(weapon);
+            }
         }
 
         private static void BuildItems()

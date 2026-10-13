@@ -32,7 +32,13 @@ namespace Emberdelve.Data
         [Range(30f, 180f)] public float arcAngle = 110f;
         public float hitSphereRadius = 0.6f;
 
+        [Header("Hands")]
+        [Tooltip("A two-handed weapon occupies both hands, so an off-hand shield cannot contribute its block while it is held.")]
+        public bool twoHanded = false;
+
         [Header("Ranged")]
+        [Tooltip("Name used by the HUD ammo readout, e.g. Arrows or Bolts.")]
+        public string ammoDisplayName = "Ammo";
         public float rangedRange = 42f;
         public float projectileSpeed = 36f;
         public float projectileRadius = 0.07f;

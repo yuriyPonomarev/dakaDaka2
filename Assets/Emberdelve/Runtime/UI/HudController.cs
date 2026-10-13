@@ -25,6 +25,7 @@ namespace Emberdelve.UI
         private RectTransform _inventoryRow;
 
         private Text _classLabel;
+        private Text _weaponLabel;
         private Text _objectiveLabel;
         private Text _statusLabel;
         private Text _healthLabel;
@@ -69,6 +70,7 @@ namespace Emberdelve.UI
             GameEvents.InteractionHoldChanged += OnHold;
             GameEvents.ObjectiveChanged += OnObjective;
             GameEvents.StatusLineChanged += OnStatus;
+            GameEvents.ActiveWeaponChanged += OnActiveWeapon;
             GameEvents.ToastRaised += OnToast;
             GameEvents.RunStateChanged += OnRunState;
             GameEvents.PauseChanged += OnPause;
@@ -86,6 +88,7 @@ namespace Emberdelve.UI
             GameEvents.InteractionHoldChanged -= OnHold;
             GameEvents.ObjectiveChanged -= OnObjective;
             GameEvents.StatusLineChanged -= OnStatus;
+            GameEvents.ActiveWeaponChanged -= OnActiveWeapon;
             GameEvents.ToastRaised -= OnToast;
             GameEvents.RunStateChanged -= OnRunState;
             GameEvents.PauseChanged -= OnPause;
@@ -131,8 +134,7 @@ namespace Emberdelve.UI
             UiFactory.SetRect(_classLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(420f, 34f), new Vector2(24f, -22f));
 
-            _objectiveLabel = UiFactory.CreateText(_root, "ObjectiveLabel", "", 16, dim, TextAnchor.UpperLeft);
-            UiFactory.SetRect(_objectiveLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+            _objectiveLabel = UiFactory.CreateText(_root, "ObjectiveLabel", "", 16, dim, TextAnchor.UpperLeft);            UiFactory.SetRect(_objectiveLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(520f, 60f), new Vector2(24f, -58f));
 
             _statusLabel = UiFactory.CreateText(_root, "StatusLabel", "", 16, dim, TextAnchor.UpperLeft);
@@ -151,6 +153,10 @@ namespace Emberdelve.UI
             _healthLabel = UiFactory.CreateText(_root, "HealthLabel", "100 / 100", 15, ink, TextAnchor.MiddleLeft);
             UiFactory.SetRect(_healthLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
                 new Vector2(BarWidth, 22f), new Vector2(24f + BarWidth * 0.5f, 74f));
+
+            _weaponLabel = UiFactory.CreateText(_root, "WeaponLabel", "", 18, dim, TextAnchor.MiddleLeft);
+            UiFactory.SetRect(_weaponLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                new Vector2(BarWidth, 26f), new Vector2(24f + BarWidth * 0.5f, 104f));
 
             _ammoLabel = UiFactory.CreateText(_root, "AmmoLabel", "", 20, ink, TextAnchor.MiddleRight);
             UiFactory.SetRect(_ammoLabel.rectTransform, new Vector2(1f, 0f), new Vector2(1f, 0f),
@@ -326,14 +332,21 @@ namespace Emberdelve.UI
 
             _ammoLabel.gameObject.SetActive(true);
             _ammoFill.gameObject.SetActive(true);
-            _ammoLabel.text = $"Arrows  {current} / {reserve}";
 
             int magazineCapacity = 1;
+            string ammoName = "Ammo";
+
             if (_director != null && _director.Player != null)
             {
                 RangedCombat ranged = _director.Player.GetComponent<RangedCombat>();
-                if (ranged != null && ranged.Weapon != null) magazineCapacity = Mathf.Max(1, ranged.Weapon.magazineSize);
+                if (ranged != null && ranged.Weapon != null)
+                {
+                    magazineCapacity = Mathf.Max(1, ranged.Weapon.magazineSize);
+                    if (!string.IsNullOrEmpty(ranged.Weapon.ammoDisplayName)) ammoName = ranged.Weapon.ammoDisplayName;
+                }
             }
+
+            _ammoLabel.text = $"{ammoName}  {current} / {reserve}";
 
             _ammoFillRect.sizeDelta = new Vector2(220f * Mathf.Clamp01(current / (float)magazineCapacity), 10f);
         }
@@ -376,6 +389,12 @@ namespace Emberdelve.UI
             _toastTimer = ToastDuration;
         }
 
+        private void OnActiveWeapon(WeaponData weapon)
+        {
+            if (_weaponLabel == null) return;
+            _weaponLabel.text = weapon != null ? weapon.displayName : "Unarmed";
+        }
+
         private void OnRunState(RunState state)
         {
             if (_root == null) return;
@@ -390,6 +409,11 @@ namespace Emberdelve.UI
                 {
                     CharacterClassData classData = _director.Player.Class;
                     if (_classLabel != null && classData != null) _classLabel.text = classData.displayName;
+
+                    // Seed the bar from live rig state as well as from the event stream: class setup can
+                    // raise the very first health change before this HUD is listening.
+                    OnPlayerHealth(_director.Player.CurrentHealth, _director.Player.MaxHealth);
+                    OnActiveWeapon(_director.Player.Loadout != null ? _director.Player.Loadout.ActiveWeapon : null);
 
                     bool ranged = _director.Player.GetComponent<RangedCombat>() != null
                                   && _director.Player.GetComponent<RangedCombat>().enabled;

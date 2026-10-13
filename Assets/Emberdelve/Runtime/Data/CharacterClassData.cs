@@ -44,6 +44,10 @@ namespace Emberdelve.Data
         public int startingReserveAmmo = 0;
         public int maxReserveAmmo = 0;
 
+        [Header("Secondary weapon reserve (used when the secondary weapon is ranged)")]
+        public int secondaryStartingReserveAmmo = 0;
+        public int secondaryMaxReserveAmmo = 0;
+
         [Header("Guard (melee classes)")]
         [Tooltip("0 disables the block ability for this class.")]
         [Range(0f, 0.95f)] public float blockReduction = 0.65f;

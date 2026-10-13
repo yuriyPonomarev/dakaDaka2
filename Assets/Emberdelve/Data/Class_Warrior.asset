@@ -29,11 +29,14 @@ MonoBehaviour:
   standEyeHeight: 1.66
   crouchEyeHeight: 1.05
   primaryWeapon: {fileID: 11400000, guid: 61fcdd9150fffb04da2f52cf24d63e2a, type: 2}
+  offhandShield: {fileID: 11400000, guid: 262b3efffcb95634da0fb83b61c5d46c, type: 2}
+  secondaryWeapon: {fileID: 11400000, guid: c3f01a7347cce4145a8f3d74925c3e28, type: 2}
   startingItems:
   - {fileID: 11400000, guid: c6fda9df47fce4e4da019554ee948f03, type: 2}
   startingReserveAmmo: 0
   maxReserveAmmo: 0
+  secondaryStartingReserveAmmo: 6
+  secondaryMaxReserveAmmo: 16
   blockReduction: 0.7
   blockArc: 140
   guardSpeedMultiplier: 0.45
-  offhandShield: {fileID: 11400000, guid: 262b3efffcb95634da0fb83b61c5d46c, type: 2}

@@ -125,6 +125,17 @@ namespace Emberdelve.EditorTools
             return imported;
         }
 
+        public static void RebuildInputAsset()
+        {
+            // Rewrites the generated asset from the fallback in place. The .meta is left alone on purpose:
+            // the dungeon scene references the asset by GUID, and deleting it would silently drop that link.
+            string json = EmberdelveInputFallback.BuildFileJson();
+            System.IO.File.WriteAllText(EmberdelvePaths.InputAssetPath, json);
+            AssetDatabase.ImportAsset(EmberdelvePaths.InputAssetPath, ImportAssetOptions.ForceSynchronousImport);
+            AssetDatabase.Refresh();
+            Debug.Log("[Emberdelve] Regenerated " + EmberdelvePaths.InputAssetPath + " from EmberdelveInputFallback.");
+        }
+
         public static void EnsureBuildScenes()
         {
             List<EditorBuildSettingsScene> scenes = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);

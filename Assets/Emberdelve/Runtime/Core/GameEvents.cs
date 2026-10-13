@@ -23,6 +23,7 @@ namespace Emberdelve.Core
         public static event Action<float> InteractionHoldChanged;
         public static event Action<string> ObjectiveChanged;
         public static event Action<string> StatusLineChanged;
+        public static event Action<WeaponData> ActiveWeaponChanged;
         public static event Action<string> ToastRaised;
         public static event Action<RunResult> RunEnded;
         public static event Action<bool> PauseChanged;
@@ -38,6 +39,7 @@ namespace Emberdelve.Core
         public static void RaiseInteractionHold(float progress) => InteractionHoldChanged?.Invoke(progress);
         public static void RaiseObjective(string objective) => ObjectiveChanged?.Invoke(objective);
         public static void RaiseStatusLine(string status) => StatusLineChanged?.Invoke(status);
+        public static void RaiseActiveWeapon(WeaponData weapon) => ActiveWeaponChanged?.Invoke(weapon);
         public static void RaiseToast(string message) => ToastRaised?.Invoke(message);
         public static void RaiseRunEnded(RunResult result) => RunEnded?.Invoke(result);
         public static void RaisePause(bool paused) => PauseChanged?.Invoke(paused);

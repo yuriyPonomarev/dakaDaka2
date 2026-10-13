@@ -31,6 +31,7 @@ namespace Emberdelve.InputLayer
         private InputAction _secondary;
         private InputAction _interact;
         private InputAction _reload;
+        private InputAction _swap;
         private InputAction _inventory;
         private InputAction _pause;
         private InputAction _inventorySystem;
@@ -50,6 +51,7 @@ namespace Emberdelve.InputLayer
         public bool InteractPressed => _interact != null && _interact.WasPressedThisFrame();
         public bool InteractHeld => _interact != null && _interact.IsPressed();
         public bool ReloadPressed => _reload != null && _reload.WasPressedThisFrame();
+        public bool SwapPressed => _swap != null && _swap.WasPressedThisFrame();
         public bool InventoryPressed => (_inventorySystem != null && _inventorySystem.WasPressedThisFrame())
                                         || (_inventory != null && _inventory.WasPressedThisFrame());
         public bool PausePressed => (_pauseSystem != null && _pauseSystem.WasPressedThisFrame())
@@ -88,6 +90,7 @@ namespace Emberdelve.InputLayer
             _secondary = _playerMap.FindAction("SecondaryAction");
             _interact = _playerMap.FindAction("Interact");
             _reload = _playerMap.FindAction("Reload");
+            _swap = _playerMap.FindAction("SwapWeapon");
             _inventory = _playerMap.FindAction("Inventory");
             _pause = _playerMap.FindAction("Pause");
 

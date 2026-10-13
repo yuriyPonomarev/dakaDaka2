@@ -1,18 +1,25 @@
-using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Combat;
 using Emberdelve.Data;
+using Emberdelve.InputLayer;
 
 namespace Emberdelve.Player
 {
     /// <summary>
-    /// Applies a CharacterClassData to the player rig and builds the temporary weapon visuals.
-    /// This is the only place that knows which components a class needs, so adding a third class is
-    /// a new asset plus (at most) one new combat component.
+    /// Applies a CharacterClassData to the player rig, owns the primary/secondary weapon slots, and
+    /// builds the temporary weapon visuals. This is the only place that knows which components a class
+    /// needs and which weapon is currently in hand, so adding a class or a secondary weapon is a new
+    /// asset plus (at most) one new combat component.
+    ///
+    /// Switching only changes which component is live and which weapon the rig reports as its main hand.
+    /// Damage still goes exclusively through the combat authority.
     /// </summary>
     public sealed class ClassLoadout : MonoBehaviour
     {
+        private const int SlotCapacity = 2;
+
         [Header("Wiring")]
         [SerializeField] private Transform weaponAnchor;
         [SerializeField] private MeleeCombat meleeCombat;
@@ -21,10 +28,22 @@ namespace Emberdelve.Player
 
         private WeaponVisualRig _visual;
         private CharacterClassData _appliedClass;
+        private PlayerRig _rig;
+
+        private readonly WeaponData[] _slots = new WeaponData[SlotCapacity];
+        private readonly List<RangedAmmoState> _ammo = new List<RangedAmmoState>(SlotCapacity);
+        private int _activeSlot;
 
         public bool HasMuzzle => _visual != null && _visual.Muzzle != null;
         public Vector3 MuzzlePosition => _visual != null && _visual.Muzzle != null ? _visual.Muzzle.position : Vector3.zero;
         public CharacterClassData AppliedClass => _appliedClass;
+
+        public WeaponData Primary => _slots[0];
+        public WeaponData Secondary => _slots[1];
+        public WeaponData ActiveWeapon => _activeSlot >= 0 && _activeSlot < SlotCapacity ? _slots[_activeSlot] : null;
+        public int ActiveSlot => _activeSlot;
+        public bool UsingSecondary => _activeSlot == 1;
+        public int EquippedCount => (_slots[0] != null ? 1 : 0) + (_slots[1] != null ? 1 : 0);
 
         private void Awake()
         {
@@ -37,6 +56,7 @@ namespace Emberdelve.Player
         {
             if (data == null || rig == null) return;
             _appliedClass = data;
+            _rig = rig;
 
             rig.Movement.ApplyClass(data, config.levelMask);
             rig.Look.ApplyClass(data);
@@ -49,24 +69,142 @@ namespace Emberdelve.Player
                 rig.Inventory.GiveStartingItems(data.startingItems);
             }
 
-            WeaponData weapon = data.primaryWeapon;
-            bool isRanged = weapon != null && weapon.IsRanged;
+            _slots[0] = data.primaryWeapon;
+            _slots[1] = data.secondaryWeapon;
 
+            _ammo.Clear();
+            SeedAmmo(0, data.startingReserveAmmo, data.maxReserveAmmo);
+            SeedAmmo(1, data.secondaryStartingReserveAmmo, data.secondaryMaxReserveAmmo);
+
+            _activeSlot = -1;
+            Equip(0);
+
+            if (targetCamera != null) targetCamera.fieldOfView = config.fieldOfView;
+        }
+
+        private void Update()
+        {
+            if (_rig == null || _rig.IsDead) return;
+
+            EmberdelveInput input = _rig.Input;
+            if (input == null) return;
+
+            if (input.SwapPressed) SwitchWeapon();
+        }
+
+        /// <summary>Toggles primary and secondary. Returns false when the class has no secondary weapon.</summary>
+        public bool SwitchWeapon()
+        {
+            return SwitchToSlot(_activeSlot == 0 ? 1 : 0);
+        }
+
+        public bool SwitchToSlot(int slot)
+        {
+            if (slot < 0 || slot >= SlotCapacity) return false;
+            if (slot == _activeSlot) return false;
+            if (_slots[slot] == null) return false;
+
+            Equip(slot);
+            return true;
+        }
+
+        private void Equip(int slot)
+        {
+            // -1 means nothing has been equipped yet, which is the case on the very first Equip from Apply.
+            // Storing at that point would copy the component's uninitialized ammo over the seeded state.
+            WeaponData previous = _activeSlot >= 0 && _activeSlot < SlotCapacity ? _slots[_activeSlot] : null;
+
+            if (previous != null && previous.IsRanged
+                && rangedCombat != null && rangedCombat.enabled
+                && rangedCombat.Weapon == previous)
+            {
+                StoreAmmo(previous);
+            }
+
+            _activeSlot = slot;
+            WeaponData weapon = _slots[slot];
+
+            bool weaponIsMelee = weapon != null && !weapon.IsRanged;
+            bool weaponIsRanged = weapon != null && weapon.IsRanged;
+
+            // Exactly one combat component is live at a time, and it is the weapon that decides which one.
             if (meleeCombat != null)
             {
-                meleeCombat.enabled = !isRanged;
+                meleeCombat.enabled = weaponIsMelee;
                 meleeCombat.Initialize(weapon);
             }
 
             if (rangedCombat != null)
             {
-                rangedCombat.enabled = isRanged;
-                rangedCombat.Initialize(weapon, data.startingReserveAmmo, data.maxReserveAmmo);
+                rangedCombat.enabled = weaponIsRanged;
+
+                if (weaponIsRanged)
+                {
+                    RangedAmmoState state = FindAmmo(weapon);
+                    if (state == null) state = CreateAmmo(weapon, 0, 0);
+                    rangedCombat.Initialize(weapon, state.reserve, state.maxReserve, state.magazine);
+                }
+                else
+                {
+                    rangedCombat.Initialize(weapon);
+                }
             }
 
             RebuildWeaponVisual(weapon);
 
-            if (targetCamera != null) targetCamera.fieldOfView = config.fieldOfView;
+            // The defense profile follows the hand it is standing in: a crossbow main hand cannot block
+            // with a sword's capability, and a rapier is where a Parry flag may legitimately appear.
+            if (_rig != null) _rig.ApplyMainHandWeapon(weapon);
+
+            GameEvents.RaiseActiveWeapon(weapon);
+            if (weapon != null) GameEvents.RaiseToast($"Equipped {weapon.displayName}");
+        }
+
+        private void SeedAmmo(int slot, int startingReserve, int maxReserve)
+        {
+            WeaponData weapon = _slots[slot];
+            if (weapon == null || !weapon.IsRanged) return;
+
+            RangedAmmoState state = CreateAmmo(weapon, startingReserve, maxReserve);
+            state.magazine = Mathf.Clamp(weapon.magazineSize, 1, 99);
+        }
+
+        private void StoreAmmo(WeaponData weapon)
+        {
+            RangedAmmoState state = FindAmmo(weapon);
+            if (state == null || rangedCombat == null) return;
+
+            state.magazine = rangedCombat.Magazine;
+            state.reserve = rangedCombat.Reserve;
+        }
+
+        /// <summary>Ammo carried for a weapon that is not currently in hand, or null if the kit has none.</summary>
+        public RangedAmmoState GetAmmoState(WeaponData weapon)
+        {
+            return weapon != null ? FindAmmo(weapon) : null;
+        }
+
+        private RangedAmmoState FindAmmo(WeaponData weapon)
+        {
+            for (int i = 0; i < _ammo.Count; i++)
+            {
+                if (_ammo[i] != null && _ammo[i].weaponId == weapon.weaponId) return _ammo[i];
+            }
+            return null;
+        }
+
+        private RangedAmmoState CreateAmmo(WeaponData weapon, int startingReserve, int maxReserve)
+        {
+            RangedAmmoState state = new RangedAmmoState
+            {
+                weaponId = weapon.weaponId,
+                magazine = 0,
+                reserve = Mathf.Max(0, startingReserve),
+                maxReserve = Mathf.Max(0, maxReserve)
+            };
+            state.reserve = Mathf.Min(state.reserve, state.maxReserve);
+            _ammo.Add(state);
+            return state;
         }
 
         public void PlaySwingVisual(WeaponData weapon)
@@ -89,6 +227,20 @@ namespace Emberdelve.Player
 
             if (weapon == null || weaponAnchor == null) return;
             _visual = WeaponVisualBuilder.Build(weapon, weaponAnchor);
+        }
+
+        /// <summary>Per-weapon ammunition, so a swap cannot quietly refill a half-empty magazine.</summary>
+        public sealed class RangedAmmoState
+        {
+            public string weaponId;
+            public int magazine;
+            public int reserve;
+            public int maxReserve;
+
+            public override string ToString()
+            {
+                return $"{weaponId}: {magazine} / {reserve} (cap {maxReserve})";
+            }
         }
     }
 }

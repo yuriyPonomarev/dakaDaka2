@@ -34,7 +34,6 @@ namespace Emberdelve.Combat
         private float _drawStartedAt;
         private bool _reloading;
         private float _reloadTimer;
-        private int _sequence;
 
         public event Action<AttackIntent> AttackStarted;
         public event Action ShotFired;
@@ -52,7 +51,12 @@ namespace Emberdelve.Combat
             if (rig == null) rig = GetComponent<PlayerRig>();
         }
 
-        public void Initialize(WeaponData weapon, int startingReserve, int maxReserve)
+        /// <summary>
+        /// startingMagazine = -1 means "full magazine". A non-negative value restores a partially spent
+        /// magazine, which is what ClassLoadout needs so ammo survives a weapon swap instead of refilling
+        /// for free.
+        /// </summary>
+        public void Initialize(WeaponData weapon, int startingReserve = 0, int maxReserve = 0, int startingMagazine = -1)
         {
             _weapon = weapon;
 
@@ -62,7 +66,8 @@ namespace Emberdelve.Combat
                 return;
             }
 
-            _magazine = Mathf.Clamp(weapon.magazineSize, 1, 99);
+            int capacity = Mathf.Clamp(weapon.magazineSize, 1, 99);
+            _magazine = startingMagazine < 0 ? capacity : Mathf.Clamp(startingMagazine, 0, capacity);
             _maxReserve = Mathf.Max(0, maxReserve);
             _reserve = Mathf.Clamp(startingReserve, 0, _maxReserve);
             _drawing = false;
@@ -162,7 +167,9 @@ namespace Emberdelve.Combat
         /// </summary>
         public void Fire(float charge = 1f)
         {
-            _sequence++;
+            // Sequence is allocated per combat id, not per component: swapping between a bow and a
+            // rapier must not make the second weapon's first attack look like a replayed command.
+            int sequence = CombatRegistry.NextSequence(rig.CombatId);
 
             Vector3 muzzle = rig.GetMuzzlePosition();
             Vector3 direction = rig.AimDirection;
@@ -196,7 +203,7 @@ namespace Emberdelve.Combat
             }
 
             AttackIntent intent = new AttackIntent(rig.CombatId, rig.Kind, _weapon, charge, muzzle, direction,
-                range, _sequence, Time.time);
+                range, sequence, Time.time);
 
             if (hasTarget && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority))
             {
@@ -211,7 +218,7 @@ namespace Emberdelve.Combat
             AttackStarted?.Invoke(intent);
             ShotFired?.Invoke();
 
-            if (_magazine == 0) GameEvents.RaiseToast("Out of arrows - press R to reload");
+            if (_magazine == 0) GameEvents.RaiseToast($"Out of {(_weapon != null && !string.IsNullOrEmpty(_weapon.ammoDisplayName) ? _weapon.ammoDisplayName : "ammo")} - press R to reload");
         }
 
         private void OnDisable()

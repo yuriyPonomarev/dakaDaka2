@@ -92,6 +92,10 @@ namespace Emberdelve.InputLayer
             InputAction reload = map.AddAction("Reload", type: InputActionType.Button, expectedControlLayout: "Button");
             reload.AddBinding("<Keyboard>/r", groups: "Keyboard&Mouse");
 
+            InputAction swap = map.AddAction("SwapWeapon", type: InputActionType.Button, expectedControlLayout: "Button");
+            swap.AddBinding("<Keyboard>/q", groups: "Keyboard&Mouse");
+            swap.AddBinding("<Gamepad>/rightShoulder", groups: "Gamepad");
+
             InputAction inventory = map.AddAction("Inventory", type: InputActionType.Button, expectedControlLayout: "Button");
             inventory.AddBinding("<Keyboard>/i", groups: "Keyboard&Mouse");
             inventory.AddBinding("<Keyboard>/tab", groups: "Keyboard&Mouse");
