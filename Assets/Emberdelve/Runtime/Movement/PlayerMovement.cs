@@ -16,6 +16,7 @@ namespace Emberdelve.Movement
         [Header("Wiring")]
         [SerializeField] private EmberdelveInput input;
         [SerializeField] private CharacterController controller;
+        [SerializeField] private Transform viewTransform;
 
         [Header("Physics")]
         [SerializeField] private float gravity = -19f;
@@ -48,6 +49,14 @@ namespace Emberdelve.Movement
         {
             if (controller == null) controller = GetComponent<CharacterController>();
             if (input == null) input = GetComponent<EmberdelveInput>();
+            if (viewTransform == null)
+            {
+                // WASD follows the active camera. On the stock rig the camera is a pitch-only child of the
+                // body, so its flattened forward equals the body yaw; resolving it here also covers a rig
+                // whose camera is driven independently.
+                Camera cam = GetComponentInChildren<Camera>();
+                if (cam != null) viewTransform = cam.transform;
+            }
             _currentHeight = controller.height;
         }
 
@@ -145,12 +154,38 @@ namespace Emberdelve.Movement
             IsMoving = targetSpeed > 0.05f;
             SpeedMultiplier = _class.moveSpeed > 0f ? _horizontalSpeed / _class.moveSpeed : 0f;
 
-            Vector3 direction = new Vector3(raw.x, 0f, raw.y).normalized;
+            Vector3 direction = ViewRelativeDirection(raw, viewTransform != null ? viewTransform : transform);
             Vector3 desired = direction * _horizontalSpeed;
             DesiredMoveIntent = desired;
 
             Vector3 motion = desired * dt + new Vector3(0f, _verticalVelocity, 0f) * dt;
             if (motion.sqrMagnitude > 0f) controller.Move(motion);
+        }
+
+        /// <summary>
+        /// Maps raw move input (x = strafe, y = forward) into a world-space direction relative to the
+        /// view. WASD has to follow where the player is looking; treating raw.x/raw.y as world X/Z made
+        /// W always run towards world north no matter which way the camera faced.
+        ///
+        /// Public and static so the mapping is verifiable without input devices, and so a future server
+        /// validating a client's DesiredMoveIntent applies the identical rule.
+        /// </summary>
+        public static Vector3 ViewRelativeDirection(Vector2 raw, Transform view)
+        {
+            if (view == null || raw.sqrMagnitude < 0.0001f) return Vector3.zero;
+
+            // Flatten: pitch must not shorten ground movement, and a straight-up view still walks.
+            Vector3 forward = new Vector3(view.forward.x, 0f, view.forward.z);
+            Vector3 right = new Vector3(view.right.x, 0f, view.right.z);
+
+            if (forward.sqrMagnitude < 0.0001f) forward = Vector3.forward;
+            if (right.sqrMagnitude < 0.0001f) right = Vector3.right;
+
+            forward.Normalize();
+            right.Normalize();
+
+            Vector3 direction = right * raw.x + forward * raw.y;
+            return direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector3.zero;
         }
 
         private void OnDrawGizmosSelected()

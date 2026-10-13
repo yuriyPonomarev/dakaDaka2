@@ -64,10 +64,21 @@ namespace Emberdelve.Player
 
             _combatId = CombatRegistry.AllocateId();
             CombatRegistry.Register(_combatId, this);
+
+            // HealthComponent only knows its own pool; GameEvents is what the HUD listens to. This rig is
+            // the local player's composition root, so it is the place that turns local health into the
+            // player-health event. Enemies keep their own Changed subscriptions and raise nothing here.
+            if (health != null) health.Changed += OnHealthChanged;
+        }
+
+        private void OnHealthChanged(float current, float max)
+        {
+            GameEvents.RaisePlayerHealth(current, max);
         }
 
         private void OnDestroy()
         {
+            if (health != null) health.Changed -= OnHealthChanged;
             CombatRegistry.Unregister(_combatId, this);
         }
 

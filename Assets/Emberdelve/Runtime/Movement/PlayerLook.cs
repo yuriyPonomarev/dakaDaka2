@@ -40,6 +40,12 @@ namespace Emberdelve.Movement
             if (movement == null) movement = GetComponent<PlayerMovement>();
             if (lookPivot == null) lookPivot = transform;
             if (cameraTransform == null && lookPivot != null) cameraTransform = lookPivot;
+
+            // Start from the transform the scene actually placed, so the first mouse move cannot snap
+            // the body back to yaw 0 and make WASD point somewhere the player is not looking.
+            _yaw = transform.localEulerAngles.y;
+            _pitch = 0f;
+            if (lookPivot != null) lookPivot.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
         }
 
         public void ApplyClass(CharacterClassData data)
