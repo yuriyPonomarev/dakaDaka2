@@ -34,6 +34,10 @@ namespace Emberdelve.Data
 
         [Header("Kit")]
         public WeaponData primaryWeapon;
+        [Tooltip("Optional off-hand shield. A shield can block but can never parry; see DefenseProfile.")]
+        public WeaponData offhandShield;
+        [Tooltip("Off-hand / secondary weapon the class can switch to at runtime (Warrior crossbow, Archer rapier).")]
+        public WeaponData secondaryWeapon;
         public ItemData[] startingItems;
 
         [Header("Ranged reserve (ignored by classes without a ranged weapon)")]

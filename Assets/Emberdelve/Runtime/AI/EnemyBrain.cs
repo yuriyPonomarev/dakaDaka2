@@ -50,6 +50,7 @@ namespace Emberdelve.AI
         private float _windupLeft;
         private bool _windingUp;
         private bool _attackConsumed;
+        private Vector3 _telegraphDirection;
 
         public EnemyBrain(EnemyData data, INavigationProvider nav, Vector3 home, LayerMask levelMask)
         {
@@ -64,8 +65,17 @@ namespace Emberdelve.AI
         public EnemyState State => _state;
         public bool IsWindingUp => _windingUp;
         public float WindupProgress => _windingUp ? 1f - Mathf.Clamp01(_windupLeft / Mathf.Max(0.05f, _data.attackWindup)) : 0f;
+        public float WindupRemaining => Mathf.Max(0f, _windupLeft);
         public Vector3 LastKnownPosition => _lastKnownPosition;
         public Vector3 PatrolTarget => _patrolTarget;
+
+        /// <summary>
+        /// The direction committed when the windup started, flattened to the ground plane. The attack is
+        /// submitted along this same vector, so the telegraph the player sees is the hit that arrives -
+        /// stepping out of the warned wedge is a real dodge, not a coincidence.
+        /// Zero until a windup has happened at least once.
+        /// </summary>
+        public Vector3 TelegraphDirection => _telegraphDirection;
 
         private void BuildPatrolPoints()
         {
@@ -218,6 +228,9 @@ namespace Emberdelve.AI
                 _windingUp = true;
                 _windupLeft = Mathf.Max(0.05f, _data.attackWindup);
                 _attackConsumed = false;
+
+                // Commit the warned direction now, while the player can still read it and react.
+                _telegraphDirection = FlattenDirection(targetCenter - self);
                 return faceOnly;
             }
 
@@ -281,6 +294,12 @@ namespace Emberdelve.AI
             Vector3 delta = a - b;
             delta.y = 0f;
             return delta.magnitude;
+        }
+
+        private static Vector3 FlattenDirection(Vector3 direction)
+        {
+            Vector3 flat = new Vector3(direction.x, 0f, direction.z);
+            return flat.sqrMagnitude < 0.0001f ? Vector3.forward : flat.normalized;
         }
     }
 }

@@ -36,3 +36,4 @@ MonoBehaviour:
   blockReduction: 0.7
   blockArc: 140
   guardSpeedMultiplier: 0.45
+  offhandShield: {fileID: 11400000, guid: 262b3efffcb95634da0fb83b61c5d46c, type: 2}

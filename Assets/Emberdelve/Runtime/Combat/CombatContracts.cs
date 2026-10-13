@@ -68,6 +68,7 @@ namespace Emberdelve.Combat
     {
         private static readonly Dictionary<int, ICombatEntity> _entities = new Dictionary<int, ICombatEntity>();
         private static readonly List<ICombatEntity> _ordered = new List<ICombatEntity>();
+        private static readonly Dictionary<int, int> _lastSequence = new Dictionary<int, int>();
         private static int _nextId = 1;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -75,10 +76,25 @@ namespace Emberdelve.Combat
         {
             _entities.Clear();
             _ordered.Clear();
+            _lastSequence.Clear();
             _nextId = 1;
         }
 
         public static int AllocateId() => _nextId++;
+
+        /// <summary>
+        /// Next command sequence for a combat ENTITY. The sequence belongs to the entity, never to the
+        /// component that happened to fire: one entity can attack with a sword and with a crossbow, and two
+        /// private counters would make the second weapon's first attack look like a replay of the first.
+        /// A future server validates the same per-entity sequence, so components must not invent their own.
+        /// </summary>
+        public static int NextSequence(int combatId)
+        {
+            _lastSequence.TryGetValue(combatId, out int last);
+            int next = last + 1;
+            _lastSequence[combatId] = next;
+            return next;
+        }
 
         public static void Register(int id, ICombatEntity entity)
         {

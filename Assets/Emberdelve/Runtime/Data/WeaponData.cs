@@ -46,12 +46,35 @@ namespace Emberdelve.Data
         public float falloffEndRange = 42f;
         [Range(0.1f, 1f)] public float falloffMinScale = 0.45f;
 
+        [Header("Defense capability")]
+        [Tooltip("Shield role hard-forbids Parry: a shield can only ever block.")]
+        public DefenseRole defenseRole = DefenseRole.Weapon;
+        [Tooltip("Block reduces incoming damage behind an arc. Parry is reserved for the future parry system and is not consumed by the runtime yet.")]
+        public DefenseCapability capabilities = DefenseCapability.None;
+        [Tooltip("-1 means use the class value.")]
+        [Range(-1f, 0.95f)] public float blockReductionOverride = -1f;
+        [Tooltip("-1 means use the class value.")]
+        [Range(-1f, 360f)] public float blockArcOverride = -1f;
+
         [Header("Blockout visuals (replace with real weapon models later)")]
         public Material shaftMaterial;
         public Material edgeMaterial;
         public Material gripMaterial;
 
         public bool IsRanged => kind == WeaponKind.Ranged;
+
+        public bool IsShield => defenseRole == DefenseRole.Shield;
+
+        /// <summary>Capabilities this item actually has, with the shield rule already applied.</summary>
+        public DefenseCapability EffectiveCapabilities => DefenseProfile.Sanitize(capabilities, IsShield);
+        public bool CanBlock => (EffectiveCapabilities & DefenseCapability.Block) != 0;
+        public bool CanParry => (EffectiveCapabilities & DefenseCapability.Parry) != 0;
+
+        private void OnValidate()
+        {
+            // Keeps the serialized asset consistent with the rule even if someone ticks Parry on a shield.
+            capabilities = DefenseProfile.Sanitize(capabilities, IsShield);
+        }
 
         public float DamageAtRange(float distance)
         {

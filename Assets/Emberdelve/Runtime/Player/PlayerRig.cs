@@ -29,6 +29,8 @@ namespace Emberdelve.Player
 
         private int _combatId;
         private CharacterClassData _class;
+        private WeaponData _mainHand;
+        private DefenseProfile _defense;
         private bool _guardHeld;
 
         public EntityKind Kind => EntityKind.LocalPlayer;
@@ -39,8 +41,10 @@ namespace Emberdelve.Player
         public bool IsDead => health != null && health.IsDead;
         public float CurrentHealth => health != null ? health.CurrentHealth : 0f;
         public float MaxHealth => health != null ? health.MaxHealth : 0f;
-        public bool IsGuarding => _guardHeld && _class != null && _class.CanGuard && !IsDead;
-        public bool CanGuard => _class != null && _class.CanGuard;
+        public bool IsGuarding => _guardHeld && _defense.CanBlock && !IsDead;
+        public bool CanGuard => _defense.CanBlock;
+        public bool CanParry => _defense.CanParry;
+        public DefenseProfile Defense => _defense;
         public bool IsAlive => !IsDead;
 
         public EmberdelveInput Input => input;
@@ -49,6 +53,7 @@ namespace Emberdelve.Player
         public HealthComponent Health => health;
         public Inventory Inventory => inventory;
         public CharacterClassData Class => _class;
+        public WeaponData MainHandWeapon => _mainHand;
         public Vector3 AimOrigin => look != null ? look.AimOrigin : transform.position;
         public Vector3 AimDirection => look != null ? look.AimDirection : transform.forward;
         public Vector3 Facing => transform.forward;
@@ -107,17 +112,18 @@ namespace Emberdelve.Player
         public bool TryGetGuardReduction(in DamageInfo incoming, out float reduction)
         {
             reduction = 0f;
-            if (!IsGuarding) return false;
+            if (!IsGuarding || !_defense.CanBlock) return false;
 
             Vector3 toSource = incoming.SourcePosition - transform.position;
             toSource.y = 0f;
             if (toSource.sqrMagnitude < 0.0001f) toSource = -incoming.Direction;
             toSource.Normalize();
 
+            // Direction-aware block: the guard only holds inside the kit's own arc towards the source.
             float angle = Vector3.Angle(transform.forward, toSource);
-            if (angle > _class.blockArc * 0.5f) return false;
+            if (angle > _defense.BlockArcDegrees * 0.5f) return false;
 
-            reduction = Mathf.Clamp01(_class.blockReduction);
+            reduction = Mathf.Clamp01(_defense.BlockReduction);
             return true;
         }
 

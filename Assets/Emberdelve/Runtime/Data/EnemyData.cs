@@ -22,6 +22,9 @@ namespace Emberdelve.Data
         public float attackWindup = 0.65f;
         public float attackCooldown = 1.9f;
         public float attackTelegraphHeight = 0.55f;
+        [Tooltip("Total angle of the warned wedge. The attack is only submitted inside this wedge, so what the telegraph shows is what actually lands.")]
+        [Range(40f, 200f)] public float attackTelegraphCone = 120f;
+        public Color telegraphColor = new Color(1f, 0.32f, 0.18f, 1f);
 
         [Header("Movement")]
         public float patrolSpeed = 1.05f;

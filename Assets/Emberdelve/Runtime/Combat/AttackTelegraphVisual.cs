@@ -1,0 +1,189 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace Emberdelve.Combat
+{
+    /// <summary>
+    /// Ground wedge that warns an incoming enemy swing. It is built from a generated mesh and a
+    /// runtime material, so it needs no art assets, and it carries no collider and sits on
+    /// Ignore Raycast, so it can never influence a combat query.
+    ///
+    /// The wedge is oriented along the direction the brain committed when the windup started, which is
+    /// the same direction EnemyAgent submits the attack along. What the player sees is what can land.
+    /// </summary>
+    public sealed class AttackTelegraphVisual : MonoBehaviour
+    {
+        private const int ArcSegments = 12;
+
+        private MeshFilter _filter;
+        private MeshRenderer _renderer;
+        private Mesh _mesh;
+        private Material _material;
+        private Color _baseColor = new Color(1f, 0.32f, 0.18f, 1f);
+
+        public static AttackTelegraphVisual Create(Transform owner, float coneDegrees, Color color)
+        {
+            if (owner == null) return null;
+
+            GameObject go = new GameObject("Attack_Telegraph");
+            go.transform.SetParent(owner, false);
+            go.transform.localPosition = new Vector3(0f, 0.07f, 0f);
+
+            int ignoreLayer = LayerMask.NameToLayer("Ignore Raycast");
+            if (ignoreLayer >= 0) go.layer = ignoreLayer;
+
+            AttackTelegraphVisual visual = go.AddComponent<AttackTelegraphVisual>();
+            visual.Configure(coneDegrees, color);
+            visual.gameObject.SetActive(false);
+            return visual;
+        }
+
+        private void Configure(float coneDegrees, Color color)
+        {
+            _baseColor = color;
+
+            _filter = gameObject.AddComponent<MeshFilter>();
+            _renderer = gameObject.AddComponent<MeshRenderer>();
+            _mesh = BuildWedge(coneDegrees);
+            _filter.sharedMesh = _mesh;
+
+            _material = CreateMaterial(_baseColor);
+            if (_material != null) _renderer.sharedMaterial = _material;
+
+            _renderer.shadowCastingMode = ShadowCastingMode.Off;
+            _renderer.receiveShadows = false;
+            _renderer.lightProbeUsage = LightProbeUsage.Off;
+            _renderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
+        }
+
+        /// <summary>Drives the wedge from the enemy's windup state every frame.</summary>
+        public void SetState(bool active, float progress, Vector3 flatDirection, float length, bool whiffed)
+        {
+            if (_renderer == null) return;
+
+            if (!active)
+            {
+                gameObject.SetActive(false);
+                return;
+            }
+
+            gameObject.SetActive(true);
+
+            Vector3 direction = new Vector3(flatDirection.x, 0f, flatDirection.z);
+            if (direction.sqrMagnitude < 0.0001f)
+            {
+                direction = transform.parent != null
+                    ? Flatten(transform.parent.forward)
+                    : Vector3.forward;
+            }
+
+            Quaternion world = Quaternion.LookRotation(direction.normalized);
+
+            // The wedge warns a world-space area, not a body-relative one: undo the parent's own rotation
+            // so an enemy turning during its windup cannot drag the warning off the committed direction.
+            transform.localRotation = transform.parent != null
+                ? Quaternion.Inverse(transform.parent.rotation) * world
+                : world;
+            float t = Mathf.Clamp01(progress);
+            float grow = whiffed ? 1f : Mathf.Lerp(0.3f, 1f, t);
+            float scale = Mathf.Max(0.1f, Mathf.Max(0.2f, length) * grow);
+            transform.localScale = new Vector3(scale, scale, scale);
+
+            if (_material != null)
+            {
+                Color lit = whiffed
+                    ? Color.Lerp(_baseColor * 0.18f, _baseColor * 0.4f, 0.5f)
+                    : Color.Lerp(_baseColor * 0.22f, _baseColor, t);
+
+                _material.color = lit;
+                SetColor(_material, "_BaseColor", lit);
+                SetColor(_material, "_Color", lit);
+                SetColor(_material, "_EmissionColor", lit);
+            }
+        }
+
+        /// <summary>Unit wedge: apex at the origin, opening along +Z, radius 1, both facings so it reads from above and below.</summary>
+        private static Mesh BuildWedge(float coneDegrees)
+        {
+            float half = Mathf.Clamp(coneDegrees, 40f, 200f) * 0.5f;
+
+            List<Vector3> vertices = new List<Vector3>(ArcSegments + 2);
+            List<int> triangles = new List<int>(ArcSegments * 6);
+            List<Vector3> normals = new List<Vector3>(ArcSegments + 2);
+
+            vertices.Add(Vector3.zero);
+            normals.Add(Vector3.up);
+
+            for (int i = 0; i <= ArcSegments; i++)
+            {
+                float angle = Mathf.Deg2Rad * Mathf.Lerp(-half, half, i / (float)ArcSegments);
+                vertices.Add(new Vector3(Mathf.Sin(angle), 0f, Mathf.Cos(angle)));
+                normals.Add(Vector3.up);
+            }
+
+            for (int i = 0; i < ArcSegments; i++)
+            {
+                int apex = 0;
+                int a = 1 + i;
+                int b = 2 + i;
+
+                triangles.Add(apex); triangles.Add(b); triangles.Add(a);
+                triangles.Add(apex); triangles.Add(a); triangles.Add(b);
+            }
+
+            Mesh mesh = new Mesh
+            {
+                name = "Emberdelve_TelegraphWedge"
+            };
+            mesh.SetVertices(vertices);
+            mesh.SetNormals(normals);
+            mesh.SetTriangles(triangles, 0);
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static Material CreateMaterial(Color color)
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null) shader = Shader.Find("Standard");
+            if (shader == null) shader = Shader.Find("Diffuse");
+            if (shader == null) return null;
+
+            Material material = new Material(shader)
+            {
+                name = "Emberdelve_AttackTelegraph",
+                hideFlags = HideFlags.HideAndDontSave,
+                color = color
+            };
+
+            SetColor(material, "_BaseColor", color);
+            SetColor(material, "_Color", color);
+            SetColor(material, "_EmissionColor", color);
+            material.EnableKeyword("_EMISSION");
+
+            // Show both facings so the warning is readable whatever the camera is doing.
+            if (material.HasProperty("_Cull")) material.SetFloat("_Cull", 0f);
+
+            return material;
+        }
+
+        private static void SetColor(Material material, string property, Color value)
+        {
+            if (material.HasProperty(property)) material.SetColor(property, value);
+        }
+
+        private static Vector3 Flatten(Vector3 direction)
+        {
+            Vector3 flat = new Vector3(direction.x, 0f, direction.z);
+            return flat.sqrMagnitude < 0.0001f ? Vector3.forward : flat;
+        }
+
+        private void OnDestroy()
+        {
+            if (_mesh != null) Destroy(_mesh);
+            if (_material != null) Destroy(_material);
+        }
+    }
+}

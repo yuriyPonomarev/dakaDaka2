@@ -41,10 +41,11 @@ namespace Emberdelve.AI
         private float _repathTimer;
         private float _timeSinceDamage;
         private int _combatId;
-        private int _attackSequence;
         private Vector3 _lastPathRequest = new Vector3(float.MaxValue, 0f, float.MaxValue);
         private Vector3 _bodyHomePosition;
         private Quaternion _lookRotation;
+        private AttackTelegraphVisual _telegraph;
+        private float _whiffTimer;
 
         public EntityKind Kind => EntityKind.Enemy;
         public int CombatId => _combatId;
@@ -55,6 +56,10 @@ namespace Emberdelve.AI
         public float MaxHealth => _health != null ? _health.MaxHealth : 0f;
         public EnemyData Data => data;
         public EnemyBrain Brain => _brain;
+
+        /// <summary>True when the last committed swing warned a wedge the player was not inside, so nothing was submitted.</summary>
+        public bool LastAttackWhiffed { get; private set; }
+        public bool IsWindingUp => _brain != null && _brain.IsWindingUp;
 
         private void Awake()
         {
@@ -81,6 +86,8 @@ namespace Emberdelve.AI
             _nav = new NavGridPathfinder(navGrid);
             _brain = new EnemyBrain(data, _nav, transform.position, config != null ? config.levelMask : Physics.DefaultRaycastLayers);
             _lookRotation = transform.rotation;
+
+            _telegraph = AttackTelegraphVisual.Create(transform, data.attackTelegraphCone, data.telegraphColor);
         }
 
         private void OnDestroy()
@@ -109,6 +116,7 @@ namespace Emberdelve.AI
         {
             _brain?.MarkDead();
             _path.Clear();
+            _telegraph?.SetState(false, 0f, Vector3.zero, 1f, false);
 
             if (bodyTransform != null)
             {
@@ -256,6 +264,35 @@ namespace Emberdelve.AI
             float progress = _brain.WindupProgress;
             float height = Mathf.Max(0.05f, data.attackTelegraphHeight);
             bodyTransform.localPosition = _bodyHomePosition + Vector3.up * (progress * height);
+
+            if (_telegraph == null) return;
+
+            if (_whiffTimer > 0f) _whiffTimer -= Time.deltaTime;
+            bool whiffed = _whiffTimer > 0f;
+            bool winding = _brain.IsWindingUp;
+
+            _telegraph.SetState(winding || whiffed,
+                winding ? progress : 1f,
+                TelegraphDirection(),
+                TelegraphLength(),
+                whiffed && !winding);
+        }
+
+        /// <summary>Ground-plane direction the brain committed at the start of the windup.</summary>
+        private Vector3 TelegraphDirection()
+        {
+            Vector3 direction = _brain != null ? _brain.TelegraphDirection : Vector3.zero;
+            direction.y = 0f;
+            if (direction.sqrMagnitude < 0.0001f) direction = transform.forward;
+            return direction.sqrMagnitude < 0.0001f ? Vector3.forward : direction.normalized;
+        }
+
+        private float TelegraphLength()
+        {
+            float reach = data.attackWeapon != null
+                ? data.attackWeapon.reach + data.attackWeapon.hitSphereRadius
+                : 1f;
+            return Mathf.Max(0.6f, Mathf.Max(reach, data.attackRange));
         }
 
         private void SubmitAttack(ICombatEntity target)
@@ -264,15 +301,38 @@ namespace Emberdelve.AI
             if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)) return;
 
             Vector3 origin = transform.position + Vector3.up * 1.2f;
-            Vector3 direction = (target.CombatCenter - origin).normalized;
+            Vector3 warned = TelegraphDirection();
+
+            Vector3 toTarget = target.CombatCenter - origin;
+            Vector3 flatTo = new Vector3(toTarget.x, 0f, toTarget.z);
+            if (flatTo.sqrMagnitude < 0.0001f) flatTo = warned;
+
+            float halfCone = Mathf.Clamp(data.attackTelegraphCone, 40f, 200f) * 0.5f;
+            float distance = flatTo.magnitude;
             float maxRange = Mathf.Max(1f, data.attackRange) + 0.4f;
 
-            _attackSequence++;
+            // The wedge the player was warned about is the only wedge this attack can land in. Outside
+            // it, or out of reach, no intent is submitted at all: dodging cannot be overridden locally.
+            if (Vector3.Angle(warned, flatTo) > halfCone || distance > maxRange)
+            {
+                LastAttackWhiffed = true;
+                _whiffTimer = 0.22f;
+                return;
+            }
+
+            Vector3 aimPoint = origin + warned * distance + Vector3.up * (target.CombatCenter.y - origin.y);
+            Vector3 direction = (aimPoint - origin).sqrMagnitude > 0.0001f
+                ? (aimPoint - origin).normalized
+                : warned;
+
+            // Same per-combat-id allocator the player's components use, so an enemy that ever carries two
+            // attack sources cannot collide with itself.
+            int sequence = CombatRegistry.NextSequence(_combatId);
 
             AttackIntent intent = new AttackIntent(_combatId, EntityKind.Enemy, data.attackWeapon, 1f,
-                origin, direction, maxRange, _attackSequence, Time.time);
+                origin, direction, maxRange, sequence, Time.time);
 
-            HitCandidate hit = new HitCandidate(target.CombatId, target.CombatCenter, false);
+            HitCandidate hit = new HitCandidate(target.CombatId, aimPoint, false);
 
             authority.SubmitAttack(intent, hit);
         }
