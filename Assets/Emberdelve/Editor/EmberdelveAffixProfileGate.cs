@@ -150,7 +150,29 @@ namespace Emberdelve.EditorTools
             Check(uncommonSeen > 0 && rareSeen > 0 && commonGearSeen > 0 && carried > 0,
                 $"profiles produced all kinds (uncommon {uncommonSeen}, rare {rareSeen}, common gear {commonGearSeen}, carried {carried})");
             Check(distinctValues.Count > 5, $"seeds give varied affixes ({distinctValues.Count} distinct id:value)");
-            string defsAfter = Json(EmberdelveAssetLibrary.Cuirass) + Json(EmberdelveAssetLibrary.FangBlade) + Json(EmberdelveAssetLibrary.ShieldItem) + Json(EmberdelveAssetLibrary.Boots);
+            // ---- explicit seeds 303/404/505 on the real tables (added in P1 verification)
+            int seenCuirass = 0, seenBlade = 0, seenShield = 0, seenBoots = 0;
+            foreach (int seed in new[] { 303, 404, 505 })
+            {
+                foreach (var table in new[] { supply, ember, seal })
+                {
+                    var drops = new List<LootDrop>();
+                    Check(table.TryRoll(seed, drops, out string rr), $"{table.tableId} seed {seed} rolls: {rr}");
+                    foreach (var d in drops)
+                    {
+                        if (d.Instance == null) continue;
+                        var keys = new HashSet<AffixStatKey>();
+                        foreach (var rec in d.Instance.Affixes) keys.Add(rec.StatKey);
+                        if (d.Item == EmberdelveAssetLibrary.Cuirass) { seenCuirass++; Check(d.Instance.AffixCount == 1 && keys.Count == 1, $"{table.tableId}/{seed} cuirass has exactly 1 affix (got {d.Instance.AffixCount})"); }
+                        else if (d.Item == EmberdelveAssetLibrary.FangBlade) { seenBlade++; Check(d.Instance.AffixCount == 1 && keys.Count == 1, $"{table.tableId}/{seed} blade has exactly 1 affix (got {d.Instance.AffixCount})"); }
+                        else if (d.Item == EmberdelveAssetLibrary.ShieldItem) { seenShield++; Check(d.Instance.AffixCount == 2 && keys.Count == 2, $"{table.tableId}/{seed} shield has 2 distinct affix keys (got {d.Instance.AffixCount}/{keys.Count})"); }
+                        else if (d.Item == EmberdelveAssetLibrary.Boots) { seenBoots++; Check(d.Instance.AffixCount == 0, $"{table.tableId}/{seed} Common boots have 0 affixes (got {d.Instance.AffixCount})"); }
+                    }
+                }
+            }
+            Debug.Log($"[Emberdelve][AffixProfile] seeds303/404/505 seen cuirass={seenCuirass} blade={seenBlade} shield={seenShield} boots={seenBoots}");
+            Check(seenCuirass + seenBlade + seenShield + seenBoots > 0, "explicit seeds produced at least one checked gear drop");
+            string defsAfter =Json(EmberdelveAssetLibrary.Cuirass) + Json(EmberdelveAssetLibrary.FangBlade) + Json(EmberdelveAssetLibrary.ShieldItem) + Json(EmberdelveAssetLibrary.Boots);
             Check(defsBefore == defsAfter, "rolling never wrote to item definitions");
             Debug.Log($"[Emberdelve][AffixProfile] rolls uncommon={uncommonSeen} rare={rareSeen} commonGear={commonGearSeen} carried={carried} distinct={distinctValues.Count}");
         }
