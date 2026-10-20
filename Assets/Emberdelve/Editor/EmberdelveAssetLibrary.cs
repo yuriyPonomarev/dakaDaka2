@@ -30,6 +30,8 @@ namespace Emberdelve.EditorTools
         public static ItemData ArrowBundle;
         public static ItemData Cuirass;
         public static ItemData Boots;
+        public static ItemData AshenCloak;
+        public static ItemData EmberMantle;
         public static ItemData FangBlade;
         public static ItemData ShieldItem;
         public static SkillData WarriorDash;
@@ -358,6 +360,8 @@ namespace Emberdelve.EditorTools
 
             SetAttributeBonuses(Cuirass, new AttributeBonusEntry(SixAttribute.Constitution, 1));
             SetAttributeBonuses(Boots, new AttributeBonusEntry(SixAttribute.Dexterity, 1));
+            SetAttributeBonuses(AshenCloak, new AttributeBonusEntry(SixAttribute.Wisdom, 1));
+            SetAttributeBonuses(EmberMantle, new AttributeBonusEntry(SixAttribute.Intelligence, 1));
 
             AssetDatabase.SaveAssets();
         }
@@ -732,6 +736,56 @@ namespace Emberdelve.EditorTools
                 };
             });
 
+            // U2B11: the two cloaks (EquipmentSlot.Back, affix category Cloak). Each carries FIXED stats - a flat
+            // armour rating (SkillStat.Armor, ARMOR_RULES.md) and one fixed attribute bonus - and, like every
+            // gear drop, rolls its own affixes per instance according to the chest profile.
+            AshenCloak = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_AshenCloak.asset", i =>
+            {
+                i.itemId = "ashen_cloak";
+                i.displayName = "Ashen Cloak";
+                i.description = "Ash-grey wool that sheds a glancing blow. Right click to wear on the back.";
+                i.kind = ItemKind.Armor;
+                i.value = 32;
+                i.maxStack = 1;
+                i.iconColor = new Color(0.46f, 0.44f, 0.4f);
+                i.worldMaterial = EmberdelveMaterials.ArmorMat;
+                i.worldSize = new Vector3(0.36f, 0.5f, 0.12f);
+                i.gridFootprint = new Vector2Int(2, 3);
+                i.equipSlot = EquipmentSlot.Back;
+                i.statModifiers = new[]
+                {
+                    new StatModifier(SkillStat.Armor, SkillModifierMode.Flat, 2f),
+                };
+                i.attributeBonuses = new[]
+                {
+                    new AttributeBonusEntry(SixAttribute.Wisdom, 1),
+                };
+            });
+
+            EmberMantle = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_EmberthreadMantle.asset", i =>
+            {
+                i.itemId = "emberthread_mantle";
+                i.displayName = "Emberthread Mantle";
+                i.description = "Cloth shot through with ember thread; it hums when spells gather. Right click to wear on the back.";
+                i.kind = ItemKind.Armor;
+                i.value = 48;
+                i.maxStack = 1;
+                i.iconColor = new Color(0.72f, 0.3f, 0.2f);
+                i.worldMaterial = EmberdelveMaterials.ArmorMat;
+                i.worldSize = new Vector3(0.36f, 0.5f, 0.12f);
+                i.gridFootprint = new Vector2Int(2, 3);
+                i.equipSlot = EquipmentSlot.Back;
+                i.statModifiers = new[]
+                {
+                    new StatModifier(SkillStat.Armor, SkillModifierMode.Flat, 1f),
+                    new StatModifier(SkillStat.MaxMana, SkillModifierMode.Flat, 15f),
+                };
+                i.attributeBonuses = new[]
+                {
+                    new AttributeBonusEntry(SixAttribute.Intelligence, 1),
+                };
+            });
+
             FangBlade = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_EmberFangBlade.asset", i =>
             {
                 i.itemId = "ember_fang_blade";
@@ -813,8 +867,46 @@ namespace Emberdelve.EditorTools
                 };
             });
 
+            // U2B11: cloak entries are appended by ApplyCloakLoot (an existing table asset is never reconfigured
+            // by LoadOrCreate), so a fresh clone and a rebuilt project end in the same table.
+            ApplyCloakLoot();
+
             // Table problems are logged by ApplyLootRarityProfiles, after the rarity/catalog migration, so the
             // warnings describe the tables the game will actually roll.
+        }
+
+        /// <summary>
+        /// U2B11: idempotently appends the two cloaks to the chest tables - Ashen Cloak to Supply (weight 1),
+        /// Emberthread Mantle to Ember (weight 2) and to Sealed (weight 2). An entry is added only when the table
+        /// holds no entry for that item reference, always at the END, so existing entry indices, items, amounts,
+        /// weights and chest seeds are untouched. The new weight does change the weighted draw, so the loot a
+        /// given authored chest seed produces differs from before U2B11 (documented in Docs/Tasks/U2B11.md).
+        /// Rarity per entry is set by <see cref="ApplyLootRarityProfiles"/> (Supply Common, Ember Uncommon,
+        /// Sealed Rare).
+        /// </summary>
+        private static void ApplyCloakLoot()
+        {
+            EnsureEntry(SupplyLoot, AshenCloak, 1);
+            EnsureEntry(EmberLoot, EmberMantle, 2);
+            EnsureEntry(SealedLoot, EmberMantle, 2);
+            AssetDatabase.SaveAssets();
+        }
+
+        private static void EnsureEntry(LootTable table, ItemData item, int weight)
+        {
+            if (table == null || item == null) return;
+
+            LootEntry[] current = table.entries ?? new LootEntry[0];
+            for (int i = 0; i < current.Length; i++)
+            {
+                if (current[i] != null && ReferenceEquals(current[i].item, item)) return;
+            }
+
+            LootEntry[] next = new LootEntry[current.Length + 1];
+            System.Array.Copy(current, next, current.Length);
+            next[current.Length] = new LootEntry { item = item, minAmount = 1, maxAmount = 1, weight = weight, maxCopies = 1 };
+            table.entries = next;
+            EditorUtility.SetDirty(table);
         }
 
         // ---------------------------------------------------------------------------------------------------
@@ -849,7 +941,7 @@ namespace Emberdelve.EditorTools
         /// The 13 allowlisted keys of Docs/Design/ITEM_AFFIXES.md, in AffixStatKey order. Category profile:
         /// attributes, max health, max mana and mana regen roll on boots/cloak/armor/weapon; armor on
         /// boots/cloak/armor; move speed on boots/cloak; melee and projectile damage on weapons only.
-        /// Cloak is a category bit only - there is no cloak/back equipment slot yet.
+        /// Cloak: since U2B11 the Back slot resolves to the Cloak category, so cloaks roll these affixes.
         /// </summary>
         private static readonly AffixSpec[] AffixSpecs =
         {
@@ -958,18 +1050,20 @@ namespace Emberdelve.EditorTools
         /// each entry's affixRarity and the table's affixCatalog. Entry order, items, amounts, weights,
         /// maxCopies, maxRolls, guarantees, table ids and the chest seeds on the layout are not touched.
         ///
-        /// Profile: Supply - everything Common, no catalog. Ember - Boiled Cuirass and Ember Fang Blade
-        /// Uncommon, the rest Common, catalog assigned. Sealed - Emberbulwark Shield Rare, the rest Common,
-        /// catalog assigned. Rarity is resolved by item reference, so a reordered entry list keeps its profile.
+        /// Profile: Supply - everything Common (incl. Ashen Cloak), no catalog. Ember - Boiled Cuirass, Ember Fang
+        /// Blade and Emberthread Mantle Uncommon, the rest Common, catalog assigned. Sealed - Emberbulwark Shield
+        /// and Emberthread Mantle Rare, the rest Common, catalog assigned (U2B11 added the cloaks). Rarity is resolved by item reference, so a reordered entry list keeps its profile.
         /// </summary>
         private static void ApplyLootRarityProfiles()
         {
             ApplyTableProfile(SupplyLoot, null);
             ApplyTableProfile(EmberLoot, Affixes,
                 (Cuirass, AffixRarity.Uncommon),
-                (FangBlade, AffixRarity.Uncommon));
+                (FangBlade, AffixRarity.Uncommon),
+                (EmberMantle, AffixRarity.Uncommon));
             ApplyTableProfile(SealedLoot, Affixes,
-                (ShieldItem, AffixRarity.Rare));
+                (ShieldItem, AffixRarity.Rare),
+                (EmberMantle, AffixRarity.Rare));
 
             AssetDatabase.SaveAssets();
 

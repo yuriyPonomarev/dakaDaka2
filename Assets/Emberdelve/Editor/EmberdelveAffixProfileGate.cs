@@ -91,7 +91,13 @@ namespace Emberdelve.EditorTools
             // ---- profiles
             LootTable supply = EmberdelveAssetLibrary.SupplyLoot, ember = EmberdelveAssetLibrary.EmberLoot, seal = EmberdelveAssetLibrary.SealedLoot;
             Check(supply.tableId == "supply_chest" && ember.tableId == "ember_chest" && seal.tableId == "sealed_chest", "table ids preserved");
-            Check(supply.entries.Length == 4 && ember.entries.Length == 4 && seal.entries.Length == 3, "entry counts preserved");
+            // U2B11 rewrite: the original 4/4/3 entries are preserved IN ORDER (asserted entry by entry below, by index) and
+            // each table gained exactly one appended cloak entry, so the counts are now 5/5/4. The previous expectation
+            // 4/4/3 pre-dated the cloak slot and only counted the pre-cloak tables; coverage is kept and extended.
+            Check(supply.entries.Length == 5 && ember.entries.Length == 5 && seal.entries.Length == 4, "entry counts: original 4/4/3 plus one appended cloak each");
+            Check(supply.entries[4].item == EmberdelveAssetLibrary.AshenCloak && supply.entries[4].affixRarity == AffixRarity.Common, "supply cloak entry appended Common");
+            Check(ember.entries[4].item == EmberdelveAssetLibrary.EmberMantle && ember.entries[4].affixRarity == AffixRarity.Uncommon, "ember cloak entry appended Uncommon");
+            Check(seal.entries[3].item == EmberdelveAssetLibrary.EmberMantle && seal.entries[3].affixRarity == AffixRarity.Rare, "sealed cloak entry appended Rare");
             foreach (var e in supply.entries) Check(e.affixRarity == AffixRarity.Common, "supply entry Common " + e.item.itemId);
             Check(ember.entries[0].item == EmberdelveAssetLibrary.Cuirass && ember.entries[0].affixRarity == AffixRarity.Uncommon, "ember cuirass Uncommon");
             Check(ember.entries[3].item == EmberdelveAssetLibrary.FangBlade && ember.entries[3].affixRarity == AffixRarity.Uncommon, "ember blade Uncommon");

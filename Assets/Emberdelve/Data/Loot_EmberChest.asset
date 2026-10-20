@@ -38,6 +38,12 @@ MonoBehaviour:
     weight: 2
     maxCopies: 1
     affixRarity: 1
+  - item: {fileID: 11400000, guid: 6699be7d0ef297d49aca16edcea7892c, type: 2}
+    minAmount: 1
+    maxAmount: 1
+    weight: 2
+    maxCopies: 1
+    affixRarity: 1
   affixCatalog:
   - {fileID: 11400000, guid: bde103bf544903d44ba67efe9563e3b1, type: 2}
   - {fileID: 11400000, guid: 20de4a56a742eff4d8d71828dbf14903, type: 2}

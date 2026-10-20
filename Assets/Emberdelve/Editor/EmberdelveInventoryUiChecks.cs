@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.UI;
 using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.Flow;
@@ -130,6 +131,7 @@ namespace Emberdelve.EditorTools
                 yield return WrongSlotRefusalKeepsOwnership(fixture);
                 yield return CancelAndCloseConserveEverything(fixture);
                 yield return ExternalBagChangeKeepsSelectionHonest(fixture);
+                yield return CloakSlotAndTooltips(fixture);
 
                 check(!rig.IsDead, $"the rig survived the pointer tests ({rig.CurrentHealth:F0}/{rig.MaxHealth:F0})");
             }
@@ -656,6 +658,178 @@ namespace Emberdelve.EditorTools
                 $"the stale selection path changed nothing ({afterRemoval} -> {Take(f)})");
             f.Check(f.CollectedEvents == 0 && f.InventoryEvents == 0,
                 $"the cancelled selection notified and credited nothing ({f.InventoryEvents} notifications)");
+        }
+
+        // ------------------------------------------------------------------ U2B11: cloak slot, containment, instance-keyed tooltips
+
+        private static bool Contains(Vector3[] outer, Vector3[] inner, float tolerance)
+        {
+            return inner[0].x >= outer[0].x - tolerance && inner[0].y >= outer[0].y - tolerance &&
+                   inner[2].x <= outer[2].x + tolerance && inner[2].y <= outer[2].y + tolerance;
+        }
+
+        private static Vector2Int OriginOfInstance(Fixture f, ItemInstance instance)
+        {
+            int index = f.Inventory.IndexOfInstance(instance.Uid);
+            return index >= 0 ? f.Inventory.Slots[index].Origin : new Vector2Int(-1, -1);
+        }
+
+        private static IEnumerator CloakSlotAndTooltips(Fixture f)
+        {
+            Debug.Log("[Emberdelve][Smoke:inventoryui] ---- cloak slot and tooltips");
+            ResetBag(f);
+            yield return WaitFrames(2);
+            OpenScreen(f);
+            yield return WaitFrames(2);
+
+            ItemData ashen = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_AshenCloak.asset");
+            ItemData mantle = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_EmberthreadMantle.asset");
+            f.Check(ashen != null && mantle != null && ashen.equipSlot == EquipmentSlot.Back, "the two cloak definitions are loadable Back items");
+            if (ashen == null || mantle == null) yield break;
+
+            // ---- six worn slots rendered, all contained in the satchel panel, which is itself on screen
+            RectTransform panel = FindChildRect(f.UiRoot, "SatchelPanel");
+            f.Check(panel != null, "the satchel panel rectangle exists");
+            if (panel == null) yield break;
+
+            Vector3[] panelCorners = new Vector3[4];
+            panel.GetWorldCorners(panelCorners);
+            // The panel has a fixed pixel size and offset from the window centre (no canvas scaler), so containment is
+            // asserted for the 1280x720 and 1920x1080 windows from its extents relative to the centre. The batch
+            // window itself is 640x480, smaller than the panel was ever designed for.
+            float leftExtent = panelCorners[0].x - Screen.width * 0.5f, rightExtent = panelCorners[2].x - Screen.width * 0.5f;
+            float bottomExtent = panelCorners[0].y - Screen.height * 0.5f, topExtent = panelCorners[2].y - Screen.height * 0.5f;
+            foreach (Vector2 window in new[] { new Vector2(1280f, 720f), new Vector2(1920f, 1080f) })
+            {
+                f.Check(window.x * 0.5f + leftExtent >= 0f && window.x * 0.5f + rightExtent <= window.x &&
+                        window.y * 0.5f + bottomExtent >= 0f && window.y * 0.5f + topExtent <= window.y,
+                    $"the satchel panel (x {leftExtent:F0}..{rightExtent:F0}, y {bottomExtent:F0}..{topExtent:F0} from centre) lies inside a {window.x:F0}x{window.y:F0} window");
+            }
+
+            int slotRows = 0;
+            Vector3[] corners = new Vector3[4];
+            foreach (EquipmentSlot slot in new[] { EquipmentSlot.Weapon, EquipmentSlot.OffHand, EquipmentSlot.Head,
+                         EquipmentSlot.Chest, EquipmentSlot.Legs, EquipmentSlot.Back })
+            {
+                RectTransform rect = FindChildRect(f.UiRoot, "Equip_" + slot);
+                RectTransform label = FindChildRect(f.UiRoot, "EquipLabel_" + slot);
+                f.Check(rect != null && label != null, $"worn slot {slot} rendered with its label");
+                if (rect == null || label == null) continue;
+                slotRows++;
+
+                rect.GetWorldCorners(corners);
+                f.Check(Contains(panelCorners, corners, 0.5f), $"the {slot} slot lies inside the satchel panel");
+                label.GetWorldCorners(corners);
+                f.Check(Contains(panelCorners, corners, 0.5f), $"the {slot} label rectangle lies inside the satchel panel");
+            }
+            f.Check(slotRows == 6, "the equipment column has six rows");
+
+            // ---- two rolled drops of one base cloak
+            List<AffixDefinition> affixes = new List<AffixDefinition>();
+            foreach (string guid in AssetDatabase.FindAssets("t:AffixDefinition", new[] { EmberdelveAssetLibrary.AffixFolder }))
+                affixes.Add(AssetDatabase.LoadAssetAtPath<AffixDefinition>(AssetDatabase.GUIDToAssetPath(guid)));
+            f.Check(ItemInstanceAuthority.TryCreate(new[] { ashen, mantle }, affixes, null, out ItemInstanceAuthority auth, out string reason),
+                "an authority over the real cloaks and affixes: " + reason);
+            if (auth == null) yield break;
+
+            bool made = ItemInstance.TryCreateNew(ashen, 1, AffixRarity.Rare,
+                new[] { new AffixRecord("affix_armor", AffixStatKey.Armor, 4), new AffixRecord("affix_wisdom", AffixStatKey.Wisdom, 2) },
+                auth, out ItemInstance rare, out reason);
+            made &= ItemInstance.TryCreateNew(ashen, 1, AffixRarity.Uncommon,
+                new[] { new AffixRecord("affix_max_health", AffixStatKey.MaxHealth, 9) }, auth, out ItemInstance uncommon, out reason);
+            f.Check(made, "two ashen cloak instances with different rolls minted: " + reason);
+            if (!made) yield break;
+
+            f.Check(f.Inventory.TryAddInstanceAt(rare, new Vector2Int(0, 0), out reason) &&
+                    f.Inventory.TryAddInstanceAt(uncommon, new Vector2Int(2, 0), out reason), "both cloaks placed in the bag: " + reason);
+            yield return WaitFrames(2);
+
+            RectTransform cellRare = FindChildRect(f.UiRoot, "Cell_0_0");
+            RectTransform cellUncommon = FindChildRect(f.UiRoot, "Cell_2_0");
+            f.Check(cellRare != null && cellUncommon != null, "cells under both cloaks rendered");
+            if (cellRare == null || cellUncommon == null) yield break;
+
+            ItemTooltipModel hoverRare = f.Screen.ShowTooltipAt(ScreenPoint(f, cellRare));
+            string textRare = hoverRare != null ? hoverRare.ToPlainText() : string.Empty;
+            RectTransform tip = FindChildRect(f.UiRoot, "TooltipPanel");
+            f.Check(hoverRare != null && tip != null && tip.gameObject.activeInHierarchy, "hovering a cloak shows the tooltip panel");
+            if (tip != null)
+            {
+                tip.GetWorldCorners(corners);
+                f.Check(Contains(panelCorners, corners, 0.5f), "the tooltip panel lies inside the satchel panel");
+            }
+
+            ItemTooltipModel hoverUncommon = f.Screen.ShowTooltipAt(ScreenPoint(f, cellUncommon));
+            string textUncommon = hoverUncommon != null ? hoverUncommon.ToPlainText() : string.Empty;
+            f.Check(hoverRare != null && hoverUncommon != null && textRare != textUncommon,
+                "hovering two drops of the same base cloak shows two different tooltips");
+            f.Check(hoverRare != null && hoverRare.RarityName == "Rare" && hoverRare.RolledLines.Count == 2 &&
+                    textRare.Contains("+4 armor") && textRare.Contains("+2 wisdom"), "the rare drop lists its two rolled affixes");
+            f.Check(hoverUncommon != null && hoverUncommon.RarityName == "Uncommon" && hoverUncommon.RolledLines.Count == 1 &&
+                    textUncommon.Contains("+9 max_health") && !textUncommon.Contains("+4 armor"), "the uncommon drop lists only its own affix");
+            f.Check(hoverRare != null && hoverUncommon != null && hoverRare.FixedLines.Count == hoverUncommon.FixedLines.Count &&
+                    textRare.Contains("Armour +2") && textUncommon.Contains("Armour +2"), "both show the same fixed armour 2");
+
+            // ---- wrong slot refused, the right slot wears exactly the selected instance
+            int before = f.Inventory.TotalUnits;
+            yield return ClickCell(f, new Vector2Int(0, 0));
+            f.Check(f.Screen.SelectedItem == ashen, "the rare cloak is selected");
+            yield return ClickEquipSlot(f, EquipmentSlot.Legs);
+            f.Check(f.Equipment.FilledCount == 0 && f.Screen.SelectedItem == ashen, "a cloak does not fit the Legs slot and the selection survives");
+            yield return ClickEquipSlot(f, EquipmentSlot.Back);
+            f.Check(ReferenceEquals(f.Equipment.EquippedInstance(EquipmentSlot.Back), rare) && f.Equipment.FilledCount == 1,
+                "clicking the Back slot wore the selected instance, not the first ashen cloak in the bag");
+            f.Check(!f.Inventory.HoldsInstanceUid(rare.Uid) && f.Inventory.HoldsInstanceUid(uncommon.Uid) && f.Inventory.TotalUnits == before - 1,
+                "exactly one cloak left the bag");
+            f.Check(f.Rig.GetArmorRating() == 6f, $"the worn cloak's fixed 2 plus rolled 4 armour is the rig's rating ({f.Rig.GetArmorRating()})");
+
+            RectTransform backRect = FindChildRect(f.UiRoot, "Equip_Back");
+            ItemTooltipModel wornTip = backRect != null ? f.Screen.ShowTooltipAt(ScreenPoint(f, backRect)) : null;
+            f.Check(wornTip != null && wornTip.ToPlainText() == textRare, "hovering the worn slot shows the same instance tooltip as in the bag");
+
+            // ---- right click swaps the other drop in, then back; both uids conserved, no stats accumulate
+            yield return ClickEquipSlot(f, EquipmentSlot.Back, true);
+            f.Check(f.Screen.SelectedItem == ashen, "the right click on a worn slot took the cloak off and selected the returned stack");
+            if (f.Screen.HasSelection) yield return ClickCell(f, new Vector2Int(9, 3), true);
+            f.Check(f.Equipment.FilledCount == 0 && f.Inventory.HoldsInstanceUid(rare.Uid) && f.Inventory.HoldsInstanceUid(uncommon.Uid) && f.Rig.GetArmorRating() == 0f,
+                "taking the cloak off returned the same instance and the armour to 0");
+
+            yield return ClickCell(f, OriginOfInstance(f, uncommon), true);
+            f.Check(ReferenceEquals(f.Equipment.EquippedInstance(EquipmentSlot.Back), uncommon) && f.Rig.GetArmorRating() == 2f, "right click wore the uncommon cloak (armour 2)");
+            yield return ClickCell(f, OriginOfInstance(f, rare), true);
+            f.Check(ReferenceEquals(f.Equipment.EquippedInstance(EquipmentSlot.Back), rare) && f.Inventory.HoldsInstanceUid(uncommon.Uid) &&
+                    f.Inventory.TotalUnits == before - 1 && f.Equipment.FilledCount == 1 && f.Rig.GetArmorRating() == 6f,
+                "the swap put the rare cloak on, the uncommon one back in the bag (bag units + worn = 2), nothing lost and armour 6 (not 8)");
+
+            ResetBag(f);
+            f.Check(f.Rig.GetArmorRating() == 0f, "clearing the kit removes the cloak's armour");
+
+            // ---- character pane: the last row lies inside the pane background (review M1)
+            Button characterTab = null;
+            foreach (Button b in f.UiRoot.GetComponentsInChildren<Button>(true)) if (b.name == "TabCharacter") characterTab = b;
+            f.Check(characterTab != null, "the CHARACTER tab button exists");
+            if (characterTab != null)
+            {
+                characterTab.onClick.Invoke();
+                Canvas.ForceUpdateCanvases();
+                yield return WaitFrames(2);
+                RectTransform pane = FindChildRect(f.UiRoot, "StatsPane");
+                RectTransform lastRow = FindChildRect(f.UiRoot, "StatValue" + (CharacterStatsView.LineCount - CharacterStatsView.SectionCount - 1));
+                f.Check(pane != null && lastRow != null, "the pane background and its last row rendered");
+                if (pane != null && lastRow != null)
+                {
+                    Vector3[] paneCorners = new Vector3[4];
+                    Vector3[] rowCorners = new Vector3[4];
+                    pane.GetWorldCorners(paneCorners);
+                    lastRow.GetWorldCorners(rowCorners);
+                    f.Check(rowCorners[0].y >= paneCorners[0].y - 0.5f && rowCorners[2].y <= paneCorners[2].y + 0.5f,
+                        $"the last pane row (y {rowCorners[0].y:F0}..{rowCorners[2].y:F0}) lies inside the pane background (y {paneCorners[0].y:F0}..{paneCorners[2].y:F0})");
+                    panel.GetWorldCorners(panelCorners);
+                    f.Check(paneCorners[0].y >= panelCorners[0].y - 0.5f, "the pane background stays inside the satchel panel");
+                }
+                foreach (Button b in f.UiRoot.GetComponentsInChildren<Button>(true)) if (b.name == "TabBag") b.onClick.Invoke();
+                yield return WaitFrames(2);
+            }
         }
 
         // ------------------------------------------------------------------ click plumbing

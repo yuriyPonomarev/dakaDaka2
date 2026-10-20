@@ -36,12 +36,15 @@ namespace Emberdelve.UI
     {
         private const float CellSize = 46f;
         private const float CellGap = 2f;
-        private const float EquipSlotSize = 64f;
-        private const float EquipSlotGap = 8f;
+        // U2B11: six worn slots (Back joined the original five). 6 x (54 + 6) - 6 = 354 px, inside the panel's
+        // 398 px inner height (the five-slot column was 5 x (64 + 8) - 8 = 352), so the column stays contained
+        // at 720p and 1080p without growing the panel.
+        private const float EquipSlotSize = 54f;
+        private const float EquipSlotGap = 6f;
 
         // The satchel is laid out from the panel's own inner bounds rather than from a handful of offsets
         // that happened to look right at one window size. Everything below is measured from the panel, so the
-        // grid, the five worn slots, their labels and the instructions all land inside the panel that is
+        // grid, the six worn slots, their labels and the instructions all land inside the panel that is
         // already inside the window.
         private const float PanelWidth = 760f;
         private const float PanelHeight = 430f;
@@ -57,8 +60,14 @@ namespace Emberdelve.UI
 
         // The satchel screen has two tabs in the header band: the bag, which is everything above, and the
         // character pane, which reuses the bag's own column (grid + detail + instructions) as its drawing
-        // area. Nothing moves, so the accepted grid, the five worn slots and their labels land exactly where
+        // area. Nothing moves, so the accepted grid, the six worn slots and their labels land exactly where
         // the pointer fixtures already click them.
+        private const float TooltipPanelWidth = 250f;
+        private const float TooltipLineHeight = 16f;
+        private const float TooltipPadding = 8f;
+        private const float TooltipPointerOffset = 14f;
+        private const float TooltipEdgeMargin = 4f;
+
         private const float TabButtonWidth = 94f;
         private const float TabButtonHeight = 26f;
         private const float TabGap = 10f;
@@ -111,7 +120,15 @@ namespace Emberdelve.UI
         private Image _characterTabGraphic;
         private Text _bagTabLabel;
         private Text _characterTabLabel;
-        private ItemData _hoverItem;
+        // Tooltips are keyed on the ItemInstance under the pointer (uid, rarity, rolls), not on its ItemData, so
+        // two drops of one base item show their own affixes. A carried stack with no identity falls back to
+        // its definition.
+        private ItemInstance _hoverInstance;
+        private ItemData _hoverDefinition;
+        private ItemTooltipModel _currentTooltip;
+        private Image _tipPanel;
+        private Text _tipBody;
+        private Vector2 _tipAnchor;
         private bool _showCharacter;
 
         private readonly List<Image> _cellImages = new List<Image>(64);
@@ -292,7 +309,7 @@ namespace Emberdelve.UI
             Vector2 screen = mouse.position.ReadValue();
 
             UpdateGhost(screen);
-            UpdateTooltip(screen);
+            ShowTooltipAt(screen);
 
             // A frame boundary is a legal moment for the bag to change underneath the cursor: a container, a
             // consumable hotkey, an equipment change or a scripted transfer can all move a stack. The
@@ -566,14 +583,14 @@ namespace Emberdelve.UI
 
         /// <summary>
         /// Switching tabs only switches which group is on screen. The bag keeps drawing its cells even while
-        /// the pane is up, so the pointer fixtures, the five worn slots and every bag operation are exactly
+        /// the pane is up, so the pointer fixtures, the six worn slots and every bag operation are exactly
         /// where they were; the hit-test already ignores a rectangle that is not active.
         ///
         /// The pane covers the whole bag column below the header, which is the column the detail line, the
         /// tooltip line and the instructions are drawn in. Leaving them active put a glyph or two of bag
         /// text in the 10px inset between the panel edge and the pane, so they are switched with the grid
         /// and switched back with it. Their rectangles, their text and the hovered item they were naming are
-        /// untouched, and the header, the two tabs and all five worn-slot rows stay exactly where they are
+        /// untouched, and the header, the two tabs and all six worn-slot rows stay exactly where they are
         /// on both tabs.
         /// </summary>
         private void ApplyTabVisibility()
@@ -583,6 +600,7 @@ namespace Emberdelve.UI
 
             if (_detailLabel != null) _detailLabel.gameObject.SetActive(!_showCharacter);
             if (_tooltipLabel != null) _tooltipLabel.gameObject.SetActive(!_showCharacter);
+            if (_tipPanel != null && _showCharacter) _tipPanel.gameObject.SetActive(false);
             if (_carryLabel != null) _carryLabel.gameObject.SetActive(!_showCharacter);
 
             // The ghost names a stack in the grid. With the grid off screen it would float over the pane,
@@ -618,76 +636,168 @@ namespace Emberdelve.UI
 
         /// <summary>
         /// The tooltip follows the pointer through the same hit-test the clicks already use: the cell or the
-        /// worn slot under the cursor names the item, and the line reports the attribute bonuses that item's
-        /// own definition declares. Nothing here selects, moves, equips or re-rolls anything.
+        /// worn slot under the cursor names the item INSTANCE, and the tooltip reports that instance's rarity,
+        /// its fixed properties and its own rolled affixes (U2B11). Returns the model now on screen (null when
+        /// nothing is hovered). Nothing here selects, moves, equips or re-rolls anything.
         /// </summary>
-        private void UpdateTooltip(Vector2 screen)
+        public ItemTooltipModel ShowTooltipAt(Vector2 screen)
         {
-            ItemData item = null;
+            ItemInstance instance = null;
+            ItemData definition = null;
 
             if (TryEquipSlotAt(screen, out EquipmentSlot slot))
             {
-                item = _equipment != null ? _equipment.Equipped(slot) : null;
+                if (_equipment != null)
+                {
+                    instance = _equipment.EquippedInstance(slot);
+                    definition = _equipment.Equipped(slot);
+                }
             }
             else if (TryCellAt(screen, out Vector2Int cell))
             {
                 int index = _inventory != null ? _inventory.IndexAtCell(cell) : -1;
-                if (index >= 0 && index < _inventory.Slots.Count) item = _inventory.Slots[index].Item;
+                if (index >= 0 && index < _inventory.Slots.Count)
+                {
+                    instance = _inventory.Slots[index].Instance;
+                    definition = _inventory.Slots[index].Item;
+                }
             }
 
-            if (item == null) item = _selectedItem;
-            if (item == _hoverItem) return;
+            if (instance == null && definition == null) ResolveSelectedItem(out instance, out definition);
 
-            _hoverItem = item;
-            ApplyTooltip(item);
-        }
+            if (_root != null && RectTransformUtility.ScreenPointToLocalPointInRectangle(_root, screen, CanvasCamera, out Vector2 local))
+                _tipAnchor = local;
 
-        /// <summary>True when the bag or a worn slot still holds this definition right now.</summary>
-        private bool IsCarriedOrWorn(ItemData item)
-        {
-            if (item == null) return false;
-            if (_equipment != null && _equipment.IsEquipped(item)) return true;
-            return _inventory != null && _inventory.IndexOfItem(item) >= 0;
-        }
-
-        private void ApplyTooltip(ItemData item)
-        {
-            if (_tooltipLabel == null) return;
-            if (item == null)
+            if (!ReferenceEquals(instance, _hoverInstance) || definition != _hoverDefinition)
             {
-                _tooltipLabel.text = string.Empty;
-                return;
+                _hoverInstance = instance;
+                _hoverDefinition = definition;
+                ApplyTooltip(instance, definition);
+            }
+            else
+            {
+                PositionTooltipPanel();
             }
 
-            _tooltipLabel.text = item.displayName + "  -  attributes: " + DescribeAttributeBonuses(item);
+            return _currentTooltip;
+        }
+
+        /// <summary>The instance (or, for a stack with no identity, the definition) the current selection names, if it still resolves.</summary>
+        private void ResolveSelectedItem(out ItemInstance instance, out ItemData definition)
+        {
+            instance = null;
+            definition = null;
+
+            if (_selectedItem == null || !TryResolveSelection(out int index)) return;
+
+            instance = _inventory.Slots[index].Instance;
+            definition = _inventory.Slots[index].Item;
+        }
+
+        /// <summary>The tooltip on screen right now, for the focused UI checks: null when none is shown.</summary>
+        public ItemTooltipModel CurrentTooltip => _currentTooltip;
+
+        /// <summary>True when the bag or a worn slot still holds this exact instance (by uid), or, for a stack with no identity, this definition.</summary>
+        private bool IsCarriedOrWorn(ItemInstance instance, ItemData definition)
+        {
+            if (instance != null)
+            {
+                if (_equipment != null && _equipment.HoldsUid(instance.Uid)) return true;
+                return _inventory != null && _inventory.HoldsInstanceUid(instance.Uid);
+            }
+
+            if (definition == null) return false;
+            if (_equipment != null && _equipment.IsEquipped(definition)) return true;
+            return _inventory != null && _inventory.IndexOfItem(definition) >= 0;
+        }
+
+        private void ApplyTooltip(ItemInstance instance, ItemData definition)
+        {
+            ItemTooltipModel model = instance != null ? ItemTooltip.ForInstance(instance) : ItemTooltip.ForDefinition(definition);
+            _currentTooltip = model;
+
+            if (_tooltipLabel != null)
+            {
+                _tooltipLabel.text = model != null ? model.Headline : string.Empty;
+                _tooltipLabel.color = model != null && model.HasRarity ? model.RarityColor : TextColor;
+            }
+
+            if (_tipPanel == null || _tipBody == null) return;
+
+            bool show = model != null && !_showCharacter;
+            _tipPanel.gameObject.SetActive(show);
+            if (!show) return;
+
+            string sectionColor = ColorUtility.ToHtmlStringRGB(new Color(0.84f, 0.72f, 0.5f, 1f));
+            string rarityColor = ColorUtility.ToHtmlStringRGB(model.RarityColor);
+
+            System.Text.StringBuilder builder = new System.Text.StringBuilder(160);
+            int lines = 0;
+
+            builder.Append("<color=#").Append(rarityColor).Append("><b>").Append(model.Title).Append("</b></color>\n");
+            lines++;
+            if (model.HasRarity)
+            {
+                builder.Append("<color=#").Append(rarityColor).Append('>').Append(model.RarityName).Append("</color>");
+                if (model.SlotName.Length > 0) builder.Append("   ").Append(model.SlotName);
+                builder.Append('\n');
+                lines++;
+            }
+            else if (model.SlotName.Length > 0)
+            {
+                builder.Append(model.SlotName).Append('\n');
+                lines++;
+            }
+
+            builder.Append("<color=#").Append(sectionColor).Append('>').Append(ItemTooltipModel.FixedHeader).Append("</color>\n");
+            lines++;
+            for (int i = 0; i < model.FixedLines.Count; i++)
+            {
+                builder.Append("  ").Append(model.FixedLines[i]).Append('\n');
+                lines++;
+            }
+
+            if (model.HasRolledSection)
+            {
+                builder.Append("<color=#").Append(sectionColor).Append('>').Append(ItemTooltipModel.RolledHeader).Append("</color>\n");
+                lines++;
+                for (int i = 0; i < model.RolledLines.Count; i++)
+                {
+                    builder.Append("  <color=#").Append(rarityColor).Append('>').Append(model.RolledLines[i]).Append("</color>\n");
+                    lines++;
+                }
+            }
+
+            if (model.UidShort.Length > 0)
+            {
+                builder.Append("<color=#").Append(ColorUtility.ToHtmlStringRGB(DimColor)).Append(">uid ")
+                       .Append(model.UidShort).Append("</color>");
+                lines++;
+            }
+
+            _tipBody.text = builder.ToString().TrimEnd('\n');
+            _tipPanel.rectTransform.sizeDelta = new Vector2(TooltipPanelWidth, lines * TooltipLineHeight + 2f * TooltipPadding);
+            PositionTooltipPanel();
         }
 
         /// <summary>
-        /// The six allowlisted bonuses the definition actually declares, each with its sign. Read straight from
-        /// <see cref="ItemData.AttributeBonusTotals"/>, which sums the authored entries without ever writing to
-        /// the shared definition, so a tooltip cannot change an item, a roll or a stat.
+        /// Parks the tooltip panel next to the pointer and clamps the whole rectangle inside the satchel panel,
+        /// so it can never hang past the panel (and with it the window) at any resolution.
         /// </summary>
-        private static string DescribeAttributeBonuses(ItemData item)
+        private void PositionTooltipPanel()
         {
-            if (item == null) return "none declared";
+            if (_tipPanel == null || !_tipPanel.gameObject.activeSelf) return;
 
-            AttributeBonuses totals = item.AttributeBonusTotals;
-            if (totals.IsEmpty) return "none declared";
+            Vector2 size = _tipPanel.rectTransform.sizeDelta;
+            float left = PanelCenterX - PanelWidth * 0.5f + TooltipEdgeMargin;
+            float right = PanelCenterX + PanelWidth * 0.5f - TooltipEdgeMargin;
+            float top = PanelCenterY + PanelHeight * 0.5f - TooltipEdgeMargin;
+            float bottom = PanelCenterY - PanelHeight * 0.5f + TooltipEdgeMargin;
 
-            System.Text.StringBuilder builder = new System.Text.StringBuilder();
+            float x = Mathf.Clamp(_tipAnchor.x + TooltipPointerOffset, left, Mathf.Max(left, right - size.x));
+            float y = Mathf.Clamp(_tipAnchor.y - TooltipPointerOffset, Mathf.Min(top, bottom + size.y), top);
 
-            for (int i = 0; i < AttributeRules.AttributeCount; i++)
-            {
-                SixAttribute attribute = (SixAttribute)i;
-                int value = totals.Total(attribute);
-                if (value == 0) continue;
-
-                if (builder.Length > 0) builder.Append("   ");
-                builder.Append(AttributeRules.Key(attribute)).Append(' ')
-                       .Append(value >= 0 ? "+" : "").Append(value);
-            }
-
-            return builder.Length > 0 ? builder.ToString() : "none declared";
+            _tipPanel.rectTransform.anchoredPosition = new Vector2(x, y);
         }
 
         // ------------------------------------------------------------ selection
@@ -855,16 +965,15 @@ namespace Emberdelve.UI
             return false;
         }
 
+        /// <summary>
+        /// Every real slot in enum order (Weapon, OffHand, Head, Chest, Legs, Back), derived from the enum so a
+        /// slot appended to <see cref="EquipmentSlot"/> gets a row without another hard-coded list (U2B11).
+        /// </summary>
         private static EquipmentSlot[] SlotOrder()
         {
-            return new[]
-            {
-                EquipmentSlot.Weapon,
-                EquipmentSlot.OffHand,
-                EquipmentSlot.Head,
-                EquipmentSlot.Chest,
-                EquipmentSlot.Legs,
-            };
+            List<EquipmentSlot> order = new List<EquipmentSlot>(Equipment.SlotCount);
+            for (int i = 1; i < Equipment.SlotCount; i++) order.Add((EquipmentSlot)i);
+            return order.ToArray();
         }
 
         // ------------------------------------------------------------ build
@@ -958,6 +1067,23 @@ namespace Emberdelve.UI
             _characterTabGraphic = _characterTab != null ? _characterTab.targetGraphic as Image : null;
             ConfigureTabButton(_bagTab);
             ConfigureTabButton(_characterTab);
+
+            // The floating tooltip panel is created last so it draws above every other widget. It never receives
+            // pointer events, and it is clamped inside the satchel panel when it is positioned.
+            _tipPanel = UiFactory.CreateImage(_root, "TooltipPanel", new Color(0.03f, 0.03f, 0.03f, 0.97f),
+                new Vector2(TooltipPanelWidth, 80f), Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+            _tipPanel.rectTransform.pivot = new Vector2(0f, 1f);
+            _tipPanel.raycastTarget = false;
+            _tipBody = UiFactory.CreateText(_tipPanel.transform, "TooltipBody", string.Empty, 13, TextColor, TextAnchor.UpperLeft);
+            _tipBody.rectTransform.anchorMin = Vector2.zero;
+            _tipBody.rectTransform.anchorMax = Vector2.one;
+            _tipBody.rectTransform.offsetMin = new Vector2(TooltipPadding, TooltipPadding);
+            _tipBody.rectTransform.offsetMax = new Vector2(-TooltipPadding, -TooltipPadding);
+            _tipBody.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _tipBody.verticalOverflow = VerticalWrapMode.Overflow;
+            _tipBody.supportRichText = true;
+            _tipBody.raycastTarget = false;
+            _tipPanel.gameObject.SetActive(false);
 
             ApplyTabVisibility();
             Rebuild();
@@ -1228,10 +1354,17 @@ namespace Emberdelve.UI
                 // A tooltip may only name something the run still has. A container, a hotkey or an equip can
                 // take the hovered definition out of the bag between two frames, and a stale line about an
                 // item the player no longer holds is a wrong number on screen just as much as a wrong stat.
-                ItemData tooltipSource = IsCarriedOrWorn(_hoverItem) ? _hoverItem : _selectedItem;
-                if (!IsCarriedOrWorn(tooltipSource)) tooltipSource = null;
-                _hoverItem = tooltipSource;
-                ApplyTooltip(tooltipSource);
+                ItemInstance sourceInstance = _hoverInstance;
+                ItemData sourceDefinition = _hoverDefinition;
+                if (!IsCarriedOrWorn(sourceInstance, sourceDefinition)) ResolveSelectedItem(out sourceInstance, out sourceDefinition);
+                if (!IsCarriedOrWorn(sourceInstance, sourceDefinition))
+                {
+                    sourceInstance = null;
+                    sourceDefinition = null;
+                }
+                _hoverInstance = sourceInstance;
+                _hoverDefinition = sourceDefinition;
+                ApplyTooltip(sourceInstance, sourceDefinition);
             }
 
             if (_carryLabel != null)
@@ -1248,7 +1381,9 @@ namespace Emberdelve.UI
             // the tooltip line and the instructions. Those widgets stay where they are and are simply drawn
             // under the pane while the character tab is up, so switching back puts them back untouched.
             float paneTop = gridTop;
-            float paneHeight = paneTop - (carryTop - CarryHeight);
+            // Sized from the content as well as from the column: the rows start at the group origin and need
+            // PreferredHeight; the extra padding keeps the last row's bottom inside the pane background (U2B11 review M1).
+            float paneHeight = Mathf.Max(paneTop - (carryTop - CarryHeight), CharacterStatsView.PreferredHeight + PanePadding);
             float paneWidth = leftColumnWidth;
 
             if (_statsGroup != null)

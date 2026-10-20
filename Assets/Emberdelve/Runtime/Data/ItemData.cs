@@ -18,6 +18,8 @@ namespace Emberdelve.Data
         Head = 3,
         Chest = 4,
         Legs = 5,
+        /// <summary>Back / cloak slot (U2B11). Appended, never reordered: assets store the integer.</summary>
+        Back = 6,
     }
 
     /// <summary>

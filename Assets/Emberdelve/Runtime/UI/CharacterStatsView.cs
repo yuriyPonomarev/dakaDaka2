@@ -32,7 +32,7 @@ namespace Emberdelve.UI
         public const int SectionCount = 4;
         public const int AttributeRowCount = AttributeRules.AttributeCount;
         public const int VitalRowCount = 3;
-        public const int GuardRowCount = 1;
+        public const int GuardRowCount = 2;
         public const int SpeedRowCount = 3;
         public const int LineCount = SectionCount + AttributeRowCount + VitalRowCount + GuardRowCount + SpeedRowCount;
 
@@ -156,6 +156,7 @@ namespace Emberdelve.UI
 
             Section("GUARD");
             Row("Guard", ready ? DescribeGuard(_rig.Defense) : "nothing held");
+            Row("Armour", ready ? DescribeArmor(_rig.GetArmorRating()) : "-");
 
             Section("SPEED, WEAPON AND SKILLS");
             Row("Walk speed", ready && _rig.Movement != null ? _rig.Movement.ResolveWalkSpeed().ToString("0.00") + " m/s" : "-");
@@ -287,6 +288,17 @@ namespace Emberdelve.UI
         private static string Rate(float regen)
         {
             return regen > 0f ? regen.ToString("0.##") + "/s" : "none";
+        }
+
+        /// <summary>
+        /// The armour rating the combat authority reads from this rig (fixed + rolled points of everything worn,
+        /// cloak included) and the share of Physical damage it removes, 100 / (100 + rating) per ARMOR_RULES.md.
+        /// </summary>
+        private static string DescribeArmor(float rating)
+        {
+            if (!(rating > 0f)) return "0";
+            float reduction = rating / (100f + rating) * 100f;
+            return rating.ToString("0.##") + "   -" + reduction.ToString("0.#") + "% physical";
         }
 
         private static string DescribeGuard(DefenseProfile defense)

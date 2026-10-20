@@ -19,20 +19,31 @@ MonoBehaviour:
     maxAmount: 1
     weight: 4
     maxCopies: 1
+    affixRarity: 0
   - item: {fileID: 11400000, guid: a26d2da41162d874ab729a17979af148, type: 2}
     minAmount: 2
     maxAmount: 5
     weight: 5
     maxCopies: 2
+    affixRarity: 0
   - item: {fileID: 11400000, guid: d8388f34120eab247b8c3af01f264b41, type: 2}
     minAmount: 1
     maxAmount: 2
     weight: 3
     maxCopies: 1
+    affixRarity: 0
   - item: {fileID: 11400000, guid: c86df608f6b8d5640ae5efeb4ed45a73, type: 2}
     minAmount: 1
     maxAmount: 1
     weight: 1
     maxCopies: 1
+    affixRarity: 0
+  - item: {fileID: 11400000, guid: f277a1ecc7a083d4a9a2766fe3a4ec50, type: 2}
+    minAmount: 1
+    maxAmount: 1
+    weight: 1
+    maxCopies: 1
+    affixRarity: 0
+  affixCatalog: []
   maxRolls: 3
   guaranteeFirstEntry: 1

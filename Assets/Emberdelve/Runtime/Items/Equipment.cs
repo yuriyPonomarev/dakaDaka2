@@ -47,7 +47,22 @@ namespace Emberdelve.Items
     [DisallowMultipleComponent]
     public sealed class Equipment : MonoBehaviour
     {
-        private const int SlotCount = 6;
+        /// <summary>
+        /// Length of the slot arrays: one entry per <see cref="EquipmentSlot"/> numeric value (index 0 is None
+        /// and never holds anything), derived from the enum's highest value so appending a slot to the enum
+        /// is the only edit a new slot needs (U2B11: Back = 6 made this 7).
+        /// </summary>
+        public static readonly int SlotCount = ComputeSlotCount();
+
+        private static int ComputeSlotCount()
+        {
+            int max = 0;
+            foreach (EquipmentSlot slot in Enum.GetValues(typeof(EquipmentSlot)))
+            {
+                if ((int)slot > max) max = (int)slot;
+            }
+            return max + 1;
+        }
 
         /// <summary>The authoritative per-slot item. Null when nothing is worn there.</summary>
         private readonly ItemInstance[] _gear = new ItemInstance[SlotCount];

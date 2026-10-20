@@ -1320,7 +1320,7 @@ namespace Emberdelve.EditorTools
             {
                 if (rig == null || rig.Equipment == null) return;
 
-                for (int i = (int)EquipmentSlot.Weapon; i <= (int)EquipmentSlot.Legs; i++)
+                for (int i = (int)EquipmentSlot.Weapon; i <= (int)EquipmentSlot.Back; i++)
                 {
                     EquipmentSlot slot = (EquipmentSlot)i;
                     ItemData worn = rig.Equipment.Equipped(slot);

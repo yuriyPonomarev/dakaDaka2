@@ -17,10 +17,9 @@ namespace Emberdelve.Items
     /// Head/Chest are Armor and Legs is Boots; anything carried rather than worn resolves to None, which is
     /// only ever legal for an item with no affixes.
     ///
-    /// There is no cloak/back slot in <see cref="EquipmentSlot"/> yet, so a cloak cannot be mapped through
-    /// this table. Until that slot exists, an authority built with an explicit resolver delegate is the
-    /// documented way to give a cloak its Boots/Cloak/Armor/Weapon category - this slice does not add or
-    /// rename any equipment slot.
+    /// U2B11: Back (the cloak slot) resolves to <see cref="AffixCategory.Cloak"/>, so a cloak rolls the
+    /// Cloak-category affixes through the same default resolver as every other slot. An authority built with
+    /// an explicit resolver delegate remains the way to override the mapping.
     /// </summary>
     public static class ItemCategoryRules
     {
@@ -58,6 +57,10 @@ namespace Emberdelve.Items
                     return true;
                 case EquipmentSlot.Legs:
                     category = AffixCategory.Boots;
+                    reason = null;
+                    return true;
+                case EquipmentSlot.Back:
+                    category = AffixCategory.Cloak;
                     reason = null;
                     return true;
                 default:
