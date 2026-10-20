@@ -104,6 +104,29 @@ namespace Emberdelve.Core
     }
 
     /// <summary>
+    /// Attackers whose gear adds a FLAT amount to the weapon's own authored base damage expose it here, on a
+    /// channel deliberately separate from <see cref="IDamageOutgoingProvider">IDamageOutgoingProvider</see>:
+    /// a flat bonus is not a multiplier, so it is not smuggled into one and a multiplier is not reinterpreted
+    /// as a flat. The combat authority reads it from the instigator it already validated, at the same
+    /// accepted-hit boundary as the multiplier, so a client, an <see cref="Emberdelve.Combat.AttackIntent"/>
+    /// or a <see cref="Emberdelve.Combat.SkillIntent"/> can never supply a bonus. An entity that does not
+    /// implement this (an enemy, anything with no rolled gear) contributes 0 and resolves exactly as before.
+    ///
+    /// Same local seam as the multiplier provider: it is how the local authority reads its own actor's state,
+    /// which is what a real server would read from replicated data. It is not proof of server authority (U3).
+    /// </summary>
+    public interface IDamageFlatWeaponBonusProvider
+    {
+        /// <summary>
+        /// Flat damage added to the weapon's authored base BEFORE range falloff, charge, the outgoing
+        /// multiplier, the ability scale and headshot. Keyed on the weapon actually used, so a melee affix
+        /// contributes nothing to a ranged shot and a projectile affix nothing to a swing. The reader
+        /// sanitizes the claim: NaN, ±Infinity and a negative total all count as 0.
+        /// </summary>
+        float GetFlatWeaponDamageBonus(Emberdelve.Data.WeaponData weapon);
+    }
+
+    /// <summary>
     /// One skill slot as the HUD needs to see it. A value type built by the skill system, so the HUD
     /// never has to reach into a rig, a cooldown timer or a mana pool.
     /// </summary>
@@ -158,6 +181,31 @@ namespace Emberdelve.Core
     public interface IDefenseProvider
     {
         bool TryGetGuardReduction(in DamageInfo incoming, out float reduction);
+    }
+
+    /// <summary>
+    /// Defenders that wear physical armor expose their CURRENT effective armor rating here, so the mitigation
+    /// is the authority's own read of the defender on the hit it already accepted - the same shape as
+    /// <see cref="IDefenseProvider"/>. An <see cref="Emberdelve.Combat.AttackIntent"/>/
+    /// <see cref="Emberdelve.Combat.SkillIntent"/> carries no armor claim and cannot be made to carry one, and
+    /// an attacker's own rating is never consulted for damage it receives.
+    ///
+    /// The contract is OPTIONAL: an entity that does not implement it (an enemy, a rig with no armor on it)
+    /// has a rating of 0 and resolves bit-for-bit as it did before this slice. The rating is a flat number of
+    /// armor points - direction-independent, independent of guard/parry/shield behaviour, and never a
+    /// Blocked flag. See Docs/Design/ARMOR_RULES.md for the prototype mitigation rule the resolver applies.
+    /// Same local seam as the guard and outgoing-damage providers: how the local authority reads its own
+    /// actor's state, which is what a real server would read from replicated gear. Not proof of server
+    /// authority (U3).
+    /// </summary>
+    public interface IArmorRatingProvider
+    {
+        /// <summary>
+        /// The defender's effective armor rating right now: the fixed authored <see cref="Emberdelve.Data.SkillStat.Armor"/>
+        /// flat modifiers plus the rolled armor affix points of the very instances being worn, summed once.
+        /// The resolver sanitizes the claim: NaN, ±Infinity and a negative rating all count as 0.
+        /// </summary>
+        float GetArmorRating();
     }
 
     /// <summary>Anything the player can act on with the interact key.</summary>

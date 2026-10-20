@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Emberdelve.Stats;
 
 namespace Emberdelve.Data
 {
@@ -16,6 +17,16 @@ namespace Emberdelve.Data
         [TextArea(3, 6)] public string description = "";
         public Color accentColor = Color.white;
 
+        [Header("Attributes (Docs/Design/ATTRIBUTES.md)")]
+        [Tooltip("Ability score, legal band 1..30. Modifier = floor((score - 10) / 2.0). Base values only: " +
+                 "equipment bonuses are applied by the rules, never written back into these fields.")]
+        public int strength = 10;
+        public int dexterity = 10;
+        public int constitution = 10;
+        public int intelligence = 10;
+        public int wisdom = 10;
+        public int charisma = 10;
+
         [Header("Vitals")]
         public int maxHealth = 120;
         [Tooltip("Passive regeneration per second once out of danger.")]
@@ -29,6 +40,15 @@ namespace Emberdelve.Data
         public float manaRegenPerSecond = 7f;
         [Tooltip("Seconds after spending mana before regeneration resumes.")]
         public float manaRegenDelay = 3f;
+
+        [Header("Stamina")]
+        [Tooltip("BASE stamina pool, before constitution. Docs/Design/ATTRIBUTES.md: warrior 90, archer 95. " +
+                 "Derived max = max(25, base + 5 * constitution modifier).")]
+        public int maxStamina = 90;
+        [Tooltip("BASE stamina restored per second, before constitution. Prototype tuning: the amendment leaves " +
+                 "base stamina regeneration unspecified, so both classes author 5/sec and the derived values " +
+                 "(max(1, base + 0.5 * constitution modifier)) become 6 and 5.5. Sprint/guard drain is U3.")]
+        public float staminaRegenPerSecond = 5f;
 
         [Header("Movement")]
         public float moveSpeed = 3.6f;
@@ -73,6 +93,41 @@ namespace Emberdelve.Data
         public bool CanGuard => blockReduction > 0f;
 
         public int EffectiveMaxMana => Mathf.Max(1, maxMana);
+
+        /// <summary>
+        /// The six authored scores as one immutable AttributeScores value. Read-only: it is built fresh
+        /// from the inspector fields on every call, and AttributeScores re-clamps each score into 1..30,
+        /// so a value written programmatically (or a zero-initialized asset) can never expose an illegal
+        /// score. Nothing here derives HP/mana/speed and nothing branches on a class id or name.
+        /// </summary>
+        public AttributeScores BaseAttributes
+        {
+            get
+            {
+                return new AttributeScores(strength, dexterity, constitution,
+                    intelligence, wisdom, charisma);
+            }
+        }
+
+        /// <summary>
+        /// The authored BASE vitals in the order <see cref="DerivedStatBases"/> takes them. Built fresh from
+        /// the inspector fields on every call and never cached, so the rules always receive the pristine
+        /// class numbers and equipment can only be added on top inside a derivation, never written back
+        /// into this asset.
+        /// </summary>
+        public DerivedStatBases AttributeBases
+        {
+            get
+            {
+                return new DerivedStatBases(
+                    Mathf.Max(1, maxHealth),
+                    EffectiveMaxMana,
+                    Mathf.Max(1, maxStamina),
+                    Mathf.Max(0f, manaRegenPerSecond),
+                    Mathf.Max(0f, staminaRegenPerSecond),
+                    moveSpeed);
+            }
+        }
 
         /// <summary>
         /// The kit contract every class must satisfy, checked once at class-apply time and reported as
@@ -152,6 +207,17 @@ namespace Emberdelve.Data
             maxMana = Mathf.Max(1, maxMana);
             manaRegenPerSecond = Mathf.Max(0f, manaRegenPerSecond);
             manaRegenDelay = Mathf.Max(0f, manaRegenDelay);
+
+            maxHealth = Mathf.Max(1, maxHealth);
+            maxStamina = Mathf.Max(1, maxStamina);
+            staminaRegenPerSecond = Mathf.Max(0f, staminaRegenPerSecond);
+
+            strength = AttributeRules.ClampScore(strength);
+            dexterity = AttributeRules.ClampScore(dexterity);
+            constitution = AttributeRules.ClampScore(constitution);
+            intelligence = AttributeRules.ClampScore(intelligence);
+            wisdom = AttributeRules.ClampScore(wisdom);
+            charisma = AttributeRules.ClampScore(charisma);
 
             if (activeSkills == null || activeSkills.Length != 2)
                 Debug.LogWarning($"[CharacterClassData] {displayName} must declare exactly 2 active skills.", this);

@@ -5,6 +5,7 @@ using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.InputLayer;
 using Emberdelve.Player;
+using Emberdelve.Stats;
 
 namespace Emberdelve.Skills
 {
@@ -367,8 +368,23 @@ namespace Emberdelve.Skills
             _context.Authority = authority;
             _context.Skill = skill;
             _context.Stats = _stats;
+            _context.SnapshotEffectScale(ResolveEffectScale());
             _context.ActivationId = CombatRegistry.NextActivationId();
             _context.ResetScratch();
+        }
+
+        /// <summary>
+        /// The caster's own ability effect scale for the cast about to run (Docs/Design/ATTRIBUTES.md):
+        /// clamp(1 + 0.04 * CHA modifier, 0.6, 1.4), read from the live six-attribute component the rig owns
+        /// and already recalculated for the gear currently worn. It is taken here, once per cast, and nowhere
+        /// else: mana cost, cooldown, target validation and projectile count keep coming from the skill asset
+        /// unchanged, and a caster with no attribute component casts at scale 1 exactly as before.
+        /// </summary>
+        private float ResolveEffectScale()
+        {
+            StatsComponent attributes = rig != null ? rig.AttributeStats : null;
+            if (attributes == null || !attributes.IsReady) return 1f;
+            return attributes.GetAbilityEffectScale();
         }
 
         private void Reject(int slot, string reason)

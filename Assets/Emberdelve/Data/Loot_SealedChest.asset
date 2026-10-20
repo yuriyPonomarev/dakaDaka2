@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 928691ac0ef825e4e92dd6b0a559ee49, type: 3}
+  m_Name: Loot_SealedChest
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.LootTable
+  tableId: sealed_chest
+  entries:
+  - item: {fileID: 11400000, guid: 0c59f5f911e934a4e92752eb0e343e3c, type: 2}
+    minAmount: 1
+    maxAmount: 1
+    weight: 3
+    maxCopies: 1
+  - item: {fileID: 11400000, guid: 64e4fc447cc5a3a439f7c2a1cdab85a8, type: 2}
+    minAmount: 1
+    maxAmount: 1
+    weight: 3
+    maxCopies: 1
+  - item: {fileID: 11400000, guid: a26d2da41162d874ab729a17979af148, type: 2}
+    minAmount: 6
+    maxAmount: 12
+    weight: 4
+    maxCopies: 1
+  maxRolls: 3
+  guaranteeFirstEntry: 1

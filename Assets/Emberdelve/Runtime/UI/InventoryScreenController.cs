@@ -1,0 +1,1324 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using Emberdelve.Core;
+using Emberdelve.Data;
+using Emberdelve.Flow;
+using Emberdelve.Items;
+using Emberdelve.Player;
+using Emberdelve.Stats;
+
+namespace Emberdelve.UI
+{
+    /// <summary>
+    /// The satchel and the worn kit, opened with I or Tab.
+    ///
+    /// The bag is a real grid: an item occupies its footprint cells, a stack occupies one footprint, and a
+    /// placement is only accepted when every cell it needs is free.
+    ///
+    /// The cursor holds a SELECTION, not an item. Clicking a stack names the stack it is pointing at; the
+    /// stack stays in the bag, at its own cells, with its own count, until an operation actually commits.
+    /// Nothing is lifted out of the bag to be "carried", so there is no removed stack, no stale index to
+    /// trust afterwards, and nothing to drop, duplicate or credit when the screen is closed, cancelled or
+    /// disabled. Every operation re-resolves the selection from the grid first, because a container, a
+    /// hotkey or a death can move the bag underneath the cursor between two clicks.
+    ///
+    /// Clicks are measured against the rectangles that are actually rendered, through RectTransformUtility and
+    /// the owning canvas's camera, so a scaled or offset canvas still routes to the cell the player sees, and
+    /// the gaps between cells and the area outside the panel are not cells at all.
+    ///
+    /// Everything drawn here is read from the inventory and equipment state. The screen never stores item
+    /// data of its own, so a future server-authoritative inventory renders unchanged.
+    /// </summary>
+    [DisallowMultipleComponent]
+    public sealed class InventoryScreenController : MonoBehaviour
+    {
+        private const float CellSize = 46f;
+        private const float CellGap = 2f;
+        private const float EquipSlotSize = 64f;
+        private const float EquipSlotGap = 8f;
+
+        // The satchel is laid out from the panel's own inner bounds rather than from a handful of offsets
+        // that happened to look right at one window size. Everything below is measured from the panel, so the
+        // grid, the five worn slots, their labels and the instructions all land inside the panel that is
+        // already inside the window.
+        private const float PanelWidth = 760f;
+        private const float PanelHeight = 430f;
+        private const float PanelCenterX = -40f;
+        private const float PanelCenterY = 20f;
+        private const float PanelInset = 16f;
+        private const float ColumnGap = 10f;
+        private const float EquipLabelGap = 10f;
+        private const float EquipLabelWidth = 118f;
+        private const float HeaderHeight = 26f;
+        private const float DetailHeight = 74f;
+        private const float CarryHeight = 56f;
+
+        // The satchel screen has two tabs in the header band: the bag, which is everything above, and the
+        // character pane, which reuses the bag's own column (grid + detail + instructions) as its drawing
+        // area. Nothing moves, so the accepted grid, the five worn slots and their labels land exactly where
+        // the pointer fixtures already click them.
+        private const float TabButtonWidth = 94f;
+        private const float TabButtonHeight = 26f;
+        private const float TabGap = 10f;
+        private const float TabHeaderGap = 10f;
+        private const float HeaderTextWidth = 271f;
+
+        // The instruction band is split rather than lengthened: the tooltip line takes the top of the band
+        // the instructions already own, so the column height - and with it the grid - does not move.
+        private const float TooltipHeight = 20f;
+        private const float CarryTooltipGap = 4f;
+        private const float InstructionHeight = CarryHeight - TooltipHeight - CarryTooltipGap;
+
+        private const float PanePadding = 10f;
+
+        private static readonly Color PanelColor = new Color(0.055f, 0.05f, 0.045f, 0.94f);
+        private static readonly Color CellColor = new Color(0.13f, 0.12f, 0.11f, 1f);
+        private static readonly Color CellBlockedColor = new Color(0.2f, 0.13f, 0.1f, 1f);
+        private static readonly Color SlotColor = new Color(0.1f, 0.11f, 0.13f, 1f);
+        private static readonly Color TextColor = new Color(0.88f, 0.84f, 0.78f, 1f);
+        private static readonly Color DimColor = new Color(0.6f, 0.56f, 0.5f, 1f);
+        private static readonly Color SelectedColor = new Color(0.95f, 0.83f, 0.42f, 1f);
+        private static readonly Color PaneColor = new Color(0.075f, 0.07f, 0.062f, 1f);
+        private static readonly Color TabIdleColor = new Color(0.13f, 0.12f, 0.11f, 1f);
+        private static readonly Color TabActiveColor = new Color(0.3f, 0.23f, 0.12f, 1f);
+
+        private RunDirector _director;
+        private PlayerRig _rig;
+        private Inventory _inventory;
+        private Equipment _equipment;
+
+        private Canvas _canvas;
+        private RectTransform _root;
+        private RectTransform _panel;
+        private RectTransform _gridGroup;
+        private RectTransform _equipGroup;
+        private Text _headerLabel;
+        private Text _detailLabel;
+        private Text _carryLabel;
+        private Image _carryGhost;
+
+        // The character pane and the item tooltip. Both are built once, like every other widget here, and
+        // afterwards only re-labelled: a reopen must not produce a second copy of either.
+        private RectTransform _statsGroup;
+        private Image _statsPane;
+        private CharacterStatsView _statsView;
+        private Text _tooltipLabel;
+        private Button _bagTab;
+        private Button _characterTab;
+        private Image _bagTabGraphic;
+        private Image _characterTabGraphic;
+        private Text _bagTabLabel;
+        private Text _characterTabLabel;
+        private ItemData _hoverItem;
+        private bool _showCharacter;
+
+        private readonly List<Image> _cellImages = new List<Image>(64);
+        private readonly List<Image> _itemImages = new List<Image>(24);
+        private readonly List<Image> _equipImages = new List<Image>(6);
+        private readonly List<Text> _equipLabels = new List<Text>(6);
+
+        // The hit-test surfaces are the rectangles on screen, paired with the cell or slot they stand for.
+        // A click is measured against these instead of against private layout arithmetic.
+        private readonly List<RectTransform> _cellRects = new List<RectTransform>(64);
+        private readonly List<Vector2Int> _cellCoords = new List<Vector2Int>(64);
+        private readonly List<RectTransform> _equipRects = new List<RectTransform>(6);
+        private readonly List<EquipmentSlot> _equipSlots = new List<EquipmentSlot>(6);
+
+        // The selection names one stack by the cell its footprint starts at. Until an operation commits the
+        // stack is still in the bag, so no index is remembered and no unit is removed here.
+        private ItemData _selectedItem;
+        private Vector2Int _selectedOrigin = new Vector2Int(-1, -1);
+        private int _selectedAmount;
+
+        public bool IsOpen { get; private set; }
+
+        /// <summary>The stack the cursor is pointing at. It is still carried in the bag.</summary>
+        public ItemData SelectedItem => _selectedItem;
+        public Vector2Int SelectedOrigin => _selectedOrigin;
+        public int SelectedAmount => _selectedAmount;
+        public bool HasSelection => _selectedItem != null;
+
+        /// <summary>Old cursor API, kept as a read-only view of the selection: nothing is held outside the bag.</summary>
+        public ItemData CarriedItem => _selectedItem;
+        public int CarriedAmount => _selectedAmount;
+
+        private Vector2 _gridOrigin;
+        private Vector2 _equipOrigin;
+        private Vector2 _panelCenter;
+
+        public void Configure(RunDirector director, PlayerRig rig)
+        {
+            _director = director;
+            _rig = rig;
+            _inventory = rig != null ? rig.Inventory : null;
+            _equipment = rig != null ? rig.Equipment : null;
+
+            if (_inventory == null && director != null) _inventory = director.Inventory;
+
+            // Re-pointing the screen at another rig is not a moment at which items may move anywhere.
+            ClearSelection();
+            Build();
+        }
+
+        private void OnEnable()
+        {
+            GameEvents.InventoryChanged += OnInventoryChanged;
+            GameEvents.EquipmentChanged += OnEquipmentChanged;
+        }
+
+        private void OnDisable()
+        {
+            GameEvents.InventoryChanged -= OnInventoryChanged;
+            GameEvents.EquipmentChanged -= OnEquipmentChanged;
+
+            // Dying, pausing out of the run or the HUD being torn down must not leave a selection behind
+            // that someone later tries to put somewhere. The stack was never removed, so clearing is free.
+            ClearSelection();
+        }
+
+        public void Open()
+        {
+            if (IsOpen) return;
+            IsOpen = true;
+
+            if (_root != null) _root.gameObject.SetActive(true);
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+
+            Rebuild();
+            GameEvents.RaiseStatusLine("Satchel open");
+        }
+
+        public void Close()
+        {
+            if (!IsOpen) return;
+            IsOpen = false;
+
+            // Closing drops the selection, not an item: the selected stack never left the bag, so there is
+            // nothing to return, nothing to spawn at the player's feet and nothing to credit as loot.
+            ClearSelection();
+
+            if (_root != null) _root.gameObject.SetActive(false);
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+        }
+
+        public void Toggle()
+        {
+            if (IsOpen) Close();
+            else Open();
+        }
+
+        private void OnInventoryChanged()
+        {
+            if (IsOpen) Rebuild();
+        }
+
+        private void OnEquipmentChanged(ItemData item, bool equipped)
+        {
+            if (IsOpen) Rebuild();
+        }
+
+        /// <summary>
+        /// Re-points the screen at the rig the run is playing right now, and reports whether anything
+        /// actually changed. The HUD builds this screen in its own Awake, which is not a moment at which
+        /// the run layer has necessarily registered the director, wired the rig or applied the class, so a
+        /// binding taken there can be missing the rig, or hold a rig whose bag and kit are not resolved
+        /// yet. Reading the live director again is a read only: no item, pool, score or roll is touched,
+        /// the widgets are not rebuilt here, and the selection is dropped only when the bag it names is a
+        /// different bag - never when a half-bound rig is merely completed.
+        /// </summary>
+        private bool EnsureLiveRig()
+        {
+            if (_director == null) GameServices.TryGet<RunDirector>(out _director);
+
+            PlayerRig live = _director != null ? _director.Player : null;
+            if (live == null) return false;
+
+            Inventory bag = live.Inventory;
+            Equipment worn = live.Equipment;
+
+            if (ReferenceEquals(_rig, live) && _inventory == bag && _equipment == worn) return false;
+
+            bool bagChanged = _inventory != null && bag != null && !ReferenceEquals(_inventory, bag);
+
+            _rig = live;
+            if (bag != null) _inventory = bag;
+            if (worn != null) _equipment = worn;
+
+            // The pane reads the rig through the view, so the view is re-pointed at the same object the
+            // screen just bound to before any line of it is labelled or refreshed.
+            if (_statsView != null) _statsView.Configure(_rig);
+
+            if (bagChanged) ClearSelection();
+
+            return true;
+        }
+
+        /// <summary>
+        /// Reads mouse clicks while the screen is open. Called by the HUD every frame so this screen does not
+        /// need its own Input Action map: the bag is presentation and input routing stays in one place.
+        /// </summary>
+        public void HandlePointer()
+        {
+            if (!IsOpen) return;
+
+            // The run layer owns the pointer while the satchel is closed and hands it over in Open(). A
+            // resume from pause re-locks it as part of unpausing, and it does that after the pause
+            // notification the HUD is listening to, so a satchel that stayed open through the pause would
+            // be left with a hidden, re-centred cursor and every click aimed at a widget landing on the
+            // crosshair instead. This screen is the one that holds the pointer while it is open, so it
+            // re-asserts that on the next frame. Closed, this method is not reached and the cursor stays
+            // locked by the run layer.
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+
+            // The rig the run is actually playing is not necessarily the rig this screen was pointed at:
+            // the HUD builds the screen in its own Awake, which is not a moment at which the run layer has
+            // finished wiring the rig or applied the class. Re-reading it here is what lets the pane show
+            // the live scores and pools instead of the ones the binding was missing when it was built.
+            if (EnsureLiveRig()) Rebuild();
+
+            // The character pane is a live read-out: pools regenerate, a cast spends mana, a gear change
+            // re-derives the scores, and all of it happens while the panel is open. This is the frame the
+            // HUD already hands the screen, so the pane needs no input action or Update of its own.
+            if (_showCharacter && _statsView != null) _statsView.Refresh();
+
+            Mouse mouse = Mouse.current;
+            if (mouse == null) return;
+
+            Vector2 screen = mouse.position.ReadValue();
+
+            UpdateGhost(screen);
+            UpdateTooltip(screen);
+
+            // A frame boundary is a legal moment for the bag to change underneath the cursor: a container, a
+            // consumable hotkey, an equipment change or a scripted transfer can all move a stack. The
+            // selection is re-resolved before anything is done with it.
+            ValidateSelection();
+
+            if (mouse.leftButton.wasPressedThisFrame) HandleClick(screen, false);
+            else if (mouse.rightButton.wasPressedThisFrame) HandleClick(screen, true);
+        }
+
+        /// <summary>
+        /// The one click entry point. The HUD's mouse reading and the focused UI checks both arrive here, so
+        /// both travel the same path: hit-test the rendered rectangles with the owning canvas camera, then run
+        /// the same move / swap / merge / equip / unequip / cancel operations.
+        /// </summary>
+        public void HandleClick(Vector2 screenPosition, bool rightClick)
+        {
+            if (!IsOpen) return;
+
+            // A finished run is not a moment at which to rearrange a bag: dying, extracting or a result
+            // screen handing control elsewhere must not leave a live cursor that can still shuffle gear.
+            // Letting go is always safe, because the selected stack never left the bag.
+            if (_director != null && _director.State != RunState.Running)
+            {
+                if (_selectedItem != null) CancelSelection();
+                return;
+            }
+
+            ValidateSelection();
+
+            if (rightClick) HandleRightClick(screenPosition);
+            else HandleLeftClick(screenPosition);
+        }
+
+        private void UpdateGhost(Vector2 screen)
+        {
+            if (_carryGhost == null) return;
+
+            // The ghost names a stack in the grid. The character tab switches the grid - and with it the
+            // ghost - off, so a selection that survived the tab switch must not bring it back over the pane.
+            bool carrying = _selectedItem != null && !_showCharacter;
+            _carryGhost.gameObject.SetActive(carrying);
+            if (!carrying) return;
+
+            Vector2 local;
+            if (_root != null && RectTransformUtility.ScreenPointToLocalPointInRectangle(_root, screen, CanvasCamera, out local))
+                _carryGhost.rectTransform.anchoredPosition = local;
+        }
+
+        // ------------------------------------------------------------ clicks
+
+        private void HandleLeftClick(Vector2 screen)
+        {
+            if (TryEquipSlotAt(screen, out EquipmentSlot slot))
+            {
+                ClickEquipSlot(slot);
+                return;
+            }
+
+            if (TryCellAt(screen, out Vector2Int cell))
+            {
+                ClickCell(cell);
+                return;
+            }
+
+            // A click on the panel, on a gap between cells or outside the screen is a no-op. It does not
+            // cancel a selection and it does not move anything.
+        }
+
+        private void ClickEquipSlot(EquipmentSlot slot)
+        {
+            if (_equipment == null)
+            {
+                GameEvents.RaiseToast("Nothing is wearing anything");
+                return;
+            }
+
+            if (_selectedItem != null)
+            {
+                if (!TryResolveSelection(out int sourceIndex))
+                {
+                    CancelSelection();
+                    return;
+                }
+
+                if (_selectedItem.equipSlot != slot)
+                {
+                    GameEvents.RaiseToast($"{_selectedItem.displayName} does not fit the {slot} slot");
+                    return;
+                }
+
+                string reason;
+                if (_equipment.TryEquipFromInventory(sourceIndex, out reason))
+                {
+                    // Equipment commits the bag half and the slot half as one transfer. The cursor only
+                    // lets go after that call says it happened.
+                    ClearSelection();
+                    Rebuild();
+                }
+                else
+                {
+                    GameEvents.RaiseToast(reason);
+                }
+                return;
+            }
+
+            ItemData worn = _equipment.Equipped(slot);
+            if (worn == null) return;
+
+            // Taking worn gear off goes through the equipment API, which decides where it lands in the bag.
+            // Snapshotting the cells this definition already occupied is how the returned stack is told apart
+            // from another copy of the same definition while copies share one definition and have no uid.
+            List<Vector2Int> cellsBefore = OriginsOfItem(worn);
+
+            string unequipReason;
+            if (_equipment.TryUnequip(slot, out unequipReason))
+            {
+                SelectReturnedStack(worn, cellsBefore);
+                Rebuild();
+            }
+            else
+            {
+                GameEvents.RaiseToast(unequipReason);
+            }
+        }
+
+        private void ClickCell(Vector2Int cell)
+        {
+            if (_inventory == null) return;
+
+            int targetIndex = _inventory.IndexAtCell(cell);
+
+            if (_selectedItem == null)
+            {
+                if (targetIndex >= 0) SelectStack(targetIndex);
+                return;
+            }
+
+            if (!TryResolveSelection(out int sourceIndex))
+            {
+                CancelSelection();
+                return;
+            }
+
+            if (targetIndex == sourceIndex)
+            {
+                // Clicking the stack that is already selected is the grid's cancel gesture. Same cell,
+                // same stack: nothing is moved, swapped, merged or credited.
+                CancelSelection();
+                return;
+            }
+
+            string reason;
+
+            if (targetIndex < 0)
+            {
+                // An empty cell is a move of the stack that is still owned by the bag. TryMove ignores the
+                // source's own occupancy, so a shape may also be shifted onto its own footprint.
+                if (_inventory.TryMove(sourceIndex, cell, out reason))
+                {
+                    ClearSelection();
+                    Rebuild();
+                }
+                else
+                {
+                    GameEvents.RaiseToast(reason);
+                }
+                return;
+            }
+
+            InventorySlot target = _inventory.Slots[targetIndex];
+
+            if (target.Item == _selectedItem && _selectedItem.CanStack)
+            {
+                if (_inventory.TryMergeStacks(sourceIndex, targetIndex, out reason))
+                {
+                    ClearSelection();
+                    Rebuild();
+                }
+                else
+                {
+                    GameEvents.RaiseToast(reason);
+                }
+                return;
+            }
+
+            // Both shapes have to fit in each other's holes, which TrySwap checks. A refusal leaves the
+            // selection and the whole bag exactly as they were.
+            if (_inventory.TrySwap(sourceIndex, targetIndex, out reason))
+            {
+                ClearSelection();
+                Rebuild();
+            }
+            else
+            {
+                GameEvents.RaiseToast(reason);
+            }
+        }
+
+        private void HandleRightClick(Vector2 screen)
+        {
+            // Right click is cancel first. The selected stack never left the bag, so cancelling has nothing
+            // to put back and cannot drop, duplicate, collect or credit anything.
+            if (_selectedItem != null)
+            {
+                CancelSelection();
+                return;
+            }
+
+            if (TryEquipSlotAt(screen, out EquipmentSlot slot))
+            {
+                ItemData worn = _equipment != null ? _equipment.Equipped(slot) : null;
+                if (worn != null)
+                {
+                    List<Vector2Int> cellsBefore = OriginsOfItem(worn);
+
+                    string reason;
+                    if (_equipment.TryUnequip(slot, out reason))
+                    {
+                        SelectReturnedStack(worn, cellsBefore);
+                        Rebuild();
+                    }
+                    else
+                    {
+                        GameEvents.RaiseToast(reason);
+                    }
+                }
+                return;
+            }
+
+            if (TryCellAt(screen, out Vector2Int cell))
+            {
+                int index = _inventory != null ? _inventory.IndexAtCell(cell) : -1;
+                if (index < 0) return;
+
+                InventorySlot slotData = _inventory.Slots[index];
+                ItemData item = slotData.Item;
+                if (item == null) return;
+
+                if (item.IsEquippable)
+                {
+                    string equipReason = _equipment == null ? "nothing to wear the item" : null;
+                    bool worn = _equipment != null && _equipment.TryEquipFromInventory(index, out equipReason);
+                    if (worn) Rebuild();
+                    else GameEvents.RaiseToast(equipReason);
+                    return;
+                }
+
+                if (_inventory.TryUseSlot(index)) Rebuild();
+            }
+        }
+
+        // ------------------------------------------------------------ tabs and tooltip
+
+        /// <summary>Reached through the button's own onClick, i.e. the canvas raycaster and the InputSystem module.</summary>
+        private void SelectBagTab()
+        {
+            if (!_showCharacter) return;
+            _showCharacter = false;
+            ApplyTabVisibility();
+            Rebuild();
+        }
+
+        private void SelectCharacterTab()
+        {
+            if (_showCharacter) return;
+            _showCharacter = true;
+            ApplyTabVisibility();
+            Rebuild();
+        }
+
+        /// <summary>
+        /// Switching tabs only switches which group is on screen. The bag keeps drawing its cells even while
+        /// the pane is up, so the pointer fixtures, the five worn slots and every bag operation are exactly
+        /// where they were; the hit-test already ignores a rectangle that is not active.
+        ///
+        /// The pane covers the whole bag column below the header, which is the column the detail line, the
+        /// tooltip line and the instructions are drawn in. Leaving them active put a glyph or two of bag
+        /// text in the 10px inset between the panel edge and the pane, so they are switched with the grid
+        /// and switched back with it. Their rectangles, their text and the hovered item they were naming are
+        /// untouched, and the header, the two tabs and all five worn-slot rows stay exactly where they are
+        /// on both tabs.
+        /// </summary>
+        private void ApplyTabVisibility()
+        {
+            if (_gridGroup != null) _gridGroup.gameObject.SetActive(!_showCharacter);
+            if (_statsGroup != null) _statsGroup.gameObject.SetActive(_showCharacter);
+
+            if (_detailLabel != null) _detailLabel.gameObject.SetActive(!_showCharacter);
+            if (_tooltipLabel != null) _tooltipLabel.gameObject.SetActive(!_showCharacter);
+            if (_carryLabel != null) _carryLabel.gameObject.SetActive(!_showCharacter);
+
+            // The ghost names a stack in the grid. With the grid off screen it would float over the pane,
+            // and Rebuild puts it back over the footprint it names when the bag tab comes back.
+            if (_carryGhost != null && _showCharacter) _carryGhost.gameObject.SetActive(false);
+
+            Color idle = TabIdleColor;
+            Color active = TabActiveColor;
+
+            if (_bagTabGraphic != null) _bagTabGraphic.color = _showCharacter ? idle : active;
+            if (_characterTabGraphic != null) _characterTabGraphic.color = _showCharacter ? active : idle;
+            if (_bagTabLabel != null) _bagTabLabel.color = _showCharacter ? DimColor : TextColor;
+            if (_characterTabLabel != null) _characterTabLabel.color = _showCharacter ? TextColor : DimColor;
+        }
+
+        private void PositionTabs(float headerTop)
+        {
+            float innerLeft = -PanelWidth * 0.5f + PanelInset;
+            float centreY = headerTop - TabButtonHeight * 0.5f;
+
+            if (_bagTabGraphic != null)
+            {
+                _bagTabGraphic.rectTransform.anchoredPosition =
+                    PanelToRoot(new Vector2(innerLeft + TabButtonWidth * 0.5f, centreY));
+            }
+
+            if (_characterTabGraphic != null)
+            {
+                _characterTabGraphic.rectTransform.anchoredPosition =
+                    PanelToRoot(new Vector2(innerLeft + TabButtonWidth + TabGap + TabButtonWidth * 0.5f, centreY));
+            }
+        }
+
+        /// <summary>
+        /// The tooltip follows the pointer through the same hit-test the clicks already use: the cell or the
+        /// worn slot under the cursor names the item, and the line reports the attribute bonuses that item's
+        /// own definition declares. Nothing here selects, moves, equips or re-rolls anything.
+        /// </summary>
+        private void UpdateTooltip(Vector2 screen)
+        {
+            ItemData item = null;
+
+            if (TryEquipSlotAt(screen, out EquipmentSlot slot))
+            {
+                item = _equipment != null ? _equipment.Equipped(slot) : null;
+            }
+            else if (TryCellAt(screen, out Vector2Int cell))
+            {
+                int index = _inventory != null ? _inventory.IndexAtCell(cell) : -1;
+                if (index >= 0 && index < _inventory.Slots.Count) item = _inventory.Slots[index].Item;
+            }
+
+            if (item == null) item = _selectedItem;
+            if (item == _hoverItem) return;
+
+            _hoverItem = item;
+            ApplyTooltip(item);
+        }
+
+        /// <summary>True when the bag or a worn slot still holds this definition right now.</summary>
+        private bool IsCarriedOrWorn(ItemData item)
+        {
+            if (item == null) return false;
+            if (_equipment != null && _equipment.IsEquipped(item)) return true;
+            return _inventory != null && _inventory.IndexOfItem(item) >= 0;
+        }
+
+        private void ApplyTooltip(ItemData item)
+        {
+            if (_tooltipLabel == null) return;
+            if (item == null)
+            {
+                _tooltipLabel.text = string.Empty;
+                return;
+            }
+
+            _tooltipLabel.text = item.displayName + "  -  attributes: " + DescribeAttributeBonuses(item);
+        }
+
+        /// <summary>
+        /// The six allowlisted bonuses the definition actually declares, each with its sign. Read straight from
+        /// <see cref="ItemData.AttributeBonusTotals"/>, which sums the authored entries without ever writing to
+        /// the shared definition, so a tooltip cannot change an item, a roll or a stat.
+        /// </summary>
+        private static string DescribeAttributeBonuses(ItemData item)
+        {
+            if (item == null) return "none declared";
+
+            AttributeBonuses totals = item.AttributeBonusTotals;
+            if (totals.IsEmpty) return "none declared";
+
+            System.Text.StringBuilder builder = new System.Text.StringBuilder();
+
+            for (int i = 0; i < AttributeRules.AttributeCount; i++)
+            {
+                SixAttribute attribute = (SixAttribute)i;
+                int value = totals.Total(attribute);
+                if (value == 0) continue;
+
+                if (builder.Length > 0) builder.Append("   ");
+                builder.Append(AttributeRules.Key(attribute)).Append(' ')
+                       .Append(value >= 0 ? "+" : "").Append(value);
+            }
+
+            return builder.Length > 0 ? builder.ToString() : "none declared";
+        }
+
+        // ------------------------------------------------------------ selection
+
+        private void SelectStack(int index)
+        {
+            if (_inventory == null || index < 0 || index >= _inventory.Slots.Count) return;
+
+            InventorySlot slot = _inventory.Slots[index];
+            if (slot.Item == null || slot.Count <= 0) return;
+
+            _selectedItem = slot.Item;
+            _selectedOrigin = slot.Origin;
+            _selectedAmount = slot.Count;
+
+            Rebuild();
+        }
+
+        /// <summary>
+        /// Selects the stack that unequipping just put back in the bag. The cells the same definition already
+        /// occupied are excluded, so a duplicate of the worn item cannot be mistaken for the returned one and
+        /// the selection never names a stack the bag does not hold.
+        /// </summary>
+        private void SelectReturnedStack(ItemData item, List<Vector2Int> cellsBefore)
+        {
+            if (_inventory == null || item == null) return;
+
+            for (int i = 0; i < _inventory.Slots.Count; i++)
+            {
+                InventorySlot slot = _inventory.Slots[i];
+                if (slot.Item != item || slot.Count <= 0) continue;
+                if (cellsBefore != null && cellsBefore.Contains(slot.Origin)) continue;
+
+                _selectedItem = slot.Item;
+                _selectedOrigin = slot.Origin;
+                _selectedAmount = slot.Count;
+                return;
+            }
+        }
+
+        /// <summary>
+        /// Turns the selection into the index it names right now, or refuses. The selection is identified by
+        /// the cell its footprint starts at and re-read from the grid, so a stack that moved, shrank, was
+        /// consumed or was removed cannot be reached through an index remembered from an earlier click.
+        /// </summary>
+        private bool TryResolveSelection(out int index)
+        {
+            index = -1;
+
+            if (_selectedItem == null || _inventory == null) return false;
+            if (_selectedOrigin.x < 0 || _selectedOrigin.y < 0) return false;
+
+            int resolved = _inventory.IndexAtCell(_selectedOrigin);
+            if (resolved < 0 || resolved >= _inventory.Slots.Count) return false;
+
+            InventorySlot slot = _inventory.Slots[resolved];
+            if (slot.Item != _selectedItem || slot.Origin != _selectedOrigin || slot.Count <= 0) return false;
+
+            index = resolved;
+            _selectedAmount = slot.Count;
+            return true;
+        }
+
+        private void ValidateSelection()
+        {
+            if (_selectedItem == null) return;
+            if (TryResolveSelection(out _)) return;
+
+            ClearSelection();
+            Rebuild();
+        }
+
+        private void CancelSelection()
+        {
+            ClearSelection();
+            Rebuild();
+        }
+
+        private void ClearSelection()
+        {
+            _selectedItem = null;
+            _selectedOrigin = new Vector2Int(-1, -1);
+            _selectedAmount = 0;
+
+            if (_carryGhost != null)
+            {
+                _carryGhost.enabled = false;
+                _carryGhost.gameObject.SetActive(false);
+            }
+        }
+
+        private List<Vector2Int> OriginsOfItem(ItemData item)
+        {
+            List<Vector2Int> origins = new List<Vector2Int>(4);
+            if (_inventory == null || item == null) return origins;
+
+            for (int i = 0; i < _inventory.Slots.Count; i++)
+            {
+                if (_inventory.Slots[i].Item == item) origins.Add(_inventory.Slots[i].Origin);
+            }
+
+            return origins;
+        }
+
+        // ------------------------------------------------------------ geometry
+
+        /// <summary>
+        /// The camera a screen-space-camera or world-space canvas needs for screen-to-rectangle maths. An
+        /// overlay canvas needs none, and feeding it the scene camera is what puts a click in the wrong cell.
+        /// </summary>
+        private Camera CanvasCamera
+        {
+            get
+            {
+                if (_canvas == null) return null;
+                if (_canvas.renderMode == RenderMode.ScreenSpaceOverlay) return null;
+                if (_canvas.worldCamera != null) return _canvas.worldCamera;
+                return Camera.main;
+            }
+        }
+
+        /// <summary>
+        /// Hit-tests the cell rectangles that are actually rendered. Screen pixels are converted by
+        /// RectTransformUtility, which accounts for the canvas scale factor, the offset and size of the group
+        /// the cells live in, any parent rotation or scale, and the canvas render mode. A click in a gap, on
+        /// the panel border or outside the grid belongs to no cell, so it stays a no-op.
+        /// </summary>
+        private bool TryCellAt(Vector2 screen, out Vector2Int cell)
+        {
+            cell = Vector2Int.zero;
+
+            Camera camera = CanvasCamera;
+
+            for (int i = 0; i < _cellRects.Count; i++)
+            {
+                RectTransform rect = _cellRects[i];
+                if (rect == null || !rect.gameObject.activeInHierarchy) continue;
+                if (!RectTransformUtility.RectangleContainsScreenPoint(rect, screen, camera)) continue;
+
+                cell = _cellCoords[i];
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryEquipSlotAt(Vector2 screen, out EquipmentSlot slot)
+        {
+            slot = EquipmentSlot.None;
+
+            if (_equipment == null) return false;
+
+            Camera camera = CanvasCamera;
+
+            for (int i = 0; i < _equipRects.Count; i++)
+            {
+                RectTransform rect = _equipRects[i];
+                if (rect == null || !rect.gameObject.activeInHierarchy) continue;
+                if (!RectTransformUtility.RectangleContainsScreenPoint(rect, screen, camera)) continue;
+
+                slot = _equipSlots[i];
+                return true;
+            }
+
+            return false;
+        }
+
+        private static EquipmentSlot[] SlotOrder()
+        {
+            return new[]
+            {
+                EquipmentSlot.Weapon,
+                EquipmentSlot.OffHand,
+                EquipmentSlot.Head,
+                EquipmentSlot.Chest,
+                EquipmentSlot.Legs,
+            };
+        }
+
+        // ------------------------------------------------------------ build
+
+        private void Build()
+        {
+            if (_root != null) return;
+
+            Canvas canvas = UiFactory.EnsureCanvas("Emberdelve_Hud", 10);
+            _canvas = canvas;
+
+            _root = UiFactory.CreateGroup(canvas.transform, "InventoryRoot");
+            _root.gameObject.SetActive(false);
+
+            _panel = UiFactory.CreatePanel(_root, "SatchelPanel", PanelColor);
+            _panel.sizeDelta = new Vector2(PanelWidth, PanelHeight);
+            _panel.anchoredPosition = new Vector2(PanelCenterX, PanelCenterY);
+
+            _gridGroup = UiFactory.CreateGroup(_root, "GridGroup");
+            _equipGroup = UiFactory.CreateGroup(_root, "EquipGroup");
+
+            // InventoryRoot is a zero-size group, so every anchor point inside it coincides with its centre:
+            // the pivot is what makes an offset describe the corner it is named for. Pivot (0,1) turns the
+            // offsets below into the widget's top-left corner inside the panel, which is what a left-aligned
+            // label needs. The previous centre pivot put the label's centre at the panel inset and half of
+            // the label outside the panel.
+            _headerLabel = UiFactory.CreateText(_root, "Header", "SATCHEL", 22, TextColor, TextAnchor.UpperLeft);
+            _headerLabel.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            _headerLabel.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            _headerLabel.rectTransform.pivot = new Vector2(0f, 1f);
+            _headerLabel.rectTransform.sizeDelta = new Vector2(420f, HeaderHeight);
+
+            // The detail and instruction lines are wrapped into their column: a single unwrapped line of
+            // "grid 10x4 ... worn: ... modifiers: ..." is far wider than the panel and ran off the window.
+            _detailLabel = UiFactory.CreateText(_root, "Detail", "", 16, DimColor, TextAnchor.UpperLeft);
+            _detailLabel.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            _detailLabel.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            _detailLabel.rectTransform.pivot = new Vector2(0f, 1f);
+            _detailLabel.rectTransform.sizeDelta = new Vector2(700f, DetailHeight);
+            _detailLabel.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _detailLabel.verticalOverflow = VerticalWrapMode.Truncate;
+
+            _carryLabel = UiFactory.CreateText(_root, "Carry", "", 15, TextColor, TextAnchor.UpperLeft);
+            _carryLabel.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            _carryLabel.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            _carryLabel.rectTransform.pivot = new Vector2(0f, 1f);
+            _carryLabel.rectTransform.sizeDelta = new Vector2(420f, CarryHeight);
+            _carryLabel.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _carryLabel.verticalOverflow = VerticalWrapMode.Truncate;
+
+            _carryGhost = UiFactory.CreateImage(_root, "CarryGhost", Color.white,
+                new Vector2(CellSize, CellSize), Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+            _carryGhost.enabled = false;
+            _carryGhost.raycastTarget = false;
+            _carryGhost.gameObject.SetActive(false);
+
+            // The tooltip line lives in the same column as the instructions it sits above, with the same
+            // top-left pivot, so it cannot run past the panel edge any more than they can.
+            _tooltipLabel = UiFactory.CreateText(_root, "Tooltip", "", 14, TextColor, TextAnchor.UpperLeft);
+            _tooltipLabel.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            _tooltipLabel.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            _tooltipLabel.rectTransform.pivot = new Vector2(0f, 1f);
+            _tooltipLabel.rectTransform.sizeDelta = new Vector2(420f, TooltipHeight);
+            _tooltipLabel.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _tooltipLabel.verticalOverflow = VerticalWrapMode.Truncate;
+            _tooltipLabel.raycastTarget = false;
+
+            // The character pane is one contained rectangle over the bag's own column, with its rows parented
+            // inside it. It is created once here and re-labelled afterwards, and it is switched as a unit.
+            _statsGroup = UiFactory.CreateGroup(_root, "StatsGroup");
+            _statsGroup.gameObject.SetActive(false);
+
+            _statsPane = UiFactory.CreateImage(_statsGroup.transform, "StatsPane", PaneColor, Vector2.zero,
+                Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+            _statsPane.raycastTarget = false;
+
+            _statsView = new CharacterStatsView(_statsGroup.transform, MeasureLeftColumnWidth() - 2f * PanePadding);
+
+            // Ordinary uGUI buttons on the accepted canvas: the GraphicRaycaster and the InputSystemUIInputModule
+            // UiFactory already ensures drive them, so a tab is a click like any other button in the game.
+            // UiFactory's default colour block is a lobby-style translucent highlight; on a tab that would
+            // make the chip go see-through while the pointer is over it, so the multipliers are set to keep
+            // each tab's own colour and let the tab state be carried by the colour the screen applies.
+            _bagTab = UiFactory.CreateButton(_root, "TabBag", "BAG", SelectBagTab,
+                new Vector2(TabButtonWidth, TabButtonHeight), TabActiveColor, TextColor, 15);
+            _characterTab = UiFactory.CreateButton(_root, "TabCharacter", "CHARACTER", SelectCharacterTab,
+                new Vector2(TabButtonWidth, TabButtonHeight), TabIdleColor, TextColor, 15);
+            _bagTabLabel = _bagTab != null ? _bagTab.GetComponentInChildren<Text>() : null;
+            _characterTabLabel = _characterTab != null ? _characterTab.GetComponentInChildren<Text>() : null;
+            _bagTabGraphic = _bagTab != null ? _bagTab.targetGraphic as Image : null;
+            _characterTabGraphic = _characterTab != null ? _characterTab.targetGraphic as Image : null;
+            ConfigureTabButton(_bagTab);
+            ConfigureTabButton(_characterTab);
+
+            ApplyTabVisibility();
+            Rebuild();
+        }
+
+        /// <summary>
+        /// A tab is a state, not a lobby call to action: its chip keeps its own colour and the highlight only
+        /// brightens it a little, instead of the shared button block multiplying the chip's alpha down to a
+        /// ghost of the panel behind it.
+        /// </summary>
+        private static void ConfigureTabButton(Button button)
+        {
+            if (button == null) return;
+
+            ColorBlock block = button.colors;
+            block.normalColor = Color.white;
+            block.highlightedColor = new Color(1.15f, 1.15f, 1.15f, 1f);
+            block.pressedColor = new Color(0.9f, 0.9f, 0.9f, 1f);
+            block.selectedColor = Color.white;
+            button.colors = block;
+        }
+
+        /// <summary>
+        /// The width the bag's own column has between the panel's left inset and the worn-kit column, measured
+        /// by the same numbers the layout uses. The character pane and its rows are sized from it so the two
+        /// tabs cannot disagree about how wide their shared column is.
+        /// </summary>
+        private static float MeasureLeftColumnWidth()
+        {
+            float innerLeft = -PanelWidth * 0.5f + PanelInset;
+            float innerRight = PanelWidth * 0.5f - PanelInset;
+            float equipColumnWidth = EquipSlotSize + EquipLabelGap + EquipLabelWidth;
+            return innerRight - equipColumnWidth - ColumnGap - innerLeft;
+        }
+
+        /// <summary>
+        /// Panel-local placement (origin at the panel centre, y up) converted to the root-local space these
+        /// widgets are actually parented in. The panel is a child of the zero-size InventoryRoot, so its
+        /// anchoredPosition is its centre in that space.
+        /// </summary>
+        private Vector2 PanelToRoot(Vector2 panelLocal)
+        {
+            Vector2 panelCentre = _panel != null ? _panel.anchoredPosition : Vector2.zero;
+            return panelLocal + panelCentre;
+        }
+
+        /// <summary>
+        /// Redraws the satchel from the live bag and worn kit. Public because it is the screen's own redraw
+        /// entry point (the same reason it was public before the U1C2C layout work); making it private was
+        /// unrelated to containing the panel.
+        /// </summary>
+        public void Rebuild()
+        {
+            if (_root == null) return;
+
+            // Every line below reads the bag, the worn kit and the rig through this screen's own binding,
+            // so the binding is resolved from the live director before anything is drawn or re-labelled.
+            EnsureLiveRig();
+
+            if (_inventory == null) return;
+
+            foreach (Image image in _cellImages) if (image != null) Destroy(image.gameObject);
+            foreach (Image image in _itemImages) if (image != null) Destroy(image.gameObject);
+            foreach (Image image in _equipImages) if (image != null) Destroy(image.gameObject);
+            foreach (Text text in _equipLabels) if (text != null) Destroy(text.gameObject);
+
+            _cellImages.Clear();
+            _itemImages.Clear();
+            _equipImages.Clear();
+            _equipLabels.Clear();
+            _cellRects.Clear();
+            _cellCoords.Clear();
+            _equipRects.Clear();
+            _equipSlots.Clear();
+
+            int width = _inventory.GridWidth;
+            int height = _inventory.GridHeight;
+            float step = CellSize + CellGap;
+
+            float gridWidth = width * step - CellGap;
+            float gridHeight = height * step - CellGap;
+
+            // ---- panel-local layout, measured from the panel's inner bounds
+            float innerLeft = -PanelWidth * 0.5f + PanelInset;
+            float innerRight = PanelWidth * 0.5f - PanelInset;
+            float innerTop = PanelHeight * 0.5f - PanelInset;
+
+            EquipmentSlot[] order = SlotOrder();
+            float equipStep = EquipSlotSize + EquipSlotGap;
+            float equipColumnWidth = EquipSlotSize + EquipLabelGap + EquipLabelWidth;
+            float equipColumnHeight = order.Length * equipStep - EquipSlotGap;
+
+            // The worn-kit column is measured by its slots plus the label extents that sit beside them, so a
+            // slot label is never allowed to hang past the panel edge. The bag grid keeps its full width and
+            // whatever is left between the two columns is the gutter.
+            float equipColumnLeft = innerRight - equipColumnWidth;
+            float leftColumnWidth = equipColumnLeft - ColumnGap - innerLeft;
+
+            float leftColumnHeight = HeaderHeight + ColumnGap + gridHeight + ColumnGap + DetailHeight +
+                                     ColumnGap + CarryHeight;
+            float leftColumnTop = innerTop - (PanelHeight - 2f * PanelInset - leftColumnHeight) * 0.5f;
+
+            float headerTop = leftColumnTop;
+            float gridTop = headerTop - HeaderHeight - ColumnGap;
+            float detailTop = gridTop - gridHeight - ColumnGap;
+            float carryTop = detailTop - DetailHeight - ColumnGap;
+
+            Vector2 gridCentrePanel = new Vector2(innerLeft + gridWidth * 0.5f, gridTop - gridHeight * 0.5f);
+            Vector2 gridCenter = PanelToRoot(gridCentrePanel);
+
+            _gridOrigin = gridCenter - new Vector2(gridWidth * 0.5f, gridHeight * 0.5f);
+
+            _gridGroup.anchoredPosition = gridCenter;
+
+            for (int row = 0; row < height; row++)
+            {
+                for (int col = 0; col < width; col++)
+                {
+                    Vector2 center = _gridOrigin + new Vector2(col * step + CellSize * 0.5f,
+                        gridHeight - (row * step + CellSize * 0.5f));
+
+                    bool occupied = _inventory.IsCellOccupied(new Vector2Int(col, row));
+
+                    Image cell = UiFactory.CreateImage(_gridGroup.transform, $"Cell_{col}_{row}",
+                        occupied ? CellBlockedColor : CellColor,
+                        new Vector2(CellSize, CellSize), center - gridCenter,
+                        new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+
+                    _cellImages.Add(cell);
+                    _cellRects.Add(cell.rectTransform);
+                    _cellCoords.Add(new Vector2Int(col, row));
+                }
+            }
+
+            // Root-local centre of the selected stack, kept outside the slot loop so the ghost block below
+            // can park the no-mouse ghost over the footprint it actually names.
+            Vector2 selectedCenter = Vector2.zero;
+            bool hasSelectedCenter = false;
+
+            for (int i = 0; i < _inventory.Slots.Count; i++)
+            {
+                InventorySlot slot = _inventory.Slots[i];
+                if (slot.Item == null) continue;
+
+                Vector2Int size = slot.Size;
+                Vector2 center = _gridOrigin + new Vector2(
+                    slot.Origin.x * step + (size.x * CellSize + (size.x - 1) * CellGap) * 0.5f,
+                    gridHeight - (slot.Origin.y * step + (size.y * CellSize + (size.y - 1) * CellGap) * 0.5f));
+
+                Vector2 blockSize = new Vector2(size.x * CellSize + (size.x - 1) * CellGap,
+                    size.y * CellSize + (size.y - 1) * CellGap);
+
+                Color color = slot.Item.iconColor;
+                color.a = 1f;
+
+                // The selected stack is marked where it still stands in the bag. It is not lifted out and it
+                // is not drawn twice as two normal owned copies: the bag copy is dimmed inside a frame of
+                // selection colour, and only the ghost at the pointer is translucent.
+                bool isSelected = _selectedItem != null && slot.Item == _selectedItem && slot.Origin == _selectedOrigin;
+                if (isSelected) color.a = 0.58f;
+
+                if (isSelected)
+                {
+                    Image frame = UiFactory.CreateImage(_gridGroup.transform, "Selected_" + slot.Item.displayName,
+                        SelectedColor, blockSize + new Vector2(6f, 6f), center - gridCenter,
+                        new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+                    frame.raycastTarget = false;
+                    // Tracked with the other transient item visuals, which Rebuild destroys at its start, so
+                    // repeated rebuild/cancel cannot stack orphan selection frames in the grid group.
+                    _itemImages.Add(frame);
+
+                    // 'center' is already in _root local space: _gridGroup has centre anchors/pivot at
+                    // gridCenter with zero size, and the block sits at center - gridCenter inside it.
+                    // The ghost is a _root child with centre anchors, so this is the same space its
+                    // anchoredPosition (and UpdateGhost's pointer reading) uses.
+                    selectedCenter = center;
+                    hasSelectedCenter = true;
+                }
+
+                Image block = UiFactory.CreateImage(_gridGroup.transform, "Item_" + slot.Item.displayName, color,
+                    blockSize, center - gridCenter, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+                block.raycastTarget = false;
+
+                _itemImages.Add(block);
+
+                if (slot.Count > 1)
+                {
+                    Text count = UiFactory.CreateText(block.transform, "Count", slot.Count.ToString(), 15, Color.black,
+                        TextAnchor.LowerRight, FontStyle.Bold);
+                    count.rectTransform.anchorMin = Vector2.zero;
+                    count.rectTransform.anchorMax = Vector2.one;
+                    count.rectTransform.offsetMin = new Vector2(3f, 1f);
+                    count.rectTransform.offsetMax = new Vector2(-3f, -1f);
+                }
+            }
+
+            // Equipment column. The origin is the top-left corner of the column, and each row descends from
+            // it once: the previous origin was already a full half-column below the centre and the loop then
+            // descended again, which pushed the last two slots below the window.
+            Vector2 equipCentrePanel = new Vector2(equipColumnLeft + EquipSlotSize * 0.5f, 0f);
+            Vector2 equipCenter = PanelToRoot(equipCentrePanel);
+            _equipOrigin = equipCenter + new Vector2(-EquipSlotSize * 0.5f, equipColumnHeight * 0.5f);
+            _equipGroup.anchoredPosition = equipCenter;
+
+            for (int i = 0; i < order.Length; i++)
+            {
+                EquipmentSlot kind = order[i];
+                Vector2 center = _equipOrigin + new Vector2(EquipSlotSize * 0.5f, -(i * equipStep) - EquipSlotSize * 0.5f);
+
+                ItemData worn = _equipment != null ? _equipment.Equipped(kind) : null;
+
+                Color color = worn != null ? worn.iconColor : SlotColor;
+                color.a = worn != null ? 1f : 1f;
+
+                Image slotImage = UiFactory.CreateImage(_equipGroup.transform, "Equip_" + kind, color,
+                    new Vector2(EquipSlotSize, EquipSlotSize), center - equipCenter,
+                    new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+
+                _equipImages.Add(slotImage);
+                _equipRects.Add(slotImage.rectTransform);
+                _equipSlots.Add(kind);
+
+                // The worn-item label sits beside the slot on the dark SatchelPanel, not inside the coloured
+                // slot block, so its foreground cannot follow the item icon colour (Footpad Boots' near-black
+                // icon colour rendered the name invisible). Use the panel's readable light text colour; empty
+                // slots keep DimColor.
+                Text label = UiFactory.CreateText(_equipGroup.transform, "EquipLabel_" + kind,
+                    worn != null ? worn.displayName : kind.ToString(), 13,
+                    worn != null ? TextColor : DimColor, TextAnchor.MiddleLeft, FontStyle.Bold);
+                label.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+                label.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+                label.rectTransform.pivot = new Vector2(0f, 0.5f);
+                label.rectTransform.sizeDelta = new Vector2(EquipLabelWidth, 18f);
+                label.rectTransform.anchoredPosition = center - equipCenter +
+                    new Vector2(EquipSlotSize * 0.5f + EquipLabelGap, 0f);
+
+                _equipLabels.Add(label);
+            }
+
+            if (_headerLabel != null)
+            {
+                int worn = _equipment != null ? _equipment.FilledCount : 0;
+                _headerLabel.text = _showCharacter
+                    ? "CHARACTER"
+                    : $"SATCHEL  {_inventory.UsedCells}/{_inventory.Capacity}  worn {worn}";
+                _headerLabel.rectTransform.sizeDelta = new Vector2(HeaderTextWidth, HeaderHeight);
+                _headerLabel.rectTransform.anchoredPosition = PanelToRoot(new Vector2(innerLeft + TabButtonWidth * 2f + TabGap + TabHeaderGap, headerTop));
+            }
+
+            if (_detailLabel != null)
+            {
+                _detailLabel.text = BuildDetailText();
+                _detailLabel.rectTransform.sizeDelta = new Vector2(leftColumnWidth, DetailHeight);
+                _detailLabel.rectTransform.anchoredPosition = PanelToRoot(new Vector2(innerLeft, detailTop));
+            }
+
+            // The instruction band is split into the tooltip line and the instructions, inside the band the
+            // instructions already owned: tooltip on top, instructions below it, both left-aligned at the
+            // same inset, neither allowed past the column the panel measured.
+            float tooltipTop = carryTop;
+            float instructionTop = carryTop - TooltipHeight - CarryTooltipGap;
+
+            if (_tooltipLabel != null)
+            {
+                _tooltipLabel.rectTransform.sizeDelta = new Vector2(leftColumnWidth, TooltipHeight);
+                _tooltipLabel.rectTransform.anchoredPosition = PanelToRoot(new Vector2(innerLeft, tooltipTop));
+
+                // A tooltip may only name something the run still has. A container, a hotkey or an equip can
+                // take the hovered definition out of the bag between two frames, and a stale line about an
+                // item the player no longer holds is a wrong number on screen just as much as a wrong stat.
+                ItemData tooltipSource = IsCarriedOrWorn(_hoverItem) ? _hoverItem : _selectedItem;
+                if (!IsCarriedOrWorn(tooltipSource)) tooltipSource = null;
+                _hoverItem = tooltipSource;
+                ApplyTooltip(tooltipSource);
+            }
+
+            if (_carryLabel != null)
+            {
+                _carryLabel.text = _selectedItem != null
+                    ? $"Selected {_selectedItem.displayName} x{_selectedAmount} at cell {_selectedOrigin} ({_selectedItem.ShortSummary})   " +
+                      "left click a cell to move it, left click another stack to swap or combine, right click to let go"
+                    : "left click an item to select it   right click a bag item to wear or use it   right click a worn item to take it off";
+                _carryLabel.rectTransform.sizeDelta = new Vector2(leftColumnWidth, InstructionHeight);
+                _carryLabel.rectTransform.anchoredPosition = PanelToRoot(new Vector2(innerLeft, instructionTop));
+            }
+
+            // The character pane covers exactly the bag column below the header: the grid, the detail line,
+            // the tooltip line and the instructions. Those widgets stay where they are and are simply drawn
+            // under the pane while the character tab is up, so switching back puts them back untouched.
+            float paneTop = gridTop;
+            float paneHeight = paneTop - (carryTop - CarryHeight);
+            float paneWidth = leftColumnWidth;
+
+            if (_statsGroup != null)
+                _statsGroup.anchoredPosition = PanelToRoot(new Vector2(innerLeft + PanePadding, paneTop - PanePadding));
+
+            if (_statsPane != null)
+            {
+                _statsPane.rectTransform.sizeDelta = new Vector2(paneWidth, paneHeight);
+                _statsPane.rectTransform.anchoredPosition = new Vector2(paneWidth * 0.5f, -paneHeight * 0.5f);
+            }
+
+            if (_statsView != null)
+            {
+                // Re-pointing at the current rig is a read, not a rebuild: the rows are built exactly once,
+                // no matter how many times the satchel is opened, closed or refilled underneath.
+                _statsView.Configure(_rig);
+                if (_statsView.RowCount == 0) _statsView.Build();
+                else _statsView.Refresh();
+            }
+
+            PositionTabs(headerTop);
+
+            if (_carryGhost != null)
+            {
+                // ApplyTabVisibility switched the ghost off with the grid; this is the other place that
+                // would put it back, so the same tab test applies here and the bag tab gets it back intact.
+                if (_selectedItem != null && !_showCharacter)
+                {
+                    Vector2Int shape = _selectedItem.EffectiveFootprint;
+                    Color ghostColor = _selectedItem.iconColor;
+                    ghostColor.a = 0.62f;
+
+                    _carryGhost.gameObject.SetActive(true);
+                    _carryGhost.enabled = true;
+                    _carryGhost.color = ghostColor;
+                    _carryGhost.rectTransform.sizeDelta = new Vector2(
+                        shape.x * CellSize + (shape.x - 1) * CellGap,
+                        shape.y * CellSize + (shape.y - 1) * CellGap);
+
+                    // With a mouse the ghost follows the pointer every frame. With no pointer device there is
+                    // nothing to follow, so it sits over the stack it names instead of at a stale position.
+                    if (Mouse.current == null && hasSelectedCenter)
+                        _carryGhost.rectTransform.anchoredPosition = selectedCenter;
+                }
+                else
+                {
+                    _carryGhost.enabled = false;
+                    _carryGhost.gameObject.SetActive(false);
+                }
+            }
+        }
+
+        private string BuildDetailText()
+        {
+            if (_inventory == null) return string.Empty;
+
+            System.Text.StringBuilder builder = new System.Text.StringBuilder();
+            builder.Append("grid ").Append(_inventory.GridWidth).Append('x').Append(_inventory.GridHeight)
+                   .Append("   free ").Append(_inventory.FreeCells).Append(" cells")
+                   .Append("   value ").Append(_inventory.CarriedValue);
+
+            if (_equipment != null && _equipment.FilledCount > 0)
+            {
+                builder.Append("   worn: ").Append(_equipment.Describe());
+            }
+
+            // The six scores and the derived numbers are no longer dumped onto this line: the character tab
+            // shows them as a readable pane, and a raw "strength=16(+3) ... hp=120" run-in here was the
+            // thing the pane was asked to replace.
+            return builder.ToString();
+        }
+    }
+}

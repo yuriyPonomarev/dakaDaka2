@@ -1,0 +1,27 @@
+# Approved Unity prototype target
+
+19October2026: continue the existing Emberdelve Unity project instead of porting or restarting it. Preserve the implemented loop. Engine-specific details of the old Godot design are reference only; the functional requirements below carry over. Unity6000.2.5f1/C#, URP, saved editable scenes/prefabs, existing editor builders and ScriptableObjects are the implementation base.
+
+## Game and loop
+Windows first-person dark-fantasy dungeon-synth PvPvE extraction. Warrior and Archer enter a small crypt with selected equipment, read enemy attacks, fight players and enemies, collect loot, channel an exit and bank exact carried items into a permanent stash. Death loses carried gear/loot to a corpse; disconnect is not free extraction. A complete small playable raid is the deliverable, not a production live-service backend.
+
+4–8player design target, initial real proof is a dedicated server plus two independent clients. Offline play uses the same gameplay rules. LocalCombatAuthority currently provides local resolution; a real networking layer must validate sender/ownership, alive state, ranges/line of sight, equipped weapon, cadence, mana/cooldowns and transfer ownership. Clients never choose damage, rolls, authoritative positions or stash contents. Late join/death/disconnect/rehost must work. No production authentication/WAN-performance claim without evidence.
+
+## Combat and classes
+Preserve existing movement, class selection, HP feedback, secondary weapons and real skills. Warrior: sword+shield and crossbow; Archer: bow and rapier. Exactly2actives/2meaningful passives per class; mana/cooldowns, collision-respecting Dash/BattleCry and actual MultiShot/PiercingShot effects. Six attributes affect real derived pools/movement/damage/effects as specified in ATTRIBUTES.md.
+
+Upgrade the current overlap/angle melee and ground wedge to a visible committed weapon trajectory matching the real continuous damage sweep. Horizontal, overhead and thrust patterns; no invisible tracking hit after the warning commits. Defense considers facing, elevation and stamina, supports failure from behind/wrong height/empty stamina and exact-once contact cost. Shields block and NEVER parry; future weapon parry capability stays separate. Do not call the current flat yaw block or local wedge equivalent to the final requirement.
+
+## Inventory, gear and loot
+DiabloII-style10x4 inventory, differing item sizes, validated move/drag/swap/equip/unequip without loss on rejection. Character panel shows6attributes and derived stats. Tooltips separate fixed properties from rolled affixes and show rarity. Immutable definitions plus stable item instances with UID, quantity, rarity, fixed definition reference and preserved rolled values; no reroll on transfer/equip/save/restore. Full rules in ITEM_AFFIXES.md. Add back/cloak slot and boots; common0/uncommon1/rare2distinct valid affixes. Gear recomputation never stacks bonuses or awards free current-pool refill.
+
+At least18data-defined items including5weapons, shield,6clothing/armour pieces, potions and valuables. Three saved chest variants/resources with distinct loot pools, lid animation and usable shared container UI. Server generates one contents list, validates distance<=3m/LOS and performs atomic single-ownership transfer: two players cannot duplicate the same UID. Death corpse loot obeys the same ownership rules.
+
+## Raid results and persistence
+Configurable10minute raid. Exit channel about3seconds; movement/damage/cancel/death interrupts and resets it. Server validates alive/range/time and commits successful extraction exactly once. Death/disconnect cannot bank items. Server-owned per-profile JSON with safe fixed IDs, schema validation, atomic replace and exact UID/roll recovery across process restart. A peer connection ID is not durable identity. In-memory RunContext alone is not persistence.
+
+## Presentation and authoring
+Readable oppressive crypt: worn stone, subdued moss/steel, amber torches, dark ambient synth. Use reusable saved scene/prefab composition and data assets. Reuse existing licensed KayKit/Kenney files before downloading duplicates; select missing textures/models/audio from author-owned sources with clear CC0/compatible licenses. Record URL, license, version/hash, modifications and integration status. No asset is accepted just because imported: actual game camera/HUD/telegraph/enemy visibility and animations need PNG inspection; audio needs a real playback check. Never hide the HUD, relocate the camera or freeze gameplay to fake a visual pass.
+
+## Completion
+A launched Windows prototype where two real clients on a dedicated server complete lobby->raid->PvPvE fight->contested chest->inventory/equipment->death or interrupted/successful extraction->exact persistent stash after restart. Actual input/camera, scene wiring, no compile/runtime errors, readable screenshots and real frame advancement, usable README/launch scripts. Tests focus on behavior and failures; raw logs and observable outcomes matter more than counts. Keep the game launchable between slices.

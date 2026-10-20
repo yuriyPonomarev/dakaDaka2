@@ -45,7 +45,8 @@ namespace Emberdelve.Combat
     /// sequence from the same per-entity allocator, and can be replayed to a server unchanged.
     ///
     /// It carries no damage number. Damage comes from the skill asset plus the weapon actually held,
-    /// resolved by the authority.
+    /// resolved by the authority. The one magnitude it does carry is the caster's bounded ability effect
+    /// scale, which the authority clamps to its legal band before applying it once.
     /// </summary>
     public readonly struct SkillIntent
     {
@@ -70,9 +71,21 @@ namespace Emberdelve.Combat
         /// <summary>Status the authority should apply to the target if - and only if - the hit is accepted.</summary>
         public readonly StatusSpec TargetStatus;
 
+        /// <summary>
+        /// The caster's ability effect scale for this activation (Docs/Design/ATTRIBUTES.md:
+        /// clamp(1 + 0.04 * CHA modifier, 0.6, 1.4)), snapshotted by the caster when the cast was accepted
+        /// and carried with every intent that activation produces. It is a magnitude for the authority to
+        /// bound and apply, not a damage number: the damage itself is still derived by the authority from
+        /// the skill asset and the weapon actually held.
+        ///
+        /// Callers that have no attribute state (an enemy, a synthetic intent, anything predating this
+        /// amendment) leave it at 1 and resolve exactly as they did before.
+        /// </summary>
+        public readonly float EffectScale;
+
         public SkillIntent(int instigatorCombatId, EntityKind instigatorKind, SkillData skill, WeaponData weapon,
             Vector3 origin, Vector3 direction, float maxRange, int sequence, float timestamp, StatusSpec targetStatus,
-            int activationId = 0)
+            int activationId = 0, float effectScale = 1f)
         {
             InstigatorCombatId = instigatorCombatId;
             InstigatorKind = instigatorKind;
@@ -86,6 +99,9 @@ namespace Emberdelve.Combat
             Timestamp = timestamp;
             TargetStatus = targetStatus;
             ActivationId = activationId;
+            EffectScale = effectScale > 0f && !float.IsNaN(effectScale) && !float.IsInfinity(effectScale)
+                ? effectScale
+                : 1f;
         }
     }
 

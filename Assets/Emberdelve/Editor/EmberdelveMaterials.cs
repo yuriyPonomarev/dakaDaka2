@@ -25,6 +25,14 @@ namespace Emberdelve.EditorTools
         public static Material PortalMat;
         public static Material TorchMat;
         public static Material LobbyFloor;
+        public static Material ArmorMat;
+        public static Material ShieldMat;
+        public static Material ChestSupply;
+        public static Material ChestSupplyLid;
+        public static Material ChestEmber;
+        public static Material ChestEmberLid;
+        public static Material ChestSealed;
+        public static Material ChestSealedLid;
 
         public static void BuildAll()
         {
@@ -48,6 +56,16 @@ namespace Emberdelve.EditorTools
 
             PortalMat = Create("EmberGate_Glow", new Color(1f, 0.55f, 0.18f), 0.4f, new Color(1.6f, 0.62f, 0.14f));
             TorchMat = Create("Torch_Brush", new Color(0.9f, 0.55f, 0.2f), 0.3f, new Color(1.3f, 0.5f, 0.08f));
+
+            ArmorMat = Create("Gear_Armor", new Color(0.42f, 0.3f, 0.16f), 0.35f, null);
+            ShieldMat = Create("Gear_Shield", new Color(0.5f, 0.52f, 0.6f), 0.6f, null);
+
+            ChestSupply = Create("Chest_Supply", new Color(0.3f, 0.22f, 0.12f), 0.3f, null);
+            ChestSupplyLid = Create("Chest_SupplyLid", new Color(0.42f, 0.32f, 0.17f), 0.35f, null);
+            ChestEmber = Create("Chest_Ember", new Color(0.34f, 0.17f, 0.1f), 0.35f, new Color(0.5f, 0.2f, 0.04f));
+            ChestEmberLid = Create("Chest_EmberLid", new Color(0.62f, 0.36f, 0.14f), 0.4f, new Color(0.8f, 0.4f, 0.08f));
+            ChestSealed = Create("Chest_Sealed", new Color(0.2f, 0.2f, 0.28f), 0.5f, null);
+            ChestSealedLid = Create("Chest_SealedLid", new Color(0.34f, 0.34f, 0.46f), 0.6f, new Color(0.2f, 0.2f, 0.5f));
         }
 
         private static Material Create(string name, Color baseColor, float smoothness, Color? emission)

@@ -4,6 +4,7 @@ using Emberdelve.Combat;
 using Emberdelve.Data;
 using Emberdelve.InputLayer;
 using Emberdelve.Skills;
+using Emberdelve.Stats;
 
 namespace Emberdelve.Movement
 {
@@ -32,6 +33,7 @@ namespace Emberdelve.Movement
 
         private CharacterClassData _class;
         private CharacterStatStack _stats;
+        private StatsComponent _attributes;
         private StatusComponent _status;
         private float _horizontalSpeed;
         private float _verticalVelocity;
@@ -77,6 +79,7 @@ namespace Emberdelve.Movement
                 if (cam != null) viewTransform = cam.transform;
             }
             _currentHeight = controller.height;
+            ConfigureMoveThreshold();
         }
 
         public void ApplyClass(CharacterClassData data, LayerMask ground)
@@ -88,17 +91,46 @@ namespace Emberdelve.Movement
             controller.radius = 0.34f;
             controller.center = new Vector3(0f, _currentHeight * 0.5f, 0f);
             groundedRadius = controller.radius;
+            ConfigureMoveThreshold();
+        }
+
+        /// <summary>
+        /// Unity discards a CharacterController.Move whose length is below minMoveDistance (default 0.001 m),
+        /// and its own CharacterController.minMoveDistance documentation recommends 0. At high frame rates a
+        /// class-speed step is already sub-millimetre (3.5 m/s * ~0.0008 s = 0.0028 m, and the Lerp below only
+        /// reaches that after several frames), so every discarded step is fed back through controller.velocity
+        /// as zero and the acceleration ramp restarts forever: the player crawls instead of reaching class speed.
+        ///
+        /// Only this threshold is changed here. skinWidth/radius/height/center/stepOffset/slopeLimit, the
+        /// collision masks, gravity and every class number stay as authored, and locomotion still goes
+        /// through controller.Move, so walls, ledges and the grounded check remain the authority.
+        /// Set from Awake as well as ApplyClass so a rig authored before this change (serialized default
+        /// 0.001) is corrected before its first Move, and re-asserted whenever class configuration is applied.
+        /// </summary>
+        private void ConfigureMoveThreshold()
+        {
+            if (controller == null) return;
+            controller.minMoveDistance = 0f;
         }
 
         /// <summary>Passive movement modifiers from the class kit. Null clears them.</summary>
         public void ApplyStatStack(CharacterStatStack stats) => _stats = stats;
 
         /// <summary>
-        /// The ground speed this character is allowed to produce for a given input state, with passives,
-        /// guard and any temporary slow already folded in.
+        /// The live six-attribute owner (Docs/Design/ATTRIBUTES.md). It supplies the DEX term of the
+        /// locomotion rule; the stack above still supplies the passive/gear terms. Null falls back to the
+        /// pre-amendment resolution, so a movement component that was never given a class still moves.
+        /// </summary>
+        public void ApplyAttributeStats(StatsComponent attributes) => _attributes = attributes;
+
+        /// <summary>
+        /// The ground speed this character is allowed to produce for a given input state, with the DEX
+        /// locomotion rule, passives, gear, guard and any temporary slow already folded in.
         ///
         /// Public and side-effect free on purpose: it is the number a future server compares a client's
         /// reported movement against, and it is the number tools can assert without needing input devices.
+        /// It is also the only place these speeds are resolved - Move() below clamps its request to this
+        /// result, and the attribute query it uses is the same call, so DEX is applied exactly once.
         /// </summary>
         public float ResolveGroundSpeed(bool sprintHeld, bool crouched)
         {
@@ -107,15 +139,15 @@ namespace Emberdelve.Movement
             float speed;
             if (crouched)
             {
-                speed = _stats != null ? _stats.Get(SkillStat.CrouchSpeed, _class.crouchSpeed) : _class.crouchSpeed;
+                speed = ResolveAuthoredSpeed(_class.crouchSpeed, SkillStat.CrouchSpeed);
             }
             else if (sprintHeld)
             {
-                speed = _stats != null ? _stats.Get(SkillStat.SprintSpeed, _class.sprintSpeed) : _class.sprintSpeed;
+                speed = ResolveAuthoredSpeed(_class.sprintSpeed, SkillStat.SprintSpeed);
             }
             else
             {
-                speed = _stats != null ? _stats.Get(SkillStat.MoveSpeed, _class.moveSpeed) : _class.moveSpeed;
+                speed = ResolveWalkSpeed();
             }
 
             if (_guardActive) speed *= _class.guardSpeedMultiplier;
@@ -123,6 +155,42 @@ namespace Emberdelve.Movement
             speed *= StatusSpeedMultiplier();
 
             return Mathf.Max(0f, speed);
+        }
+
+        /// <summary>
+        /// Docs/Design/ATTRIBUTES.md walking rule, in the amendment's exact order:
+        /// clamp(authoredMoveSpeed * max(0.5, 1 + 0.025 * DEX modifier) * passive/gear multiplier
+        ///       + passive/gear flat, 2, 8).
+        ///
+        /// The multiplier and the flat are read separately from the stack on purpose: CharacterStatStack.Get
+        /// computes (base + flat) * multiplier, which is NOT the amendment's order. Sprint and crouch keep
+        /// their own authored bases (see ResolveAuthoredSpeed); guard, aim, status, collision, acceleration
+        /// and the requested-speed cap below are unchanged.
+        /// </summary>
+        public float ResolveWalkSpeed()
+        {
+            if (_class == null) return 0f;
+
+            float multiplier = _stats != null ? _stats.Multiplier(SkillStat.MoveSpeed) : 1f;
+            float flat = _stats != null ? _stats.Flat(SkillStat.MoveSpeed) : 0f;
+
+            if (_attributes != null && _attributes.IsReady) return _attributes.ResolveMoveSpeed(multiplier, flat);
+            return _stats != null ? _stats.Get(SkillStat.MoveSpeed, _class.moveSpeed) : _class.moveSpeed;
+        }
+
+        /// <summary>
+        /// Sprint/crouch: the authored base for that mode, the same DEX factor, and that mode's own
+        /// passive/gear terms. The authored base is retained rather than clamped into the walking band.
+        /// </summary>
+        private float ResolveAuthoredSpeed(float authoredBaseSpeed, SkillStat stat)
+        {
+            if (_class == null) return 0f;
+
+            float multiplier = _stats != null ? _stats.Multiplier(stat) : 1f;
+            float flat = _stats != null ? _stats.Flat(stat) : 0f;
+
+            if (_attributes != null && _attributes.IsReady) return _attributes.ResolveAuthoredSpeed(authoredBaseSpeed, multiplier, flat);
+            return _stats != null ? _stats.Get(stat, authoredBaseSpeed) : authoredBaseSpeed;
         }
 
         private float StatusSpeedMultiplier()
@@ -248,6 +316,17 @@ namespace Emberdelve.Movement
                 _horizontalSpeed = targetSpeed;
             }
 
+            // Bound the *request* to the speed this character is currently allowed to produce.
+            // The Lerp above seeds from controller.velocity, and CharacterController.velocity also
+            // contains contact / depenetration displacement from the previous Move (wall, enemy body,
+            // chest collider). A contact spike therefore re-enters the requested speed and the
+            // speedChangeRate decay keeps asking for several times the legal class/passive speed for
+            // many frames (measured: intent 34.663 m/s against a resolved 5.824 m/s sprint cap).
+            // Only the requested magnitude is clamped, to [0, ResolveGroundSpeed target]. The physical
+            // response is left to the controller: no transform write, no velocity write, no collision
+            // mask change, so walls and contacts remain the authority on where the body ends up.
+            _horizontalSpeed = Mathf.Clamp(_horizontalSpeed, 0f, targetSpeed);
+
             IsMoving = targetSpeed > 0.05f;
             SpeedMultiplier = BaseMoveSpeed > 0f ? _horizontalSpeed / BaseMoveSpeed : 0f;
 
@@ -284,8 +363,11 @@ namespace Emberdelve.Movement
             }
         }
 
-        /// <summary>Unmodified class move speed, so speed ratios stay comparable across classes with passives.</summary>
-        private float BaseMoveSpeed => _stats != null ? _stats.Get(SkillStat.MoveSpeed, _class.moveSpeed) : _class.moveSpeed;
+        /// <summary>
+        /// The character's own resolved ordinary walking speed, so speed ratios (dash, sprint) stay
+        /// comparable across classes and gear instead of using a second, differently ordered formula.
+        /// </summary>
+        private float BaseMoveSpeed => ResolveWalkSpeed();
 
         /// <summary>
         /// Maps raw move input (x = strafe, y = forward) into a world-space direction relative to the

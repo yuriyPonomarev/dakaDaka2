@@ -1,0 +1,38 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 928691ac0ef825e4e92dd6b0a559ee49, type: 3}
+  m_Name: Loot_SupplyChest
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.LootTable
+  tableId: supply_chest
+  entries:
+  - item: {fileID: 11400000, guid: c6fda9df47fce4e4da019554ee948f03, type: 2}
+    minAmount: 1
+    maxAmount: 1
+    weight: 4
+    maxCopies: 1
+  - item: {fileID: 11400000, guid: a26d2da41162d874ab729a17979af148, type: 2}
+    minAmount: 2
+    maxAmount: 5
+    weight: 5
+    maxCopies: 2
+  - item: {fileID: 11400000, guid: d8388f34120eab247b8c3af01f264b41, type: 2}
+    minAmount: 1
+    maxAmount: 2
+    weight: 3
+    maxCopies: 1
+  - item: {fileID: 11400000, guid: c86df608f6b8d5640ae5efeb4ed45a73, type: 2}
+    minAmount: 1
+    maxAmount: 1
+    weight: 1
+    maxCopies: 1
+  maxRolls: 3
+  guaranteeFirstEntry: 1

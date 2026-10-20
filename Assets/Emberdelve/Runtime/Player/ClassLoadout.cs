@@ -69,19 +69,14 @@ namespace Emberdelve.Player
             rig.Look.ApplyClass(data);
             rig.Look.ConfigureSensitivity(config.mouseSensitivity);
 
-            int maxHealth = Mathf.Max(1, Mathf.RoundToInt(stats != null ? stats.Get(SkillStat.MaxHealth, data.maxHealth) : data.maxHealth));
-            rig.Health.Configure(maxHealth, data.healthRegenPerSecond, data.regenDelay);
-
-            if (rig.Mana != null)
-            {
-                int maxMana = Mathf.Max(1, Mathf.RoundToInt(stats != null ? stats.Get(SkillStat.MaxMana, data.maxMana) : data.maxMana));
-                float manaRegen = stats != null ? stats.Get(SkillStat.ManaRegen, data.manaRegenPerSecond) : data.manaRegenPerSecond;
-                rig.Mana.Configure(maxMana, manaRegen, data.manaRegenDelay);
-            }
+            // The rig owns the vitals rule: attribute-derived pristine bases plus the passive/gear stack on
+            // top, applied once, and filled once because applying a class is a run start and not a gear
+            // change. Equipment later takes the clamp-only path instead of this one.
+            rig.InitializeVitals();
 
             if (rig.Inventory != null)
             {
-                rig.Inventory.Configure(config.inventoryCapacity);
+                rig.Inventory.ConfigureGrid(config.inventoryGridWidth, config.inventoryGridHeight);
                 rig.Inventory.GiveStartingItems(data.startingItems);
             }
 
@@ -122,6 +117,43 @@ namespace Emberdelve.Player
 
             Equip(slot);
             return true;
+        }
+
+        /// <summary>
+        /// Puts a different weapon into a loadout hand, which is what equipping a weapon item from the
+        /// inventory does. Ammunition follows the weapon rather than the hand, so a bow that already has
+        /// bolts recorded keeps them and a brand new one is seeded from the class's numbers for that slot.
+        /// The previously held weapon is returned to the caller so unequipping can put it back.
+        /// </summary>
+        public WeaponData TryReplaceWeaponSlot(int slot, WeaponData weapon)
+        {
+            if (slot < 0 || slot >= SlotCapacity) return null;
+            if (weapon == null) return null;
+
+            WeaponData previous = _slots[slot];
+            if (previous == weapon) return null;
+
+            if (previous != null && previous.IsRanged
+                && rangedCombat != null && rangedCombat.enabled
+                && rangedCombat.Weapon == previous)
+            {
+                StoreAmmo(previous);
+            }
+
+            _slots[slot] = weapon;
+
+            if (weapon.IsRanged && FindAmmo(weapon) == null)
+            {
+                int reserve = slot == 0 ? (_appliedClass != null ? _appliedClass.startingReserveAmmo : 0)
+                                        : (_appliedClass != null ? _appliedClass.secondaryStartingReserveAmmo : 0);
+                int maxReserve = slot == 0 ? (_appliedClass != null ? _appliedClass.maxReserveAmmo : 0)
+                                           : (_appliedClass != null ? _appliedClass.secondaryMaxReserveAmmo : 0);
+                SeedAmmo(slot, reserve, maxReserve);
+            }
+
+            if (slot == _activeSlot) Equip(slot);
+
+            return previous;
         }
 
         private void Equip(int slot)

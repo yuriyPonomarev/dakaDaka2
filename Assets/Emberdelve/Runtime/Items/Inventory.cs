@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using Emberdelve.Core;
@@ -7,31 +8,132 @@ using Emberdelve.Player;
 
 namespace Emberdelve.Items
 {
+    /// <summary>
+    /// One stack of items as it currently sits in the grid: what it is, how many, which cell its top-left
+    /// corner occupies, and the shape it blocks out. The shape comes from the item asset, so a two-by-three
+    /// sword and a single-cell coin are stored by the same rule.
+    ///
+    /// U2B4: a gear stack also reports the one ItemInstance it carries, so an observer can tell two copies of
+    /// one definition apart. A carried stack (currency, consumables, relics) keeps the definition-only shape in
+    /// this slice and reports a null Instance.
+    /// </summary>
     public readonly struct InventorySlot
     {
         public readonly ItemData Item;
+        public readonly ItemInstance Instance;
         public readonly int Count;
-        public InventorySlot(ItemData item, int count) { Item = item; Count = count; }
+        public readonly Vector2Int Origin;
+        public readonly Vector2Int Size;
+        public readonly int Index;
+
+        public InventorySlot(ItemData item, int count)
+        {
+            Item = item;
+            Instance = null;
+            Count = count;
+            Origin = Vector2Int.zero;
+            Size = Vector2Int.one;
+            Index = -1;
+        }
+
+        public InventorySlot(ItemData item, int count, Vector2Int origin, Vector2Int size, int index)
+        {
+            Item = item;
+            Instance = null;
+            Count = count;
+            Origin = origin;
+            Size = size;
+            Index = index;
+        }
+
+        public InventorySlot(ItemData item, ItemInstance instance, int count, Vector2Int origin,
+            Vector2Int size, int index)
+        {
+            Item = item;
+            Instance = instance;
+            Count = count;
+            Origin = origin;
+            Size = size;
+            Index = index;
+        }
+
+        /// <summary>True when this stack is an actual item instance rather than a definition-only carried stack.</summary>
+        public bool IsInstanceBacked => Instance != null;
+
+        /// <summary>Canonical Guid "N" text of the identity this stack carries, empty when it carries none.</summary>
+        public string UidText => Instance != null ? Instance.UidText : string.Empty;
     }
 
     /// <summary>
-    /// Stack-based carrying bag for the local player. It stores what the player holds; it never
-    /// decides what a pickup is worth or whether a run succeeds (RunDirector does that from the
-    /// facts raised through GameEvents). Consumables apply their effect here because that is the
-    /// only place that knows both the item data and the owner's combat components.
+    /// Stack-based carrying bag for the local player, stored as a real width x height cell grid.
+    ///
+    /// It stores what the player holds; it never decides what a pickup is worth or whether a run succeeds
+    /// (RunDirector does that from the facts raised through GameEvents). Consumables apply their effect here
+    /// because that is the only place that knows both the item data and the owner's combat components.
+    ///
+    /// Placement is validated, not assumed: an item only enters the grid if its footprint fits, an existing
+    /// stack only takes units of the same item up to its cap, and a move is refused when the destination
+    /// overlaps something else. A partial add is a real outcome, so a nearly full bag leaves loot behind.
+    ///
+    /// U2B4: worn or held gear is stored as an actual <see cref="ItemInstance"/>, one identity per occupied
+    /// gear stack. A legacy add of an equippable definition mints exactly one explicit Common instance for
+    /// each gear object it accepts (quantity 1 each) through this bag's own local issuer and catalog boundary -
+    /// a local trusted boundary for one process, not proof of server minting. <see cref="TryAddInstance"/> is
+    /// the path for an instance that already exists and keeps its uid, rarity and rolls. Carried stacks
+    /// (currency, consumables, relics) keep the definition-only behavior in this slice.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class Inventory : MonoBehaviour
     {
-        [SerializeField] private int capacity = 8;
+        [SerializeField] private int gridWidth = 10;
+        [SerializeField] private int gridHeight = 4;
 
-        private readonly List<InventorySlot> _slots = new List<InventorySlot>();
+        /// <summary>
+        /// One cell-anchored stack. Definition-facing reads go through <see cref="Definition"/>, which prefers
+        /// the instance's own definition, so a gear stack can never wear a definition its identity does not have.
+        /// </summary>
+        private sealed class Stack
+        {
+            public ItemData Item;
+            public ItemInstance Instance;
+            public int Count;
+            public Vector2Int Origin;
+
+            public ItemData Definition => Instance != null ? Instance.Definition : Item;
+        }
+
+        /// <summary>
+        /// The bag's own local catalog: one single-entry trusted catalog per definition object it has been asked
+        /// to carry, so the accepted trusted-definition gate always sees the very object being minted against.
+        /// </summary>
+        private sealed class LocalCatalog
+        {
+            public ItemData Definition;
+            public ItemInstanceAuthority Authority;
+        }
+
+        private readonly List<Stack> _stacks = new List<Stack>();
+        private readonly List<LocalCatalog> _localCatalogs = new List<LocalCatalog>();
+        private readonly List<InventorySlot> _views = new List<InventorySlot>();
+        private int[] _cells = new int[40];
+
         private PlayerRig _rig;
         private RangedCombat _rangedCombat;
 
-        public int Capacity => capacity;
-        public int UsedSlots => _slots.Count;
-        public IReadOnlyList<InventorySlot> Slots => _slots;
+        // Local identity plumbing (U2B4). A local trusted issuer for one process, not a network authority.
+        private ItemIdentityIssuer _issuer;
+        private Equipment _equipment;
+        private string _lastCatalogFailure;
+
+        public int GridWidth => gridWidth;
+        public int GridHeight => gridHeight;
+
+        /// <summary>Cells the grid has, which is what capacity means once items have a shape.</summary>
+        public int Capacity => gridWidth * gridHeight;
+        public int UsedSlots => _stacks.Count;
+        public int UsedCells { get; private set; }
+        public int FreeCells => Mathf.Max(0, Capacity - UsedCells);
+        public IReadOnlyList<InventorySlot> Slots => _views;
         public int TotalUnits { get; private set; }
         public int CarriedValue { get; private set; }
 
@@ -46,17 +148,67 @@ namespace Emberdelve.Items
         {
             _rig = GetComponent<PlayerRig>();
             _rangedCombat = GetComponent<RangedCombat>();
+            EnsureGrid();
         }
 
         public void Initialize(PlayerRig rig)
         {
             _rig = rig;
             _rangedCombat = GetComponent<RangedCombat>();
+            EnsureGrid();
         }
 
+        /// <summary>Kept for callers that only know a bag size: it becomes a grid of that many cells.</summary>
         public void Configure(int newCapacity)
         {
-            capacity = Mathf.Max(1, newCapacity);
+            int cells = Mathf.Max(1, newCapacity);
+            int width = Mathf.Clamp(cells, 1, 12);
+            int height = Mathf.Max(1, Mathf.CeilToInt(cells / (float)width));
+            ConfigureGrid(width, height);
+        }
+
+        public void ConfigureGrid(int width, int height)
+        {
+            int newWidth = Mathf.Max(1, width);
+            int newHeight = Mathf.Max(1, height);
+
+            if (newWidth == gridWidth && newHeight == gridHeight)
+            {
+                EnsureGrid();
+                return;
+            }
+
+            gridWidth = newWidth;
+            gridHeight = newHeight;
+
+            // Reseating the grid re-places everything the player is carrying, and an item that no longer
+            // fits is left behind rather than silently deleted.
+            List<Stack> carried = new List<Stack>(_stacks);
+            _stacks.Clear();
+            EnsureGrid();
+            Recompute();
+
+            for (int i = 0; i < carried.Count; i++)
+            {
+                Stack stack = carried[i];
+                ItemData definition = stack.Definition;
+
+                // Re-seating is a move, not a re-issue: the same instance object is placed in the new grid, so a
+                // resized bag never mints a second identity or drops the rolls one gear stack already had.
+                Vector2Int origin = FindFreeOrigin(definition.EffectiveFootprint);
+                if (origin.x < 0)
+                {
+                    TotalUnits = Mathf.Max(0, TotalUnits - stack.Count);
+                    CarriedValue = Mathf.Max(0, CarriedValue - definition.value * stack.Count);
+                    GameEvents.RaiseToast($"Bag too small, left {definition.displayName} behind");
+                    continue;
+                }
+
+                AddStack(definition, stack.Instance, stack.Count, origin);
+            }
+
+            Recompute();
+            GameEvents.RaiseInventoryChanged();
         }
 
         public void GiveStartingItems(ItemData[] items)
@@ -78,34 +230,111 @@ namespace Emberdelve.Items
             }
         }
 
+        // ------------------------------------------------------------ adding
+
         public bool TryAdd(ItemData item, int amount = 1)
         {
-            if (item == null || amount <= 0) return false;
+            return TryAdd(item, amount, out _);
+        }
+
+        /// <summary>
+        /// Adds what fits and answers the yes/no question only: true when every unit landed.
+        /// A caller that has to keep a source in step with what it handed over needs the counted form
+        /// <see cref="TryAdd(ItemData,int,out string,out int)"/>, because a partial add is a real outcome and a
+        /// bool cannot say how many units actually committed.
+        /// </summary>
+        public bool TryAdd(ItemData item, int amount, out string reason)
+        {
+            return TryAdd(item, amount, out reason, out _);
+        }
+
+        /// <summary>
+        /// Adds what fits: units go onto matching stacks first, then into new shapes anywhere a hole exists.
+        /// Returns true only when every unit landed, and reports why the rest could not.
+        ///
+        /// <paramref name="accepted"/> is the exact number of units this call committed into the grid, which is
+        /// the same number this method added to TotalUnits, CarriedValue, LifetimeCollected and RecoveredValue,
+        /// and is therefore the only number a source container may remove from what it offered. It is 0 when
+        /// nothing was committed (refused call, no room at all, or a refused gear mint that rolled the whole
+        /// add back out) and equals <paramref name="amount"/> exactly when the return value is true.
+        ///
+        /// An equippable definition never joins an existing stack: each gear object this call accepts is placed
+        /// as its own stack with its own freshly minted Common instance. If that identity cannot be minted the
+        /// whole add is refused and every stack this call placed is taken back out.
+        /// </summary>
+        public bool TryAdd(ItemData item, int amount, out string reason, out int accepted)
+        {
+            reason = null;
+            accepted = 0;
+
+            if (item == null)
+            {
+                reason = "no item to add";
+                return false;
+            }
+
+            if (amount <= 0)
+            {
+                reason = "nothing to add";
+                return false;
+            }
+
+            EnsureGrid();
 
             int remaining = amount;
-            int stackLimit = Mathf.Max(1, item.maxStack);
+            int stackLimit = item.StackLimitForFootprint;
 
-            for (int i = 0; i < _slots.Count && remaining > 0; i++)
+            for (int i = 0; i < _stacks.Count && remaining > 0; i++)
             {
-                if (_slots[i].Item != item) continue;
-                int space = stackLimit - _slots[i].Count;
+                Stack stack = _stacks[i];
+                if (stack.Definition != item) continue;
+                // Gear stacks are separate items with their own identity: they never take units of a lookalike.
+                if (stack.Instance != null) continue;
+
+                int space = stackLimit - stack.Count;
                 if (space <= 0) continue;
 
                 int move = Mathf.Min(space, remaining);
-                _slots[i] = new InventorySlot(item, _slots[i].Count + move);
+                stack.Count += move;
                 remaining -= move;
             }
 
-            while (remaining > 0 && _slots.Count < capacity)
+            int createdStacks = 0;
+
+            while (remaining > 0)
             {
+                Vector2Int origin = FindFreeOrigin(item.EffectiveFootprint);
+                if (origin.x < 0) break;
+
                 int move = Mathf.Min(stackLimit, remaining);
-                _slots.Add(new InventorySlot(item, move));
+
+                // Worn gear is one item, so every gear object this call actually places is given its identity
+                // here: exactly one explicit Common instance per accepted gear stack, quantity 1 each.
+                ItemInstance instance = null;
+                if (item.IsEquippable)
+                {
+                    if (!TryMintCommonInstance(item, out instance, out string mintReason))
+                    {
+                        reason = $"could not give {item.displayName} an item identity: {mintReason}";
+                        RollbackCreatedStacks(createdStacks);
+                        GameEvents.RaiseToast(reason);
+                        return false;
+                    }
+
+                    move = 1;
+                }
+
+                AddStack(item, instance, move, origin);
+                createdStacks++;
                 remaining -= move;
             }
 
-            int accepted = amount - remaining;
+            accepted = amount - remaining;
+            Recompute();
+
             if (accepted <= 0)
             {
+                reason = $"no room for {item.displayName} ({item.EffectiveFootprint.x}x{item.EffectiveFootprint.y} cells needed, {FreeCells} free)";
                 GameEvents.RaiseToast("Bag is full");
                 return false;
             }
@@ -122,16 +351,817 @@ namespace Emberdelve.Items
 
             GameEvents.RaiseInventoryChanged();
 
-            if (remaining > 0) GameEvents.RaiseToast($"Bag full, left {item.displayName} behind");
-            return remaining <= 0;
+            if (remaining > 0)
+            {
+                reason = $"bag full, left {remaining} {item.displayName} behind";
+                GameEvents.RaiseToast(reason);
+                return false;
+            }
+
+            return true;
         }
+
+        /// <summary>Places an item at an exact cell, which is what a click in the inventory screen does.</summary>
+        public bool TryAddAt(ItemData item, int amount, Vector2Int origin, out string reason)
+        {
+            reason = null;
+            if (item == null || amount <= 0)
+            {
+                reason = "nothing to place";
+                return false;
+            }
+
+            EnsureGrid();
+
+            Vector2Int size = item.EffectiveFootprint;
+            if (!CanPlace(origin, size, -1))
+            {
+                reason = $"no room for {item.displayName} at cell {origin}";
+                return false;
+            }
+
+            int stackLimit = item.StackLimitForFootprint;
+            int placed = 0;
+
+            if (item.CanStack)
+            {
+                int existing = IndexAtCell(origin);
+                if (existing >= 0 && _stacks[existing].Definition == item && _stacks[existing].Instance == null)
+                {
+                    int space = stackLimit - _stacks[existing].Count;
+                    int move = Mathf.Min(space, amount);
+                    if (move > 0)
+                    {
+                        _stacks[existing].Count += move;
+                        placed += move;
+                    }
+                }
+            }
+
+            int createdStacks = 0;
+
+            while (placed < amount)
+            {
+                Vector2Int hole = placed == 0 ? origin : FindFreeOrigin(size);
+                if (hole.x < 0) break;
+                if (placed > 0 && !CanPlace(hole, size, -1)) break;
+
+                int move = item.CanStack ? Mathf.Min(stackLimit, amount - placed) : 1;
+
+                ItemInstance instance = null;
+                if (item.IsEquippable)
+                {
+                    if (!TryMintCommonInstance(item, out instance, out string mintReason))
+                    {
+                        reason = $"could not give {item.displayName} an item identity: {mintReason}";
+                        RollbackCreatedStacks(createdStacks);
+                        return false;
+                    }
+
+                    move = 1;
+                }
+
+                AddStack(item, instance, move, hole);
+                createdStacks++;
+                placed += move;
+
+                if (!item.CanStack) break;
+            }
+
+            Recompute();
+
+            if (placed <= 0)
+            {
+                reason = $"could not place {item.displayName}";
+                return false;
+            }
+
+            TotalUnits += placed;
+            CarriedValue += item.value * placed;
+
+            if (!_givingStartingKit)
+            {
+                LifetimeCollected += placed;
+                RecoveredValue += item.value * placed;
+                GameEvents.RaiseItemCollected(item, LifetimeCollected);
+            }
+
+            GameEvents.RaiseInventoryChanged();
+
+            if (placed < amount)
+            {
+                reason = $"only {placed} of {amount} {item.displayName} fit";
+                return false;
+            }
+
+            return true;
+        }
+
+        // ------------------------------------------------------- item instances (U2B4)
+
+        /// <summary>How many UIDs this bag's local issuer has minted. Minting is not free and not invisible.</summary>
+        public int MintedInstanceCount => _issuer != null ? _issuer.MintedCount : 0;
+
+        /// <summary>The instance one bag stack carries, or null when it is a definition-only carried stack.</summary>
+        public ItemInstance InstanceAt(int index)
+        {
+            if (index < 0 || index >= _stacks.Count) return null;
+            return _stacks[index].Instance;
+        }
+
+        /// <summary>The stack that carries this exact identity, or -1 when this bag carries no such item.</summary>
+        public int IndexOfInstance(Guid uid)
+        {
+            if (uid == Guid.Empty) return -1;
+            for (int i = 0; i < _stacks.Count; i++)
+            {
+                ItemInstance instance = _stacks[i].Instance;
+                if (instance != null && instance.Uid == uid) return i;
+            }
+            return -1;
+        }
+
+        /// <summary>True when one of this bag's stacks already carries this identity.</summary>
+        public bool HoldsInstanceUid(Guid uid) => IndexOfInstance(uid) >= 0;
+
+        /// <summary>
+        /// Places an instance that already exists - the path a roller (U2B3) or a future server hands a rolled
+        /// item to the bag. The instance itself is what enters the grid: the same UID, the same rarity and the
+        /// exact accepted rolls, with no mint, no reroll and no copy. A refusal touches nothing.
+        ///
+        /// Rolled non-equipment is refused rather than quietly flattened into a definition-only stack, because
+        /// that would throw the identity and the rolls away. Currency and consumables keep the legacy
+        /// <see cref="TryAdd"/> path in this slice.
+        ///
+        /// One identity may be carried by this bag exactly once: a UID already in the bag, or already worn by
+        /// this player's equipment, is refused. That is this process's own ownership rule, not proof of a
+        /// cross-player server ownership decision (U4A).
+        /// </summary>
+        public bool TryAddInstance(ItemInstance instance, out string reason)
+        {
+            return TryAddInstanceInternal(instance, new Vector2Int(-1, -1), false, out reason);
+        }
+
+        /// <summary>The exact-cell form of <see cref="TryAddInstance"/>, which is what a click in the grid does.</summary>
+        public bool TryAddInstanceAt(ItemInstance instance, Vector2Int origin, out string reason)
+        {
+            return TryAddInstanceInternal(instance, origin, true, out reason);
+        }
+
+        private bool TryAddInstanceInternal(ItemInstance instance, Vector2Int origin, bool exactOrigin,
+            out string reason)
+        {
+            reason = null;
+
+            if (instance == null)
+            {
+                reason = "no item instance to add";
+                return false;
+            }
+
+            ItemData definition = instance.Definition;
+
+            if (!instance.IsEquippable)
+            {
+                reason = $"{definition.displayName} [{instance.UidText}] is carried rather than worn: this slice " +
+                         "keeps currency and consumables on the definition path, so placing it as an instance " +
+                         "would discard its rarity and rolls";
+                return false;
+            }
+
+            if (instance.Quantity != 1)
+            {
+                reason = $"{definition.displayName} [{instance.UidText}] is worn gear, so one instance is exactly " +
+                         $"one unit (got {instance.Quantity})";
+                return false;
+            }
+
+            EnsureGrid();
+
+            if (HoldsInstanceUid(instance.Uid))
+            {
+                reason = $"this bag already carries {definition.displayName} [{instance.UidText}]: one uid is one item";
+                return false;
+            }
+
+            Equipment partner = EquipmentPartner();
+            if (partner != null && partner.HoldsUid(instance.Uid))
+            {
+                reason = $"{definition.displayName} [{instance.UidText}] is already worn by this player: " +
+                         "one uid is one item";
+                return false;
+            }
+
+            Vector2Int footprint = definition.EffectiveFootprint;
+            Vector2Int landed = exactOrigin ? origin : FindFreeOrigin(footprint);
+
+            if (landed.x < 0 || (exactOrigin && !CanPlace(landed, footprint, -1)))
+            {
+                reason = exactOrigin
+                    ? $"no room for {definition.displayName} [{instance.UidText}] at cell {origin}"
+                    : $"no {footprint.x}x{footprint.y} hole for {definition.displayName} [{instance.UidText}] " +
+                      $"({FreeCells} free cells)";
+                return false;
+            }
+
+            AddStack(definition, instance, 1, landed);
+            Recompute();
+
+            TotalUnits += 1;
+            CarriedValue += definition.value;
+
+            // An instance arriving from outside is loot, exactly like the definition path: the starting kit is
+            // still not loot, and an internal transfer never reaches this method at all.
+            if (!_givingStartingKit)
+            {
+                LifetimeCollected += 1;
+                RecoveredValue += definition.value;
+                GameEvents.RaiseItemCollected(definition, LifetimeCollected);
+            }
+
+            GameEvents.RaiseInventoryChanged();
+            return true;
+        }
+
+        /// <summary>
+        /// Mints the one Common instance a legacy gear add needs. The mint goes through the accepted issuer and
+        /// catalog boundary (<see cref="ItemIdentityIssuer.TryCreateInstance"/>, which validates everything and
+        /// mints only after that), so a refused definition mints nothing. A mint failure is a refusal of the
+        /// whole add and rolls back every stack this call placed.
+        /// </summary>
+        private bool TryMintCommonInstance(ItemData definition, out ItemInstance instance, out string reason)
+        {
+            instance = null;
+
+            if (definition == null)
+            {
+                reason = "no item definition to give an identity";
+                return false;
+            }
+
+            if (_issuer == null) _issuer = ItemIdentityIssuer.CreateLocalTrusted();
+
+            ItemInstanceAuthority authority = LocalCatalogFor(definition);
+            if (authority == null)
+            {
+                reason = _lastCatalogFailure ?? "no local item catalog could be built for this definition";
+                return false;
+            }
+
+            return _issuer.TryCreateInstance(definition, 1, AffixRarity.Common, null, authority,
+                out instance, out reason);
+        }
+
+        /// <summary>
+        /// The catalog this bag trusts is the definition object it was handed, indexed on its own so the
+        /// accepted gate that demands "the catalog's own object for that id" is satisfied for the exact object
+        /// being minted. Two distinct objects that claim one item id (an ephemeral test clone, a probe plate
+        /// copied from a shipped asset) therefore each get their own catalog instead of making the whole
+        /// lookup ambiguous. This is a local carrying boundary, not an item database and not a network authority.
+        /// </summary>
+        private ItemInstanceAuthority LocalCatalogFor(ItemData definition)
+        {
+            for (int i = 0; i < _localCatalogs.Count; i++)
+            {
+                if (ReferenceEquals(_localCatalogs[i].Definition, definition)) return _localCatalogs[i].Authority;
+            }
+
+            ItemInstanceAuthority authority;
+            if (!ItemInstanceAuthority.TryCreate(new ItemData[] { definition }, new AffixDefinition[0],
+                out authority, out string reason))
+            {
+                _lastCatalogFailure = reason;
+                return null;
+            }
+
+            _localCatalogs.Add(new LocalCatalog { Definition = definition, Authority = authority });
+            return authority;
+        }
+
+        /// <summary>
+        /// The equipment that shares this identity boundary, when there is one. A bag on its own (a geometry
+        /// probe, a container fixture) has none, and that is not an error.
+        /// </summary>
+        private Equipment EquipmentPartner()
+        {
+            if (_equipment != null) return _equipment;
+            if (_rig != null) _equipment = _rig.Equipment;
+            if (_equipment == null) _equipment = GetComponent<Equipment>();
+            return _equipment;
+        }
+
+        /// <summary>Takes back the stacks one add call appended, so a refusal mid-loop leaves nothing behind.</summary>
+        private void RollbackCreatedStacks(int createdStacks)
+        {
+            if (createdStacks <= 0) return;
+            _stacks.RemoveRange(_stacks.Count - createdStacks, createdStacks);
+            Recompute();
+        }
+
+        // ------------------------------------------------------------ moving
+
+        /// <summary>True when a size x size block fits entirely inside the grid without covering another item.</summary>
+        public bool CanPlace(Vector2Int origin, Vector2Int size, int ignoreIndex = -1, int alsoIgnore = -1)
+        {
+            EnsureGrid();
+
+            int width = Mathf.Max(1, size.x);
+            int height = Mathf.Max(1, size.y);
+
+            if (origin.x < 0 || origin.y < 0) return false;
+            if (origin.x + width > gridWidth || origin.y + height > gridHeight) return false;
+
+            for (int y = origin.y; y < origin.y + height; y++)
+            {
+                for (int x = origin.x; x < origin.x + width; x++)
+                {
+                    int occupant = _cells[y * gridWidth + x];
+                    if (occupant < 0) continue;
+                    if (occupant == ignoreIndex || occupant == alsoIgnore) continue;
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>First free hole that can hold the shape, scanning row by row. (-1,-1) when there is none.</summary>
+        public Vector2Int FindFreeOrigin(Vector2Int size)
+        {
+            return FindFreeOriginIgnoring(size, -1);
+        }
+
+        /// <summary>
+        /// Same scan with one stack treated as absent. This is what lets a replacement be planned: the hole
+        /// the incoming unit is about to vacate is a legal destination for the item leaving the slot.
+        /// </summary>
+        private Vector2Int FindFreeOriginIgnoring(Vector2Int size, int ignoreIndex)
+        {
+            EnsureGrid();
+
+            int width = Mathf.Max(1, size.x);
+            int height = Mathf.Max(1, size.y);
+
+            for (int y = 0; y + height <= gridHeight; y++)
+            {
+                for (int x = 0; x + width <= gridWidth; x++)
+                {
+                    if (CanPlace(new Vector2Int(x, y), size, ignoreIndex)) return new Vector2Int(x, y);
+                }
+            }
+
+            return new Vector2Int(-1, -1);
+        }
+
+        /// <summary>Moves an existing stack to a new cell. The stack keeps its count and its shape.</summary>
+        public bool TryMove(int index, Vector2Int origin, out string reason)
+        {
+            reason = null;
+            EnsureGrid();
+
+            if (index < 0 || index >= _stacks.Count)
+            {
+                reason = "no item there";
+                return false;
+            }
+
+            Stack stack = _stacks[index];
+            Vector2Int size = stack.Definition.EffectiveFootprint;
+
+            if (!CanPlace(origin, size, index))
+            {
+                reason = $"{stack.Definition.displayName} does not fit at cell {origin}";
+                return false;
+            }
+
+            stack.Origin = origin;
+            Recompute();
+            GameEvents.RaiseInventoryChanged();
+            return true;
+        }
+
+        /// <summary>Swaps two stacks by exchanging their cells, which is what dragging one item onto another does.</summary>
+        public bool TrySwap(int a, int b, out string reason)
+        {
+            reason = null;
+            EnsureGrid();
+
+            if (a < 0 || a >= _stacks.Count || b < 0 || b >= _stacks.Count || a == b)
+            {
+                reason = "cannot swap those slots";
+                return false;
+            }
+
+            Stack first = _stacks[a];
+            Stack second = _stacks[b];
+
+            Vector2Int firstOrigin = first.Origin;
+            Vector2Int secondOrigin = second.Origin;
+
+            // The two shapes each item would wear after the exchange, measured the same way the rest of the
+            // bag measures a footprint and never smaller than a single cell.
+            Vector2Int declaredFirstShape = first.Definition != null ? first.Definition.EffectiveFootprint : Vector2Int.one;
+            Vector2Int declaredSecondShape = second.Definition != null ? second.Definition.EffectiveFootprint : Vector2Int.one;
+            Vector2Int firstShape = new Vector2Int(Mathf.Max(1, declaredFirstShape.x), Mathf.Max(1, declaredFirstShape.y));
+            Vector2Int secondShape = new Vector2Int(Mathf.Max(1, declaredSecondShape.x), Mathf.Max(1, declaredSecondShape.y));
+
+            // Destination rectangles, computed before anything is touched: the first item lands on the second
+            // one's cell with its own shape, the second lands on the first one's cell with its own shape.
+            // Upper edges are exclusive, so footprints that merely share a border are legal neighbours.
+            int firstDestMinX = secondOrigin.x;
+            int firstDestMaxX = secondOrigin.x + firstShape.x;
+            int firstDestMinY = secondOrigin.y;
+            int firstDestMaxY = secondOrigin.y + firstShape.y;
+            int secondDestMinX = firstOrigin.x;
+            int secondDestMaxX = firstOrigin.x + secondShape.x;
+            int secondDestMinY = firstOrigin.y;
+            int secondDestMaxY = firstOrigin.y + secondShape.y;
+
+            // Both shapes have to fit in the other's hole, so a long sword cannot trade places with a coin
+            // that only covers one of its cells.
+            // A swap lifts both items before it checks, so each shape is measured against the other's hole
+            // with both stacks treated as absent. Without that, two items of the same shape could never
+            // trade places because each one's hole is still recorded as occupied by the other.
+            // Lifting both items is only half the question: the two holes are still checked against every
+            // third stack in the bag, and the two destination rectangles are checked against each other.
+            // Two unequal shapes can each fit in the other's hole on their own and still cover the same
+            // cell once both are put down, which is an overlap the grid may never hold.
+            if (!CanPlace(secondOrigin, firstShape, a, b) ||
+                !CanPlace(firstOrigin, secondShape, b, a))
+            {
+                reason = $"{first.Definition.displayName} and {second.Definition.displayName} cannot trade places";
+                return false;
+            }
+
+            bool destinationsCollide = firstDestMinX < secondDestMaxX && secondDestMinX < firstDestMaxX &&
+                                       firstDestMinY < secondDestMaxY && secondDestMinY < firstDestMaxY;
+
+            if (destinationsCollide)
+            {
+                string firstName = first.Item != null ? first.Item.displayName : "item";
+                string secondName = second.Item != null ? second.Item.displayName : "item";
+                int overlapX = Mathf.Min(firstDestMaxX, secondDestMaxX) - Mathf.Max(firstDestMinX, secondDestMinX);
+                int overlapY = Mathf.Min(firstDestMaxY, secondDestMaxY) - Mathf.Max(firstDestMinY, secondDestMinY);
+                reason = $"{firstName} at {secondOrigin} ({firstShape.x}x{firstShape.y}) and {secondName} at {firstOrigin} " +
+                         $"({secondShape.x}x{secondShape.y}) would cover the same {overlapX}x{overlapY} cells";
+                return false;
+            }
+
+            first.Origin = secondOrigin;
+            second.Origin = firstOrigin;
+            Recompute();
+            GameEvents.RaiseInventoryChanged();
+            return true;
+        }
+
+        /// <summary>
+        /// Combines two stacks of the same item: units move out of <paramref name="sourceIndex"/> only into the
+        /// headroom <paramref name="targetIndex"/> actually has, whatever will not fit stays at the source, and
+        /// only a source that runs out is removed. A stack that survives keeps its own cell.
+        ///
+        /// This is rearranging what the player already owns. Nothing enters or leaves the bag, so TotalUnits and
+        /// CarriedValue are untouched, LifetimeCollected and RecoveredValue are untouched, no ItemCollected is
+        /// raised, and the one notification an inventory change owes its observers is raised exactly once.
+        /// A refusal touches nothing and notifies nothing.
+        /// </summary>
+        public bool TryMergeStacks(int sourceIndex, int targetIndex, out string reason)
+        {
+            reason = null;
+            EnsureGrid();
+
+            if (sourceIndex < 0 || sourceIndex >= _stacks.Count || targetIndex < 0 || targetIndex >= _stacks.Count)
+            {
+                reason = "no item in those slots";
+                return false;
+            }
+
+            if (sourceIndex == targetIndex)
+            {
+                reason = "that is already one stack";
+                return false;
+            }
+
+            Stack source = _stacks[sourceIndex];
+            Stack target = _stacks[targetIndex];
+
+            if (source == null || source.Definition == null || source.Count <= 0)
+            {
+                reason = "nothing to combine";
+                return false;
+            }
+
+            if (target == null || target.Definition == null || target.Count <= 0)
+            {
+                reason = "no item to combine into";
+                return false;
+            }
+
+            // Gear never merges by definition. Two pieces that share a base archetype are two items with two
+            // identities (and, once rolled, two different sets of rolls); combining them would either discard
+            // one identity or invent a second one, and minting is not this helper's job.
+            if (source.Instance != null || target.Instance != null)
+            {
+                reason = $"{DescribeStack(source)} and {DescribeStack(target)} are separate items: " +
+                         "worn or held gear is never merged into another stack";
+                return false;
+            }
+
+            if (source.Definition != target.Definition)
+            {
+                reason = $"{source.Definition.displayName} and {target.Definition.displayName} are not the same item";
+                return false;
+            }
+
+            int limit = target.Definition.StackLimitForFootprint;
+            int space = limit - target.Count;
+
+            if (space <= 0)
+            {
+                reason = $"{target.Definition.displayName} stack is full ({target.Count}/{limit})";
+                return false;
+            }
+
+            int moved = Mathf.Min(space, source.Count);
+            target.Count += moved;
+            source.Count -= moved;
+
+            // Only the stack that ran out is taken off the grid. The remainder keeps its own cell, so a
+            // partial combine neither duplicates the item nor frees a cell something else could claim.
+            if (source.Count <= 0) _stacks.RemoveAt(sourceIndex);
+
+            Recompute();
+            GameEvents.RaiseInventoryChanged();
+            return true;
+        }
+
+        // ---------------------------------------------------- equipment transfers
+
+        /// <summary>
+        /// The bag half of an equipment change, planned before any of it is committed.
+        ///
+        /// One unit leaves <paramref name="bagIndex"/>, and the stack there is checked against the exact
+        /// instance the equipment side resolved: the identity is what is transferred, so two stacks of one
+        /// definition can never be confused for each other. When the player is replacing something the item
+        /// they are taking off lands in a hole that only exists because the incoming unit is about to leave.
+        /// The hole is found first: if there is none the bag is untouched and the caller must not change its
+        /// side either. A stack that survives the removal keeps every cell it already had, so only a stack of
+        /// one unit opens a hole.
+        ///
+        /// The outgoing instance is the one the equipment slot is releasing. Its ownership moves with it: the
+        /// same object is placed in the bag in the same commit that hands the slot to the incoming instance,
+        /// so no moment exists where the item is in two places or in none. No second identity is minted and
+        /// nothing is rerolled on the way.
+        ///
+        /// Nothing here is newly collected loot: the collection counters stay where they were, no
+        /// ItemCollected event is raised, and no notification at all is raised.
+        ///
+        /// Internal and deliberately silent. The bag half is only half of an equipment change, and an observer
+        /// notified here would see the incoming item gone from the bag while the old gear is still worn and
+        /// the stat source is still stale. Equipment therefore finishes its own slot/hand/stat commit first
+        /// and raises the single InventoryChanged notification once both halves exist. A refusal touches
+        /// nothing and notifies nothing.
+        /// </summary>
+        internal bool TryEquipTransfer(int bagIndex, ItemInstance expectedIncoming, ItemInstance outgoing,
+            out string reason)
+        {
+            reason = null;
+
+            EnsureGrid();
+
+            if (bagIndex < 0 || bagIndex >= _stacks.Count)
+            {
+                reason = "no item in that bag slot";
+                return false;
+            }
+
+            Stack taken = _stacks[bagIndex];
+            if (taken == null || taken.Definition == null || taken.Count <= 0)
+            {
+                reason = "that bag slot holds nothing";
+                return false;
+            }
+
+            if (expectedIncoming == null)
+            {
+                reason = "no item to take out of the bag";
+                return false;
+            }
+
+            ItemInstance incoming = taken.Instance;
+
+            if (incoming == null)
+            {
+                reason = $"the {taken.Definition.displayName} in that bag slot carries no item identity to wear";
+                return false;
+            }
+
+            if (incoming.Uid != expectedIncoming.Uid)
+            {
+                reason = $"that bag slot holds {incoming.Definition.displayName} [{incoming.UidText}], not " +
+                         $"{expectedIncoming.Definition.displayName} [{expectedIncoming.UidText}]";
+                return false;
+            }
+
+            ItemData incomingDefinition = incoming.Definition;
+            ItemData outgoingDefinition = outgoing != null ? outgoing.Definition : null;
+            bool opensHole = taken.Count == 1;
+            Vector2Int outgoingOrigin = new Vector2Int(-1, -1);
+
+            if (outgoing != null)
+            {
+                if (outgoingDefinition == null)
+                {
+                    reason = "the item being taken off has no item definition to put back in the bag";
+                    return false;
+                }
+
+                // The identity being released must not already be carried somewhere else in this bag, or the
+                // transfer would end with one uid in two stacks.
+                int alreadyCarried = IndexOfInstance(outgoing.Uid);
+                if (alreadyCarried >= 0)
+                {
+                    reason = $"this bag already carries {outgoingDefinition.displayName} [{outgoing.UidText}] " +
+                             $"in stack {alreadyCarried}, so the worn copy cannot be put back into it";
+                    return false;
+                }
+
+                Vector2Int outgoingFootprint = outgoingDefinition.EffectiveFootprint;
+                outgoingOrigin = opensHole
+                    ? FindFreeOriginIgnoring(outgoingFootprint, bagIndex)
+                    : FindFreeOrigin(outgoingFootprint);
+
+                if (outgoingOrigin.x < 0)
+                {
+                    reason = $"no {outgoingFootprint.x}x{outgoingFootprint.y} hole for {outgoingDefinition.displayName}, and taking {incomingDefinition.displayName} out of the bag does not open one";
+                    return false;
+                }
+            }
+
+            // Planned. Commit both moves together; the notification waits for the equipment side to commit.
+            if (opensHole)
+            {
+                if (outgoing != null)
+                {
+                    taken.Item = outgoingDefinition;
+                    taken.Instance = outgoing;
+                    taken.Origin = outgoingOrigin;
+                }
+                else
+                {
+                    _stacks.RemoveAt(bagIndex);
+                }
+            }
+            else
+            {
+                taken.Count -= 1;
+                if (outgoing != null) AddStack(outgoingDefinition, outgoing, 1, outgoingOrigin);
+            }
+
+            Recompute();
+
+            TotalUnits = Mathf.Max(0, TotalUnits - 1);
+            CarriedValue = Mathf.Max(0, CarriedValue - incomingDefinition.value);
+
+            if (outgoing != null)
+            {
+                TotalUnits += 1;
+                CarriedValue += outgoingDefinition.value;
+            }
+
+            // Silent on purpose: Equipment raises the one notification after its side is committed.
+            return true;
+        }
+
+        /// <summary>
+        /// Puts an item the player is already wearing back into the bag, carrying the very instance the slot
+        /// held: same uid, same rarity, same rolls, no mint and no copy. Planned first: when no hole of the
+        /// item's own shape exists the bag is untouched, so the caller keeps the item in its slot instead of
+        /// deleting it. Moving already-owned gear is not loot, so LifetimeCollected, RecoveredValue and
+        /// ItemCollected are deliberately untouched.
+        ///
+        /// Internal and silent for the same reason as the equip half: the outgoing item would otherwise be
+        /// visible in the bag while it is still worn. Equipment clears the slot, restores the hand, refreshes
+        /// the stat source and only then raises the one InventoryChanged notification.
+        /// </summary>
+        internal bool TryUnequipTransfer(ItemInstance instance, out string reason)
+        {
+            reason = null;
+
+            if (instance == null || instance.Definition == null)
+            {
+                reason = "nothing to put back in the bag";
+                return false;
+            }
+
+            ItemData item = instance.Definition;
+
+            EnsureGrid();
+
+            if (HoldsInstanceUid(instance.Uid))
+            {
+                reason = $"this bag already carries {item.displayName} [{instance.UidText}]: " +
+                         "one uid is one item, so the worn copy is not added a second time";
+                return false;
+            }
+
+            Vector2Int footprint = item.EffectiveFootprint;
+            Vector2Int origin = FindFreeOrigin(footprint);
+            if (origin.x < 0)
+            {
+                reason = $"bag has no {footprint.x}x{footprint.y} hole for {item.displayName}";
+                return false;
+            }
+
+            AddStack(item, instance, 1, origin);
+            Recompute();
+
+            TotalUnits += 1;
+            CarriedValue += item.value;
+
+            // Silent on purpose: Equipment raises the one notification after its side is committed.
+            return true;
+        }
+
+        // ------------------------------------------------------------ removing
+
+        /// <summary>Takes units out of a stack. Returns how many actually left; an empty stack is removed.</summary>
+        public int TryRemoveAt(int index, int amount)
+        {
+            EnsureGrid();
+
+            if (index < 0 || index >= _stacks.Count || amount <= 0) return 0;
+
+            Stack stack = _stacks[index];
+            int removed = Mathf.Min(amount, stack.Count);
+            stack.Count -= removed;
+
+            // A stack that runs out takes its identity with it: no stack, no uid, no stale reference left in a
+            // view or a cell map. Gear is one unit per stack, so removing a gear unit removes the whole stack.
+            if (stack.Count <= 0) _stacks.RemoveAt(index);
+
+            Recompute();
+            TotalUnits = Mathf.Max(0, TotalUnits - removed);
+            CarriedValue = Mathf.Max(0, CarriedValue - stack.Definition.value * removed);
+            GameEvents.RaiseInventoryChanged();
+            return removed;
+        }
+
+        public int IndexOfItem(ItemData item)
+        {
+            if (item == null) return -1;
+            for (int i = 0; i < _stacks.Count; i++) if (_stacks[i].Definition == item) return i;
+            return -1;
+        }
+
+        public int IndexAtCell(Vector2Int cell)
+        {
+            EnsureGrid();
+            if (cell.x < 0 || cell.y < 0 || cell.x >= gridWidth || cell.y >= gridHeight) return -1;
+            return _cells[cell.y * gridWidth + cell.x];
+        }
+
+        public InventorySlot SlotAtCell(Vector2Int cell)
+        {
+            int index = IndexAtCell(cell);
+            return index >= 0 ? _views[index] : default;
+        }
+
+        public bool IsCellOccupied(Vector2Int cell) => IndexAtCell(cell) >= 0;
+
+        /// <summary>
+        /// Adds units to an existing stack, limited by that item's stack limit. Used when two stacks of the
+        /// same item are combined on the grid.
+        /// </summary>
+        public int TryAddToSlot(int index, int amount)
+        {
+            EnsureGrid();
+
+            if (index < 0 || index >= _stacks.Count || amount <= 0) return 0;
+
+            Stack stack = _stacks[index];
+            if (stack.Definition == null || !stack.Definition.CanStack) return 0;
+            // An instance-backed stack is one concrete item: it does not take on units of a lookalike.
+            if (stack.Instance != null) return 0;
+
+            int space = stack.Definition.StackLimitForFootprint - stack.Count;
+            int added = Mathf.Min(space, amount);
+            if (added <= 0) return 0;
+
+            stack.Count += added;
+
+            Recompute();
+            GameEvents.RaiseInventoryChanged();
+            return added;
+        }
+
+        // ------------------------------------------------------------ using
 
         public bool TryUseSlot(int index)
         {
-            if (index < 0 || index >= _slots.Count) return false;
+            if (index < 0 || index >= _stacks.Count) return false;
 
-            InventorySlot slot = _slots[index];
-            ItemData item = slot.Item;
+            Stack stack = _stacks[index];
+            ItemData item = stack.Definition;
             if (item == null) return false;
 
             bool applied = false;
@@ -162,23 +1192,76 @@ namespace Emberdelve.Items
                 return false;
             }
 
-            int count = slot.Count - 1;
-            if (count <= 0) _slots.RemoveAt(index);
-            else _slots[index] = new InventorySlot(item, count);
-
-            TotalUnits = Mathf.Max(0, TotalUnits - 1);
-            CarriedValue = Mathf.Max(0, CarriedValue - item.value);
-
-            GameEvents.RaiseInventoryChanged();
+            TryRemoveAt(index, 1);
             return true;
         }
 
         public void Clear()
         {
-            _slots.Clear();
+            _stacks.Clear();
             TotalUnits = 0;
             CarriedValue = 0;
+            Recompute();
             GameEvents.RaiseInventoryChanged();
+        }
+
+        // ------------------------------------------------------------ grid bookkeeping
+
+        private void AddStack(ItemData item, ItemInstance instance, int count, Vector2Int origin)
+        {
+            _stacks.Add(new Stack { Item = item, Instance = instance, Count = count, Origin = origin });
+            Recompute();
+        }
+
+        /// <summary>How one stack is named in a refusal: its definition and, when it has one, its identity.</summary>
+        private static string DescribeStack(Stack stack)
+        {
+            if (stack == null || stack.Definition == null) return "empty stack";
+            return stack.Instance != null
+                ? $"{stack.Definition.displayName} [{stack.Instance.UidText}]"
+                : stack.Definition.displayName;
+        }
+
+        private void EnsureGrid()
+        {
+            gridWidth = Mathf.Max(1, gridWidth);
+            gridHeight = Mathf.Max(1, gridHeight);
+
+            if (_cells == null || _cells.Length != gridWidth * gridHeight)
+            {
+                System.Array.Resize(ref _cells, gridWidth * gridHeight);
+            }
+        }
+
+        /// <summary>Rebuilds the cell occupancy map and the read-only slot view from the stacks.</summary>
+        private void Recompute()
+        {
+            EnsureGrid();
+
+            for (int i = 0; i < _cells.Length; i++) _cells[i] = -1;
+
+            UsedCells = 0;
+            _views.Clear();
+
+            for (int i = 0; i < _stacks.Count; i++)
+            {
+                Stack stack = _stacks[i];
+                if (stack == null || stack.Definition == null) continue;
+
+                Vector2Int size = stack.Definition.EffectiveFootprint;
+                _views.Add(new InventorySlot(stack.Definition, stack.Instance, stack.Count, stack.Origin, size, i));
+
+                for (int y = stack.Origin.y; y < stack.Origin.y + size.y; y++)
+                {
+                    for (int x = stack.Origin.x; x < stack.Origin.x + size.x; x++)
+                    {
+                        if (x < 0 || y < 0 || x >= gridWidth || y >= gridHeight) continue;
+                        if (_cells[y * gridWidth + x] >= 0) continue;
+                        _cells[y * gridWidth + x] = i;
+                        UsedCells++;
+                    }
+                }
+            }
         }
     }
 }

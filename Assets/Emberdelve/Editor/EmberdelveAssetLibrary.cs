@@ -4,6 +4,7 @@ using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.Level;
+using Emberdelve.Stats;
 
 namespace Emberdelve.EditorTools
 {
@@ -27,6 +28,10 @@ namespace Emberdelve.EditorTools
         public static ItemData Draught;
         public static ItemData Relic;
         public static ItemData ArrowBundle;
+        public static ItemData Cuirass;
+        public static ItemData Boots;
+        public static ItemData FangBlade;
+        public static ItemData ShieldItem;
         public static SkillData WarriorDash;
         public static SkillData WarriorBattleCry;
         public static SkillData WarriorMight;
@@ -40,6 +45,18 @@ namespace Emberdelve.EditorTools
         public static EnemyData Warden;
         public static DungeonLayoutData Layout;
         public static NavGridData NavGrid;
+        public static LootTable SupplyLoot;
+        public static LootTable EmberLoot;
+        public static LootTable SealedLoot;
+
+        /// <summary>
+        /// U2B10: the builder-owned affix catalog, one definition per allowlisted stat key, in
+        /// <see cref="AffixStatKey"/> order. Filled by BuildAffixCatalog before the loot tables are built, and
+        /// exposed so a gate can validate exactly what the rolled chest tables were given.
+        /// </summary>
+        public static AffixDefinition[] Affixes;
+
+        public const string AffixFolder = EmberdelvePaths.Data + "/Affixes";
 
         public static CharacterClassData[] Classes => new[] { Warrior, Archer };
 
@@ -52,8 +69,15 @@ namespace Emberdelve.EditorTools
             BuildClasses();
             ApplyDefenseKit();
             ApplySkillKit();
+            ApplyAttributeDefinitions();
+            ApplyAttributeVitalBases();
+            ApplyAttributeActionBases();
+            BuildAffixCatalog();
+            BuildLootTables();
+            ApplyLootRarityProfiles();
             BuildEnemies();
             BuildLayout();
+            ApplyChestSpawns();
             BuildNavGrid();
             BuildConfig();
         }
@@ -224,6 +248,10 @@ namespace Emberdelve.EditorTools
                 w.reach = 2.7f;
                 w.arcAngle = 70f;
                 w.hitSphereRadius = 0.45f;
+                // The one finesse-marked definition in the kit (Docs/Design/ATTRIBUTES.md): its damage scales
+                // off the better of the STR and DEX modifiers. The marker is authored data on the asset, so no
+                // runtime code ever has to recognise a rapier by name.
+                w.finesse = true;
                 w.shaftMaterial = EmberdelveMaterials.Blade;
                 w.edgeMaterial = EmberdelveMaterials.Blade;
                 w.gripMaterial = EmberdelveMaterials.Grip;
@@ -290,9 +318,10 @@ namespace Emberdelve.EditorTools
         }
 
         /// <summary>
-        /// Idempotent pass that writes the skill kits and mana pools onto the class assets that existed
-        /// before those fields were added, in the same way ApplyDefenseKit does for defense. Exactly two
-        /// active and exactly two passive skills per class, which is the contract SkillCaster validates.
+        /// Idempotent pass that writes the skill kits and the mana regen delays onto the class assets that
+        /// existed before those fields were added, in the same way ApplyDefenseKit does for defense. Exactly
+        /// two active and exactly two passive skills per class, which is the contract SkillCaster validates.
+        /// The mana POOL numbers moved to ApplyAttributeVitalBases, which owns every base vital.
         /// </summary>
         private static void ApplySkillKit()
         {
@@ -300,8 +329,6 @@ namespace Emberdelve.EditorTools
             {
                 Warrior.activeSkills = new[] { WarriorDash, WarriorBattleCry };
                 Warrior.passiveSkills = new[] { WarriorMight, WarriorBulwark };
-                Warrior.maxMana = 120;
-                Warrior.manaRegenPerSecond = 8f;
                 Warrior.manaRegenDelay = 3.5f;
                 EditorUtility.SetDirty(Warrior);
             }
@@ -310,13 +337,145 @@ namespace Emberdelve.EditorTools
             {
                 Archer.activeSkills = new[] { ArcherMultiShot, ArcherPiercingShot };
                 Archer.passiveSkills = new[] { ArcherFarshot, ArcherFleet };
-                Archer.maxMana = 100;
-                Archer.manaRegenPerSecond = 10f;
                 Archer.manaRegenDelay = 3f;
                 EditorUtility.SetDirty(Archer);
             }
 
             AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>
+        /// Idempotent pass that writes the six authored ability scores (Docs/Design/ATTRIBUTES.md) onto the
+        /// class assets and the fixed attribute bonuses onto the two gear assets that already existed before
+        /// those fields were added, in the same way ApplyDefenseKit does for defense. LoadOrCreate only
+        /// configures a brand new asset, so without this pass a rebuild over an existing project would keep
+        /// the pre-amendment data. It writes scores only: no base vitals, no pool refill, no equipment wiring.
+        /// </summary>
+        private static void ApplyAttributeDefinitions()
+        {
+            SetAttributes(Warrior, 16, 10, 14, 8, 10, 10);
+            SetAttributes(Archer, 10, 16, 12, 10, 14, 8);
+
+            SetAttributeBonuses(Cuirass, new AttributeBonusEntry(SixAttribute.Constitution, 1));
+            SetAttributeBonuses(Boots, new AttributeBonusEntry(SixAttribute.Dexterity, 1));
+
+            AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>
+        /// Idempotent pass that writes the BASE vitals the attribute amendment authors on a class
+        /// (Docs/Design/ATTRIBUTES.md): warrior 100 health / 75 mana / 3 mana regen / 90 stamina /
+        /// 5 stamina regen, archer 80 / 90 / 3.5 / 95 / 5. These are the pristine numbers the six
+        /// attributes are derived from, so they are authored here and nowhere else; the runtime never
+        /// writes them back. LoadOrCreate only configures a brand new asset, so without this pass a rebuild
+        /// over an existing project would keep the pre-amendment 150/120 and 100/100 pools.
+        ///
+        /// The stamina pair is explicit prototype tuning: the amendment fixes max_stamina 90/95 but leaves
+        /// base stamina regeneration unspecified, so both classes author 5/sec and the derived values
+        /// become 6 and 5.5. Move speed is authored by ApplyAttributeActionBases; sprint/crouch stay as
+        /// BuildClasses authored them.
+        /// </summary>
+        private static void ApplyAttributeVitalBases()
+        {
+            SetVitalBases(Warrior, 100, 75, 3f, 90, 5f);
+            SetVitalBases(Archer, 80, 90, 3.5f, 95, 5f);
+
+            AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>
+        /// Idempotent pass for the numbers U2A4 wired into live locomotion and live damage
+        /// (Docs/Design/ATTRIBUTES.md): both classes author move_speed 4.3, and the rapier is the one
+        /// definition marked finesse. Like the other Apply* passes it repairs assets that existed before the
+        /// fields existed, and it writes authored data only - the DEX term itself is derived at runtime from
+        /// the class scores, never baked into an asset. Sprint/crouch authored speeds, stamina costs and the
+        /// damage numbers of every weapon are left exactly as authored.
+        /// </summary>
+        private static void ApplyAttributeActionBases()
+        {
+            SetMoveSpeed(Warrior, 4.3f);
+            SetMoveSpeed(Archer, 4.3f);
+
+            SetFinesse(Rapier, true);
+            SetFinesse(Sword, false);
+            SetFinesse(Bow, false);
+            SetFinesse(Crossbow, false);
+            SetFinesse(Shield, false);
+            SetFinesse(Claw, false);
+            SetFinesse(ClawElite, false);
+
+            AssetDatabase.SaveAssets();
+        }
+
+        private static void SetMoveSpeed(CharacterClassData data, float moveSpeed)
+        {
+            if (data == null || Mathf.Approximately(data.moveSpeed, moveSpeed)) return;
+
+            data.moveSpeed = moveSpeed;
+            EditorUtility.SetDirty(data);
+        }
+
+        private static void SetFinesse(WeaponData weapon, bool expected)
+        {
+            if (weapon == null || weapon.finesse == expected) return;
+
+            weapon.finesse = expected;
+            EditorUtility.SetDirty(weapon);
+        }
+
+        private static void SetVitalBases(CharacterClassData data, int maxHealth, int maxMana,
+            float manaRegen, int maxStamina, float staminaRegen)
+        {
+            if (data == null) return;
+
+            if (data.maxHealth != maxHealth
+                || data.maxMana != maxMana
+                || !Mathf.Approximately(data.manaRegenPerSecond, manaRegen)
+                || data.maxStamina != maxStamina
+                || !Mathf.Approximately(data.staminaRegenPerSecond, staminaRegen))
+            {
+                data.maxHealth = maxHealth;
+                data.maxMana = maxMana;
+                data.manaRegenPerSecond = manaRegen;
+                data.maxStamina = maxStamina;
+                data.staminaRegenPerSecond = staminaRegen;
+                EditorUtility.SetDirty(data);
+            }
+        }
+
+        private static void SetAttributes(CharacterClassData data, int strength, int dexterity,
+            int constitution, int intelligence, int wisdom, int charisma)
+        {
+            if (data == null) return;
+
+            if (data.strength != strength || data.dexterity != dexterity
+                || data.constitution != constitution || data.intelligence != intelligence
+                || data.wisdom != wisdom || data.charisma != charisma)
+            {
+                data.strength = strength;
+                data.dexterity = dexterity;
+                data.constitution = constitution;
+                data.intelligence = intelligence;
+                data.wisdom = wisdom;
+                data.charisma = charisma;
+                EditorUtility.SetDirty(data);
+            }
+        }
+
+        private static void SetAttributeBonuses(ItemData item, AttributeBonusEntry expected)
+        {
+            if (item == null) return;
+
+            AttributeBonusEntry[] current = item.attributeBonuses;
+            if (current != null && current.Length == 1
+                && current[0].attribute == expected.attribute
+                && current[0].amount == expected.amount)
+            {
+                return;
+            }
+
+            item.attributeBonuses = new[] { expected };
+            EditorUtility.SetDirty(item);
         }
 
         private static void SetDefense(WeaponData weapon, DefenseRole role, DefenseCapability capabilities,
@@ -522,6 +681,423 @@ namespace Emberdelve.EditorTools
                 i.worldMaterial = EmberdelveMaterials.ArrowMat;
                 i.worldSize = new Vector3(0.26f, 0.26f, 0.26f);
             });
+
+            // Equipment items. Each one declares the cells it needs in the bag, the slot it fills, and the
+            // modifiers it contributes while worn, so a new piece of gear is an asset rather than a code path.
+            Cuirass = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_BoiledCuirass.asset", i =>
+            {
+                i.itemId = "boiled_cuirass";
+                i.displayName = "Boiled Cuirass";
+                i.description = "Leather boiled hard enough to keep a claw out of the ribs. Right click to wear.";
+                i.kind = ItemKind.Armor;
+                i.value = 40;
+                i.maxStack = 1;
+                i.iconColor = new Color(0.42f, 0.3f, 0.16f);
+                i.worldMaterial = EmberdelveMaterials.ArmorMat;
+                i.worldSize = new Vector3(0.4f, 0.5f, 0.28f);
+                i.gridFootprint = new Vector2Int(2, 3);
+                i.equipSlot = EquipmentSlot.Chest;
+                i.statModifiers = new[]
+                {
+                    new StatModifier(SkillStat.MaxHealth, SkillModifierMode.Flat, 30f),
+                    new StatModifier(SkillStat.BlockReduction, SkillModifierMode.Flat, 0.08f),
+                };
+                i.attributeBonuses = new[]
+                {
+                    new AttributeBonusEntry(SixAttribute.Constitution, 1),
+                };
+            });
+
+            Boots = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_FootpadBoots.asset", i =>
+            {
+                i.itemId = "footpad_boots";
+                i.displayName = "Footpad Boots";
+                i.description = "Soft soles, quiet steps. Right click to wear.";
+                i.kind = ItemKind.Armor;
+                i.value = 28;
+                i.maxStack = 1;
+                i.iconColor = new Color(0.3f, 0.34f, 0.42f);
+                i.worldMaterial = EmberdelveMaterials.ArmorMat;
+                i.worldSize = new Vector3(0.3f, 0.26f, 0.3f);
+                i.gridFootprint = new Vector2Int(2, 2);
+                i.equipSlot = EquipmentSlot.Legs;
+                i.statModifiers = new[]
+                {
+                    new StatModifier(SkillStat.MoveSpeed, SkillModifierMode.Multiplier, 1.18f),
+                    new StatModifier(SkillStat.SprintSpeed, SkillModifierMode.Multiplier, 1.12f),
+                };
+                i.attributeBonuses = new[]
+                {
+                    new AttributeBonusEntry(SixAttribute.Dexterity, 1),
+                };
+            });
+
+            FangBlade = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_EmberFangBlade.asset", i =>
+            {
+                i.itemId = "ember_fang_blade";
+                i.displayName = "Ember Fang Blade";
+                i.description = "A thin blade that parries. Right click to hold it in the main hand.";
+                i.kind = ItemKind.Weapon;
+                i.value = 55;
+                i.maxStack = 1;
+                i.iconColor = new Color(0.78f, 0.8f, 0.86f);
+                i.worldMaterial = EmberdelveMaterials.Blade;
+                i.worldSize = new Vector3(0.24f, 0.9f, 0.24f);
+                i.gridFootprint = new Vector2Int(1, 3);
+                i.equipSlot = EquipmentSlot.Weapon;
+                i.grantedWeapon = Rapier;
+            });
+
+            ShieldItem = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_EmberbulwarkShieldItem.asset", i =>
+            {
+                i.itemId = "emberbulwark_shield";
+                i.displayName = "Emberbulwark Shield";
+                i.description = "A bracing plate for the off hand. Right click to raise it.";
+                i.kind = ItemKind.Armor;
+                i.value = 45;
+                i.maxStack = 1;
+                i.iconColor = new Color(0.5f, 0.52f, 0.6f);
+                i.worldMaterial = EmberdelveMaterials.ShieldMat;
+                i.worldSize = new Vector3(0.5f, 0.6f, 0.14f);
+                i.gridFootprint = new Vector2Int(2, 2);
+                i.equipSlot = EquipmentSlot.OffHand;
+                i.grantedWeapon = Shield;
+            });
+        }
+
+        /// <summary>
+        /// Container contents. Tables are shared assets: several chests may point at the same table, and the
+        /// seed lives on the chest spawn rather than in the table, so the same table can fill different chests
+        /// with different, reproducible loot.
+        /// </summary>
+        private static void BuildLootTables()
+        {
+            SupplyLoot = LoadOrCreate<LootTable>(EmberdelvePaths.Data + "/Loot_SupplyChest.asset", t =>
+            {
+                t.tableId = "supply_chest";
+                t.maxRolls = 3;
+                t.guaranteeFirstEntry = true;
+                t.entries = new[]
+                {
+                    new LootEntry { item = Draught, minAmount = 1, maxAmount = 1, weight = 4, maxCopies = 1 },
+                    new LootEntry { item = Coin, minAmount = 2, maxAmount = 5, weight = 5, maxCopies = 2 },
+                    new LootEntry { item = ArrowBundle, minAmount = 1, maxAmount = 2, weight = 3, maxCopies = 1 },
+                    new LootEntry { item = Boots, minAmount = 1, maxAmount = 1, weight = 1, maxCopies = 1 },
+                };
+            });
+
+            EmberLoot = LoadOrCreate<LootTable>(EmberdelvePaths.Data + "/Loot_EmberChest.asset", t =>
+            {
+                t.tableId = "ember_chest";
+                t.maxRolls = 4;
+                t.guaranteeFirstEntry = true;
+                t.entries = new[]
+                {
+                    new LootEntry { item = Cuirass, minAmount = 1, maxAmount = 1, weight = 3, maxCopies = 1 },
+                    new LootEntry { item = Coin, minAmount = 4, maxAmount = 9, weight = 4, maxCopies = 2 },
+                    new LootEntry { item = Draught, minAmount = 1, maxAmount = 2, weight = 3, maxCopies = 1 },
+                    new LootEntry { item = FangBlade, minAmount = 1, maxAmount = 1, weight = 2, maxCopies = 1 },
+                };
+            });
+
+            SealedLoot = LoadOrCreate<LootTable>(EmberdelvePaths.Data + "/Loot_SealedChest.asset", t =>
+            {
+                t.tableId = "sealed_chest";
+                t.maxRolls = 3;
+                t.guaranteeFirstEntry = true;
+                t.entries = new[]
+                {
+                    new LootEntry { item = Relic, minAmount = 1, maxAmount = 1, weight = 3, maxCopies = 1 },
+                    new LootEntry { item = ShieldItem, minAmount = 1, maxAmount = 1, weight = 3, maxCopies = 1 },
+                    new LootEntry { item = Coin, minAmount = 6, maxAmount = 12, weight = 4, maxCopies = 1 },
+                };
+            });
+
+            // Table problems are logged by ApplyLootRarityProfiles, after the rarity/catalog migration, so the
+            // warnings describe the tables the game will actually roll.
+        }
+
+        // ---------------------------------------------------------------------------------------------------
+        // U2B10 - authored affix catalog and normal chest rarity profiles
+        // ---------------------------------------------------------------------------------------------------
+
+        /// <summary>Gear families every general-purpose affix (six scores, max health/mana, mana regen) may roll on.</summary>
+        private const AffixCategory AllGear =
+            AffixCategory.Boots | AffixCategory.Cloak | AffixCategory.Armor | AffixCategory.Weapon;
+
+        /// <summary>One authored affix: its stable id, asset file name, display name and the gear it may roll on.
+        /// The roll band and step are never written here - they come from AffixStatKeys.TryPrototypeBand.</summary>
+        private readonly struct AffixSpec
+        {
+            public readonly AffixStatKey Key;
+            public readonly string Id;
+            public readonly string FileName;
+            public readonly string DisplayName;
+            public readonly AffixCategory Categories;
+
+            public AffixSpec(AffixStatKey key, string id, string fileName, string displayName, AffixCategory categories)
+            {
+                Key = key;
+                Id = id;
+                FileName = fileName;
+                DisplayName = displayName;
+                Categories = categories;
+            }
+        }
+
+        /// <summary>
+        /// The 13 allowlisted keys of Docs/Design/ITEM_AFFIXES.md, in AffixStatKey order. Category profile:
+        /// attributes, max health, max mana and mana regen roll on boots/cloak/armor/weapon; armor on
+        /// boots/cloak/armor; move speed on boots/cloak; melee and projectile damage on weapons only.
+        /// Cloak is a category bit only - there is no cloak/back equipment slot yet.
+        /// </summary>
+        private static readonly AffixSpec[] AffixSpecs =
+        {
+            new AffixSpec(AffixStatKey.Strength, "affix_strength", "Affix_Strength", "Strength", AllGear),
+            new AffixSpec(AffixStatKey.Dexterity, "affix_dexterity", "Affix_Dexterity", "Dexterity", AllGear),
+            new AffixSpec(AffixStatKey.Constitution, "affix_constitution", "Affix_Constitution", "Constitution", AllGear),
+            new AffixSpec(AffixStatKey.Intelligence, "affix_intelligence", "Affix_Intelligence", "Intelligence", AllGear),
+            new AffixSpec(AffixStatKey.Wisdom, "affix_wisdom", "Affix_Wisdom", "Wisdom", AllGear),
+            new AffixSpec(AffixStatKey.Charisma, "affix_charisma", "Affix_Charisma", "Charisma", AllGear),
+            new AffixSpec(AffixStatKey.Armor, "affix_armor", "Affix_Armor", "Armor",
+                AffixCategory.Boots | AffixCategory.Cloak | AffixCategory.Armor),
+            new AffixSpec(AffixStatKey.MaxHealth, "affix_max_health", "Affix_MaxHealth", "Max Health", AllGear),
+            new AffixSpec(AffixStatKey.MaxMana, "affix_max_mana", "Affix_MaxMana", "Max Mana", AllGear),
+            new AffixSpec(AffixStatKey.MoveSpeed, "affix_move_speed", "Affix_MoveSpeed", "Move Speed",
+                AffixCategory.Boots | AffixCategory.Cloak),
+            new AffixSpec(AffixStatKey.MeleeDamage, "affix_melee_damage", "Affix_MeleeDamage", "Melee Damage",
+                AffixCategory.Weapon),
+            new AffixSpec(AffixStatKey.ProjectileDamage, "affix_projectile_damage", "Affix_ProjectileDamage",
+                "Projectile Damage", AffixCategory.Weapon),
+            new AffixSpec(AffixStatKey.ManaRegen, "affix_mana_regen", "Affix_ManaRegen", "Mana Regeneration", AllGear),
+        };
+
+        /// <summary>
+        /// Creates or reloads the 13 builder-owned AffixDefinition assets under Data/Affixes and fills
+        /// <see cref="Affixes"/>. Idempotent: an existing asset keeps its GUID and is never recreated.
+        ///
+        /// Ownership after load: the identity half (id, stat key, allowed categories) is the contract the roller
+        /// and every saved instance record rely on, so it is always re-asserted. The tunable half (display
+        /// name, band, step, weight) is written on creation and repaired only when the asset no longer passes
+        /// AffixDefinition.TryValidate - a legal narrower band or weight tuned in the Inspector survives a rebuild.
+        /// </summary>
+        private static void BuildAffixCatalog()
+        {
+            if (!AssetDatabase.IsValidFolder(AffixFolder))
+            {
+                AssetDatabase.CreateFolder(EmberdelvePaths.Data, "Affixes");
+            }
+
+            AffixDefinition[] catalog = new AffixDefinition[AffixSpecs.Length];
+
+            for (int i = 0; i < AffixSpecs.Length; i++)
+            {
+                AffixSpec spec = AffixSpecs[i];
+                if (!AffixStatKeys.TryPrototypeBand(spec.Key, out float min, out float max, out float step))
+                {
+                    Debug.LogError($"[Emberdelve][Affix] {spec.Id}: no prototype band for key {spec.Key}; not authored");
+                    continue;
+                }
+
+                AffixDefinition definition = LoadOrCreate<AffixDefinition>(AffixFolder + "/" + spec.FileName + ".asset", a =>
+                {
+                    a.id = spec.Id;
+                    a.displayName = spec.DisplayName;
+                    a.statKey = spec.Key;
+                    a.minValue = min;
+                    a.maxValue = max;
+                    a.step = step;
+                    a.weight = 1f;
+                    a.allowedCategories = spec.Categories;
+                });
+
+                ApplyAffixOwnership(definition, spec, min, max, step);
+                catalog[i] = definition;
+            }
+
+            Affixes = catalog;
+            AssetDatabase.SaveAssets();
+
+            if (!Emberdelve.Data.AffixCatalog.TryValidate(Affixes, out List<string> problems))
+            {
+                for (int i = 0; i < problems.Count; i++) Debug.LogError("[Emberdelve][Affix] " + problems[i]);
+            }
+        }
+
+        private static void ApplyAffixOwnership(AffixDefinition definition, AffixSpec spec, float min, float max, float step)
+        {
+            if (definition == null) return;
+
+            bool changed = false;
+
+            if (definition.id != spec.Id) { definition.id = spec.Id; changed = true; }
+            if (definition.statKey != spec.Key) { definition.statKey = spec.Key; changed = true; }
+            if (definition.allowedCategories != spec.Categories)
+            {
+                definition.allowedCategories = spec.Categories;
+                changed = true;
+            }
+
+            if (!definition.TryValidate(out _))
+            {
+                // Only an asset the validator rejects gets its tunable half reset to the prototype numbers.
+                if (string.IsNullOrWhiteSpace(definition.displayName)) definition.displayName = spec.DisplayName;
+                definition.minValue = min;
+                definition.maxValue = max;
+                definition.step = step;
+                definition.weight = 1f;
+                changed = true;
+            }
+
+            if (changed) EditorUtility.SetDirty(definition);
+        }
+
+        /// <summary>
+        /// Writes the U2B10 rarity profile onto the three chest tables, for brand new and pre-existing assets
+        /// alike (LoadOrCreate does not configure an asset that already exists). It owns exactly two things:
+        /// each entry's affixRarity and the table's affixCatalog. Entry order, items, amounts, weights,
+        /// maxCopies, maxRolls, guarantees, table ids and the chest seeds on the layout are not touched.
+        ///
+        /// Profile: Supply - everything Common, no catalog. Ember - Boiled Cuirass and Ember Fang Blade
+        /// Uncommon, the rest Common, catalog assigned. Sealed - Emberbulwark Shield Rare, the rest Common,
+        /// catalog assigned. Rarity is resolved by item reference, so a reordered entry list keeps its profile.
+        /// </summary>
+        private static void ApplyLootRarityProfiles()
+        {
+            ApplyTableProfile(SupplyLoot, null);
+            ApplyTableProfile(EmberLoot, Affixes,
+                (Cuirass, AffixRarity.Uncommon),
+                (FangBlade, AffixRarity.Uncommon));
+            ApplyTableProfile(SealedLoot, Affixes,
+                (ShieldItem, AffixRarity.Rare));
+
+            AssetDatabase.SaveAssets();
+
+            if (SupplyLoot != null) LogTableProblems(SupplyLoot);
+            if (EmberLoot != null) LogTableProblems(EmberLoot);
+            if (SealedLoot != null) LogTableProblems(SealedLoot);
+        }
+
+        /// <param name="catalog">The catalog to assign, or null to leave the table's catalog as it is (a Common-only table needs none).</param>
+        private static void ApplyTableProfile(LootTable table, AffixDefinition[] catalog,
+            params (ItemData item, AffixRarity rarity)[] raised)
+        {
+            if (table == null || table.entries == null) return;
+
+            bool changed = false;
+
+            for (int i = 0; i < table.entries.Length; i++)
+            {
+                LootEntry entry = table.entries[i];
+                if (entry == null) continue;
+
+                AffixRarity wanted = AffixRarity.Common;
+                for (int k = 0; k < raised.Length; k++)
+                {
+                    if (raised[k].item != null && ReferenceEquals(entry.item, raised[k].item))
+                    {
+                        wanted = raised[k].rarity;
+                        break;
+                    }
+                }
+
+                if (entry.affixRarity != wanted)
+                {
+                    entry.affixRarity = wanted;
+                    changed = true;
+                }
+            }
+
+            if (catalog != null && !SameReferences(table.affixCatalog, catalog))
+            {
+                table.affixCatalog = (AffixDefinition[])catalog.Clone();
+                changed = true;
+            }
+
+            if (changed) EditorUtility.SetDirty(table);
+        }
+
+        private static bool SameReferences(AffixDefinition[] current, AffixDefinition[] wanted)
+        {
+            if (current == null || current.Length != wanted.Length) return false;
+            for (int i = 0; i < wanted.Length; i++)
+            {
+                if (!ReferenceEquals(current[i], wanted[i])) return false;
+            }
+            return true;
+        }
+
+        private static void LogTableProblems(LootTable table)
+        {
+            List<string> problems = table.Validate();
+            for (int i = 0; i < problems.Count; i++) Debug.LogWarning("[Emberdelve][Loot] " + problems[i]);
+        }
+
+        /// <summary>
+        /// Chests in the level, written onto the layout asset. Idempotent: rebuilding rewrites the same list
+        /// rather than appending duplicates, the same way the skill kit is applied to the class assets.
+        /// </summary>
+        private static void ApplyChestSpawns()
+        {
+            if (Layout == null) return;
+
+            Layout.chestSpawns.Clear();
+
+            Layout.chestSpawns.Add(new ChestSpawnSpec
+            {
+                cell = new Vector2Int(5, 4),
+                variant = Emberdelve.Interaction.ChestVariant.Supply,
+                seed = 101,
+                lootTable = SupplyLoot,
+                bodyMaterial = EmberdelveMaterials.ChestSupply,
+                lidMaterial = EmberdelveMaterials.ChestSupplyLid,
+            });
+
+            Layout.chestSpawns.Add(new ChestSpawnSpec
+            {
+                cell = new Vector2Int(14, 4),
+                variant = Emberdelve.Interaction.ChestVariant.Supply,
+                seed = 202,
+                lootTable = SupplyLoot,
+                bodyMaterial = EmberdelveMaterials.ChestSupply,
+                lidMaterial = EmberdelveMaterials.ChestSupplyLid,
+            });
+
+            Layout.chestSpawns.Add(new ChestSpawnSpec
+            {
+                cell = new Vector2Int(3, 12),
+                variant = Emberdelve.Interaction.ChestVariant.Ember,
+                seed = 303,
+                lootTable = EmberLoot,
+                bodyMaterial = EmberdelveMaterials.ChestEmber,
+                lidMaterial = EmberdelveMaterials.ChestEmberLid,
+            });
+
+            Layout.chestSpawns.Add(new ChestSpawnSpec
+            {
+                cell = new Vector2Int(7, 19),
+                variant = Emberdelve.Interaction.ChestVariant.Ember,
+                seed = 404,
+                lootTable = EmberLoot,
+                bodyMaterial = EmberdelveMaterials.ChestEmber,
+                lidMaterial = EmberdelveMaterials.ChestEmberLid,
+            });
+
+            Layout.chestSpawns.Add(new ChestSpawnSpec
+            {
+                cell = new Vector2Int(22, 12),
+                variant = Emberdelve.Interaction.ChestVariant.Sealed,
+                seed = 505,
+                lootTable = SealedLoot,
+                bodyMaterial = EmberdelveMaterials.ChestSealed,
+                lidMaterial = EmberdelveMaterials.ChestSealedLid,
+            });
+
+            EditorUtility.SetDirty(Layout);
+            AssetDatabase.SaveAssets();
+
+            List<string> problems = Layout.Validate();
+            for (int i = 0; i < problems.Count; i++) Debug.LogWarning("[Emberdelve][Layout] " + problems[i]);
         }
 
         private static void BuildClasses()
@@ -532,10 +1108,21 @@ namespace Emberdelve.EditorTools
                 c.displayName = "Warrior";
                 c.description = "Slow, heavy, hard to kill. Holds a shield-line of steel and walks out with what he carried in.";
                 c.accentColor = new Color(0.85f, 0.42f, 0.22f);
-                c.maxHealth = 150;
+                c.strength = 16;
+                c.dexterity = 10;
+                c.constitution = 14;
+                c.intelligence = 8;
+                c.wisdom = 10;
+                c.charisma = 10;
+                c.maxHealth = 100;
                 c.healthRegenPerSecond = 1.5f;
                 c.regenDelay = 8f;
-                c.moveSpeed = 3.5f;
+                c.maxMana = 75;
+                c.manaRegenPerSecond = 3f;
+                c.manaRegenDelay = 3.5f;
+                c.maxStamina = 90;
+                c.staminaRegenPerSecond = 5f;
+                c.moveSpeed = 4.3f;
                 c.sprintSpeed = 5.2f;
                 c.crouchSpeed = 1.7f;
                 c.jumpHeight = 1.1f;
@@ -558,10 +1145,21 @@ namespace Emberdelve.EditorTools
                 c.displayName = "Archer";
                 c.description = "Quick and fragile. Wins by distance, and by leaving before the thing reaches you.";
                 c.accentColor = new Color(0.35f, 0.72f, 0.62f);
-                c.maxHealth = 100;
+                c.strength = 10;
+                c.dexterity = 16;
+                c.constitution = 12;
+                c.intelligence = 10;
+                c.wisdom = 14;
+                c.charisma = 8;
+                c.maxHealth = 80;
                 c.healthRegenPerSecond = 2f;
                 c.regenDelay = 7f;
-                c.moveSpeed = 4.4f;
+                c.maxMana = 90;
+                c.manaRegenPerSecond = 3.5f;
+                c.manaRegenDelay = 3f;
+                c.maxStamina = 95;
+                c.staminaRegenPerSecond = 5f;
+                c.moveSpeed = 4.3f;
                 c.sprintSpeed = 6.4f;
                 c.crouchSpeed = 2.1f;
                 c.jumpHeight = 1.25f;
@@ -735,6 +1333,8 @@ namespace Emberdelve.EditorTools
             Config.interactionRange = 2.4f;
             Config.interactSphereRadius = 0.45f;
             Config.inventoryCapacity = 8;
+            Config.inventoryGridWidth = 10;
+            Config.inventoryGridHeight = 4;
             Config.mouseSensitivity = 1.2f;
             Config.fieldOfView = 68f;
 

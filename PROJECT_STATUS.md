@@ -516,7 +516,91 @@ Representative evidence lines:
 - No unit-test framework: verification is the batch-mode smoke harness plus these logs. Project Auditor has
   not been run for this milestone.
 
-## Next step (Milestone 5 — NOT started)
-Diablo II-style grid inventory, equipment (clothing / armor / weapon items, including the Warrior
-`offhandShield` slot that `CharacterClassData` already declares but nothing equips or renders yet), and
-several interactable chest types with loot. Do not begin until the Milestone 4 diff is reviewed and committed.
+## Milestone 5 — IN PROGRESS (grid inventory, equipment, chests)
+
+Committed baseline for this milestone: `99dabd30 Milestone 4: add mana and class skill kits`.
+
+### Sub-milestones (the order this milestone is built and verified in)
+
+**M5.1 Item grid model** — `ItemData` gains a grid footprint, an equipment slot, an optional granted
+`WeaponData`, and its own `StatModifier[]` (reusing the Milestone 4 stat vocabulary so equipment feeds the
+same `CharacterStatStack` consumption points as passives). Stack rule: only non-equippable items may stack,
+and `maxStack` is the stack cap; equippable items are forced to `maxStack = 1` in `OnValidate`.
+
+**M5.2 Grid storage** — `Inventory` becomes a real `width x height` cell grid instead of a flat list of
+stacks, keeping its existing public surface (`Capacity`, `Slots`, `TryAdd`, `TryUseSlot`, `RecoveredValue`,
+`CarriedValue`, `Clear`) so every Milestone 1-4 assertion keeps meaning the same thing. Adds placement
+validation (`CanPlace`, `FindFreeOrigin`, `TryAddAt`, `TryMove`, `TryRemoveAt`), used-cells accounting, and
+refusal reasons. An item occupies `footprint.x x footprint.y` cells; a multi-cell item cannot be placed where
+it would overlap another item or leave the grid, and a stack only accepts units of the same item up to
+`maxStack`.
+
+**M5.3 Equipment slots** — new `Equipment` component with Weapon / OffHand / Head / Chest / Legs slots.
+Equipping a weapon item replaces the loadout's primary weapon through `ClassLoadout`, which already re-resolves
+the `DefenseProfile`; an off-hand item feeds the shield path that `CharacterClassData.offhandShield` already
+models but nothing could fill before. Armor and clothing contribute `StatModifier`s through a new named
+source on `CharacterStatStack`, so health, mana, regen, movement, block reduction and damage multipliers all
+update from the same rule passives use. Equipping out of the grid removes the item from storage; unequipping
+puts it back (and is refused, with a reason, when the grid has no room for it).
+
+**M5.4 Inventory + equipment UI** — a visible `InventoryScreen` panel: the cell grid drawn to scale with
+each item's footprint, an equipment column, click to pick an item up and click again to place or drop it,
+right-click to equip or use, and a close button. Toggled with **I** or **Tab**, which are already bound in
+the input asset and were unused before, so nothing collides with WASD, mouse buttons, `E` interact, `R`
+reload, `Q` swap, `F`/`G` skills or `1`-`4` hotbar.
+
+**M5.5 Chests and loot tables** — new `LootTable` asset (entries of item / min / max / weight) rolled with an
+explicit seed so the same chest in the same layout always yields the same loot, and `ChestInteractable` with
+at least two variants driven by that data: a **Supply Chest** (instant open, common table) and an **Ember
+Chest** (must be held open, richer table). Chests are placed from `DungeonLayoutData.chestSpawns` so content
+stays data-driven, and they hand loot to the existing `ILootHost` path, which means a full bag is a real
+outcome and leftovers stay in the chest.
+
+**M5.6 Verification** — new smoke coverage for grid fit / overflow / partial acceptance, move and remove,
+equip and unequip effects on real combat and movement numbers, chest rolls and variants, plus the existing
+combat / archer / AI / death / extraction / lobby / result-loop regressions, all in batch mode.
+
+### Controls decided for this milestone
+- `I` or `Tab` — open / close the inventory + equipment screen (existing unused bindings).
+- Left click an item, left click a destination cell — move it; left click on the grid background — drop it
+  back into storage.
+- Right click an item — equip it (equippable) or use it (consumable / ammo).
+- `1`-`4` hotbar, `E` interact, `Q` swap, `F`/`G` skills, mouse buttons: unchanged.
+
+### Scene/bootstrap policy for this milestone
+No hand setup and no scene rebuild required: chest content is spawned at run start from the layout asset by
+an ensured `ChestSpawner`, and `EmberdelveLevelBuilder` / `EmberdelveAssetLibrary` produce the same objects and
+assets through the existing `EmberdelveBootstrapMenu` paths so a future rebuild produces identical content.
+
+## Pause snapshot — 2026-10-13 (M5 unfinished)
+
+### Current checkpoint
+
+- The local Pi process was stopped on the user's request. Its terminal session ended; no Unity batch-mode process for this project was running at the stop.
+- HEAD remains 99dabd30 — Milestone 4: add mana and class skill kits. M5 changes are present in the working tree and intentionally uncommitted.
+- M5 work exists across ItemData, grid Inventory, Equipment, InventoryScreenController, LootTable, ChestInteractable, and ChestSpawner; the level/config data and Emberdelve_Level01 scene were wired with chest spawns. The asset library/bootstrap creates sample gear, three loot-table assets, and chest/gear materials.
+- The M5 smoke entry point is Emberdelve.EditorTools.EmberdelveRuntimeSmokeTest.RunInventoryFlow (Smoke:items).
+- The inventory smoke harness was added to Assets/Emberdelve/Editor/EmberdelveRuntimeSmokeTest.cs. It exercises grid storage, equipment, armor/block, and chest containers.
+
+### Latest verification evidence
+
+- Logs/m5_compile5.log — Unity batch compile exited successfully.
+- Logs/m5_data3.log and Logs/m5_wire1.log — batch runs exited successfully.
+- Logs/m5_items1.log — FAIL checks=189 failures=22 (superseded by the next run).
+- Logs/m5_items2.log — latest inventory/chest smoke: FAIL checks=203 failures=15. M5 is not verified or complete.
+- The latest 15 failures cluster in:
+  1. Grid/stack test setup: five 2x3 items were accepted into a 40-cell grid; the assertion assumed 10 remaining cells cannot fit another 6-cell footprint. Verify geometric first-fit, and make the partial-stack test exceed the configured stack/item capacity.
+  2. Equipment defense path: shield/block results report no reduction, cuirass does not reduce damage, and guard is inactive in one phase. Trace equipped DefenseProfile, damage mitigation, and harness guard activation/state. Do not weaken assertions; correct either runtime behavior or a proven harness setup issue.
+- Earlier compile errors in m5_compile1 through m5_compile4 were followed by clean m5_compile5; no M5 smoke run is green yet.
+- M4 regression logs are from before the M5 edits. Rerun the full combat, Archer, AI, death, extraction, lobby, and result-loop flows after fixing M5.
+
+### Resume checklist
+
+1. Read this snapshot and the M5 sub-milestone plan above; inspect m5_items2.log plus the current Inventory.cs, Equipment.cs, PlayerRig.cs, CharacterStatStack.cs, and the ItemFlow harness before editing.
+2. Fix the 15 remaining assertions using diagnostics and direct state checks; preserve coverage for grid placement/partial acceptance, equip/unequip stats and defense, chest open/loot persistence, and inventory UI interactions.
+3. Run the clean compile, RunInventoryFlow, then all listed M4 regressions. Record the final command, log, and pass count for each.
+4. Review the complete M5 diff, update this handoff with remaining limitations, then commit M5 only after the milestone is green. Do not include generated Library/ or Logs/ files in the commit.
+
+
+## 19October2026 — Unity orchestration resumed
+Current authoritative forward plan: Docs/ROADMAP.md. Codex manager: C:/Users/yrapa/.pi/agent/projects/unity-emberdelve. Prior M5 work preserved in checkpoint. Fresh combat201/0; inventory197/10fail despiteexit0, U1A fixture/exit then U1B equipment. Full prototype/online/persistence/visuals not accepted. Historical entries above remain evidence, not the current queue.

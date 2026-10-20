@@ -63,7 +63,7 @@ namespace Emberdelve.InputLayer
 
             InputAction look = map.AddAction("Look", type: InputActionType.Value, expectedControlLayout: "Vector2");
             look.AddBinding("<Mouse>/delta", groups: "Keyboard&Mouse");
-            look.AddBinding("<Gamepad>/rightStick", processors: "Scale2(x=2.5,y=2.5)", groups: "Gamepad");
+            look.AddBinding("<Gamepad>/rightStick", processors: "ScaleVector2(x=2.5,y=2.5)", groups: "Gamepad");
 
             InputAction jump = map.AddAction("Jump", type: InputActionType.Button, expectedControlLayout: "Button");
             jump.AddBinding("<Keyboard>/space", groups: "Keyboard&Mouse");

@@ -49,6 +49,21 @@ namespace Emberdelve.Level
     }
 
     /// <summary>
+    /// One container in the level. The seed is authored rather than random so the same chest in the same
+    /// layout always holds the same loot, and the table is a shared asset several chests may point at.
+    /// </summary>
+    [Serializable]
+    public class ChestSpawnSpec
+    {
+        public Vector2Int cell;
+        public Emberdelve.Interaction.ChestVariant variant = Emberdelve.Interaction.ChestVariant.Supply;
+        public int seed = 1;
+        public Data.LootTable lootTable;
+        public Material bodyMaterial;
+        public Material lidMaterial;
+    }
+
+    /// <summary>
     /// Data description of the blockout dungeon. Cell based, so the same grid drives geometry,
     /// navigation and spawn placement. Replacing the blockout with real art means keeping this asset
     /// (or swapping the geometry builder), not rewriting gameplay.
@@ -81,6 +96,7 @@ namespace Emberdelve.Level
         public List<LootSpawnSpec> lootSpawns = new List<LootSpawnSpec>();
         public List<EnemySpawnSpec> enemySpawns = new List<EnemySpawnSpec>();
         public List<TorchSpec> torches = new List<TorchSpec>();
+        public List<ChestSpawnSpec> chestSpawns = new List<ChestSpawnSpec>();
 
         public int CellSize => Mathf.Max(1, cellSize);
 
@@ -194,6 +210,13 @@ namespace Emberdelve.Level
             for (int i = 0; i < lootSpawns.Count; i++)
             {
                 if (!IsWalkableCell(lootSpawns[i].cell)) problems.Add($"Loot spawn {lootSpawns[i].cell} is not walkable.");
+            }
+
+            for (int i = 0; i < chestSpawns.Count; i++)
+            {
+                ChestSpawnSpec chest = chestSpawns[i];
+                if (!IsWalkableCell(chest.cell)) problems.Add($"Chest spawn {chest.cell} is not walkable.");
+                if (chest.lootTable == null) problems.Add($"Chest spawn {chest.cell} has no loot table.");
             }
 
             return problems;

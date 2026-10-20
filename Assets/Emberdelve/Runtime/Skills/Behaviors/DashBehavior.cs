@@ -39,7 +39,16 @@ namespace Emberdelve.Skills
             Vector3 intent = context.Rig.Movement.DesiredMoveIntent;
             Vector3 direction = intent.sqrMagnitude > 0.01f ? intent : context.Rig.Facing;
 
-            return context.Rig.Movement.TryStartDash(direction, context.Skill.dashDistance, context.Skill.dashDuration);
+            // Docs/Design/ATTRIBUTES.md: CHA scales the ability's own effect, so the dash covers more
+            // ground and takes proportionally longer. Both numbers come from the one per-cast snapshot and
+            // are scaled together, which keeps distance / duration - the speed PlayerMovement caps at
+            // 24 m/s and feeds through its collision-respecting controller.Move - exactly the authored
+            // trajectory speed. The asset is only read; PlayerMovement still owns the clamp, the cap,
+            // gravity and the collision stop.
+            float scale = context.EffectScale;
+
+            return context.Rig.Movement.TryStartDash(direction,
+                context.Skill.dashDistance * scale, context.Skill.dashDuration * scale);
         }
     }
 }

@@ -7891,7 +7891,11 @@ MonoBehaviour:
   movement: {fileID: 855788056}
   look: {fileID: 855788055}
   health: {fileID: 855788054}
+  mana: {fileID: 0}
+  status: {fileID: 0}
+  skills: {fileID: 0}
   inventory: {fileID: 855788053}
+  equipment: {fileID: 0}
   loadout: {fileID: 855788049}
 --- !u!114 &855788049
 MonoBehaviour:
@@ -7965,7 +7969,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: faaf2a248eb9eca4fb5a4d5ef6917bf6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Items.Inventory
-  capacity: 8
+  gridWidth: 10
+  gridHeight: 4
 --- !u!114 &855788054
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -8018,6 +8023,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Movement.PlayerMovement
   input: {fileID: 855788058}
   controller: {fileID: 855788057}
+  viewTransform: {fileID: 0}
   gravity: -19
   speedChangeRate: 11
   groundedOffset: -0.22
@@ -11615,6 +11621,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Flow.RunDirector
   config: {fileID: 11400000, guid: 42104ea13853ced48a3788216368b0ca, type: 2}
   fallbackClass: {fileID: 11400000, guid: 79dd14208ad0fa34ba2edf3f6edb6047, type: 2}
+  layout: {fileID: 11400000, guid: f4d115d21a08c1b4ab6965e34ac24271, type: 2}
   playerRig: {fileID: 855788048}
 --- !u!114 &1445287662
 MonoBehaviour:

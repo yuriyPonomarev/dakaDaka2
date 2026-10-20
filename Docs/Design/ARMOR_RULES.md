@@ -1,0 +1,8 @@
+# Prototype armor rating — manager implementation decision20Oct2026
+ITEM_AFFIXES requires fixed and rolled armor points but specifies no mitigation equation. The following explicit prototype rule completes that numeric meaning; it is an implementation/balance decision, not a quotation from the user. Keep zero-rating old combat unchanged.
+
+Armor is independent of directional guard. Rating = sum fixed SkillStat.Armor flat modifiers + rolled Armor affix points on worn instances. Nonfinite/negative effective rating becomes0. It mitigates Physical damage only, from every direction, after existing directional guard: final = max(1, postGuardDamage * 100/(100+rating)). Compute ratio safely for large finite ratings; no NaN/overflow may poison damage. Holy/fire/etc are unchanged. Rating0 is an exact no-op. Raw15 at6armor becomes15*100/106; rating100 halves physical damage. No new authored armor values are assigned to existing gear in this slice, preserving accepted existing balance.
+
+Armor must not set a hit's Blocked flag or alter guard reduction/arc/parry semantics. It never grants parry, affects stamina or turns shields into parry weapons. Existing guard/blocked/headshot/source/type metadata retained. Only the existing actual defender provides rating; intent carries no armor claim. This local seam does not prove real networking.
+
+The positive minimum-hit1 follows the existing DamageResolver minimum and applies to otherwise valid physical hits. Existing invalid/no-hit intents still reject; armor is not an authority-validation bypass. DamageInfo.Amount and health loss must reflect the same final amount. Further balance tuning needs measured gameplay and updated explicit design, not a silent fixture rewrite.

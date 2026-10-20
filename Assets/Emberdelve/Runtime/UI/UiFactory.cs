@@ -166,11 +166,43 @@ namespace Emberdelve.UI
             rect.offsetMax = Vector2.zero;
         }
 
+        /// <summary>
+        /// The pivot every SetRect call used before per-widget pivots existed. Kept as the default so every
+        /// existing caller is laid out exactly as before: a centred widget is still a centred widget.
+        /// </summary>
+        public static readonly Vector2 DefaultPivot = new Vector2(0.5f, 0.5f);
+
         public static void SetRect(RectTransform rect, Vector2 anchorMin, Vector2 anchorMax, Vector2 sizeDelta, Vector2 anchoredPosition)
+        {
+            SetRect(rect, anchorMin, anchorMax, sizeDelta, anchoredPosition, DefaultPivot);
+        }
+
+        /// <summary>
+        /// The pivot a widget needs for its existing corner offset to describe the corner it is named for.
+        /// </summary>
+        public static Vector2 AnchorPivot(Vector2 anchorMin, Vector2 anchorMax)
+        {
+            return new Vector2((anchorMin.x + anchorMax.x) * 0.5f, (anchorMin.y + anchorMax.y) * 0.5f);
+        }
+
+        /// <summary>
+        /// Places a rectangle. anchoredPosition is the position of the pivot, so the pivot decides which corner
+        /// of the rectangle the offset is measured from: a top-left anchored label whose offset is meant to be
+        /// its top-left inset needs pivot (0,1), and a bottom-right anchored readout whose offset is meant to
+        /// be its bottom-right inset needs pivot (1,0). With the centre pivot those offsets put the rectangle's
+        /// centre at the corner inset instead, and a half-width of the widget lands outside the screen.
+        ///
+        /// sizeDelta is always relative to the anchor region, exactly as RectTransform defines it: an explicit
+        /// size for point anchors, an inset for stretch anchors. Callers that pass a full size together with a
+        /// stretched anchor are asking for a rectangle wider than their parent, and are corrected at the caller
+        /// rather than silently resized here.
+        /// </summary>
+        public static void SetRect(RectTransform rect, Vector2 anchorMin, Vector2 anchorMax, Vector2 sizeDelta,
+            Vector2 anchoredPosition, Vector2 pivot)
         {
             rect.anchorMin = anchorMin;
             rect.anchorMax = anchorMax;
-            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.pivot = pivot;
             rect.sizeDelta = sizeDelta;
             rect.anchoredPosition = anchoredPosition;
         }

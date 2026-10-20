@@ -37,6 +37,14 @@ namespace Emberdelve.Data
         MaxMana = 6,
         ManaRegen = 7,
         MaxHealth = 8,
+        /// <summary>
+        /// Physical armor POINTS (Docs/Design/ARMOR_RULES.md, U2B8). Appended after the existing 0..8 values so
+        /// every already-authored modifier keeps its numeric meaning. It is a FLAT rating summed once over the
+        /// passives and worn gear that declare it, read through the defender contract the rig implements and
+        /// mitigated by <see cref="Emberdelve.Combat.DamageResolver"/> on Physical damage only. It is not a pool,
+        /// not a multiplier and deliberately not <see cref="BlockReduction"/>: an armor affix never becomes guard.
+        /// </summary>
+        Armor = 9,
     }
 
     public enum SkillModifierMode
@@ -218,6 +226,7 @@ namespace Emberdelve.Data
                 case SkillStat.MaxMana: return "max mana";
                 case SkillStat.ManaRegen: return "mana regen";
                 case SkillStat.MaxHealth: return "max health";
+                case SkillStat.Armor: return "armor";
                 default: return stat.ToString();
             }
         }

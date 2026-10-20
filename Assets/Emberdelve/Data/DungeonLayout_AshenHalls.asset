@@ -157,3 +157,34 @@ MonoBehaviour:
     height: 2.3
     range: 7
     intensity: 10
+  chestSpawns:
+  - cell: {x: 5, y: 4}
+    variant: 0
+    seed: 101
+    lootTable: {fileID: 11400000, guid: 2e113c6e440def441a8213ab00e237aa, type: 2}
+    bodyMaterial: {fileID: 2100000, guid: b5d1f24440793954f82e577e3514e312, type: 2}
+    lidMaterial: {fileID: 2100000, guid: 2596265e04163144787edc7e0aebe9d7, type: 2}
+  - cell: {x: 14, y: 4}
+    variant: 0
+    seed: 202
+    lootTable: {fileID: 11400000, guid: 2e113c6e440def441a8213ab00e237aa, type: 2}
+    bodyMaterial: {fileID: 2100000, guid: b5d1f24440793954f82e577e3514e312, type: 2}
+    lidMaterial: {fileID: 2100000, guid: 2596265e04163144787edc7e0aebe9d7, type: 2}
+  - cell: {x: 3, y: 12}
+    variant: 1
+    seed: 303
+    lootTable: {fileID: 11400000, guid: 97f7e3a8a34944448a14155f967af52d, type: 2}
+    bodyMaterial: {fileID: 2100000, guid: 4274bbf4e1787ae48bfc774e6f984430, type: 2}
+    lidMaterial: {fileID: 2100000, guid: b3e02270324f95549a901695eba961a2, type: 2}
+  - cell: {x: 7, y: 19}
+    variant: 1
+    seed: 404
+    lootTable: {fileID: 11400000, guid: 97f7e3a8a34944448a14155f967af52d, type: 2}
+    bodyMaterial: {fileID: 2100000, guid: 4274bbf4e1787ae48bfc774e6f984430, type: 2}
+    lidMaterial: {fileID: 2100000, guid: b3e02270324f95549a901695eba961a2, type: 2}
+  - cell: {x: 22, y: 12}
+    variant: 2
+    seed: 505
+    lootTable: {fileID: 11400000, guid: 8e4dc9988d979024bb9a46e92c195b7a, type: 2}
+    bodyMaterial: {fileID: 2100000, guid: 4091ec3fba0f3f349bab068d06f53901, type: 2}
+    lidMaterial: {fileID: 2100000, guid: 3e3d9ceb7905bb84eb306153969d0e5c, type: 2}

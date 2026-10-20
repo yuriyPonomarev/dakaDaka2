@@ -17,13 +17,21 @@ MonoBehaviour:
   description: Quick and fragile. Wins by distance, and by leaving before the thing
     reaches you.
   accentColor: {r: 0.35, g: 0.72, b: 0.62, a: 1}
-  maxHealth: 100
+  strength: 10
+  dexterity: 16
+  constitution: 12
+  intelligence: 10
+  wisdom: 14
+  charisma: 8
+  maxHealth: 80
   healthRegenPerSecond: 2
   regenDelay: 7
-  maxMana: 100
-  manaRegenPerSecond: 10
+  maxMana: 90
+  manaRegenPerSecond: 3.5
   manaRegenDelay: 3
-  moveSpeed: 4.4
+  maxStamina: 95
+  staminaRegenPerSecond: 5
+  moveSpeed: 4.3
   sprintSpeed: 6.4
   crouchSpeed: 2.1
   jumpHeight: 1.25

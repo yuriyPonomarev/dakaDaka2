@@ -6,6 +6,7 @@ using Emberdelve.Combat;
 using Emberdelve.Interaction;
 using Emberdelve.InputLayer;
 using Emberdelve.Items;
+using Emberdelve.Level;
 using Emberdelve.Player;
 
 namespace Emberdelve.Flow
@@ -13,14 +14,16 @@ namespace Emberdelve.Flow
     /// <summary>
     /// Owns one dungeon run: applies the chosen class to the player rig, tracks the run's facts,
     /// decides whether extraction is allowed, and turns death or a completed hold into a RunResult.
-    /// It is also the loot host, so pickups and enemy drops go through one place.
+    /// It is also the loot host, so pickups and enemy drops go through one place - and since U2B9 it is the
+    /// only host that can receive a chest's already-rolled gear item, as that exact item.
     /// </summary>
     [DisallowMultipleComponent]
-    public sealed class RunDirector : MonoBehaviour, IExtractionSink, ILootHost
+    public sealed class RunDirector : MonoBehaviour, IExtractionSink, ILootHost, ICountedLootHost, IInstanceLootHost
     {
         [Header("Configuration")]
         [SerializeField] private GameConfig config;
         [SerializeField] private CharacterClassData fallbackClass;
+        [SerializeField] private DungeonLayoutData layout;
 
         [Header("Scene wiring")]
         [SerializeField] private PlayerRig playerRig;
@@ -33,12 +36,19 @@ namespace Emberdelve.Flow
 
         public RunState State => _state;
         public GameConfig Config => config;
+        public DungeonLayoutData Layout => layout;
         public Inventory Inventory => _inventory;
         public PlayerRig Player => playerRig;
         public int Kills => _kills;
         public int ItemsCollected => _inventory != null ? _inventory.LifetimeCollected : 0;
         public int LootValue => _inventory != null ? _inventory.RecoveredValue : 0;
         public float Elapsed => Mathf.Max(0f, Time.unscaledTime - _startedAt);
+
+        /// <summary>Containers built from the layout asset, created once per run scene.</summary>
+        public ChestSpawner Chests { get; private set; }
+
+        /// <summary>True while the satchel screen has the pointer.</summary>
+        public bool InventoryOpen { get; private set; }
 
         private void Awake()
         {
@@ -65,6 +75,10 @@ namespace Emberdelve.Flow
 
             _startedAt = Time.unscaledTime;
             SetState(RunState.Running);
+
+            // Containers come from the layout asset through the run layer, because a chest hands its loot to the
+            // run host and the run host is what decides whether the player can actually carry it.
+            Chests = ChestSpawner.Ensure(layout, config, this);
 
             GameEvents.RaiseObjective(config != null ? config.objectiveText : "Survive and extract");
             GameEvents.RaiseStatusLine(classData != null ? classData.displayName : "Class");
@@ -93,10 +107,30 @@ namespace Emberdelve.Flow
             if (input.PausePressed) TogglePause();
         }
 
+        /// <summary>
+        /// The satchel screen takes the pointer, so while it is open the player keeps their position and stops
+        /// acting: no movement, no attacks, no skills. The world carries on, which is the cost of stopping to
+        /// sort a bag in a hostile level. Pausing and the bag are separate states and neither cancels the other.
+        /// </summary>
+        public void SetInventoryOpen(bool open)
+        {
+            if (playerRig == null) return;
+
+            InventoryOpen = open && _state == RunState.Running;
+
+            bool controlAllowed = !InventoryOpen && !_paused;
+            playerRig.SetInputEnabled(controlAllowed);
+
+            if (!InventoryOpen && !_paused)
+            {
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+            }
+        }
+
         private void TogglePause()
         {
             if (_state != RunState.Running && _state != RunState.Paused) return;
-
             _paused = !_paused;
             Time.timeScale = _paused ? 0f : 1f;
             playerRig.SetInputEnabled(!_paused);
@@ -174,10 +208,75 @@ namespace Emberdelve.Flow
             GameEvents.RaiseRunState(state);
         }
 
+        /// <summary>
+        /// The yes/no answer a loot source used before counts existed: true only when the bag took every unit.
+        /// It is now derived from the counted path, so the two can never disagree.
+        /// </summary>
         public bool CollectLoot(ItemData item, int amount)
         {
-            if (_inventory == null) return false;
-            return _inventory.TryAdd(item, Mathf.Max(1, amount));
+            return CollectLootCounted(item, amount) == Mathf.Max(1, amount);
+        }
+
+        /// <summary>
+        /// The counted loot path (U1C2H): the run host hands the offer to the bag's own add algorithm and
+        /// reports back the exact units that committed, so a chest or a ground pickup can shrink itself by
+        /// that much instead of guessing from a bool. No placement rule lives here, and no unit is credited
+        /// twice: the bag is what counts, and RunDirector reads its loot figures straight off the bag.
+        /// </summary>
+        public int CollectLootCounted(ItemData item, int amount)
+        {
+            if (_inventory == null || item == null) return 0;
+
+            int requested = Mathf.Max(1, amount);
+            _inventory.TryAdd(item, requested, out _, out int accepted);
+            return Mathf.Clamp(accepted, 0, requested);
+        }
+
+        /// <summary>
+        /// The instance half of the loot contract (U2B9): a chest that rolled a gear item hands over that very
+        /// <see cref="ItemInstance"/>, and this is the only path that accepts it. It goes straight to the bag's
+        /// own instance placement, so the accepted item is the same object - same UID, same rarity, same accepted
+        /// affix records, quantity 1 - with no mint, no copy and no reroll, and it is credited exactly once
+        /// because the bag counts it once.
+        ///
+        /// A run that is not in a state to receive loot refuses it: a run that has not started, one that is
+        /// already dead or extracted, a player who is dead, and a player with no bag at all all leave the item
+        /// where it was. A refusal changes nothing on either side, which is what lets the chest keep the
+        /// identical item for the next open.
+        /// </summary>
+        public bool TryCollectLootInstance(ItemInstance instance, out string reason)
+        {
+            reason = null;
+
+            if (instance == null)
+            {
+                reason = "no item instance to collect";
+                return false;
+            }
+
+            if (_state != RunState.Running)
+            {
+                reason = $"the run is {_state}: {instance.Definition.displayName} [{instance.UidText}] is not " +
+                         "loot a finished or unstarted run can take";
+                return false;
+            }
+
+            if (playerRig == null || _inventory == null)
+            {
+                reason = $"no player bag to carry {instance.Definition.displayName} [{instance.UidText}]";
+                return false;
+            }
+
+            if (playerRig.IsDead)
+            {
+                reason = $"the player is dead: {instance.Definition.displayName} [{instance.UidText}] stays " +
+                         "where it is";
+                return false;
+            }
+
+            // The bag's own rule, read unchanged: one identity is one item, so a UID this player already
+            // carries or already wears is refused rather than granted a second time.
+            return _inventory.TryAddInstance(instance, out reason);
         }
 
         public void SpawnLoot(ItemData item, int amount, Vector3 worldPosition)

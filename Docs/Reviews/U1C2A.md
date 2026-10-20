@@ -1,0 +1,18 @@
+# U1C2A — not accepted; first Windows build blocked by missing namespace
+
+Independent review19October2026. Worker settled64calls; actual controller29920/Pi12352 absent before build/source review, same-config Strata6340/5064 healthy. New files preserve prior accepted gameplay. Reviewed synchronous Windows builder, opt-in bridge initialization, queued input and real screenshot capture paths; no result accepted from worker report.
+
+Manager actual Unity6000.2.5f1 BuildReview invocation fails compilation before BuildPipeline executes: CS0246 KeyboardState at bridge605 and MouseState at635. Both types are in UnityEngine.InputSystem.LowLevel; bridge imports InputSystem but omits LowLevel. Existing smoke harness imports both. Exit1, no BuildWindows PASS, no executable. Raw command/editor/stdout/stderr/pid: manager review-U1C2A-build.json and validation/U1C2A-windows-20261019-035139.
+
+U1C2A-R1 adds only the namespace import, retaining all source and diagnostics. Then manager reruns the fresh Windows build, launches actual1280x720 Player, verifies advancing frames, real PNGs and ordinary queued input effects, and compares no-flag launch. Bridge/Windows build acceptance does not accept aggregate U1C2 full local loop or visuals by itself.
+
+
+## Independent standalone review — 2026-10-19
+R1 namespace fix verified: Windows BuildReview exit0, exactly one PASS result=Succeeded, no captured compile/errors, binary and Data folder present. Evidence manager review-U1C2A-build.json and validation/U1C2A-windows-20261019-035316.
+Actual windowed Player PID25248 launched, first Lobby PNG inspected at1280x720. Queued InputSystem mouse on DESCEND entered saved Emberdelve_Level01; I opened inventory. Frame/time advanced from frame2/time.02 to frame30677/time29.19 (not frozen screenshot proof). Unknown key id5 rejected; quit id6 acknowledged, actual PID absent afterward. No direct gameplay calls/teleport used.
+Actual rendered PNGs raid-first.png/inventory.png reveal clipped HUD, overlapping skill text and offscreen lower equipment slots. Player log128 contains unknown Scale2 processor error; installed InputSystem registers ScaleVector2. U1C2B narrow processor repair then U1C2C layout repair prepared.
+Only R1 compile repair accepted. U1C2A bridge remains partial pending remaining protocol/no-flag checks; U1C2 full local loop and visual acceptance remain OPEN. Physical OS mouse, full chest/death/extraction/results, audio and real networking NOT established.
+
+
+## Completed bridge acceptance 19 October 2026
+Fresh Player30308: duplicate id147 and stale145 rejected without replay; unsafe ../escape.png rejected; malformed JSON produced failed read ack id-1, unknown action149 rejected; subsequent quit150 succeeded and PID absent. Actual normal mouse/key, frames/time advancement, scene transition, PNG capture and full extraction/returnLobby verified. Player log4103lines: only failure/error match was deliberately malformed JSON; no gameplay exceptions. No-flag Player12480 alive after6seconds, log has zero review initialization/ack lines; source Install guard reviewed. Hidden no-flag process had no closeable main window, so manager stopped that command-verified owned process after check; first sandbox no-flag launch27436 ended after its parent session, not counted as stable proof. No-flag log has Unity Curl DNS errors; these do not establish gameplay failure and remain recorded. Bridge accepted as development-only normal InputSystem automation; physical OS device behavior and audio remain unverified. Evidence validation/U1C2A-player-20261019-075204 and U1C2A-no-flag-20261019-080513.

@@ -29,6 +29,29 @@ namespace Emberdelve.Skills
         /// </summary>
         public int ActivationId;
 
+        /// <summary>
+        /// The ability effect scale of THIS cast (Docs/Design/ATTRIBUTES.md):
+        /// clamp(1 + 0.04 * CHA modifier, 0.6, 1.4), snapshotted by SkillCaster when the cast was accepted.
+        /// 1 whenever the caster owns no attribute state, so an entity without six scores behaves exactly as
+        /// it did before the amendment.
+        ///
+        /// Readable by every behavior, writable only by SkillCaster, and re-taken for every cast. That is
+        /// what makes the scale per-cast instead of per-frame: an effect already running (a dash in flight,
+        /// a status already applied) keeps the numbers the cast that produced it had, and gear changed
+        /// afterwards only moves the next cast. It is also the only place this scale exists, so a behavior
+        /// that applied it and then handed it to the authority as well would be counting CHA twice.
+        /// </summary>
+        public float EffectScale { get; private set; }
+
+        /// <summary>
+        /// SkillCaster only: records the scale this cast is running on. A non-positive or non-finite value
+        /// is not a scale, so it falls back to 1 rather than silently shrinking or erasing an effect.
+        /// </summary>
+        internal void SnapshotEffectScale(float scale)
+        {
+            EffectScale = scale > 0f && !float.IsNaN(scale) && !float.IsInfinity(scale) ? scale : 1f;
+        }
+
         /// <summary>Reusable scratch buffer so a cast allocates nothing per shot.</summary>
         public readonly List<HitCandidate> Hits = new List<HitCandidate>(8);
         public readonly List<int> AlreadyHit = new List<int>(8);

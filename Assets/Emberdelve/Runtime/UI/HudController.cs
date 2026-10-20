@@ -6,7 +6,9 @@ using Emberdelve.Core;
 using Emberdelve.Combat;
 using Emberdelve.Data;
 using Emberdelve.Flow;
+using Emberdelve.InputLayer;
 using Emberdelve.Items;
+using Emberdelve.Player;
 using Emberdelve.Skills;
 
 namespace Emberdelve.UI
@@ -25,6 +27,7 @@ namespace Emberdelve.UI
         private Canvas _canvas;
         private RectTransform _root;
         private RectTransform _inventoryRow;
+        private Text _bagSummaryLabel;
 
         private Text _classLabel;
         private Text _weaponLabel;
@@ -39,6 +42,11 @@ namespace Emberdelve.UI
         private Text _manaLabel;
         private Image _manaFill;
         private RectTransform _manaFillRect;
+        private Text _staminaLabel;
+        private Image _staminaFill;
+        private RectTransform _staminaFillRect;
+        private int _staminaShownCurrent = -1;
+        private int _staminaShownMax = -1;
         private Text _kitLabel;
         private readonly SkillSlotWidget[] _skillSlots = new SkillSlotWidget[Skills.SkillCaster.ActiveSlotCapacity];
         private Text _promptLabel;
@@ -56,6 +64,7 @@ namespace Emberdelve.UI
         private float _holdProgress;
         private bool _paused;
         private RunDirector _director;
+        private InventoryScreenController _inventoryScreen;
 
         /// <summary>Widgets of one skill slot. Built once, then updated from SkillSnapshot values.</summary>
         private sealed class SkillSlotWidget
@@ -74,6 +83,33 @@ namespace Emberdelve.UI
         private const float BarHeight = 20f;
         private const float ManaBarHeight = 14f;
         private const float SkillRejectFlash = 1.6f;
+
+        // The stamina bar is the mana bar's shape in the free band to the right of the mana readout, so the
+        // three pools read as one stack of bars. Measured in the same 1280x720 image coordinates the hotbar
+        // comment below uses: mana bar x 24..364 y 695..709, mana label x 378..598 y 695..715, hotbar chips
+        // x 430..850 y 648..692, ammo fill x 1036..1256 y 667..677, ammo label x 932..1252 y 632..660.
+        // Stamina bar x 610..830 y 695..709 and label x 844..1034 y 695..715 sit in the empty stretch of that
+        // bottom row: 12px right of the mana label, 3px below the hotbar chips, 22px left of the ammo fill,
+        // and every one of them is corner-anchored with a fixed inset, so the same clearances hold at 1920x1080
+        // (bar x 930..1150, label x 1164..1354, against chips that start at x 1250 and an ammo fill at x 1676).
+        private const float StaminaBarWidth = 220f;
+        private const float StaminaBarLeft = 610f;
+        private const float StaminaLabelWidth = 190f;
+
+        // The raid hotbar. HotbarController.Update loops i = 0..3 and calls Inventory.TryUseSlot(i), so 1-4
+        // address the first four stacks the bag currently holds, never four capacity cells and never a
+        // filtered subset of them. The strip therefore draws exactly those four stacks.
+        private const int HotbarCapacity = 4;
+        private const float HotbarChipWidth = 96f;
+        private const float HotbarChipHeight = 44f;
+        private const float HotbarChipGap = 12f;
+
+        // Offsets of each widget's pivot above the window's bottom edge, which is what their bottom-centre
+        // anchors are relative to. See RebuildInventory for the neighbour rectangles they were measured against.
+        private const float HotbarChipCentre = 50f;
+        private const float BagSummaryCentre = 90f;
+        private const float BagSummaryWidth = 520f;
+        private const float BagSummaryHeight = 22f;
 
         private void Awake()
         {
@@ -162,6 +198,29 @@ namespace Emberdelve.UI
                     widget.ReasonLabel.color = color;
                 }
             }
+
+            UpdateInventoryScreen();
+            UpdateStamina();
+        }
+
+        private void UpdateInventoryScreen()
+        {
+            if (_inventoryScreen == null) return;
+
+            if (_director == null) GameServices.TryGet<RunDirector>(out _director);
+
+            PlayerRig rig = _director != null ? _director.Player : null;
+            EmberdelveInput input = rig != null ? rig.Input : null;
+            bool running = _director == null || _director.State == RunState.Running;
+
+            if (input != null && running && input.InventoryPressed)
+            {
+                _inventoryScreen.Toggle();
+
+                if (_director != null) _director.SetInventoryOpen(_inventoryScreen.IsOpen);
+            }
+
+            _inventoryScreen.HandlePointer();
         }
 
         private void BuildHud()
@@ -175,14 +234,15 @@ namespace Emberdelve.UI
 
             _classLabel = UiFactory.CreateText(_root, "ClassLabel", "Class", 26, ink, TextAnchor.UpperLeft);
             UiFactory.SetRect(_classLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(420f, 34f), new Vector2(24f, -22f));
+                new Vector2(420f, 34f), new Vector2(24f, -22f), new Vector2(0f, 1f));
 
-            _objectiveLabel = UiFactory.CreateText(_root, "ObjectiveLabel", "", 16, dim, TextAnchor.UpperLeft);            UiFactory.SetRect(_objectiveLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(520f, 60f), new Vector2(24f, -58f));
+            _objectiveLabel = UiFactory.CreateText(_root, "ObjectiveLabel", "", 16, dim, TextAnchor.UpperLeft);
+            UiFactory.SetRect(_objectiveLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(520f, 60f), new Vector2(24f, -58f), new Vector2(0f, 1f));
 
             _statusLabel = UiFactory.CreateText(_root, "StatusLabel", "", 16, dim, TextAnchor.UpperLeft);
             UiFactory.SetRect(_statusLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(520f, 26f), new Vector2(24f, -118f));
+                new Vector2(520f, 26f), new Vector2(24f, -118f), new Vector2(0f, 1f));
 
             UiFactory.CreateImage(_root, "HealthBack", new Color(0.08f, 0.07f, 0.06f, 0.85f),
                 new Vector2(BarWidth, BarHeight), new Vector2(24f + BarWidth * 0.5f, 44f),
@@ -203,7 +263,7 @@ namespace Emberdelve.UI
 
             _ammoLabel = UiFactory.CreateText(_root, "AmmoLabel", "", 20, ink, TextAnchor.MiddleRight);
             UiFactory.SetRect(_ammoLabel.rectTransform, new Vector2(1f, 0f), new Vector2(1f, 0f),
-                new Vector2(320f, 28f), new Vector2(-28f, 74f));
+                new Vector2(320f, 28f), new Vector2(-28f, 74f), new Vector2(1f, 0.5f));
 
             _ammoFill = UiFactory.CreateImage(_root, "AmmoFill", new Color(0.85f, 0.72f, 0.3f, 1f),
                 new Vector2(220f, 10f), new Vector2(-24f - 220f, 48f), new Vector2(1f, 0f), new Vector2(1f, 0f));
@@ -221,7 +281,26 @@ namespace Emberdelve.UI
 
             _manaLabel = UiFactory.CreateText(_root, "ManaLabel", "0 / 0", 14, dim, TextAnchor.MiddleLeft);
             UiFactory.SetRect(_manaLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
-                new Vector2(220f, 20f), new Vector2(24f + BarWidth + 14f, 15f));
+                new Vector2(220f, 20f), new Vector2(24f + BarWidth + 14f, 15f), new Vector2(0f, 0.5f));
+
+            // Stamina, drawn the way health and mana are drawn: a dark back, a filled bar that shrinks from
+            // the left, and a current / maximum line beside it. The colour is the one the kit already reads
+            // as "endurance" - a green against the red health bar and the blue mana bar - and the numbers
+            // come from the live pool, not from a ceiling the HUD invented.
+            UiFactory.CreateImage(_root, "StaminaBack", new Color(0.06f, 0.085f, 0.07f, 0.85f),
+                new Vector2(StaminaBarWidth, ManaBarHeight), new Vector2(StaminaBarLeft + StaminaBarWidth * 0.5f, 18f),
+                new Vector2(0f, 0f), new Vector2(0f, 0f));
+
+            _staminaFill = UiFactory.CreateImage(_root, "StaminaFill", new Color(0.34f, 0.62f, 0.36f, 1f),
+                new Vector2(StaminaBarWidth, ManaBarHeight), new Vector2(StaminaBarLeft, 18f),
+                new Vector2(0f, 0f), new Vector2(0f, 0f));
+            _staminaFill.rectTransform.pivot = new Vector2(0f, 0.5f);
+            _staminaFillRect = _staminaFill.rectTransform;
+
+            _staminaLabel = UiFactory.CreateText(_root, "StaminaLabel", "", 14, dim, TextAnchor.MiddleLeft);
+            UiFactory.SetRect(_staminaLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                new Vector2(StaminaLabelWidth, 20f), new Vector2(StaminaBarLeft + StaminaBarWidth + 14f, 15f),
+                new Vector2(0f, 0.5f));
 
             BuildSkillBar(ink, dim);
             BuildPassiveReadout(dim);
@@ -248,10 +327,31 @@ namespace Emberdelve.UI
             _pauseLabel.gameObject.SetActive(false);
 
             BuildCrosshair(ink);
-            BuildInventoryRow();
+            BuildHotbar();
 
             _vignette = UiFactory.CreateImage(_root, "DamageVignette", new Color(0.65f, 0.05f, 0.05f, 0f),
                 new Vector2(2400f, 1400f), Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+
+            BuildInventoryScreen();
+        }
+
+        /// <summary>
+        /// The satchel and worn-kit screen, opened with I or Tab. It lives beside the HUD rather than inside it
+        /// because it takes over the pointer, and the run layer decides whether the player keeps control while
+        /// it is open.
+        /// </summary>
+        private void BuildInventoryScreen()
+        {
+            GameObject screenObject = new GameObject("Emberdelve_InventoryScreen");
+            screenObject.transform.SetParent(_canvas.transform, false);
+
+            if (_director == null) GameServices.TryGet<RunDirector>(out _director);
+
+            _inventoryScreen = screenObject.AddComponent<InventoryScreenController>();
+            _inventoryScreen.Configure(_director, _director != null ? _director.Player : null);
+
+            // The host stays active so the controller keeps its bag/gear subscriptions and its per-frame
+            // pointer handling; only the screen's own visual root is switched off until Open() is called.
         }
 
         private void BuildCrosshair(Color ink)
@@ -316,25 +416,30 @@ namespace Emberdelve.UI
                 widget.KeyLabel = UiFactory.CreateText(background.transform, "KeyLabel", "?", 15,
                     new Color(1f, 0.9f, 0.72f, 1f), TextAnchor.MiddleCenter, FontStyle.Bold);
                 UiFactory.SetRect(widget.KeyLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                    new Vector2(46f, 22f), new Vector2(26f, -12f));
+                    new Vector2(46f, 22f), new Vector2(10f, -8f), new Vector2(0f, 1f));
 
+                // Point anchors with an explicit width. The previous anchors stretched across the chip while
+                // sizeDelta still carried a full chip width, which asked for a rectangle twice as wide as the
+                // chip and pushed the title out of the slot on both sides.
                 widget.NameLabel = UiFactory.CreateText(background.transform, "NameLabel", "", 16, ink, TextAnchor.UpperLeft);
-                UiFactory.SetRect(widget.NameLabel.rectTransform, new Vector2(0f, 1f), new Vector2(1f, 1f),
-                    new Vector2(chipWidth - 60f, 24f), new Vector2(52f, -12f));
+                UiFactory.SetRect(widget.NameLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                    new Vector2(chipWidth - 66f, 24f), new Vector2(60f, -8f), new Vector2(0f, 1f));
 
                 widget.CostLabel = UiFactory.CreateText(background.transform, "CostLabel", "", 13, dim, TextAnchor.MiddleLeft);
-                UiFactory.SetRect(widget.CostLabel.rectTransform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                    new Vector2(chipWidth - 20f, 20f), new Vector2(0f, 16f));
+                UiFactory.SetRect(widget.CostLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                    new Vector2(chipWidth - 20f, 20f), new Vector2(10f, 10f), new Vector2(0f, 0f));
 
+                // Stretch anchors keep the cooldown readout glued to the chip, so sizeDelta is now the inset
+                // rather than a second full size on top of the chip's own.
                 widget.CooldownLabel = UiFactory.CreateText(background.transform, "CooldownLabel", "", 20,
                     new Color(1f, 0.85f, 0.6f, 1f), TextAnchor.MiddleRight);
                 UiFactory.SetRect(widget.CooldownLabel.rectTransform, new Vector2(0f, 0f), new Vector2(1f, 1f),
-                    new Vector2(chipWidth - 20f, chipHeight - 24f), Vector2.zero);
+                    new Vector2(-20f, -24f), Vector2.zero);
 
                 widget.ReasonLabel = UiFactory.CreateText(background.transform, "RejectLabel", "", 12,
                     new Color(1f, 0.55f, 0.4f, 0f), TextAnchor.MiddleCenter);
-                UiFactory.SetRect(widget.ReasonLabel.rectTransform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                    new Vector2(chipWidth - 16f, 34f), new Vector2(0f, 40f));
+                UiFactory.SetRect(widget.ReasonLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                    new Vector2(chipWidth - 16f, 34f), new Vector2(8f, 40f), new Vector2(0f, 0f));
                 widget.ReasonLabel.gameObject.SetActive(false);
 
                 _skillSlots[i] = widget;
@@ -346,16 +451,33 @@ namespace Emberdelve.UI
         {
             _kitLabel = UiFactory.CreateText(_root, "KitLabel", "", 13, dim, TextAnchor.UpperLeft);
             UiFactory.SetRect(_kitLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
-                new Vector2(430f, 92f), new Vector2(24f, 132f));
+                new Vector2(430f, 92f), new Vector2(24f, 132f), new Vector2(0f, 0f));
         }
 
-        private void BuildInventoryRow()
+        /// <summary>
+        /// The raid hotbar: the four stacks the 1-4 keys actually reach, plus one compact line saying what the
+        /// rest of the bag is doing. The full 10x4 satchel is not squeezed into the HUD; it is the screen
+        /// opened with I or Tab, and this strip only names the stacks HotbarController consumes.
+        /// </summary>
+        private void BuildHotbar()
         {
             _inventoryRow = UiFactory.CreateGroup(_root, "InventoryRow");
-            UiFactory.SetRect(_inventoryRow, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), Vector2.zero, new Vector2(0f, 40f));
+            UiFactory.SetRect(_inventoryRow, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), Vector2.zero, Vector2.zero);
+
+            _bagSummaryLabel = UiFactory.CreateText(_root, "BagSummary", "", 15,
+                new Color(0.84f, 0.79f, 0.7f, 0.95f), TextAnchor.MiddleCenter);
+            UiFactory.SetRect(_bagSummaryLabel.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(BagSummaryWidth, BagSummaryHeight), new Vector2(0f, BagSummaryCentre));
+
             RebuildInventory();
         }
 
+        /// <summary>
+        /// Rebuilds the strip from the live bag. The chips are named Slot1..Slot4 and stand for stack indices
+        /// 0..3 of Inventory.Slots, the same indices HotbarController hands to Inventory.TryUseSlot, so a
+        /// stack that is consumed, removed, merged or shifted is re-read from the bag on the next
+        /// InventoryChanged notification instead of being remembered here.
+        /// </summary>
         private void RebuildInventory()
         {
             if (_inventoryRow == null) return;
@@ -370,51 +492,103 @@ namespace Emberdelve.UI
             Inventory inventory = _director != null ? _director.Inventory : null;
             if (inventory == null) return;
 
-            int capacity = Mathf.Max(1, inventory.Capacity);
-            const float chipWidth = 96f;
-            const float chipHeight = 44f;
-            float total = capacity * chipWidth;
+            // Geometry, measured against the neighbours that already live at the bottom of the HUD in the
+            // tightest supported window (1280x720, image coords with y down from the top edge):
+            //   health bar x 24..364 y 666..686, health label x 24..364 y 635..657, weapon label x 24..364
+            //   y 603..629, mana bar x 24..364 y 695..709, mana label x 378..598 y 695..715,
+            //   kit label x 24..454 y 496..588, ammo label x 932..1252 y 632..660, ammo fill x 1036..1256
+            //   y 667..677, skill chips x 882..1252 y 514..592, prompt x 260..1020 y 554..586,
+            //   hold bar x 490..790 y 586..598.
+            // Four 96px chips on a 12px pitch, pivots 50px above the bottom edge, span x 430..850 and y
+            // 648..692: 3px clear of the mana label's bottom edge, 50px below the hold bar, and clear of both
+            // bars and the ammo readout in x. The 520px summary line, pivots 90px above the bottom edge, spans
+            // x 380..900 and y 619..641: 7px above the chips, 21px below the hold bar, 16px right of the weapon
+            // label and 32px left of the ammo label. Every one of those neighbours is corner-anchored with a
+            // fixed pixel inset while this strip is bottom-centred, so the same offsets keep the same clearances
+            // at 1920x1080 (chips x 750..1170 y 1008..1052, summary x 700..1220 y 979..1001, against a skill bar
+            // that starts at x 1522, an ammo label that starts at x 1572 and a mana label that ends at x 598).
+            float total = HotbarCapacity * HotbarChipWidth + (HotbarCapacity - 1) * HotbarChipGap;
 
-            for (int i = 0; i < capacity; i++)
+            for (int i = 0; i < HotbarCapacity; i++)
             {
-                float x = -total * 0.5f + chipWidth * (i + 0.5f);
+                float x = -total * 0.5f + (HotbarChipWidth + HotbarChipGap) * i + HotbarChipWidth * 0.5f;
 
                 bool filled = i < inventory.Slots.Count;
                 InventorySlot slot = filled ? inventory.Slots[i] : default;
+                ItemData item = filled ? slot.Item : null;
 
-                Color chipColor = new Color(0.07f, 0.06f, 0.055f, filled ? 0.9f : 0.55f);
-                Image chip = UiFactory.CreateImage(_inventoryRow, "Slot" + (i + 1), chipColor,
-                    new Vector2(chipWidth - 6f, chipHeight), new Vector2(x, 0f),
+                Image chip = UiFactory.CreateImage(_inventoryRow, "Slot" + (i + 1),
+                    new Color(0.07f, 0.06f, 0.055f, item != null ? 0.93f : 0.6f),
+                    new Vector2(HotbarChipWidth, HotbarChipHeight), new Vector2(x, HotbarChipCentre),
                     new Vector2(0.5f, 0f), new Vector2(0.5f, 0f));
+                chip.raycastTarget = false;
 
-                if (filled && slot.Item != null)
+                // The key glyph is the hint, and it is the key HotbarController reads for this stack index.
+                Text key = UiFactory.CreateText(chip.transform, "Key", (i + 1).ToString(), 18,
+                    item != null ? new Color(1f, 0.9f, 0.72f, 1f) : new Color(0.55f, 0.52f, 0.46f, 0.85f),
+                    TextAnchor.MiddleCenter, FontStyle.Bold);
+                UiFactory.SetRect(key.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                    new Vector2(24f, 22f), new Vector2(12f, HotbarChipHeight * 0.5f), new Vector2(0.5f, 0.5f));
+                key.raycastTarget = false;
+
+                UiFactory.CreateImage(chip.transform, "KeyDivider", new Color(0.45f, 0.41f, 0.35f, 0.8f),
+                    new Vector2(1f, HotbarChipHeight - 12f), new Vector2(26f, HotbarChipHeight * 0.5f),
+                    new Vector2(0f, 0f), new Vector2(0f, 0f)).raycastTarget = false;
+
+                if (item == null)
                 {
-                    Color accent = slot.Item.iconColor;
-                    UiFactory.CreateImage(chip.transform, "Swatch", accent, new Vector2(10f, 10f),
-                        new Vector2(-36f, 8f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
-
-                    string label = slot.Item.displayName;
-                    if (label.Length > 14) label = label.Substring(0, 14);
-                    if (slot.Count > 1) label += " x" + slot.Count;
-
-                    Text text = UiFactory.CreateText(chip.transform, "Label", label, 12,
-                        new Color(0.92f, 0.88f, 0.8f, 1f), TextAnchor.MiddleCenter);
-                    UiFactory.SetRect(text.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                        new Vector2(chipWidth - 12f, 20f), new Vector2(4f, 6f));
-
-                    string keyHint = i < 4 ? "[" + (i + 1) + "]" : "used by";
-                    Text hint = UiFactory.CreateText(chip.transform, "Key", keyHint, 11,
-                        new Color(0.7f, 0.66f, 0.58f, 0.9f), TextAnchor.MiddleCenter);
-                    UiFactory.SetRect(hint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-                        new Vector2(chipWidth - 12f, 16f), new Vector2(4f, 12f));
-                }
-                else
-                {
-                    Text empty = UiFactory.CreateText(chip.transform, "Empty", i < 4 ? "[" + (i + 1) + "]" : "-", 12,
+                    Text empty = UiFactory.CreateText(chip.transform, "Empty", "empty", 12,
                         new Color(0.5f, 0.47f, 0.42f, 0.8f), TextAnchor.MiddleCenter);
-                    UiFactory.Stretch(empty.rectTransform);
+                    UiFactory.SetRect(empty.rectTransform, Vector2.zero, Vector2.one,
+                        new Vector2(-34f, -14f), new Vector2(10f, 0f));
+                    empty.raycastTarget = false;
+                    continue;
                 }
+
+                // The chip's own accent strip carries the item's icon colour, so the name keeps the whole
+                // remaining width instead of trading it for a swatch.
+                Color accent = item.iconColor;
+                accent.a = 1f;
+                UiFactory.CreateImage(chip.transform, "Accent", accent, new Vector2(HotbarChipWidth, 4f),
+                    new Vector2(HotbarChipWidth * 0.5f, HotbarChipHeight - 2f),
+                    new Vector2(0f, 0f), new Vector2(0f, 0f)).raycastTarget = false;
+
+                // Long names wrap inside the chip rather than being cut to fourteen characters; the full name,
+                // footprint and summary stay in the satchel screen.
+                Text label = UiFactory.CreateText(chip.transform, "Label", HotbarLabel(item, slot.Count), 12,
+                    new Color(0.93f, 0.89f, 0.81f, 1f), TextAnchor.MiddleCenter);
+                UiFactory.SetRect(label.rectTransform, Vector2.zero, Vector2.one,
+                    new Vector2(-34f, -14f), new Vector2(10f, 0f));
+                label.horizontalOverflow = HorizontalWrapMode.Wrap;
+                label.verticalOverflow = VerticalWrapMode.Truncate;
+                label.raycastTarget = false;
             }
+
+            UpdateBagSummary(inventory);
+        }
+
+        /// <summary>Stack name plus count, hard-cut only when a name is long enough to overflow the chip.</summary>
+        private static string HotbarLabel(ItemData item, int count)
+        {
+            string name = item.displayName ?? string.Empty;
+            if (name.Length > 22) name = name.Substring(0, 22).TrimEnd() + "...";
+
+            return count > 1 ? name + " x" + count : name;
+        }
+
+        /// <summary>
+        /// One readable line for the bag the four chips do not show: how full the satchel is, what it is worth,
+        /// how much is worn, and the key that opens the whole 10x4 grid.
+        /// </summary>
+        private void UpdateBagSummary(Inventory inventory)
+        {
+            if (_bagSummaryLabel == null || inventory == null) return;
+
+            Equipment equipment = _director != null && _director.Player != null ? _director.Player.Equipment : null;
+            int worn = equipment != null ? equipment.FilledCount : 0;
+
+            _bagSummaryLabel.text = $"1-4 use these stacks   bag {inventory.UsedCells}/{inventory.Capacity} cells   " +
+                                    $"value {inventory.CarriedValue}   worn {worn}   [I] satchel";
         }
 
         private void OnPlayerHealth(float current, float max)
@@ -487,6 +661,47 @@ namespace Emberdelve.UI
             _manaFillRect.sizeDelta = new Vector2(BarWidth * fraction, ManaBarHeight);
 
             if (_manaLabel != null) _manaLabel.text = $"Mana  {Mathf.RoundToInt(current)} / {Mathf.RoundToInt(max)}";
+        }
+
+        /// <summary>
+        /// The stamina read-out, re-read from the live pool. Stamina regenerates on its own clock and its
+        /// ceiling moves with gear, so the bar is refreshed from the pool rather than remembered from an
+        /// event; the label is only rewritten when a number the player can actually see has changed. This
+        /// reads the pool - it never spends stamina, never changes a ceiling and never refills anything.
+        /// </summary>
+        private void UpdateStamina()
+        {
+            if (_staminaFill == null || _staminaFillRect == null) return;
+
+            PlayerRig rig = _director != null ? _director.Player : null;
+            StaminaComponent stamina = rig != null ? rig.Stamina : null;
+
+            if (stamina == null)
+            {
+                _staminaFill.gameObject.SetActive(false);
+                if (_staminaLabel != null) _staminaLabel.gameObject.SetActive(false);
+                _staminaShownCurrent = -1;
+                _staminaShownMax = -1;
+                return;
+            }
+
+            _staminaFill.gameObject.SetActive(true);
+            if (_staminaLabel != null) _staminaLabel.gameObject.SetActive(true);
+
+            float current = stamina.CurrentStamina;
+            float max = stamina.MaxStamina;
+            int shownCurrent = Mathf.RoundToInt(current);
+            int shownMax = Mathf.RoundToInt(max);
+
+            if (shownCurrent == _staminaShownCurrent && shownMax == _staminaShownMax) return;
+
+            _staminaShownCurrent = shownCurrent;
+            _staminaShownMax = shownMax;
+
+            float fraction = max > 0f ? Mathf.Clamp01(current / max) : 0f;
+            _staminaFillRect.sizeDelta = new Vector2(StaminaBarWidth * fraction, ManaBarHeight);
+
+            if (_staminaLabel != null) _staminaLabel.text = $"Stamina  {shownCurrent} / {shownMax}";
         }
 
         private void OnSkillState(SkillSnapshot snapshot)
@@ -626,6 +841,13 @@ namespace Emberdelve.UI
                     OnPlayerMana(_director.Player.Mana != null ? _director.Player.Mana.CurrentMana : 0f,
                         _director.Player.Mana != null ? _director.Player.Mana.MaxMana : 0f);
 
+                    // Stamina has no GameEvents channel yet (the pool only raises its own Changed), and the
+                    // run layer is not the place to invent one for a bar. Seeding from the live pool here is
+                    // the same seed the health and mana bars get, and Update keeps it current from there.
+                    _staminaShownCurrent = -1;
+                    _staminaShownMax = -1;
+                    UpdateStamina();
+
                     SkillCaster caster = _director.Player.Skills;
                     if (caster != null)
                     {
@@ -638,6 +860,15 @@ namespace Emberdelve.UI
                     if (!ranged && _ammoLabel != null) _ammoLabel.gameObject.SetActive(false);
                     if (!ranged && _ammoFill != null) _ammoFill.gameObject.SetActive(false);
                 }
+
+                // Seed the hotbar from the live bag here too. RunDirector assigns its Inventory only after
+                // ApplyClass has already handed out the starting kit, so the InventoryChanged raised by that
+                // kit reaches RebuildInventory while RunDirector.Inventory is still null and is dropped, and a
+                // class that starts with an empty bag never raises one at all. Running is the first state in
+                // which the director's bag exists, so this is the point where the strip is built - from the
+                // bag itself, not from an invented event. RebuildInventory keeps its own destroy/rebuild path
+                // and its own director/bag null guards, so an empty bag still yields the four empty chips.
+                RebuildInventory();
             }
         }
 
@@ -660,10 +891,25 @@ namespace Emberdelve.UI
             _kitLabel.text = builder.ToString().TrimEnd();
         }
 
+        /// <summary>
+        /// The pause label, and the one moment the run layer is told again that the satchel still holds the
+        /// pointer. RunDirector.TogglePause re-enables gameplay input before it raises this notification and
+        /// re-locks the cursor after it, so a resume out of pause while the satchel is open would otherwise
+        /// leave the player looking at an open screen whose next click is also an attack. Re-running the
+        /// run layer's own SetInventoryOpen contract from here puts the input gate back the way Open() set
+        /// it; the cursor itself belongs to the screen that is open and is re-asserted there.
+        /// </summary>
         private void OnPause(bool paused)
         {
             _paused = paused;
             if (_pauseLabel != null) _pauseLabel.gameObject.SetActive(paused);
+
+            if (_inventoryScreen == null) return;
+            if (_director == null) GameServices.TryGet<RunDirector>(out _director);
+
+            // Closed, this is the same call the toggle already made: the run layer keeps control and keeps
+            // the cursor locked. Open, it is the difference between a tab that can be clicked and a swing.
+            if (_director != null) _director.SetInventoryOpen(_inventoryScreen.IsOpen);
         }
     }
 }

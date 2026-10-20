@@ -20,6 +20,8 @@ MonoBehaviour:
   extractionHoldDuration: 3
   interactionRange: 2.4
   interactSphereRadius: 0.45
+  inventoryGridWidth: 10
+  inventoryGridHeight: 4
   inventoryCapacity: 8
   mouseSensitivity: 1.2
   fieldOfView: 68

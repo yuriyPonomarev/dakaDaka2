@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Data;
+using Emberdelve.Stats;
 
 namespace Emberdelve.Combat
 {
@@ -10,11 +11,19 @@ namespace Emberdelve.Combat
     {
         public const float HeadshotMultiplier = 1.8f;
 
+        /// <summary>
+        /// Ordinary weapon damage. <paramref name="weaponBaseDamageBonus"/> is the authority-read flat bonus
+        /// on the weapon's OWN base (U2B7 rolled melee_damage / projectile_damage): it enters through
+        /// <see cref="WeaponData.DamageAtRange(float, float)"/> before falloff, so charge, the instigator
+        /// multiplier and headshot all still multiply the already-boosted base exactly as they multiplied the
+        /// authored one. 0 - every entity that is not a flat-bonus provider, and every weapon with no matching
+        /// affix - resolves bit-for-bit to the previous number.
+        /// </summary>
         public static DamageInfo Resolve(WeaponData weapon, in AttackIntent intent, in HitCandidate hit,
-            ICombatEntity target, float instigatorMultiplier = 1f)
+            ICombatEntity target, float instigatorMultiplier = 1f, float weaponBaseDamageBonus = 0f)
         {
             float distance = Vector3.Distance(intent.Origin, hit.HitPoint);
-            float amount = weapon.DamageAtRange(distance);
+            float amount = weapon.DamageAtRange(distance, weaponBaseDamageBonus);
 
             if (weapon.IsRanged)
             {
@@ -33,9 +42,20 @@ namespace Emberdelve.Combat
         /// Skill damage. A skill either brings its own number (flatDamage) or scales the weapon actually
         /// held, which is what keeps Multi-shot and Piercing Shot honest about the bow in the player's
         /// hands: range falloff, damage type and headshots all still come from the weapon asset.
+        ///
+        /// effectScale is the caster's per-activation ability scale (Docs/Design/ATTRIBUTES.md CHA rule).
+        /// It is applied here and nowhere else in this path, once per accepted hit, on top of the weapon's
+        /// own falloff and the instigator multiplier the authority read from the instigator - so the STR/DEX
+        /// weapon factor, the passive/gear/status factors, charge and falloff each still count exactly once
+        /// and a skill cannot be scaled by both its behavior and its resolver.
+        ///
+        /// weaponBaseDamageBonus is the same authority-read flat the ordinary attack path gets, and it is
+        /// applied in the WEAPON branch only: a weapon-based skill scales the boosted base with its own
+        /// damageMultiplier, while a skill that declares its own flat number (BattleCry) keeps that number
+        /// untouched and gains nothing from the weapon in hand.
         /// </summary>
         public static DamageInfo ResolveSkill(in SkillIntent intent, in HitCandidate hit, ICombatEntity target,
-            float instigatorMultiplier = 1f)
+            float instigatorMultiplier = 1f, float effectScale = 1f, float weaponBaseDamageBonus = 0f)
         {
             SkillData skill = intent.Skill;
             float distance = Vector3.Distance(intent.Origin, hit.HitPoint);
@@ -52,12 +72,13 @@ namespace Emberdelve.Combat
                 WeaponData weapon = intent.Weapon;
                 if (weapon == null) return DamageInfo.Invalid;
 
-                amount = weapon.DamageAtRange(distance);
+                amount = weapon.DamageAtRange(distance, weaponBaseDamageBonus);
                 if (weapon.IsRanged) amount *= Mathf.Lerp(weapon.minChargeDamageScale, 1f, 1f);
                 amount *= Mathf.Max(0.05f, skill.damageMultiplier);
             }
 
             amount *= Mathf.Max(0f, instigatorMultiplier);
+            amount *= ClampEffectScale(effectScale);
 
             if (hit.Headshot) amount *= HeadshotMultiplier;
 
@@ -66,6 +87,20 @@ namespace Emberdelve.Combat
 
             return Finalize(amount, source, intent.Direction, intent.Origin, intent.InstigatorCombatId,
                 intent.InstigatorKind, hit, target, type);
+        }
+
+        /// <summary>
+        /// Bounds a claimed ability effect scale to the band AttributeRules can actually produce
+        /// (0.6..1.4). A claim outside it is corrected to the nearest legal value rather than obeyed, and a
+        /// missing or nonsense claim means "no scale" (1), which is what an entity with no six-attribute
+        /// state - an enemy, an intent built before this amendment - resolves to.
+        /// </summary>
+        public static float ClampEffectScale(float scale)
+        {
+            if (!(scale > 0f) || float.IsNaN(scale) || float.IsInfinity(scale)) return 1f;
+            if (scale < AttributeRules.MinEffectScale) return AttributeRules.MinEffectScale;
+            if (scale > AttributeRules.MaxEffectScale) return AttributeRules.MaxEffectScale;
+            return scale;
         }
 
         private static DamageInfo Finalize(float amount, WeaponData source, Vector3 direction, Vector3 origin,
@@ -82,7 +117,59 @@ namespace Emberdelve.Combat
                 info = info.WithReduction(reduction, out _);
             }
 
+            // U2B8: armor is a defender-side PHYSICAL mitigation, applied after the directional guard and
+            // independently of it. It applies from every direction (a hit from behind still meets the
+            // breastplate, it simply does not meet the shield arc), it touches DamageType.Physical only, and it
+            // is NOT run through WithReduction, because that would flag the hit as blocked and rewrite
+            // BlockReduction. A target that is not an armor provider - an enemy, anything wearing nothing - is
+            // never asked and contributes a 0 rating, which is the exact no-op below.
+            if (info.Type == DamageType.Physical && target is IArmorRatingProvider armorProvider)
+            {
+                info = ApplyArmorRating(info, armorProvider.GetArmorRating());
+            }
+
             return info;
+        }
+
+        /// <summary>
+        /// Maps a claimed armor rating to the rating this resolver is willing to use: NaN, plus or minus
+        /// Infinity and a negative claim all become 0, which is the exact no-op. A legal claim is returned
+        /// unchanged, so a huge finite rating stays huge and is handled by the ratio below instead of being
+        /// clamped away.
+        /// </summary>
+        public static float SanitizeArmorRating(float claimedRating)
+        {
+            if (float.IsNaN(claimedRating) || float.IsInfinity(claimedRating) || claimedRating < 0f) return 0f;
+            return claimedRating;
+        }
+
+        /// <summary>
+        /// The prototype armor rule (Docs/Design/ARMOR_RULES.md) applied to an already resolved, already
+        /// guard-reduced hit: final = max(1, postGuardAmount * 100 / (100 + rating)). A 0 rating returns the
+        /// same value untouched, so every zero-armor number this project already balances is unchanged. The
+        /// ratio is evaluated in double: 100 + a rating near float.MaxValue cannot overflow there, and because
+        /// the ratio is never greater than 1 the mitigated amount can never exceed the amount it started from,
+        /// so the cast back to float cannot overflow either. An amount that is already NaN or infinite is
+        /// returned untouched rather than repaired into a valid hit: armor mitigates damage, it does not
+        /// validate it, and an invalid hit still fails DamageInfo.IsValid in the authority exactly as before.
+        /// Blocked, Headshot, BlockReduction, point, direction, source position, source combat id, source kind
+        /// and type are carried through unchanged, and the returned Amount is the number the authority hands
+        /// to IDamageable.ApplyDamage, so the reported damage and the health actually lost are one number.
+        /// </summary>
+        public static DamageInfo ApplyArmorRating(in DamageInfo info, float claimedRating)
+        {
+            float rating = SanitizeArmorRating(claimedRating);
+            if (rating <= 0f) return info;
+
+            float amount = info.Amount;
+            if (float.IsNaN(amount) || float.IsInfinity(amount)) return info;
+
+            double mitigated = (double)amount * (100.0 / (100.0 + (double)rating));
+            float final = mitigated >= 1.0 ? (float)mitigated : 1f;
+            if (float.IsNaN(final) || float.IsInfinity(final)) final = 1f;
+
+            return new DamageInfo(final, info.Point, info.Direction, info.SourcePosition, info.SourceCombatId,
+                info.SourceKind, info.Type, info.Blocked, info.Headshot, info.BlockReduction);
         }
     }
 

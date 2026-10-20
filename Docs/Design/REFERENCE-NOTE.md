@@ -1,0 +1,1 @@
+ATTRIBUTES.md and ITEM_AFFIXES.md preserve approved numeric/business rules. Their old Godot Resource/.tres/API terminology maps to Unity C#/ScriptableObjects and per-instance DTOs; do not implement Godot formats. Apply actual class baseline changes in U2A with reviewed test updates, not U1 fixture repair. UNITY_DESIGN.md and ROADMAP.md define Unity execution/order.

@@ -36,6 +36,14 @@ namespace Emberdelve.EditorTools
         private const string ModeKey = "Emberdelve.Smoke.Mode";
         private const string DoneKey = "Emberdelve.Smoke.Done";
 
+        /// <summary>
+        /// Session key holding the code the editor must exit with. SessionState is used for the other
+        /// markers because it survives the play mode transition, and the exit code needs the same trip:
+        /// it is written inside play mode by the completion pass or the watchdog and consumed by the
+        /// ExitingPlayMode handler after the transition back to the editor.
+        /// </summary>
+        private const string ExitCodeKey = "Emberdelve.Smoke.ExitCode";
+
         private static double _watchdogStartedAt;
 
         static EmberdelveRuntimeSmokeTest()
@@ -51,14 +59,26 @@ namespace Emberdelve.EditorTools
         public static void RunArcherFlow() => StartRun("archer");
         public static void RunResultLoop() => StartRun("resultloop");
 
+        /// <summary>Milestone 5: grid storage, equipment slots and containers.</summary>
+        public static void RunInventoryFlow() => StartRun("items");
+
+        /// <summary>U1C1: satchel pointer routing and conserving cursor operations (move/swap/merge/equip/cancel).</summary>
+        public static void RunInventoryUiFlow() => StartRun("inventoryui");
+
         private static void StartRun(string mode)
         {
             EmberdelveAssetLibrary.BuildAll();
 
             SessionState.SetBool(DoneKey, false);
             SessionState.SetString(ModeKey, mode);
+            SessionState.SetInt(ExitCodeKey, 0);
 
-            string scenePath = (mode == "lobby" || mode == "archer") ? EmberdelvePaths.LobbyScenePath : EmberdelvePaths.DungeonScenePath;
+            // The item flows need the archer, whose class carries no shield, so they go through the lobby the
+            // same way the archer flow does. The satchel pointer flow needs that same class plus the dungeon
+            // HUD that builds the screen it clicks, so it descends through the lobby too.
+            string scenePath = (mode == "lobby" || mode == "archer" || mode == "items" || mode == "inventoryui")
+                ? EmberdelvePaths.LobbyScenePath
+                : EmberdelvePaths.DungeonScenePath;
             EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
 
             Debug.Log($"[Emberdelve][Smoke] Requesting play mode for '{mode}' in {scenePath}");
@@ -80,6 +100,7 @@ namespace Emberdelve.EditorTools
             {
                 EditorApplication.update -= WatchForPlayModeStart;
                 SessionState.SetString(ModeKey, string.Empty);
+                SessionState.SetInt(ExitCodeKey, 1);
                 Debug.LogError("[Emberdelve][Smoke] Play mode never started - headless play mode is unavailable in this session.");
                 EditorApplication.Exit(1);
             }
@@ -100,9 +121,22 @@ namespace Emberdelve.EditorTools
             {
                 if (SessionState.GetBool(DoneKey, false))
                 {
+                    // Whatever the harness recorded (completion pass or watchdog) is the code the process
+                    // has to leave with. A run that logged FAIL must not come out of the editor as 0.
+                    int exitCode = SessionState.GetInt(ExitCodeKey, 1);
                     SessionState.SetBool(DoneKey, false);
                     SessionState.SetString(ModeKey, string.Empty);
-                    EditorApplication.delayCall += () => EditorApplication.Exit(0);
+                    Debug.Log($"[Emberdelve][Smoke] Play mode finished, exiting with stored code {exitCode}");
+                    EditorApplication.delayCall += () => EditorApplication.Exit(exitCode);
+                }
+                else if (!string.IsNullOrEmpty(SessionState.GetString(ModeKey, string.Empty)))
+                {
+                    // Play mode ended without the harness finishing its pass. An unfinished run is not a
+                    // pass, so it leaves with a failure code instead of hanging the batch process.
+                    Debug.LogError("[Emberdelve][Smoke] Play mode ended before the harness finished its pass - reporting failure");
+                    SessionState.SetInt(ExitCodeKey, 1);
+                    SessionState.SetString(ModeKey, string.Empty);
+                    EditorApplication.delayCall += () => EditorApplication.Exit(1);
                 }
             }
         }
@@ -156,6 +190,7 @@ namespace Emberdelve.EditorTools
                 if (Time.realtimeSinceStartup - _startedAt > 150f)
                 {
                     Debug.LogError($"[Emberdelve][Smoke:{Mode}] watchdog timeout - aborting with {_failures} failures");
+                    SessionState.SetInt(ExitCodeKey, 1);
                     SessionState.SetBool(DoneKey, true);
                     EditorApplication.isPlaying = false;
                 }
@@ -180,6 +215,22 @@ namespace Emberdelve.EditorTools
                     yield return LobbyFlow();
                     yield return ArcherFlow();
                 }
+                else if (Mode == "items")
+                {
+                    // Same reason: the item tests need the class that carries no shield by default.
+                    yield return LobbyFlow();
+                    yield return ItemFlow();
+                }
+                else if (Mode == "inventoryui")
+                {
+                    // The satchel screen is built by the dungeon HUD, so a run has to exist before the pointer
+                    // fixtures can click it. Same lobby route as the item tests: the pointer fixtures measure
+                    // equipment transfers as well, and the archer carries no shield to get in the way.
+                    yield return LobbyFlow();
+                    _rig = FindFirstObjectByType<PlayerRig>();
+                    _director = FindFirstObjectByType<RunDirector>();
+                    yield return EmberdelveInventoryUiChecks.Run(_rig, _director, Check);
+                }
                 else if (_rig == null || _director == null)
                 {
                     Check(false, "dungeon scene contains a PlayerRig and a RunDirector");
@@ -195,7 +246,9 @@ namespace Emberdelve.EditorTools
                     else if (Mode == "resultloop") yield return ResultLoopFlow();
                 }
 
-                Debug.Log($"[Emberdelve][Smoke:{Mode}] {(_failures == 0 ? "PASS" : "FAIL")} checks={_checks} failures={_failures}");
+                int exitCode = _failures == 0 ? 0 : 1;
+                Debug.Log($"[Emberdelve][Smoke:{Mode}] {(_failures == 0 ? "PASS" : "FAIL")} checks={_checks} failures={_failures} exit={exitCode}");
+                SessionState.SetInt(ExitCodeKey, exitCode);
                 SessionState.SetBool(DoneKey, true);
                 EditorApplication.isPlaying = false;
             }
@@ -1076,8 +1129,15 @@ namespace Emberdelve.EditorTools
 
                 Check(rig.Class == chosen, "dungeon run uses the class chosen in the lobby");
                 Check(director.State == RunState.Running, $"run started (state {director.State})");
-                Check(Mathf.Approximately(rig.MaxHealth, chosen.maxHealth),
-                    $"class health applied ({rig.MaxHealth} vs {chosen.maxHealth})");
+                // U2A8 fixture migration. Old assumption: the live ceiling equals the class asset's
+                // maxHealth field. Since U2A3 that field is the pristine BASE and the ceiling a run start
+                // fills is the derived one: the archer authors CON 12 -> floor((12-10)/2) = 1 ->
+                // 80 + 10*1 = 90 (Docs/Design/ATTRIBUTES.md). Both halves are asserted, so neither a missing
+                // derivation nor a class asset written by equipment can satisfy this check.
+                Check(chosen.maxHealth == 80,
+                    $"archer class asset still authors the base health 80 ({chosen.maxHealth})");
+                Check(Mathf.Approximately(rig.MaxHealth, 90f),
+                    $"derived archer health applied at run start (got {rig.MaxHealth}, expected 80 + 10*1 = 90)");
 
                 RangedCombat ranged = rig.GetComponent<RangedCombat>();
                 MeleeCombat melee = rig.GetComponent<MeleeCombat>();
@@ -1349,8 +1409,16 @@ namespace Emberdelve.EditorTools
 
                 if (_rig.Mana != null && _rig.Skills != null)
                 {
-                    Check(_rig.Mana.MaxMana == (_rig.Class != null ? _rig.Class.EffectiveMaxMana : _rig.Mana.MaxMana),
-                        $"fresh run reconfigured the mana pool ({_rig.Mana.CurrentMana:F0}/{_rig.Mana.MaxMana})");
+                    // U2A8 fixture migration. Old assumption: the fresh run's mana ceiling equals the raw
+                    // class field (EffectiveMaxMana = the authored 75). Accepted rule: max_mana =
+                    // max(10, authored 75 + 5 * INT modifier), and this run descends through the dungeon
+                    // scene's authored fallback class (warrior, INT 8 -> floor((8-10)/2) = -1) -> 70
+                    // (Docs/Design/ATTRIBUTES.md). The authored base is asserted separately so the base and
+                    // the derived ceiling are both visible.
+                    Check(_rig.Class != null && _rig.Class.maxMana == 75 && _rig.Class.intelligence == 8,
+                        $"fresh run descends with the authored warrior mana base 75 and INT 8 ({(_rig.Class != null ? _rig.Class.classId : "none")})");
+                    Check(_rig.Mana.MaxMana == 70,
+                        $"fresh run reconfigured the mana pool to the derived 75 + 5*-1 (got {_rig.Mana.MaxMana}, current {_rig.Mana.CurrentMana:F0})");
                     Check(_rig.Mana.CurrentMana >= _rig.Mana.MaxMana - 0.5f, "fresh run starts with full mana");
                     Check(_rig.Skills.KitValid && _rig.Skills.KitProblems.Count == 0, "fresh run resolved a valid skill kit");
                     Check(_rig.Skills.IsReady(0) && _rig.Skills.IsReady(1),
@@ -1407,6 +1475,1848 @@ namespace Emberdelve.EditorTools
                 return null;
             }
 
+            // ---------------------------------------------------------------- items: grid, equipment, containers
+
+            /// <summary>
+            /// Milestone 5 assertions. The bag is tested as a grid (footprints, overlap refusal, stacking,
+            /// move, swap, removal, overflow), equipment is tested as numbers that change while an item is worn
+            /// and return when it is not, and containers are tested as seeded loot tables that hand their loot
+            /// to the run host and keep whatever the player cannot carry.
+            /// </summary>
+            private IEnumerator ItemFlow()
+            {
+                _rig = FindFirstObjectByType<PlayerRig>();
+                _director = FindFirstObjectByType<RunDirector>();
+
+                Check(_rig != null && _director != null, "item flow found a rig and a director");
+                if (_rig == null || _director == null) yield break;
+
+                if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority resolved)) resolved = null;
+                _authority = resolved;
+                _localAuthority = resolved as LocalCombatAuthority;
+                Check(_authority != null, "combat authority resolved for the armor measurement");
+
+                Inventory inventory = _rig.Inventory;
+                Equipment equipment = _rig.Equipment;
+                Check(inventory != null, "player rig carries an inventory");
+                Check(equipment != null, "player rig carries equipment slots");
+                if (inventory == null || equipment == null) yield break;
+
+                GameConfig config = _director.Config;
+                Check(config != null, "run director resolved a game config");
+                if (config == null) yield break;
+
+                ItemData coin = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_EmberCoin.asset");
+                ItemData draught = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_BloodDraught.asset");
+                ItemData relic = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_AshenRelic.asset");
+                ItemData cuirass = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_BoiledCuirass.asset");
+                ItemData boots = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_FootpadBoots.asset");
+                ItemData blade = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_EmberFangBlade.asset");
+                ItemData shieldItem = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_EmberbulwarkShieldItem.asset");
+
+                Check(coin != null && draught != null && relic != null, "consumable and currency items loadable");
+                Check(cuirass != null && boots != null && blade != null && shieldItem != null,
+                    "equipment items loadable");
+                if (cuirass == null || boots == null || blade == null || shieldItem == null || coin == null) yield break;
+
+                Debug.Log("[Emberdelve][Smoke:items] ---- grid storage");
+                yield return GridStorageFlow(inventory, coin, cuirass, boots, shieldItem, config);
+
+                Debug.Log("[Emberdelve][Smoke:items] ---- equipment slots");
+                yield return EquipmentFlow(inventory, equipment, cuirass, boots, blade, shieldItem);
+
+                Debug.Log("[Emberdelve][Smoke:items] ---- equipment transfers");
+                yield return EquipmentTransferFlow(inventory, equipment, cuirass, blade, coin);
+
+                Debug.Log("[Emberdelve][Smoke:items] ---- containers");
+                yield return ChestFlow(inventory, equipment, coin, cuirass, draught, relic);
+            }
+
+            private IEnumerator GridStorageFlow(Inventory inventory, ItemData coin, ItemData cuirass,
+                ItemData boots, ItemData shieldItem, GameConfig config)
+            {
+                Check(inventory.GridWidth == config.inventoryGridWidth && inventory.GridHeight == config.inventoryGridHeight,
+                    $"bag is the grid the config declares ({inventory.GridWidth}x{inventory.GridHeight})");
+                Check(inventory.Capacity == inventory.GridWidth * inventory.GridHeight,
+                    $"capacity is cells, not slots ({inventory.Capacity})");
+
+                // A deterministic starting point: everything the flow measures below is measured against an
+                // empty bag, so the numbers are exact rather than relative to whatever the class handed out.
+                inventory.Clear();
+                yield return WaitFrames(2);
+
+                Check(inventory.Slots.Count == 0 && inventory.UsedCells == 0,
+                    "bag cleared for the grid tests");
+                Check(inventory.FreeCells == inventory.Capacity, $"every cell free ({inventory.FreeCells})");
+
+                // ---- footprint
+                Check(cuirass.EffectiveFootprint == new Vector2Int(2, 3),
+                    $"cuirass declares a 2x3 footprint ({cuirass.EffectiveFootprint})");
+                Check(boots.EffectiveFootprint == new Vector2Int(2, 2),
+                    $"boots declare a 2x2 footprint ({boots.EffectiveFootprint})");
+                Check(coin.EffectiveFootprint == new Vector2Int(1, 1),
+                    $"coins take one cell ({coin.EffectiveFootprint})");
+
+                Check(inventory.TryAdd(cuirass, 1, out string cuirassReason),
+                    $"2x3 cuirass placed ({cuirassReason})");
+                Check(inventory.Slots.Count == 1, "one stack in the bag");
+
+                Vector2Int cuirassOrigin = inventory.Slots[0].Origin;
+                Check(inventory.UsedCells == 6, $"the cuirass occupies six cells ({inventory.UsedCells})");
+
+                bool allCellsMarked = true;
+                for (int x = 0; x < 2; x++)
+                {
+                    for (int y = 0; y < 3; y++)
+                    {
+                        if (!inventory.IsCellOccupied(cuirassOrigin + new Vector2Int(x, y))) allCellsMarked = false;
+                    }
+                }
+                Check(allCellsMarked, "every cell under the footprint is marked occupied");
+                Check(inventory.SlotAtCell(cuirassOrigin + new Vector2Int(1, 2)).Item == cuirass,
+                    "the grid reports the item when asked what is at a covered cell");
+
+                // ---- overlap refusal, and the refusal changes nothing
+                Check(!inventory.TryAddAt(boots, 1, cuirassOrigin + new Vector2Int(1, 1), out string overlapReason),
+                    "boots cannot be placed on top of the cuirass");
+                Check(!string.IsNullOrEmpty(overlapReason), $"the refusal explains itself ({overlapReason})");
+                Check(inventory.UsedCells == 6 && inventory.Slots.Count == 1,
+                    $"a refused placement changed nothing ({inventory.UsedCells} cells, {inventory.Slots.Count} stacks)");
+
+                // ---- stacking
+                Check(inventory.TryAdd(coin, 20, out string coinReason), $"20 coins added ({coinReason})");
+
+                int coinStacks = 0;
+                int coinUnits = 0;
+                for (int i = 0; i < inventory.Slots.Count; i++)
+                {
+                    if (inventory.Slots[i].Item != coin) continue;
+                    coinStacks++;
+                    coinUnits += inventory.Slots[i].Count;
+                    Check(inventory.Slots[i].Count <= coin.StackLimitForFootprint,
+                        $"a coin stack respects its limit ({inventory.Slots[i].Count}/{coin.StackLimitForFootprint})");
+                }
+
+                Check(coinUnits == 20, $"all twenty coins are carried ({coinUnits})");
+                Check(coinStacks == 3, $"coins fill stack limits rather than one cell each ({coinStacks} stacks)");
+                Check(inventory.UsedCells == 9, $"three coin cells plus the cuirass ({inventory.UsedCells})");
+                Check(inventory.TotalUnits == 21, $"unit count counts stacks ({inventory.TotalUnits})");
+
+                // Equippable items never stack, so two more cuirasses are two more footprints.
+                Check(cuirass.CanStack == false, "an equippable item cannot stack");
+                int cuirassStacksBefore = 0;
+                for (int i = 0; i < inventory.Slots.Count; i++) if (inventory.Slots[i].Item == cuirass) cuirassStacksBefore++;
+
+                Check(inventory.TryAdd(cuirass, 2, out string twoCuirass), $"two cuirasses added as two stacks ({twoCuirass})");
+                int cuirassStacks = 0;
+                for (int i = 0; i < inventory.Slots.Count; i++) if (inventory.Slots[i].Item == cuirass) cuirassStacks++;
+                Check(cuirassStacks == cuirassStacksBefore + 2,
+                    $"equippable items are separate stacks ({cuirassStacksBefore} -> {cuirassStacks})");
+                Check(inventory.UsedCells == 21, $"each cuirass holds its own six cells ({inventory.UsedCells})");
+
+                // ---- move
+                int firstCuirass = inventory.IndexOfItem(cuirass);
+                Vector2Int oldOrigin = inventory.Slots[firstCuirass].Origin;
+                Vector2Int newOrigin = inventory.FindFreeOrigin(new Vector2Int(2, 3));
+                Check(newOrigin.x >= 0, "a free 2x3 hole exists to move into");
+
+                if (newOrigin.x >= 0)
+                {
+                    Check(inventory.TryMove(firstCuirass, newOrigin, out string moveReason),
+                        $"cuirass moved to cell {newOrigin} ({moveReason})");
+                    Check(inventory.Slots[firstCuirass].Origin == newOrigin, "the stack records its new origin");
+
+                    bool oldFreed = true;
+                    bool newFilled = true;
+                    for (int x = 0; x < 2; x++)
+                    {
+                        for (int y = 0; y < 3; y++)
+                        {
+                            if (inventory.IsCellOccupied(oldOrigin + new Vector2Int(x, y))) oldFreed = false;
+                            if (!inventory.IsCellOccupied(newOrigin + new Vector2Int(x, y))) newFilled = false;
+                        }
+                    }
+                    Check(oldFreed, "the cells it left are free again");
+                    Check(newFilled, "the cells it entered are occupied");
+                    Check(inventory.UsedCells == 21, $"moving costs the same cells ({inventory.UsedCells})");
+                }
+
+                // An illegal move has to roll back completely, not leave the item half-placed. The target is
+                // the cell the cuirass is standing on right now, so the refusal is about occupancy.
+                int bootsIndex = inventory.IndexOfItem(boots);
+                Check(inventory.TryAdd(boots, 1, out string bootsReason), $"boots added ({bootsReason})");
+                bootsIndex = inventory.IndexOfItem(boots);
+                Vector2Int bootsOrigin = inventory.Slots[bootsIndex].Origin;
+
+                int cuirassNow = inventory.IndexOfItem(cuirass);
+                Vector2Int occupiedTarget = inventory.Slots[cuirassNow].Origin;
+
+                Check(!inventory.TryMove(bootsIndex, occupiedTarget, out string badMoveReason),
+                    "boots cannot be moved onto the cell the cuirass occupies");
+                Check(!string.IsNullOrEmpty(badMoveReason), $"the refused move explains itself ({badMoveReason})");
+                Check(inventory.Slots[bootsIndex].Origin == bootsOrigin, "the refused move left the item where it was");
+                Check(inventory.IsCellOccupied(bootsOrigin) && inventory.IsCellOccupied(bootsOrigin + new Vector2Int(1, 1)),
+                    "its original cells are still marked, so the grid did not half-apply the move");
+
+                // ---- swap
+                Check(inventory.TryAdd(shieldItem, 1, out string shieldReason), $"shield item added ({shieldReason})");
+                int shieldIndex = inventory.IndexOfItem(shieldItem);
+                Vector2Int shieldOrigin = inventory.Slots[shieldIndex].Origin;
+
+                Check(inventory.TrySwap(bootsIndex, shieldIndex, out string swapReason),
+                    $"two 2x2 items swap places ({swapReason})");
+                Check(inventory.Slots[bootsIndex].Origin == shieldOrigin && inventory.Slots[shieldIndex].Origin == bootsOrigin,
+                    $"the origins exchanged (boots {inventory.Slots[bootsIndex].Origin}, shield {inventory.Slots[shieldIndex].Origin})");
+                Check(inventory.SlotAtCell(bootsOrigin).Item == shieldItem && inventory.SlotAtCell(shieldOrigin).Item == boots,
+                    "the grid occupancy follows the swap");
+
+                // A 2x3 cannot trade places with a 1x1 unless the surrounding cells happen to be free.
+                int coinIndex = inventory.IndexOfItem(coin);
+                Vector2Int coinOrigin = inventory.Slots[coinIndex].Origin;
+                Vector2Int cuirassSwapOrigin = inventory.Slots[inventory.IndexOfItem(cuirass)].Origin;
+
+                Check(!inventory.TrySwap(inventory.IndexOfItem(cuirass), coinIndex, out string badSwapReason),
+                    "a 2x3 cuirass cannot swap into a lone coin cell");
+                Check(!string.IsNullOrEmpty(badSwapReason), $"the refused swap explains itself ({badSwapReason})");
+                Check(inventory.Slots[inventory.IndexOfItem(cuirass)].Origin == cuirassSwapOrigin &&
+                      inventory.Slots[inventory.IndexOfItem(coin)].Origin == coinOrigin,
+                    "a refused swap left both items where they were");
+
+                // ---- removal frees exactly the cells the item held
+                int usedBeforeRemove = inventory.UsedCells;
+                int removedCoins = inventory.TryRemoveAt(coinIndex, 1);
+                Check(removedCoins == 1, $"one coin removed ({removedCoins})");
+                Check(inventory.Slots[inventory.IndexOfItem(coin)].Count == coin.StackLimitForFootprint - 1,
+                    "the remaining stack shrank by one");
+                Check(inventory.UsedCells == usedBeforeRemove, "a partial removal still needs the same cell");
+
+                int coinCellsFreed = 0;
+                while (inventory.IndexOfItem(coin) >= 0)
+                {
+                    int index = inventory.IndexOfItem(coin);
+                    int count = inventory.Slots[index].Count;
+                    coinCellsFreed += inventory.Slots[index].Size.x * inventory.Slots[index].Size.y;
+                    inventory.TryRemoveAt(index, count);
+                }
+                Check(coinCellsFreed == 3, $"three coin cells were released ({coinCellsFreed})");
+                Check(inventory.UsedCells == usedBeforeRemove - 3, $"the grid shrank with the stacks ({inventory.UsedCells})");
+                Check(inventory.IndexOfItem(coin) < 0, "the item is gone from the bag");
+
+                // ---- overflow: measured from an empty bag of identical shapes, so the expected count comes
+                // from geometry and not from an area division. Equal-area capacity is not rectangular
+                // packing: a 10x4 bag holds floor(10/2) x floor(4/3) = 5 upright 2x3 items (30 cells), while
+                // 40/6 would claim 6. The expectation is computed from the grid and footprint axes.
+                inventory.Clear();
+                yield return WaitFrames(2);
+
+                int capacity = inventory.Capacity;
+                int gridWidth = inventory.GridWidth;
+                int gridHeight = inventory.GridHeight;
+                Vector2Int cuirassShape = cuirass.EffectiveFootprint;
+                int cellsPerCuirass = cuirassShape.x * cuirassShape.y;
+                int fitAcross = gridWidth / cuirassShape.x;
+                int fitDown = gridHeight / cuirassShape.y;
+                int expectedFit = fitAcross * fitDown;
+                int expectedUsed = expectedFit * cellsPerCuirass;
+                int expectedFree = capacity - expectedUsed;
+
+                Check(cuirassShape.x > 0 && cuirassShape.y > 0 && expectedFit > 0 && expectedUsed <= capacity,
+                    $"the packing expectation is well defined ({gridWidth}x{gridHeight} bag, {cuirassShape} item, {fitAcross} across x {fitDown} down = {expectedFit} items)");
+
+                // Bounded insertion: a bag that keeps saying yes cannot spin the coroutine until the harness
+                // watchdog fires, and the extra attempts are what turn that into a visible failure.
+                int placed = 0;
+                int placementAttempts = 0;
+                int attemptCap = expectedFit + 2;
+                while (placementAttempts < attemptCap && inventory.TryAdd(cuirass, 1))
+                {
+                    placed++;
+                    placementAttempts++;
+                }
+
+                Check(placed == expectedFit,
+                    $"the bag took exactly the rectangles its cells allow ({placed} placed, expected {expectedFit} = {fitAcross} across x {fitDown} down in {gridWidth}x{gridHeight})");
+                Check(placementAttempts < attemptCap,
+                    $"insertion attempts stayed bounded ({placementAttempts} attempts, cap {attemptCap})");
+                Check(inventory.UsedCells == expectedUsed,
+                    $"every item paid for its own cells ({inventory.UsedCells} used, expected {expectedUsed})");
+                Check(inventory.FreeCells == expectedFree,
+                    $"the leftover cells are the geometric remainder ({inventory.FreeCells} free, expected {expectedFree})");
+                Check(inventory.UsedSlots == expectedFit,
+                    $"each equippable item is its own stack ({inventory.UsedSlots} stacks for {expectedFit} items)");
+
+                Check(!inventory.TryAdd(cuirass, 1, out string overflowReason), "one more cuirass does not fit");
+                Check(overflowReason != null && overflowReason.Contains("no room"),
+                    $"the overflow refusal says why ({overflowReason})");
+                Check(inventory.UsedCells == expectedUsed && inventory.UsedSlots == expectedFit,
+                    $"the refused cuirass changed nothing ({inventory.UsedCells} cells, {inventory.UsedSlots} stacks)");
+
+                // Free cells and a free hole are different things, which is the cost of a real grid.
+                bool noHoleForShape = inventory.FindFreeOrigin(cuirassShape).x < 0;
+                Check(inventory.FreeCells > 0 && noHoleForShape,
+                    $"leftover cells are too scattered to hold a {cuirassShape} item ({inventory.FreeCells} free, no hole)");
+                if (expectedFree >= cellsPerCuirass)
+                {
+                    // The remainder here is a band one cell tall: enough area for another item, no block
+                    // wide and tall enough to put it in.
+                    Check(inventory.FreeCells >= cellsPerCuirass && noHoleForShape,
+                        $"free cells outnumber one footprint yet contain no hole ({inventory.FreeCells} free, needs {cellsPerCuirass} in one {cuirassShape} block)");
+                }
+
+                // A partial add keeps what fits and reports the rest instead of losing it silently. The
+                // request is derived from the grid, not from a magic number: the bag holds no coins yet, so
+                // the room that exists is every free cell times the coin's own stack limit.
+                Check(inventory.IndexOfItem(coin) < 0, "the fragmented bag holds no coins before the partial add");
+
+                int coinStackLimit = coin.StackLimitForFootprint;
+                int freeCellsBeforeCoins = inventory.FreeCells;
+                int coinStacksBefore = 0;
+                int coinUnitsBefore = 0;
+                int coinStackSpaceBefore = 0;
+                for (int i = 0; i < inventory.Slots.Count; i++)
+                {
+                    if (inventory.Slots[i].Item != coin) continue;
+                    coinStacksBefore++;
+                    coinUnitsBefore += inventory.Slots[i].Count;
+                    coinStackSpaceBefore += Mathf.Max(0, coinStackLimit - inventory.Slots[i].Count);
+                }
+
+                int expectedCoinCapacity = coinStackSpaceBefore + freeCellsBeforeCoins * coinStackLimit;
+                int coinRequest = expectedCoinCapacity + 1;
+
+                // Snapshot the cuirasses so the partial add can be shown not to disturb them.
+                int fullBagCuirassStacks = 0;
+                List<Vector2Int> fullBagCuirassOrigins = new List<Vector2Int>();
+                List<int> fullBagCuirassCounts = new List<int>();
+                for (int i = 0; i < inventory.Slots.Count; i++)
+                {
+                    if (inventory.Slots[i].Item != cuirass) continue;
+                    fullBagCuirassOrigins.Add(inventory.Slots[i].Origin);
+                    fullBagCuirassCounts.Add(inventory.Slots[i].Count);
+                    fullBagCuirassStacks++;
+                }
+
+                int unitsBefore = inventory.TotalUnits;
+                int usedCellsBefore = inventory.UsedCells;
+                int stacksBefore = inventory.UsedSlots;
+
+                Check(coinStackLimit > 0 && expectedCoinCapacity > 0 && coinRequest > expectedCoinCapacity,
+                    $"the request is strictly larger than the room that exists ({coinRequest} coins requested, room for {expectedCoinCapacity} = {freeCellsBeforeCoins} free cells x {coinStackLimit})");
+
+                bool tookEveryCoin = inventory.TryAdd(coin, coinRequest, out string partialReason);
+                int gained = inventory.TotalUnits - unitsBefore;
+                int leftover = coinRequest - gained;
+
+                Check(!tookEveryCoin, $"the bag cannot take every coin requested ({coinRequest} requested, {gained} accepted)");
+                Check(gained == expectedCoinCapacity,
+                    $"the bag took exactly the capacity it had ({gained} accepted, room for {expectedCoinCapacity})");
+                Check(gained > 0 && gained < coinRequest,
+                    $"the add is partial, neither a refusal nor a success ({gained} of {coinRequest})");
+                Check(leftover == coinRequest - expectedCoinCapacity && leftover > 0,
+                    $"the coins that did not fit are accounted for ({leftover} left out of {coinRequest})");
+                Check(partialReason != null && partialReason.Contains("left") && partialReason.Contains(leftover.ToString()),
+                    $"the partial add reports what it could not take ({partialReason})");
+
+                int coinStacksAfter = 0;
+                int coinUnitsAfter = 0;
+                bool coinStacksWithinLimit = true;
+                for (int i = 0; i < inventory.Slots.Count; i++)
+                {
+                    if (inventory.Slots[i].Item != coin) continue;
+                    coinStacksAfter++;
+                    coinUnitsAfter += inventory.Slots[i].Count;
+                    if (inventory.Slots[i].Count > coinStackLimit) coinStacksWithinLimit = false;
+                }
+
+                Check(coinUnitsAfter == coinUnitsBefore + expectedCoinCapacity,
+                    $"every accepted coin is carried in a stack ({coinUnitsAfter} coins, was {coinUnitsBefore})");
+                Check(coinStacksAfter == coinStacksBefore + freeCellsBeforeCoins && coinStacksWithinLimit,
+                    $"each scattered free cell became one coin stack at its limit ({coinStacksAfter} coin stacks, limit {coinStackLimit})");
+                Check(inventory.UsedCells == usedCellsBefore + freeCellsBeforeCoins && inventory.FreeCells == 0,
+                    $"the new stacks filled exactly the leftover cells ({inventory.UsedCells} used, {inventory.FreeCells} free)");
+                Check(inventory.TotalUnits == unitsBefore + gained && inventory.UsedSlots == stacksBefore + coinStacksAfter - coinStacksBefore,
+                    $"totals follow the accepted units ({inventory.TotalUnits} units, {inventory.UsedSlots} stacks)");
+
+                int fullBagCuirassStacksNow = 0;
+                bool cuirassSnapshotIntact = true;
+                for (int i = 0; i < inventory.Slots.Count; i++)
+                {
+                    if (inventory.Slots[i].Item != cuirass) continue;
+                    if (fullBagCuirassStacksNow >= fullBagCuirassStacks)
+                    {
+                        cuirassSnapshotIntact = false;
+                        break;
+                    }
+                    if (inventory.Slots[i].Origin != fullBagCuirassOrigins[fullBagCuirassStacksNow] ||
+                        inventory.Slots[i].Count != fullBagCuirassCounts[fullBagCuirassStacksNow] ||
+                        inventory.Slots[i].Size != cuirassShape) cuirassSnapshotIntact = false;
+                    fullBagCuirassStacksNow++;
+                }
+                cuirassSnapshotIntact = cuirassSnapshotIntact && fullBagCuirassStacksNow == fullBagCuirassStacks;
+
+                Check(cuirassSnapshotIntact,
+                    $"the partial add left the cuirass stacks where they were ({fullBagCuirassStacks} before, {fullBagCuirassStacksNow} after)");
+
+                bool cuirassCellsStillMarked = true;
+                for (int i = 0; i < fullBagCuirassStacks; i++)
+                {
+                    for (int x = 0; x < cuirassShape.x; x++)
+                    {
+                        for (int y = 0; y < cuirassShape.y; y++)
+                        {
+                            if (!inventory.IsCellOccupied(fullBagCuirassOrigins[i] + new Vector2Int(x, y))) cuirassCellsStillMarked = false;
+                        }
+                    }
+                }
+                Check(cuirassCellsStillMarked,
+                    $"every cell the cuirasses hold is still marked after the coin add ({fullBagCuirassStacks * cellsPerCuirass} cuirass cells)");
+
+                inventory.Clear();
+                yield return WaitFrames(2);
+                Check(inventory.UsedCells == 0 && inventory.FreeCells == inventory.Capacity,
+                    "bag cleared again after the grid tests");
+            }
+
+            private IEnumerator EquipmentFlow(Inventory inventory, Equipment equipment, ItemData cuirass,
+                ItemData boots, ItemData blade, ItemData shieldItem)
+            {
+                CharacterClassData classData = _rig.Class;
+                Check(classData != null && classData.classId == "archer", $"item flow runs as the class chosen in the lobby ({(classData != null ? classData.classId : "none")})");
+                if (classData == null) yield break;
+
+                RangedCombat ranged = _rig.GetComponent<RangedCombat>();
+                MeleeCombat melee = _rig.GetComponent<MeleeCombat>();
+
+                float healthBase = _rig.MaxHealth;
+                float speedBase = _rig.Movement != null ? _rig.Movement.ResolveGroundSpeed(false, false) : 0f;
+                WeaponData bowBase = _rig.MainHandWeapon;
+
+                // U2A8 fixture migration. Old assumption: the unworn archer's ceiling is the class asset's
+                // maxHealth field. That field is the pristine base (80); the ceiling the run start filled is
+                // the derived one, CON 12 -> floor((12-10)/2) = 1 -> 80 + 10*1 = 90 (Docs/Design/
+                // ATTRIBUTES.md). The raw field is asserted too, so a class asset mutated by equipment
+                // would fail here instead of quietly matching a mutated baseline.
+                Check(classData.maxHealth == 80, $"archer class asset still authors the base health 80 ({classData.maxHealth})");
+                Check(Mathf.Approximately(healthBase, 90f),
+                    $"baseline unworn health is the derived 80 + 10*1 (got {healthBase}, expected 90)");
+                Check(_rig.Defense.HasShield == false, "baseline archer carries no shield");
+                Check(_rig.Defense.CanBlock == false, "baseline archer cannot block");
+                Check(_rig.Defense.CanParry == false, "baseline archer cannot parry");
+                Check(bowBase != null && bowBase.IsRanged, $"baseline main hand is a ranged weapon ({bowBase.displayName})");
+                Check(ranged != null && ranged.enabled, "ranged combat is live for the baseline weapon");
+                Check(melee != null && !melee.enabled, "melee combat is off for the baseline weapon");
+                Check(equipment.FilledCount == 0, $"nothing worn at the start ({equipment.FilledCount})");
+
+                // ---- wearing armor changes the pools and the defense numbers
+                Check(inventory.TryAdd(cuirass, 1, out string addCuirass), $"cuirass put in the bag ({addCuirass})");
+                int cuirassIndex = inventory.IndexOfItem(cuirass);
+                Check(cuirassIndex >= 0, "cuirass found in the bag");
+
+                float healthBeforeEquip = _rig.CurrentHealth;
+                Check(equipment.TryEquipFromInventory(cuirassIndex, out string equipReason),
+                    $"cuirass equipped from the bag ({equipReason})");
+                Check(equipment.Equipped(EquipmentSlot.Chest) == cuirass, "the chest slot holds the cuirass");
+                Check(inventory.IndexOfItem(cuirass) < 0, "the worn cuirass is no longer in the bag");
+                // U2A8 fixture migration. Old assumption: equipping the cuirass paid its own 30 hit points
+                // into the CURRENT pool. Accepted rule (Docs/Design/ATTRIBUTES.md, U2A3): a gear change moves
+                // the ceiling and clamps current pools downward only - it never heals or refills. Expected
+                // ceiling = the derived unworn 90 plus the item's authored flat 30 = 120, because its CON +1
+                // takes 12 -> 13, still modifier 1, so the attribute term does not move. Both reads bracket
+                // the same synchronous equip, so no regeneration tick can sit between them and a capacity
+                // payout would show up as a current-pool jump.
+                Check(_rig.MaxHealth >= healthBase + cuirass.StatTotal(SkillStat.MaxHealth) - 0.5f,
+                    $"max health rose by the item's own number ({healthBase} -> {_rig.MaxHealth})");
+                Check(Mathf.Abs(_rig.MaxHealth - 120f) <= 0.011f,
+                    $"worn ceiling is the derived 90 plus the cuirass' own flat 30 (got {_rig.MaxHealth}, expected 120)");
+                Check(_rig.CurrentHealth <= healthBeforeEquip + 0.001f,
+                    $"equipping the cuirass healed nothing ({healthBeforeEquip:F0} -> {_rig.CurrentHealth:F0}): a bigger ceiling clamps down only, it never pays out hit points");
+                Check(_rig.Defense.BlockReduction >= cuirass.StatTotal(SkillStat.BlockReduction) - 0.001f,
+                    $"block reduction includes the armor ({_rig.Defense.BlockReduction:F2})");
+                Check(_rig.Stats != null && _rig.Stats.HasSourceWithModifiers(CharacterStatStack.EquipmentSourceKey),
+                    "the stat stack records an equipment source");
+
+                // ---- movement speed from worn boots
+                float speedWithBootsBefore = speedBase;
+                Check(inventory.TryAdd(boots, 1, out string addBoots), $"boots put in the bag ({addBoots})");
+                Check(equipment.TryEquipFromInventory(inventory.IndexOfItem(boots), out string bootsReason),
+                    $"boots equipped ({bootsReason})");
+                Check(equipment.Equipped(EquipmentSlot.Legs) == boots, "the legs slot holds the boots");
+
+                yield return WaitFrames(2);
+                float speedWearingBoots = _rig.Movement != null ? _rig.Movement.ResolveGroundSpeed(false, false) : 0f;
+                float bootsMultiplier = boots.MultiplierFor(SkillStat.MoveSpeed);
+                Check(speedWearingBoots > speedWithBootsBefore + 0.05f,
+                    $"wearing the boots made the resolved speed faster ({speedWithBootsBefore:F2} -> {speedWearingBoots:F2})");
+                Check(Mathf.Abs(speedWearingBoots - speedWithBootsBefore * bootsMultiplier) < 0.12f,
+                    $"the speed matches the item's declared multiplier x{bootsMultiplier:F2}");
+
+                // ---- a weapon item changes what is held, and what the kit can do
+                Check(inventory.TryAdd(blade, 1, out string addBlade), $"blade put in the bag ({addBlade})");
+                Check(equipment.TryEquipFromInventory(inventory.IndexOfItem(blade), out string bladeReason),
+                    $"blade equipped ({bladeReason})");
+                Check(equipment.Equipped(EquipmentSlot.Weapon) == blade, "the weapon slot holds the blade");
+                // GrantsWeapon is a bool, so comparing against it would pass for any non-null weapon. The
+                // granted reference itself is what has to be in the hand.
+                WeaponData bladeWeapon = blade.grantedWeapon;
+                Check(bladeWeapon != null && blade.GrantsWeapon,
+                    $"the blade declares the weapon it grants ({(bladeWeapon != null ? bladeWeapon.displayName : "none")})");
+                Check(_rig.MainHandWeapon != null && ReferenceEquals(_rig.MainHandWeapon, bladeWeapon),
+                    $"the main hand holds exactly the weapon the item grants ({(_rig.MainHandWeapon != null ? _rig.MainHandWeapon.displayName : "none")} vs {(bladeWeapon != null ? bladeWeapon.displayName : "none")})");
+                Check(_rig.Defense.CanParry, "the blade's Parry capability is live");
+                Check(ranged != null && !ranged.enabled, "ranged combat switched off for a melee main hand");
+                Check(melee != null && melee.enabled, "melee combat switched on for a melee main hand");
+
+                // ---- the off hand: carried, then actually usable
+                Check(inventory.TryAdd(shieldItem, 1, out string addShield), $"shield put in the bag ({addShield})");
+                Check(equipment.TryEquipFromInventory(inventory.IndexOfItem(shieldItem), out string shieldReason),
+                    $"shield equipped ({shieldReason})");
+                Check(equipment.Equipped(EquipmentSlot.OffHand) == shieldItem, "the off hand slot holds the shield item");
+                WeaponData shieldWeapon = shieldItem.grantedWeapon;
+                Check(shieldWeapon != null && shieldItem.GrantsWeapon,
+                    $"the shield item declares the shield it grants ({(shieldWeapon != null ? shieldWeapon.displayName : "none")})");
+                Check(_rig.OffhandWeapon != null && ReferenceEquals(_rig.OffhandWeapon, shieldWeapon),
+                    "the rig holds exactly the shield the item grants");
+                Check(_rig.Defense.HasShield, "the defense profile knows a shield is carried");
+                Check(_rig.Defense.CanBlock,
+                    "with a one-handed main hand the shield contributes, and the armor supplies the reduction");
+
+                // ---- measured defense, not just flags. The flow itself takes the cuirass off and puts it
+                // back on through the bag, so the armor is the only thing that changes between the hits it
+                // measures.
+                yield return GuardWithGearFlow(inventory, equipment, cuirass);
+
+                // A two-handed main hand must cancel the off hand again.
+                Check(equipment.TryUnequip(EquipmentSlot.Weapon, out string unequipBladeReason),
+                    $"blade unequipped ({unequipBladeReason})");
+                Check(_rig.MainHandWeapon == bowBase, $"the class weapon went back into the main hand ({(_rig.MainHandWeapon != null ? _rig.MainHandWeapon.displayName : "none")})");
+                Check(_rig.Defense.CanBlock == false,
+                    "the shield contributes nothing while a two-handed weapon is held");
+                Check(_rig.Defense.CanParry == false, "the parry capability left with the blade");
+                Check(ranged != null && ranged.enabled, "ranged combat came back for the ranged main hand");
+                Check(equipment.Equipped(EquipmentSlot.Weapon) == null, "the weapon slot is empty again");
+
+                // ---- unequipping puts everything back
+                Check(equipment.TryUnequip(EquipmentSlot.OffHand, out string unequipShieldReason),
+                    $"shield unequipped ({unequipShieldReason})");
+                Check(_rig.OffhandWeapon == null, "the archer's off hand is empty again");
+                Check(_rig.Defense.HasShield == false, "no shield in the defense profile");
+
+                Check(equipment.TryUnequip(EquipmentSlot.Legs, out string unequipBootsReason),
+                    $"boots unequipped ({unequipBootsReason})");
+                yield return WaitFrames(2);
+                float speedAfterBoots = _rig.Movement != null ? _rig.Movement.ResolveGroundSpeed(false, false) : 0f;
+                Check(Mathf.Abs(speedAfterBoots - speedBase) < 0.12f,
+                    $"the speed bonus is gone when the boots come off ({speedWearingBoots:F2} -> {speedAfterBoots:F2})");
+
+                Check(equipment.TryUnequip(EquipmentSlot.Chest, out string unequipCuirassReason),
+                    $"cuirass unequipped ({unequipCuirassReason})");
+                Check(Mathf.Approximately(_rig.MaxHealth, healthBase) || _rig.MaxHealth <= healthBase + 0.5f,
+                    $"max health returned to the class number ({_rig.MaxHealth})");
+                Check(_rig.Defense.BlockReduction <= 0.001f,
+                    $"no block reduction left from gear ({_rig.Defense.BlockReduction:F2})");
+                Check(equipment.FilledCount == 0, $"nothing worn ({equipment.FilledCount})");
+                Check(inventory.IndexOfItem(cuirass) >= 0 && inventory.IndexOfItem(boots) >= 0 &&
+                      inventory.IndexOfItem(blade) >= 0 && inventory.IndexOfItem(shieldItem) >= 0,
+                    "every unequipped item went back into the bag");
+
+                // ---- a full bag refuses an unequip instead of deleting the item. The item is worn first so
+                // filling the bag afterwards leaves no hole big enough to put it back into.
+                inventory.Clear();
+                yield return WaitFrames(2);
+
+                Check(inventory.TryAdd(cuirass, 1, out string lastCuirass), $"one cuirass in an empty bag ({lastCuirass})");
+                Check(equipment.TryEquipFromInventory(inventory.IndexOfItem(cuirass), out string equipAnyway),
+                    $"cuirass equipped again ({equipAnyway})");
+
+                // Worn gear occupies no bag cells, so taking it off frees nothing in the grid. The fill is
+                // bounded by the packing this grid's own geometry allows, so a bag that kept saying yes cannot
+                // spin this coroutine into the watchdog, and the extra attempts become a visible failure.
+                Vector2Int chestShape = cuirass.EffectiveFootprint;
+                int cellsPerChest = chestShape.x * chestShape.y;
+                int bagFitAcross = inventory.GridWidth / chestShape.x;
+                int bagFitDown = inventory.GridHeight / chestShape.y;
+                int expectedBagFit = bagFitAcross * bagFitDown;
+                int fillCap = expectedBagFit + 2;
+
+                int fill = 0;
+                while (fill < fillCap && inventory.TryAdd(cuirass, 1)) fill++;
+
+                Check(fill < fillCap, $"the fill loop terminated on its own ({fill} cuirasses, cap {fillCap})");
+                Check(fill == expectedBagFit,
+                    $"the bag holds exactly the {expectedBagFit} cuirasses its cells allow ({fill} = {bagFitAcross} across x {bagFitDown} down)");
+                Check(fill > 0 && inventory.UsedCells == fill * cellsPerChest,
+                    $"worn gear occupies no bag cells ({inventory.UsedCells} used by {fill} bag cuirasses at {cellsPerChest} cells each)");
+                Check(inventory.FindFreeOrigin(chestShape).x < 0,
+                    $"the full bag holds no {chestShape} hole for the worn cuirass ({inventory.FreeCells} free cells, none of them a whole hole)");
+
+                int unitsBeforeStuck = inventory.TotalUnits;
+                int valueBeforeStuck = inventory.CarriedValue;
+                int stacksBeforeStuck = inventory.UsedSlots;
+                int cellsBeforeStuck = inventory.UsedCells;
+                int collectedBeforeStuck = inventory.LifetimeCollected;
+                int recoveredBeforeStuck = inventory.RecoveredValue;
+
+                Check(!equipment.TryUnequip(EquipmentSlot.Chest, out string stuckReason),
+                    "an unequip into a full bag is refused");
+                Check(stuckReason != null && stuckReason.Contains("hole"),
+                    $"the refusal says what is missing ({stuckReason})");
+                Check(equipment.Equipped(EquipmentSlot.Chest) == cuirass, "the item is still worn, not destroyed");
+                Check(inventory.TotalUnits == unitsBeforeStuck && inventory.CarriedValue == valueBeforeStuck &&
+                      inventory.UsedSlots == stacksBeforeStuck && inventory.UsedCells == cellsBeforeStuck,
+                      $"the refused unequip conserved the bag exactly ({inventory.UsedSlots} stacks, {inventory.UsedCells} cells)");
+                Check(inventory.LifetimeCollected == collectedBeforeStuck && inventory.RecoveredValue == recoveredBeforeStuck,
+                      $"the refused unequip credited nothing ({inventory.LifetimeCollected} collected, {inventory.RecoveredValue} recovered)");
+
+                // ---- making the success honest: the destination has to come from the bag, not from the item
+                // being taken off. One controlled bag cuirass is removed with the bag's own API to open a real
+                // 2x3 hole, the bag is re-snapshot after that removal, and only then is the transfer required
+                // to land in the hole that genuinely exists.
+                int holeMakerIndex = inventory.IndexOfItem(cuirass);
+                Check(holeMakerIndex >= 0, "the bag holds a cuirass to clear a hole with");
+                Vector2Int holeOrigin = holeMakerIndex >= 0
+                    ? inventory.Slots[holeMakerIndex].Origin
+                    : new Vector2Int(-1, -1);
+                int holeUnits = holeMakerIndex >= 0 ? inventory.TryRemoveAt(holeMakerIndex, 1) : 0;
+                Check(holeUnits == 1, $"one bag cuirass was removed to open a hole ({holeUnits} removed from {holeOrigin})");
+
+                Vector2Int plannedHole = inventory.FindFreeOrigin(chestShape);
+                Check(plannedHole.x >= 0, $"the bag now has a {chestShape} hole to unequip into ({plannedHole})");
+
+                int unitsBeforeFree = inventory.TotalUnits;
+                int valueBeforeFree = inventory.CarriedValue;
+                int stacksBeforeFree = inventory.UsedSlots;
+                int cellsBeforeFree = inventory.UsedCells;
+                int collectedBeforeFree = inventory.LifetimeCollected;
+                int recoveredBeforeFree = inventory.RecoveredValue;
+
+                Check(equipment.TryUnequip(EquipmentSlot.Chest, out string unequipIntoHole),
+                    $"the worn cuirass comes off into the hole the bag opened ({unequipIntoHole})");
+                Check(equipment.Equipped(EquipmentSlot.Chest) == null, "the chest slot is empty again");
+                Check(inventory.IndexOfItem(cuirass) >= 0, "the unequipped cuirass is back in the bag");
+                Check(inventory.TotalUnits == unitsBeforeFree + 1 &&
+                      inventory.CarriedValue == valueBeforeFree + cuirass.value,
+                      $"exactly one unit and its value moved back ({inventory.TotalUnits} units, {inventory.CarriedValue} value)");
+                Check(inventory.UsedSlots == stacksBeforeFree + 1 &&
+                      inventory.UsedCells == cellsBeforeFree + cellsPerChest,
+                      $"the unequipped item paid for its own {chestShape} footprint ({inventory.UsedSlots} stacks, {inventory.UsedCells} cells)");
+                Check(inventory.LifetimeCollected == collectedBeforeFree && inventory.RecoveredValue == recoveredBeforeFree,
+                      $"taking worn gear off farmed no collection credit ({inventory.LifetimeCollected} collected, {inventory.RecoveredValue} recovered)");
+
+                int cuirassStacksAfterHole = 0;
+                Vector2Int landedOrigin = new Vector2Int(-1, -1);
+                bool landedAsWholeShape = false;
+                for (int i = 0; i < inventory.Slots.Count; i++)
+                {
+                    InventorySlot slot = inventory.Slots[i];
+                    if (slot.Item != cuirass) continue;
+                    cuirassStacksAfterHole++;
+                    if (slot.Count == 1 && slot.Size == chestShape && slot.Origin == plannedHole)
+                    {
+                        landedAsWholeShape = true;
+                        landedOrigin = slot.Origin;
+                    }
+                }
+
+                Check(cuirassStacksAfterHole == fill,
+                    $"the bag holds one stack per cuirass with nothing duplicated ({cuirassStacksAfterHole} stacks for {fill} cuirasses)");
+                Check(landedAsWholeShape,
+                    $"the unequipped cuirass landed as one whole {chestShape} footprint in the hole the bag opened ({landedOrigin})");
+                Check(landedAsWholeShape && inventory.IsCellOccupied(landedOrigin + new Vector2Int(chestShape.x - 1, chestShape.y - 1)),
+                    "every cell of that footprint is marked occupied, so the hole was really filled and not invented");
+
+                Check(!equipment.TryUnequip(EquipmentSlot.Chest, out string emptySlotReason),
+                    "unequipping an empty slot is refused");
+                Check(!string.IsNullOrEmpty(emptySlotReason) && emptySlotReason.Contains("nothing"),
+                    $"the refusal says the slot was empty ({emptySlotReason})");
+
+                // ---- a second equip/unequip cycle on the same definition: the hand goes out and comes back,
+                // and the run is not credited for gear it already had.
+                inventory.Clear();
+                yield return WaitFrames(2);
+
+                Check(inventory.TryAdd(blade, 1, out string addBladeAgain), $"the blade is put back in the bag ({addBladeAgain})");
+                int unitsBeforeCycle = inventory.TotalUnits;
+                int valueBeforeCycle = inventory.CarriedValue;
+                int collectedBeforeCycle = inventory.LifetimeCollected;
+                int recoveredBeforeCycle = inventory.RecoveredValue;
+
+                Check(equipment.TryEquipFromInventory(inventory.IndexOfItem(blade), out string equipBladeAgain),
+                    $"the blade is equipped a second time ({equipBladeAgain})");
+                Check(inventory.IndexOfItem(blade) < 0, "the blade left the bag on the second equip too");
+                Check(equipment.TryUnequip(EquipmentSlot.Weapon, out string unequipBladeAgain),
+                    $"and was taken off again ({unequipBladeAgain})");
+                Check(_rig.MainHandWeapon == bowBase, "the class weapon is back in the main hand after the cycle");
+                Check(inventory.IndexOfItem(blade) >= 0, "the blade went back into the bag on the second unequip too");
+                Check(inventory.TotalUnits == unitsBeforeCycle && inventory.CarriedValue == valueBeforeCycle,
+                    $"the cycle conserved the bag ({inventory.TotalUnits} units, {inventory.CarriedValue} value)");
+                Check(inventory.LifetimeCollected == collectedBeforeCycle && inventory.RecoveredValue == recoveredBeforeCycle,
+                    $"the cycle farmed no extraction credit ({inventory.LifetimeCollected} collected, {inventory.RecoveredValue} recovered)");
+
+                equipment.Clear();
+                inventory.Clear();
+                yield return WaitFrames(2);
+                Check(equipment.FilledCount == 0 && inventory.UsedCells == 0, "gear and bag cleared for the container tests");
+                Check(_rig.MaxHealth <= healthBase + 0.5f, $"pools back at the class numbers ({_rig.MaxHealth})");
+            }
+
+            /// <summary>
+            /// U1B ownership and conservation checks for the equipment transfer: an unowned definition is
+            /// refused, the selected bag stack is the one consumed, a replacement that only fits in the space
+            /// the incoming item vacates is allowed, a geometrically impossible replacement changes nothing, and
+            /// no equip/unequip cycle credits the run with loot it never collected.
+            /// </summary>
+            private IEnumerator EquipmentTransferFlow(Inventory inventory, Equipment equipment,
+                ItemData cuirass, ItemData blade, ItemData coin)
+            {
+                equipment.Clear();
+                inventory.Clear();
+                yield return WaitFrames(2);
+
+                Check(equipment.FilledCount == 0 && inventory.Slots.Count == 0 && inventory.UsedCells == 0,
+                    "gear and bag are empty for the transfer tests");
+
+                // A 1x1 chest plate cloned from the cuirass so the impossible-swap geometry is real without
+                // editing a shipped asset. It is destroyed before this flow returns.
+                ItemData probePlate = UnityEngine.Object.Instantiate(cuirass);
+                probePlate.name = "U1B_ProbeChestPlate";
+                probePlate.itemId = "u1b_probe_chest_plate";
+                probePlate.displayName = "U1B Probe Plate";
+                probePlate.description = "Temporary 1x1 chest plate used only by the transfer fixtures.";
+                probePlate.gridFootprint = new Vector2Int(1, 1);
+                probePlate.maxStack = 1;
+                probePlate.equipSlot = EquipmentSlot.Chest;
+                probePlate.statModifiers = new StatModifier[0];
+                probePlate.grantedWeapon = null;
+                probePlate.kind = ItemKind.Armor;
+                probePlate.value = 10;
+
+                Check(probePlate.EffectiveFootprint == Vector2Int.one && probePlate.IsEquippable && !probePlate.CanStack,
+                    "the cloned plate is a 1x1 equippable item, used only for geometry");
+
+                int collectedBefore = inventory.LifetimeCollected;
+                int recoveredBefore = inventory.RecoveredValue;
+                int collectedEvents = 0;
+                int equipNotifications = 0;
+                int unequipNotifications = 0;
+
+                System.Action<ItemData, int> onCollected = (item, total) => collectedEvents++;
+                System.Action<ItemData, bool> onEquipment = (item, equipped) =>
+                {
+                    if (equipped) equipNotifications++; else unequipNotifications++;
+                };
+
+                // A subscriber that reads the whole picture from inside the notification: the bag, the slots,
+                // both hands and the numbers the equipment source produced. Everything is copied out of the
+                // live collections because the notification is raised synchronously in the middle of a
+                // transfer, and it is only counted while armed - the loot adds that set these fixtures up are
+                // legitimate collection, not equipment commits.
+                int transferNotifications = 0;
+                bool probeArmed = false;
+                CommitSnapshot seenAtNotification = null;
+
+                System.Action onInventoryChanged = () =>
+                {
+                    if (!probeArmed) return;
+                    transferNotifications++;
+                    seenAtNotification = CaptureCommit(inventory, equipment, _rig);
+                };
+
+                GameEvents.ItemCollected += onCollected;
+                GameEvents.EquipmentChanged += onEquipment;
+                GameEvents.InventoryChanged += onInventoryChanged;
+
+                try
+                {
+                    // Arming is scoped to one equipment call so nothing else in the flow can be mistaken for
+                    // a transfer, and a refusal that notifies nothing shows up as a zero instead of a stale
+                    // count left over from the previous scenario.
+                    System.Action ArmProbe = () =>
+                    {
+                        transferNotifications = 0;
+                        seenAtNotification = null;
+                        probeArmed = true;
+                    };
+
+                    System.Action DisarmProbe = () =>
+                    {
+                        probeArmed = false;
+                    };
+
+                    // ---- 1. refusals change nothing: null, a bad index, something that cannot be worn
+                    int unitsStart = inventory.TotalUnits;
+                    int valueStart = inventory.CarriedValue;
+                    int cellsStart = inventory.UsedCells;
+                    int stacksStart = inventory.UsedSlots;
+                    float maxHealthStart = _rig.MaxHealth;
+                    float reductionStart = _rig.Defense.BlockReduction;
+                    WeaponData mainHandStart = _rig.MainHandWeapon;
+                    WeaponData offhandStart = _rig.OffhandWeapon;
+
+                    ArmProbe();
+
+                    Check(!equipment.TryEquipItem(null, out string nullReason) && nullReason == "no item",
+                        $"a null item is refused ({nullReason})");
+
+                    // Each out-of-range call is evaluated on its own. Two out-params behind one && leave the
+                    // second unassigned whenever the first refusal short-circuits, and the message then reads a
+                    // local the compiler has no proof was ever set (CS0165). Neither check is dropped.
+                    bool lowRefused = !equipment.TryEquipFromInventory(-1, out string lowIndexReason);
+                    bool highRefused = !equipment.TryEquipFromInventory(inventory.Slots.Count, out string highIndexReason);
+
+                    Check(lowRefused, $"a negative bag index is refused ({lowIndexReason})");
+                    Check(!string.IsNullOrEmpty(lowIndexReason), $"the negative index refusal explains itself ({lowIndexReason})");
+                    Check(highRefused, $"a bag index past the last stack is refused ({highIndexReason})");
+                    Check(!string.IsNullOrEmpty(highIndexReason), $"the out-of-range index refusal explains itself ({highIndexReason})");
+
+                    Check(!equipment.TryEquipItem(coin, out string coinReason) && coinReason.Contains("cannot be worn"),
+                        $"a carried item that is not equipment is refused ({coinReason})");
+                    Check(!equipment.TryUnequip(EquipmentSlot.None, out string noSlotReason),
+                        $"the None slot is not a slot ({noSlotReason})");
+
+                    DisarmProbe();
+
+
+                    Check(inventory.TotalUnits == unitsStart && inventory.CarriedValue == valueStart &&
+                          inventory.UsedSlots == stacksStart && inventory.UsedCells == cellsStart,
+                          $"the refusals left the bag exactly as it was ({inventory.UsedSlots} stacks, {inventory.UsedCells} cells)");
+                    Check(equipment.FilledCount == 0 && _rig.MaxHealth == maxHealthStart &&
+                          Mathf.Abs(_rig.Defense.BlockReduction - reductionStart) < 0.0001f,
+                          "the refusals changed no slot, pool or defense number");
+                    Check(ReferenceEquals(_rig.MainHandWeapon, mainHandStart) && ReferenceEquals(_rig.OffhandWeapon, offhandStart),
+                        "the refusals did not touch the hands");
+                    Check(collectedEvents == 0 && equipNotifications == 0 && unequipNotifications == 0,
+                        "a refusal notifies nothing");
+                    Check(transferNotifications == 0 && seenAtNotification == null,
+                        $"a refusal raised no inventory notification for anyone to look at ({transferNotifications} notifications)");
+
+                    // ---- 2. an equippable definition the bag does not hold is not an item
+                    Check(inventory.IndexOfItem(cuirass) < 0 && !equipment.IsEquipped(cuirass),
+                        "the cuirass is neither in the bag nor worn");
+
+                    ArmProbe();
+                    bool unownedRefused = !equipment.TryEquipItem(cuirass, out string unownedReason);
+                    DisarmProbe();
+
+                    Check(unownedRefused,
+                        "equipping a definition the bag does not hold is refused");
+                    Check(!string.IsNullOrEmpty(unownedReason) && unownedReason.Contains("not in the bag"),
+                        $"the refusal says the item is not carried ({unownedReason})");
+                    Check(equipment.Equipped(EquipmentSlot.Chest) == null && equipment.FilledCount == 0,
+                        "no item appeared in a slot");
+                    Check(inventory.TotalUnits == unitsStart && inventory.CarriedValue == valueStart &&
+                          inventory.UsedSlots == stacksStart && inventory.UsedCells == cellsStart,
+                          $"the unowned refusal created nothing ({inventory.UsedSlots} stacks, {inventory.UsedCells} cells)");
+                    Check(inventory.LifetimeCollected == collectedBefore && inventory.RecoveredValue == recoveredBefore,
+                        $"the unowned refusal credited nothing ({inventory.LifetimeCollected} collected, {inventory.RecoveredValue} recovered)");
+                    Check(transferNotifications == 0 && seenAtNotification == null,
+                        $"the unowned refusal notified nothing ({transferNotifications} notifications)");
+
+                    // ---- 3. the selected stack is consumed, not the first stack with the same definition
+                    Check(inventory.TryAdd(cuirass, 1, out string addFirst), $"first cuirass added ({addFirst})");
+                    Check(inventory.TryAdd(cuirass, 1, out string addSecond), $"second cuirass added ({addSecond})");
+
+                    // Those two adds are real loot, so the baseline the transfer checks are measured against
+                    // has to move with them. Everything below is equipment movement, not collection.
+                    collectedBefore = inventory.LifetimeCollected;
+                    recoveredBefore = inventory.RecoveredValue;
+                    collectedEvents = 0;
+
+                    Check(inventory.Slots.Count == 2 && inventory.UsedCells == 12,
+                        $"two copies of one definition occupy two footprints ({inventory.Slots.Count} stacks, {inventory.UsedCells} cells)");
+
+                    Vector2Int firstOrigin = inventory.Slots[0].Origin;
+                    Vector2Int secondOrigin = inventory.Slots[1].Origin;
+                    Check(firstOrigin != secondOrigin, $"the two copies sit at different cells ({firstOrigin} and {secondOrigin})");
+
+                    int unitsBeforeSelected = inventory.TotalUnits;
+                    int valueBeforeSelected = inventory.CarriedValue;
+                    float wornHealthExpected = maxHealthStart + cuirass.StatTotal(SkillStat.MaxHealth);
+                    float wornReductionExpected = reductionStart + cuirass.StatTotal(SkillStat.BlockReduction);
+
+                    ArmProbe();
+                    bool equippedSelected = equipment.TryEquipFromInventory(1, out string equipSecond);
+                    DisarmProbe();
+
+                    Check(equippedSelected,
+                        $"the copy at bag slot 1 equipped ({equipSecond})");
+                    Check(transferNotifications == 1,
+                        $"one committed equip raised exactly one inventory notification ({transferNotifications})");
+
+                    // Read from inside that notification: the observer is allowed to see a bag with the
+                    // equipped copy gone only when the slot, the filled count and the stat source already agree
+                    // that it is being worn. A notification raised from the bag helper would fail all of these.
+                    Check(seenAtNotification != null && seenAtNotification.Slot(EquipmentSlot.Chest) == cuirass &&
+                          seenAtNotification.FilledCount == 1,
+                          "from inside the notification the chest slot already held the cuirass");
+                    Check(seenAtNotification != null && seenAtNotification.CountOf(cuirass) == 1 &&
+                          seenAtNotification.StacksOf(cuirass) == 1 &&
+                          seenAtNotification.OriginOf(cuirass) == firstOrigin &&
+                          seenAtNotification.OriginOf(cuirass) != secondOrigin,
+                          "from inside the notification the selected bag footprint had already left while the copy that was not selected remained as exactly one unit in one stack at its own cell: " + firstOrigin + " held, " + secondOrigin + " empty (" + (seenAtNotification != null ? seenAtNotification.CountOf(cuirass) : -1) + " units in " + (seenAtNotification != null ? seenAtNotification.StacksOf(cuirass) : -1) + " stack at " + (seenAtNotification != null ? seenAtNotification.OriginOf(cuirass) : new Vector2Int(-1, -1)) + ", two copies of one definition counted without UIDs until U2)");
+                    Check(seenAtNotification != null && seenAtNotification.BagStacks == 1 &&
+                          seenAtNotification.BagOrigins.Count == 1 &&
+                          seenAtNotification.BagOrigins[0] == firstOrigin && seenAtNotification.BagCounts[0] == 1,
+                          "from inside the notification the copy that was not selected was still one unit at its own cell");
+                    Check(seenAtNotification != null && seenAtNotification.BagCells == 6 &&
+                          seenAtNotification.BagUnits == unitsBeforeSelected - 1 &&
+                          seenAtNotification.BagValue == valueBeforeSelected - cuirass.value,
+                          $"from inside the notification the bag had committed exactly the unit that moved ({(seenAtNotification != null ? seenAtNotification.BagUnits : -1)} units, {(seenAtNotification != null ? seenAtNotification.BagCells : -1)} cells)");
+                    Check(seenAtNotification != null && seenAtNotification.MaxHealth > maxHealthStart + 0.5f &&
+                          Mathf.Abs(seenAtNotification.MaxHealth - wornHealthExpected) < 0.5f,
+                          $"from inside the notification the stat source was already refreshed ({(seenAtNotification != null ? seenAtNotification.MaxHealth : 0f):F0} HP against {wornHealthExpected:F0} expected)");
+                    Check(seenAtNotification != null && seenAtNotification.BlockReduction >= wornReductionExpected - 0.001f,
+                          $"from inside the notification the defense number already carried the armor ({(seenAtNotification != null ? seenAtNotification.BlockReduction : 0f):F2} against {wornReductionExpected:F2})");
+                    Check(equipment.Equipped(EquipmentSlot.Chest) == cuirass, "the chest slot holds the cuirass");
+                    Check(inventory.Slots.Count == 1 && inventory.Slots[0].Origin == firstOrigin,
+                        $"the copy that was not selected is still at its own cell ({inventory.Slots[0].Origin})");
+                    Check(inventory.UsedCells == 6, $"only the selected footprint left the grid ({inventory.UsedCells} cells)");
+                    Check(inventory.TotalUnits == unitsBeforeSelected - 1 &&
+                          inventory.CarriedValue == valueBeforeSelected - cuirass.value,
+                          $"carried totals follow the one unit that moved ({inventory.TotalUnits} units, {inventory.CarriedValue} value)");
+                    Check(inventory.LifetimeCollected == collectedBefore && inventory.RecoveredValue == recoveredBefore,
+                        $"equipping is not collecting ({inventory.LifetimeCollected} collected, {inventory.RecoveredValue} recovered)");
+                    Check(collectedEvents == 0, "equipping raised no ItemCollected event");
+                    Check(equipNotifications == 1 && unequipNotifications == 0,
+                        $"one equip notification for one equip ({equipNotifications} up, {unequipNotifications} down)");
+
+                    // ---- 4. a valid replacement that only fits in the space the incoming item vacates.
+                    // Coins stack, so they are placed one cell at a time: the bag has to be full to the last
+                    // cell, which leaves the hole the incoming cuirass will free as the only 2x3 hole it has.
+                    int coinsPlaced = 0;
+                    int coinAttempts = 0;
+                    int cellBudget = inventory.Capacity;
+                    for (int y = 0; y < inventory.GridHeight; y++)
+                    {
+                        for (int x = 0; x < inventory.GridWidth; x++)
+                        {
+                            Vector2Int cell = new Vector2Int(x, y);
+                            if (inventory.IsCellOccupied(cell)) continue;
+                            if (coinAttempts >= cellBudget) break;
+                            coinAttempts++;
+                            if (inventory.TryAddAt(coin, 1, cell, out string fillReason)) coinsPlaced++;
+                        }
+                    }
+
+                    Check(coinAttempts <= cellBudget, $"the fill loop stayed bounded ({coinAttempts} attempts, budget {cellBudget})");
+                    Check(coinsPlaced > 0 && inventory.FreeCells == 0,
+                        $"the bag is full to the last cell ({inventory.UsedCells}/{inventory.Capacity} used, {coinsPlaced} single coins)");
+                    Check(inventory.UsedSlots == 1 + coinsPlaced, $"each single coin is its own stack ({inventory.UsedSlots} stacks)");
+
+                    collectedBefore = inventory.LifetimeCollected;
+                    recoveredBefore = inventory.RecoveredValue;
+                    collectedEvents = 0;
+
+                    int unitsBeforeSwap = inventory.TotalUnits;
+                    int valueBeforeSwap = inventory.CarriedValue;
+                    int stacksBeforeSwap = inventory.UsedSlots;
+                    int cellsBeforeSwap = inventory.UsedCells;
+                    float maxHealthBeforeSwap = _rig.MaxHealth;
+                    float reductionBeforeSwap = _rig.Defense.BlockReduction;
+                    int bagCuirassIndex = inventory.IndexOfItem(cuirass);
+                    Check(bagCuirassIndex >= 0, "the bag still holds one cuirass to replace the worn one with");
+                    Vector2Int vacatedOrigin = inventory.Slots[bagCuirassIndex].Origin;
+
+                    ArmProbe();
+                    bool replaced = equipment.TryEquipFromInventory(bagCuirassIndex, out string swapReason);
+                    DisarmProbe();
+
+                    Check(replaced,
+                        $"the worn cuirass is replaced using the space the incoming copy vacates ({swapReason})");
+                    Check(transferNotifications == 1,
+                        $"one committed replacement raised exactly one inventory notification ({transferNotifications})");
+                    Check(seenAtNotification != null && seenAtNotification.Slot(EquipmentSlot.Chest) == cuirass &&
+                          seenAtNotification.FilledCount == 1,
+                          "from inside the notification the chest slot already held the incoming copy");
+                    Check(seenAtNotification != null && seenAtNotification.CountOf(cuirass) == 1 &&
+                          seenAtNotification.StacksOf(cuirass) == 1,
+                          $"from inside the notification the bag held exactly one cuirass, not the incoming one missing and not both copies at once ({(seenAtNotification != null ? seenAtNotification.CountOf(cuirass) : -1)} units)");
+                    Check(seenAtNotification != null && seenAtNotification.OriginOf(cuirass) == vacatedOrigin &&
+                          seenAtNotification.HasWholeFootprint(cuirass, cuirass.EffectiveFootprint),
+                          $"from inside the notification the replaced copy already occupied the {cuirass.EffectiveFootprint} hole the selected incoming copy vacated ({(seenAtNotification != null ? seenAtNotification.OriginOf(cuirass) : new Vector2Int(-1, -1))} against {vacatedOrigin})");
+                    Check(seenAtNotification != null && seenAtNotification.BagStacks == stacksBeforeSwap &&
+                          seenAtNotification.BagCells == cellsBeforeSwap && seenAtNotification.BagUnits == unitsBeforeSwap &&
+                          seenAtNotification.BagValue == valueBeforeSwap && seenAtNotification.FreeCells == 0,
+                          $"from inside the notification the full bag was conserved: same stacks, cells, units and value ({(seenAtNotification != null ? seenAtNotification.UsedText : "none")})");
+                    Check(seenAtNotification != null && Mathf.Abs(seenAtNotification.MaxHealth - maxHealthBeforeSwap) < 0.01f &&
+                          Mathf.Abs(seenAtNotification.BlockReduction - reductionBeforeSwap) < 0.0001f,
+                          $"from inside the notification the pools and defense were the worn-gear numbers, not a half-applied pair ({(seenAtNotification != null ? seenAtNotification.MaxHealth : 0f):F0} HP, {(seenAtNotification != null ? seenAtNotification.BlockReduction : 0f):F2} block)");
+                    Check(equipment.Equipped(EquipmentSlot.Chest) == cuirass, "the chest slot still holds the cuirass definition");
+                    Check(inventory.UsedSlots == stacksBeforeSwap && inventory.UsedCells == cellsBeforeSwap &&
+                          inventory.FreeCells == 0,
+                          $"the bag is still full, with the same number of stacks ({inventory.UsedSlots} stacks, {inventory.UsedCells} cells)");
+                    Check(inventory.TotalUnits == unitsBeforeSwap && inventory.CarriedValue == valueBeforeSwap,
+                        $"a same-definition replacement conserves units and value ({inventory.TotalUnits} units, {inventory.CarriedValue} value)");
+                    Check(inventory.IsCellOccupied(vacatedOrigin),
+                        $"the hole the incoming copy vacated ({vacatedOrigin}) is where the replaced copy landed");
+
+                    bool replacedCopyIsWhole = false;
+                    for (int i = 0; i < inventory.Slots.Count; i++)
+                    {
+                        if (inventory.Slots[i].Item != cuirass) continue;
+                        replacedCopyIsWhole = inventory.Slots[i].Count == 1 &&
+                                              inventory.Slots[i].Size == cuirass.EffectiveFootprint;
+                        break;
+                    }
+                    Check(replacedCopyIsWhole, "the replaced cuirass is back in the bag as one full unstacked footprint");
+                    Check(inventory.LifetimeCollected == collectedBefore && inventory.RecoveredValue == recoveredBefore,
+                        $"the replacement credited no loot ({inventory.LifetimeCollected} collected, {inventory.RecoveredValue} recovered)");
+                    Check(collectedEvents == 0, "the replacement raised no ItemCollected event");
+                    Check(equipNotifications == 2 && unequipNotifications == 0,
+                        $"a replacement is one equip, not an unequip plus an equip ({equipNotifications} up, {unequipNotifications} down)");
+
+                    // ---- 5. a replacement that cannot fit anywhere changes absolutely nothing
+                    // The bag is full, so one single-coin cell is cleared to make room for the 1x1 plate.
+                    int coinCellIndex = inventory.IndexOfItem(coin);
+                    Check(coinCellIndex >= 0 && inventory.TryRemoveAt(coinCellIndex, 1) == 1,
+                        "one single coin was taken out to make room for the probe plate");
+                    Check(inventory.FreeCells == 1, $"the bag has exactly one free cell now ({inventory.FreeCells})");
+                    Check(inventory.TryAdd(probePlate, 1, out string addProbe), $"the 1x1 probe plate added ({addProbe})");
+                    Check(inventory.FreeCells == 0, $"and filled it to the last cell ({inventory.UsedCells} used)");
+
+                    collectedBefore = inventory.LifetimeCollected;
+                    recoveredBefore = inventory.RecoveredValue;
+                    collectedEvents = 0;
+
+                    int unitsBeforeBad = inventory.TotalUnits;
+                    int valueBeforeBad = inventory.CarriedValue;
+                    int stacksBeforeBad = inventory.UsedSlots;
+                    int cellsBeforeBad = inventory.UsedCells;
+                    int orderBeforeBad = inventory.Slots.Count;
+                    Vector2Int probeOrigin = inventory.Slots[inventory.IndexOfItem(probePlate)].Origin;
+                    List<Vector2Int> originsBefore = new List<Vector2Int>();
+                    List<int> countsBefore = new List<int>();
+                    for (int i = 0; i < inventory.Slots.Count; i++)
+                    {
+                        originsBefore.Add(inventory.Slots[i].Origin);
+                        countsBefore.Add(inventory.Slots[i].Count);
+                    }
+
+                    ArmProbe();
+                    bool impossibleRefused = !equipment.TryEquipFromInventory(inventory.IndexOfItem(probePlate), out string impossibleReason);
+                    DisarmProbe();
+
+                    Check(impossibleRefused,
+                        "a 1x1 replacement cannot free a 2x3 hole for the cuirass it replaces, so it is refused");
+                    Check(!string.IsNullOrEmpty(impossibleReason) && impossibleReason.Contains("hole"),
+                        $"the refused replacement says where it ran out of room ({impossibleReason})");
+
+                    bool gridIdentical = inventory.Slots.Count == orderBeforeBad && inventory.UsedSlots == stacksBeforeBad;
+                    for (int i = 0; i < inventory.Slots.Count && gridIdentical; i++)
+                    {
+                        if (inventory.Slots[i].Origin != originsBefore[i]) gridIdentical = false;
+                        if (inventory.Slots[i].Count != countsBefore[i]) gridIdentical = false;
+                    }
+                    Check(gridIdentical, "every stack kept its item, count, origin and order");
+
+                    bool cellsIdentical = inventory.UsedCells == cellsBeforeBad;
+                    for (int y = 0; y < inventory.GridHeight && cellsIdentical; y++)
+                    {
+                        for (int x = 0; x < inventory.GridWidth && cellsIdentical; x++)
+                        {
+                            Vector2Int cell = new Vector2Int(x, y);
+                            bool occupiedNow = inventory.IsCellOccupied(cell);
+                            bool occupiedBefore = false;
+                            for (int s = 0; s < originsBefore.Count; s++)
+                            {
+                                Vector2Int size = inventory.Slots[s].Size;
+                                if (cell.x >= originsBefore[s].x && cell.x < originsBefore[s].x + size.x &&
+                                    cell.y >= originsBefore[s].y && cell.y < originsBefore[s].y + size.y)
+                                {
+                                    occupiedBefore = true;
+                                    break;
+                                }
+                            }
+                            if (occupiedNow != occupiedBefore) cellsIdentical = false;
+                        }
+                    }
+                    Check(cellsIdentical, $"the occupancy map is unchanged ({inventory.UsedCells} cells used)");
+                    Check(inventory.IsCellOccupied(probeOrigin) && inventory.IndexOfItem(probePlate) >= 0,
+                        "the probe plate is still in the bag at the cell it was placed at");
+                    Check(inventory.TotalUnits == unitsBeforeBad && inventory.CarriedValue == valueBeforeBad,
+                        $"totals are untouched ({inventory.TotalUnits} units, {inventory.CarriedValue} value)");
+                    Check(inventory.LifetimeCollected == collectedBefore && inventory.RecoveredValue == recoveredBefore,
+                        $"collection counters are untouched ({inventory.LifetimeCollected} collected, {inventory.RecoveredValue} recovered)");
+                    Check(equipment.Equipped(EquipmentSlot.Chest) == cuirass && equipment.FilledCount == 1,
+                        "the chest slot still holds the cuirass it held before the refusal");
+                    Check(collectedEvents == 0 && equipNotifications == 2 && unequipNotifications == 0,
+                        $"the refused replacement raised no collection and no equipment notification ({collectedEvents} collected, {equipNotifications} up, {unequipNotifications} down)");
+                    Check(transferNotifications == 0 && seenAtNotification == null,
+                        $"the refused replacement raised no inventory notification either ({transferNotifications})");
+
+                    // ---- 6. a failed unequip keeps the item, and a successful one is not loot
+                    ArmProbe();
+                    bool stuckUnequipRefused = !equipment.TryUnequip(EquipmentSlot.Chest, out string stuckChestReason);
+                    DisarmProbe();
+
+                    Check(stuckUnequipRefused,
+                        "taking the cuirass off into a bag with no 2x3 hole is refused");
+                    Check(!string.IsNullOrEmpty(stuckChestReason) && stuckChestReason.Contains("hole"),
+                        $"the refusal names the missing hole ({stuckChestReason})");
+                    Check(equipment.Equipped(EquipmentSlot.Chest) == cuirass, "the cuirass is still worn, not destroyed");
+                    Check(inventory.UsedCells == cellsBeforeBad && inventory.UsedSlots == stacksBeforeBad,
+                        $"the refused unequip added nothing to the bag ({inventory.UsedSlots} stacks, {inventory.UsedCells} cells)");
+                    Check(inventory.LifetimeCollected == collectedBefore && inventory.RecoveredValue == recoveredBefore,
+                        $"the refused unequip credited nothing ({inventory.LifetimeCollected} collected, {inventory.RecoveredValue} recovered)");
+                    Check(unequipNotifications == 0, "the refused unequip raised no equipment notification");
+                    Check(transferNotifications == 0 && seenAtNotification == null,
+                        $"the refused unequip raised no inventory notification ({transferNotifications})");
+
+                    // A successful unequip still needs a hole of the item's own shape. Clearing the bag is
+                    // the honest way to open one here, and it does not touch the lifetime counters.
+                    inventory.Clear();
+                    yield return WaitFrames(2);
+                    Check(inventory.UsedCells == 0 && inventory.FreeCells == inventory.Capacity,
+                        "the bag was emptied, so the unequip has somewhere to land");
+
+                    int unitsBeforeUnequip = inventory.TotalUnits;
+                    int valueBeforeUnequip = inventory.CarriedValue;
+                    int stacksBeforeUnequip = inventory.UsedSlots;
+                    int cellsBeforeUnequip = inventory.UsedCells;
+
+                    ArmProbe();
+                    bool unequipCommitted = equipment.TryUnequip(EquipmentSlot.Chest, out string freeUnequip);
+                    DisarmProbe();
+
+                    Check(unequipCommitted,
+                        $"with a 2x3 hole free the cuirass comes off ({freeUnequip})");
+                    Check(transferNotifications == 1,
+                        $"one committed unequip raised exactly one inventory notification ({transferNotifications})");
+                    Check(seenAtNotification != null && seenAtNotification.Slot(EquipmentSlot.Chest) == null &&
+                          seenAtNotification.FilledCount == 0,
+                          "from inside the notification the chest slot was already empty, so the item was not simultaneously worn and carried");
+                    Check(seenAtNotification != null && seenAtNotification.CountOf(cuirass) == 1 &&
+                          seenAtNotification.StacksOf(cuirass) == 1 &&
+                          seenAtNotification.HasWholeFootprint(cuirass, cuirass.EffectiveFootprint),
+                          "from inside the notification the unequipped cuirass was one whole unstacked footprint in the bag");
+                    Check(seenAtNotification != null && seenAtNotification.BagStacks == stacksBeforeUnequip + 1 &&
+                          seenAtNotification.BagCells == cellsBeforeUnequip + cuirass.EffectiveFootprint.x * cuirass.EffectiveFootprint.y &&
+                          seenAtNotification.BagUnits == unitsBeforeUnequip + 1 &&
+                          seenAtNotification.BagValue == valueBeforeUnequip + cuirass.value,
+                          $"from inside the notification the bag had already paid for the footprint and gained exactly one unit ({(seenAtNotification != null ? seenAtNotification.UsedText : "none")})");
+                    Check(seenAtNotification != null && Mathf.Abs(seenAtNotification.MaxHealth - maxHealthStart) < 0.01f &&
+                          Mathf.Abs(seenAtNotification.BlockReduction - reductionStart) < 0.0001f,
+                          $"from inside the notification the worn contribution was already out of the pools and the defense profile ({(seenAtNotification != null ? seenAtNotification.MaxHealth : 0f):F0} HP, {(seenAtNotification != null ? seenAtNotification.BlockReduction : 0f):F2} block)");
+                    Check(equipment.Equipped(EquipmentSlot.Chest) == null && equipment.FilledCount == 0,
+                        "the chest slot is empty");
+                    Check(inventory.IndexOfItem(cuirass) >= 0, "the cuirass is in the bag");
+                    Check(inventory.TotalUnits == unitsBeforeUnequip + 1 &&
+                          inventory.CarriedValue == valueBeforeUnequip + cuirass.value,
+                          $"the bag totals gained exactly the one item that moved back ({inventory.TotalUnits} units, {inventory.CarriedValue} value)");
+                    Check(inventory.LifetimeCollected == collectedBefore && inventory.RecoveredValue == recoveredBefore,
+                        $"moving worn gear is not collecting ({inventory.LifetimeCollected} collected, {inventory.RecoveredValue} recovered)");
+                    Check(collectedEvents == 0, "the unequip raised no ItemCollected event");
+                    Check(unequipNotifications == 1 && equipNotifications == 2,
+                        $"one unequip notification for one unequip ({equipNotifications} up, {unequipNotifications} down)");
+
+                    // ---- 7. re-equipping the same definition does not stack its modifiers a second time
+                    int cuirassIndex = inventory.IndexOfItem(cuirass);
+                    Check(cuirassIndex >= 0, "the unequipped cuirass is available to wear again");
+
+                    ArmProbe();
+                    bool reEquipped = equipment.TryEquipFromInventory(cuirassIndex, out string reEquipCuirass);
+                    DisarmProbe();
+
+                    Check(reEquipped,
+                        $"the same cuirass equipped again ({reEquipCuirass})");
+                    Check(transferNotifications == 1 && seenAtNotification != null &&
+                          seenAtNotification.Slot(EquipmentSlot.Chest) == cuirass && !seenAtNotification.Holds(cuirass),
+                          $"from inside that notification the slot held the cuirass and the bag no longer did ({transferNotifications})");
+
+                    float maxHealthWorn = _rig.MaxHealth;
+                    float reductionWorn = _rig.Defense.BlockReduction;
+                    Check(maxHealthWorn > maxHealthStart && reductionWorn > reductionStart,
+                        $"wearing it raised the numbers once ({maxHealthStart:F0} -> {maxHealthWorn:F0} HP, {reductionStart:F2} -> {reductionWorn:F2} block)");
+
+                    equipment.RefreshStats();
+                    equipment.RefreshStats();
+                    Check(Mathf.Abs(_rig.MaxHealth - maxHealthWorn) < 0.01f &&
+                          Mathf.Abs(_rig.Defense.BlockReduction - reductionWorn) < 0.0001f,
+                        $"refreshing the equipment source adds nothing on top ({_rig.MaxHealth:F0} HP, {_rig.Defense.BlockReduction:F2} block)");
+
+                    ArmProbe();
+                    bool finalUnequipCommitted = equipment.TryUnequip(EquipmentSlot.Chest, out string finalUnequip);
+                    DisarmProbe();
+
+                    Check(finalUnequipCommitted,
+                        $"and it comes back off ({finalUnequip})");
+                    Check(transferNotifications == 1 && seenAtNotification != null &&
+                          seenAtNotification.Slot(EquipmentSlot.Chest) == null && seenAtNotification.Holds(cuirass) &&
+                          Mathf.Abs(seenAtNotification.MaxHealth - maxHealthStart) < 0.01f,
+                          $"from inside that notification the slot was empty, the bag held the cuirass and the pool was the class number again ({transferNotifications})");
+                    Check(Mathf.Abs(_rig.MaxHealth - maxHealthStart) < 0.01f &&
+                          Mathf.Abs(_rig.Defense.BlockReduction - reductionStart) < 0.0001f,
+                        $"one contribution in, one contribution out ({_rig.MaxHealth:F0} HP, {_rig.Defense.BlockReduction:F2} block)");
+
+                    // ---- 8. a weapon item leaves the hand the way it found it, every time
+                    Check(inventory.TryAdd(blade, 1, out string addBladeTransfer), $"the blade added ({addBladeTransfer})");
+
+                    collectedBefore = inventory.LifetimeCollected;
+                    recoveredBefore = inventory.RecoveredValue;
+                    collectedEvents = 0;
+
+                    WeaponData classWeapon = _rig.MainHandWeapon;
+                    Check(classWeapon != null && classWeapon.IsRanged, $"the class weapon in hand is ranged ({classWeapon.displayName})");
+
+                    ArmProbe();
+                    bool bladeEquipped = equipment.TryEquipFromInventory(inventory.IndexOfItem(blade), out string equipBladeTransfer);
+                    DisarmProbe();
+
+                    Check(bladeEquipped,
+                        $"the blade equipped ({equipBladeTransfer})");
+                    Check(transferNotifications == 1 && seenAtNotification != null &&
+                          ReferenceEquals(seenAtNotification.MainHand, blade.grantedWeapon) &&
+                          !seenAtNotification.Holds(blade) && seenAtNotification.Slot(EquipmentSlot.Weapon) == blade,
+                          $"from inside the notification the hand already held the blade's own weapon and the bag had released the blade ({transferNotifications})");
+                    Check(ReferenceEquals(_rig.MainHandWeapon, blade.grantedWeapon),
+                        "the main hand holds exactly the blade's granted weapon");
+
+                    ArmProbe();
+                    bool bladeUnequipped = equipment.TryUnequip(EquipmentSlot.Weapon, out string unequipBladeTransfer);
+                    DisarmProbe();
+
+                    Check(bladeUnequipped,
+                        $"the blade unequipped ({unequipBladeTransfer})");
+                    Check(transferNotifications == 1 && seenAtNotification != null &&
+                          ReferenceEquals(seenAtNotification.MainHand, classWeapon) &&
+                          seenAtNotification.Holds(blade) && seenAtNotification.Slot(EquipmentSlot.Weapon) == null,
+                          $"from inside the notification the class weapon was already back in the hand and the blade was already back in the bag ({transferNotifications})");
+                    Check(ReferenceEquals(_rig.MainHandWeapon, classWeapon),
+                        $"the class weapon is back in the main hand ({(_rig.MainHandWeapon != null ? _rig.MainHandWeapon.displayName : "none")})");
+                    Check(inventory.IndexOfItem(blade) >= 0, "the blade is in the bag, not duplicated");
+
+                    int bladeStacks = 0;
+                    for (int i = 0; i < inventory.Slots.Count; i++)
+                    {
+                        if (inventory.Slots[i].Item == blade && inventory.Slots[i].Count == 1) bladeStacks++;
+                    }
+                    Check(bladeStacks == 1, $"one blade exists in the bag ({bladeStacks})");
+                    Check(inventory.LifetimeCollected == collectedBefore && inventory.RecoveredValue == recoveredBefore,
+                        $"no equip or unequip cycle farmed extraction credit ({inventory.LifetimeCollected} collected, {inventory.RecoveredValue} recovered)");
+
+                    Debug.Log($"[Emberdelve][Smoke:items] transfer diag: stacks={inventory.UsedSlots} cells={inventory.UsedCells} units={inventory.TotalUnits} value={inventory.CarriedValue} collected={inventory.LifetimeCollected} recovered={inventory.RecoveredValue} equipEvents={equipNotifications} unequipEvents={unequipNotifications} collectedEvents={collectedEvents} transferNotifications={transferNotifications}");
+                }
+                finally
+                {
+                    GameEvents.ItemCollected -= onCollected;
+                    GameEvents.EquipmentChanged -= onEquipment;
+                    GameEvents.InventoryChanged -= onInventoryChanged;
+
+                    equipment.Clear();
+                    inventory.Clear();
+                    UnityEngine.Object.Destroy(probePlate);
+                }
+            }
+
+            /// <summary>
+            /// What the whole gear-plus-bag picture looked like at the instant an observer was notified.
+            /// Every collection here is a copy taken inside the callback, so a notification raised in the
+            /// middle of a transfer is judged on the state the observer actually saw rather than on whatever
+            /// the flow looks like a few statements later.
+            /// </summary>
+            private sealed class CommitSnapshot
+            {
+                public int BagUnits;
+                public int BagValue;
+                public int BagStacks;
+                public int BagCells;
+                public int FreeCells;
+                public int FilledCount;
+                public float MaxHealth;
+                public float BlockReduction;
+                public WeaponData MainHand;
+                public WeaponData Offhand;
+
+                public readonly List<ItemData> BagItems = new List<ItemData>();
+                public readonly List<int> BagCounts = new List<int>();
+                public readonly List<Vector2Int> BagOrigins = new List<Vector2Int>();
+                public readonly List<Vector2Int> BagSizes = new List<Vector2Int>();
+                public readonly List<ItemData> EquipSlots = new List<ItemData>();
+
+                public int CountOf(ItemData item)
+                {
+                    int total = 0;
+                    for (int i = 0; i < BagItems.Count; i++) if (BagItems[i] == item) total += BagCounts[i];
+                    return total;
+                }
+
+                public int StacksOf(ItemData item)
+                {
+                    int stacks = 0;
+                    for (int i = 0; i < BagItems.Count; i++) if (BagItems[i] == item) stacks++;
+                    return stacks;
+                }
+
+                public bool Holds(ItemData item) => CountOf(item) > 0;
+
+                public Vector2Int OriginOf(ItemData item)
+                {
+                    for (int i = 0; i < BagItems.Count; i++) if (BagItems[i] == item) return BagOrigins[i];
+                    return new Vector2Int(-1, -1);
+                }
+
+                public bool HasWholeFootprint(ItemData item, Vector2Int size)
+                {
+                    for (int i = 0; i < BagItems.Count; i++)
+                    {
+                        if (BagItems[i] == item && BagCounts[i] == 1 && BagSizes[i] == size) return true;
+                    }
+                    return false;
+                }
+
+                public ItemData Slot(EquipmentSlot slot)
+                {
+                    int index = (int)slot;
+                    return index >= 0 && index < EquipSlots.Count ? EquipSlots[index] : null;
+                }
+
+                /// <summary>One readable line for a failure message: what the observer saw, all of it.</summary>
+                public string UsedText =>
+                    $"{BagStacks} stacks, {BagCells} cells, {BagUnits} units, {BagValue} value, {FreeCells} free, worn={DescribeGear()}";
+
+                public string DescribeGear()
+                {
+                    System.Text.StringBuilder builder = new System.Text.StringBuilder();
+                    for (int i = 0; i < EquipSlots.Count; i++)
+                    {
+                        if (EquipSlots[i] == null) continue;
+                        if (builder.Length > 0) builder.Append('/');
+                        builder.Append(EquipSlots[i].displayName);
+                    }
+                    return builder.Length > 0 ? builder.ToString() : "nothing";
+                }
+            }
+
+            /// <summary>Copies the live bag, slots, hands and resolved numbers into one snapshot.</summary>
+            private static CommitSnapshot CaptureCommit(Inventory inventory, Equipment equipment, PlayerRig rig)
+            {
+                CommitSnapshot snapshot = new CommitSnapshot();
+                if (inventory != null)
+                {
+                    snapshot.BagUnits = inventory.TotalUnits;
+                    snapshot.BagValue = inventory.CarriedValue;
+                    snapshot.BagStacks = inventory.UsedSlots;
+                    snapshot.BagCells = inventory.UsedCells;
+                    snapshot.FreeCells = inventory.FreeCells;
+
+                    IReadOnlyList<InventorySlot> slots = inventory.Slots;
+                    for (int i = 0; i < slots.Count; i++)
+                    {
+                        snapshot.BagItems.Add(slots[i].Item);
+                        snapshot.BagCounts.Add(slots[i].Count);
+                        snapshot.BagOrigins.Add(slots[i].Origin);
+                        snapshot.BagSizes.Add(slots[i].Size);
+                    }
+                }
+
+                if (equipment != null)
+                {
+                    IReadOnlyList<ItemData> equipSlots = equipment.Slots;
+                    for (int i = 0; i < equipSlots.Count; i++) snapshot.EquipSlots.Add(equipSlots[i]);
+                    snapshot.FilledCount = equipment.FilledCount;
+                }
+
+                if (rig != null)
+                {
+                    snapshot.MainHand = rig.MainHandWeapon;
+                    snapshot.Offhand = rig.OffhandWeapon;
+                    snapshot.MaxHealth = rig.MaxHealth;
+                    snapshot.BlockReduction = rig.Defense.BlockReduction;
+                }
+
+                return snapshot;
+            }
+
+            /// <summary>
+            /// The armor has to change a real hit, not only a flag. The same enemy claw, submitted through the
+            /// authority from the same place at the same distance, is measured with the cuirass off and on, and
+            /// then from inside, behind and beside the guard arc. Damage is read from the rig's own health pool
+            /// and from the DamageInfo the authority produced for that specific submission.
+            /// </summary>
+            private IEnumerator GuardWithGearFlow(Inventory inventory, Equipment equipment, ItemData cuirass)
+            {
+                Check(_authority != null, "an authority is available to resolve the measured hits");
+                Check(_rig != null && _rig.Health != null && !_rig.IsDead, "a living rig is available to take the measured hits");
+                if (_authority == null || _rig == null || _rig.Health == null || _rig.IsDead) yield break;
+
+                EnemyAgent enemy = PickAliveEnemy();
+                Check(enemy != null && enemy.Data != null && enemy.Data.attackWeapon != null,
+                    "a live enemy with an attack weapon is available for the armor measurement");
+                if (enemy == null || enemy.Data == null || enemy.Data.attackWeapon == null) yield break;
+
+                WeaponData claw = enemy.Data.attackWeapon;
+                float declaredReduction = cuirass.StatTotal(SkillStat.BlockReduction);
+                Check(declaredReduction > 0f, $"the cuirass declares a block reduction to measure ({declaredReduction:F2})");
+
+                MeleeCombat melee = _rig.GetComponent<MeleeCombat>();
+                bool meleeWasEnabled = melee != null && melee.enabled;
+                bool cuirassWornAtEntry = equipment.Equipped(EquipmentSlot.Chest) == cuirass;
+                float healthAtEntry = _rig.CurrentHealth;
+
+                GearHitMeasurement nakedFront = new GearHitMeasurement();
+                GearHitMeasurement wornFront = new GearHitMeasurement();
+                GearHitMeasurement wornRear = new GearHitMeasurement();
+                GearHitMeasurement wornSide = new GearHitMeasurement();
+
+                // CaptureDamage is subscribed for exactly this measurement and nowhere else in the items flow,
+                // so a capture here is a hit this flow caused.
+                _rig.Health.Damaged += CaptureDamage;
+                _capturedValid = false;
+                _capturedDamage = DamageInfo.Invalid;
+
+                try
+                {
+                    // One geometry for every measured hit: the same frozen attacker at the same standoff from
+                    // the same anchor, with only the facing and the worn armor changing between submissions.
+                    Vector3 anchor = _rig.transform.position;
+                    Vector3 initialFacing = FlatForward(_rig.transform);
+                    enemy.enabled = false;
+                    enemy.transform.position = anchor + initialFacing * MeasuredStandoffDistance + Vector3.up * 0.1f;
+                    Physics.SyncTransforms();
+                    yield return WaitFrames(2);
+
+                    if (melee != null) melee.enabled = false;
+
+                    // ---- the independent variable really comes off, into the bag
+                    Check(cuirassWornAtEntry, "the cuirass is worn when the measurement starts");
+                    Check(equipment.TryUnequip(EquipmentSlot.Chest, out string nakedUnequip),
+                        $"the cuirass is unequipped for the baseline ({nakedUnequip})");
+                    Check(equipment.Equipped(EquipmentSlot.Chest) == null, "the chest slot is empty for the baseline");
+                    Check(inventory.IndexOfItem(cuirass) >= 0, "the unequipped cuirass is back in the bag rather than deleted");
+                    Check(_rig.Defense.BlockReduction <= 0.001f && !_rig.Defense.CanBlock,
+                        $"without the armor the archer's own kit declares no reduction to guard with ({_rig.Defense})");
+
+                    yield return SubmitMeasuredGuardHit(enemy, claw, 0, 0f, anchor, nakedFront);
+                    CheckMeasurement("naked front", nakedFront, enemy);
+                    Check(!nakedFront.blocked && nakedFront.infoReduction <= 0.001f,
+                        "the unarmored baseline is legitimately unblocked, because the kit declares zero reduction");
+                    Check(Mathf.Abs(nakedFront.damage - claw.baseDamage) < 0.75f,
+                        $"the unarmored hit took the weapon's own number ({nakedFront.damage:F1} vs {claw.baseDamage:F1})");
+
+                    // ---- same attack, same geometry, one more piece worn, put back through the bag
+                    int cuirassIndex = inventory.IndexOfItem(cuirass);
+                    Check(cuirassIndex >= 0, "the cuirass is picked back up out of the bag it was returned to");
+                    Check(equipment.TryEquipFromInventory(cuirassIndex, out string wornEquip),
+                        $"the cuirass is equipped again from the bag ({wornEquip})");
+                    Check(equipment.Equipped(EquipmentSlot.Chest) == cuirass, "the chest slot holds the cuirass again");
+                    Check(inventory.IndexOfItem(cuirass) < 0, "the worn cuirass is out of the bag again");
+                    Check(_rig.Defense.BlockReduction >= declaredReduction - 0.001f && _rig.Defense.CanBlock,
+                        $"wearing it raises the resolved reduction to its declared number ({_rig.Defense})");
+
+                    yield return SubmitMeasuredGuardHit(enemy, claw, 1, 0f, anchor, wornFront);
+                    CheckMeasurement("worn front", wornFront, enemy);
+                    Check(wornFront.blocked, "worn armor blocks a hit that arrives inside the guard arc");
+                    Check(wornFront.damage < nakedFront.damage - 0.25f,
+                        $"the same attack lands softer behind the cuirass ({nakedFront.damage:F1} -> {wornFront.damage:F1})");
+                    Check(Mathf.Abs(wornFront.infoReduction - declaredReduction) < 0.001f,
+                        $"the authority reports the reduction the item declares ({wornFront.infoReduction:F2} vs {declaredReduction:F2})");
+                    Check(Mathf.Abs(wornFront.damage - nakedFront.damage * (1f - declaredReduction)) < 0.75f,
+                        $"the health delta is that reduction applied to the same hit ({wornFront.damage:F1} vs {nakedFront.damage * (1f - declaredReduction):F1})");
+                    Check(Mathf.Abs(wornFront.travelDistance - nakedFront.travelDistance) < 0.05f,
+                        $"both hits travelled the same distance ({nakedFront.travelDistance:F2} vs {wornFront.travelDistance:F2})");
+                    Check(wornFront.facingError <= _rig.Defense.BlockArcDegrees * 0.5f,
+                        $"the source was inside the guard arc for the blocked hit ({wornFront.facingError:F1} of {(_rig.Defense.BlockArcDegrees * 0.5f):F1} degrees)");
+
+                    // ---- the arc stays directional even with the armor worn
+                    yield return SubmitMeasuredGuardHit(enemy, claw, 2, 180f, anchor, wornRear);
+                    CheckMeasurement("worn rear", wornRear, enemy);
+                    Check(!wornRear.blocked, "facing away from the source drops the block even with the armor worn");
+                    Check(wornRear.damage > wornFront.damage + 0.25f,
+                        $"the rear hit took more damage than the blocked one ({wornRear.damage:F1} vs {wornFront.damage:F1})");
+                    Check(Mathf.Abs(wornRear.damage - nakedFront.damage) < 0.75f,
+                        $"the rear hit took the weapon's full number ({wornRear.damage:F1} vs {claw.baseDamage:F1})");
+
+                    yield return SubmitMeasuredGuardHit(enemy, claw, 3, 90f, anchor, wornSide);
+                    CheckMeasurement("worn side", wornSide, enemy);
+                    Check(!wornSide.blocked, "ninety degrees off the source is outside the guard arc");
+                    Check(wornSide.damage > wornFront.damage + 0.25f,
+                        $"the side hit took more damage than the blocked one ({wornSide.damage:F1} vs {wornFront.damage:F1})");
+
+                    Debug.Log($"[Emberdelve][Smoke:items] armor measurement: claw={claw.baseDamage:F1} arc={(_rig.Defense.BlockArcDegrees * 0.5f):F1}deg reduction={declaredReduction:F2} " +
+                              $"nakedFront={nakedFront.damage:F1}/blocked={nakedFront.blocked} " +
+                              $"wornFront={wornFront.damage:F1}/blocked={wornFront.blocked} " +
+                              $"wornRear={wornRear.damage:F1}/blocked={wornRear.blocked} " +
+                              $"wornSide={wornSide.damage:F1}/blocked={wornSide.blocked}");
+                }
+                finally
+                {
+                    // Subscription, gear, guard, the frozen agent and the pool all go back the way they were,
+                    // including when an assertion failed part way through.
+                    _rig.Health.Damaged -= CaptureDamage;
+                    _capturedValid = false;
+                    _capturedDamage = DamageInfo.Invalid;
+
+                    _rig.SetGuardHeld(false);
+
+                    if (cuirassWornAtEntry && equipment.Equipped(EquipmentSlot.Chest) != cuirass)
+                    {
+                        int restoreIndex = inventory.IndexOfItem(cuirass);
+                        if (restoreIndex >= 0) equipment.TryEquipFromInventory(restoreIndex, out string restoreReason);
+                    }
+
+                    if (melee != null) melee.enabled = meleeWasEnabled;
+                    enemy.enabled = true;
+                    _rig.Health.SetHealth(Mathf.Min(healthAtEntry, _rig.MaxHealth));
+                }
+            }
+
+            private const float MeasuredStandoffDistance = 1.6f;
+            private const float MeasuredStampSpacing = 3f;
+
+            /// <summary>
+            /// One controlled submission. The rig is re-seated at the same anchor and turned
+            /// <paramref name="turnFromSource"/> degrees away from facing the attacker; the attacker is put back
+            /// at the same standoff; the pool is topped up outside the measured interval; and the intent travels
+            /// from the attacker to the rig, which is the direction the attack actually moves in. The health
+            /// delta and the DamageInfo the authority produced for this submission are both recorded.
+            /// </summary>
+            private IEnumerator SubmitMeasuredGuardHit(EnemyAgent enemy, WeaponData claw, int hitIndex,
+                float turnFromSource, Vector3 anchor, GearHitMeasurement result)
+            {
+                // player -> source is the direction the rig has to face. source -> player is the direction the
+                // attack travels. They are opposites, and the guard arc is measured against the first one.
+                Vector3 towardSource = enemy.transform.position - anchor;
+                towardSource.y = 0f;
+                if (towardSource.sqrMagnitude < 0.0001f)
+                {
+                    result.reason = "the attacker is on top of the rig, so there is no facing to measure";
+                    yield break;
+                }
+                towardSource.Normalize();
+
+                Vector3 facing = Quaternion.AngleAxis(turnFromSource, Vector3.up) * towardSource;
+                _rig.transform.position = anchor;
+                _rig.transform.rotation = Quaternion.LookRotation(facing);
+                enemy.transform.position = anchor + towardSource * MeasuredStandoffDistance + Vector3.up * 0.1f;
+                Physics.SyncTransforms();
+                yield return WaitFrames(2);
+
+                Vector3 origin = enemy.transform.position + Vector3.up * 1.2f;
+                Vector3 hitPoint = _rig.CombatCenter;
+                Vector3 travel = hitPoint - origin;
+                travel.y = 0f;
+                if (travel.sqrMagnitude < 0.0001f)
+                {
+                    result.reason = "the attack has no travel direction from that origin";
+                    yield break;
+                }
+                travel.Normalize();
+
+                result.facingError = Vector3.Angle(FlatForward(_rig.transform), towardSource);
+                result.travelDistance = Vector3.Distance(origin, hitPoint);
+                result.maxRange = Mathf.Max(1f, enemy.Data.attackRange) + 0.6f;
+                result.turnFromSource = turnFromSource;
+
+                _rig.Health.SetHealth(_rig.MaxHealth);
+                _rig.SetGuardHeld(true);
+                yield return WaitFrames(1);
+
+                result.guarding = _rig.IsGuarding;
+                result.canBlock = _rig.Defense.CanBlock;
+                result.rigReduction = _rig.Defense.BlockReduction;
+
+                float before = _rig.CurrentHealth;
+                int acceptedBefore = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
+                _capturedValid = false;
+                _capturedDamage = DamageInfo.Invalid;
+
+                int sequence = CombatRegistry.NextSequence(enemy.CombatId);
+                result.sequence = sequence;
+                result.accepted = _authority.SubmitAttack(
+                    new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f, origin, travel, result.maxRange,
+                        sequence, Time.time + 60f + hitIndex * MeasuredStampSpacing),
+                    new HitCandidate(_rig.CombatId, hitPoint, false));
+
+                result.damage = before - _rig.CurrentHealth;
+                result.sequenceConsumed = _localAuthority != null && _localAuthority.LastSequenceFor(enemy.CombatId) == sequence;
+                result.acceptedCountGrew = _localAuthority != null && _localAuthority.AcceptedCount == acceptedBefore + 1;
+                result.captured = _capturedValid;
+                result.blocked = _capturedValid && _capturedDamage.Blocked;
+                result.infoReduction = _capturedValid ? _capturedDamage.BlockReduction : 0f;
+                result.sourceCombatId = _capturedValid ? _capturedDamage.SourceCombatId : -1;
+                result.sourceKind = _capturedValid ? _capturedDamage.SourceKind : EntityKind.Neutral;
+            }
+
+            /// <summary>The facts every measured submission has to satisfy, whoever is wearing what.</summary>
+            private void CheckMeasurement(string label, GearHitMeasurement m, EnemyAgent enemy)
+            {
+                Check(m.reason == null, $"{label}: the submission was set up ({m.reason ?? "ok"})");
+                Check(m.accepted, $"{label}: the authority accepted the attack");
+                Check(m.acceptedCountGrew, $"{label}: the authority counted exactly one accepted hit");
+                Check(m.sequenceConsumed, $"{label}: the intent claimed the sequence the authority consumed (#{m.sequence})");
+                Check(m.captured, $"{label}: the hit arrived on the rig as a DamageInfo");
+                Check(m.sourceCombatId == enemy.CombatId && m.sourceKind == EntityKind.Enemy,
+                    $"{label}: the capture names this enemy as its source (#{m.sourceCombatId} vs #{enemy.CombatId})");
+                Check(m.damage > 0f, $"{label}: real health left the pool ({m.damage:F1})");
+                Debug.Log($"[Emberdelve][Smoke:items] measurement {label}: turn={m.turnFromSource:F0}deg travel={m.travelDistance:F2}m range={m.maxRange:F2}m facing={m.facingError:F1}deg guarding={m.guarding} canBlock={m.canBlock} rigReduction={m.rigReduction:F2} blocked={m.blocked} infoReduction={m.infoReduction:F2} damage={m.damage:F1}");
+            }
+
+            /// <summary>What one measured submission did, read back from the authority and the health pool.</summary>
+            private sealed class GearHitMeasurement
+            {
+                public string reason;
+                public bool accepted;
+                public bool acceptedCountGrew;
+                public bool sequenceConsumed;
+                public int sequence;
+                public bool captured;
+                public bool blocked;
+                public float damage;
+                public float infoReduction;
+                public float rigReduction;
+                public bool canBlock;
+                public bool guarding;
+                public int sourceCombatId;
+                public EntityKind sourceKind;
+                public float travelDistance;
+                public float facingError;
+                public float maxRange;
+                public float turnFromSource;
+            }
+
+            private IEnumerator ChestFlow(Inventory inventory, Equipment equipment, ItemData coin,
+                ItemData cuirass, ItemData draught, ItemData relic)
+            {
+                ChestSpawner spawner = _director.Chests;
+                Check(spawner != null, "run director built a chest spawner from the layout");
+                if (spawner == null) yield break;
+
+                Check(spawner.Count >= 2, $"at least two containers exist in the level ({spawner.Count})");
+
+                int supply = 0, ember = 0, sealedCount = 0;
+                for (int i = 0; i < spawner.Chests.Count; i++)
+                {
+                    ChestInteractable chest = spawner.Chests[i];
+                    if (chest == null) continue;
+
+                    switch (chest.Variant)
+                    {
+                        case ChestVariant.Supply: supply++; break;
+                        case ChestVariant.Ember: ember++; break;
+                        case ChestVariant.Sealed: sealedCount++; break;
+                    }
+                }
+
+                Check(supply >= 1 && ember >= 1 && sealedCount >= 1,
+                    $"the level holds each variant (supply {supply}, ember {ember}, sealed {sealedCount})");
+
+                if (_layout != null)
+                {
+                    bool allWalkable = true;
+                    for (int i = 0; i < _layout.chestSpawns.Count; i++)
+                    {
+                        if (!_layout.IsWalkableCell(_layout.chestSpawns[i].cell)) allWalkable = false;
+                    }
+                    Check(allWalkable, "every chest sits on a walkable cell");
+                }
+
+                // ---- the variants differ in rules, not just in colour
+                ChestInteractable supplyChest = FindChest(spawner, ChestVariant.Supply);
+                ChestInteractable emberChest = FindChest(spawner, ChestVariant.Ember);
+                ChestInteractable sealedChest = FindChest(spawner, ChestVariant.Sealed);
+
+                if (supplyChest == null || emberChest == null || sealedChest == null) yield break;
+
+                Check(!supplyChest.RequiresHold, "a supply chest opens on one press");
+                Check(emberChest.RequiresHold && emberChest.HoldDuration > 0.5f,
+                    $"an ember chest has to be held open ({emberChest.HoldDuration:F1}s)");
+                Check(sealedChest.HoldDuration > emberChest.HoldDuration,
+                    $"a sealed chest takes longer still ({sealedChest.HoldDuration:F1}s)");
+                Check(supplyChest.LootTable != null && emberChest.LootTable != null &&
+                      supplyChest.LootTable != emberChest.LootTable,
+                    "the variants read different loot tables");
+
+                // ---- determinism: the same seed always rolls the same contents
+                List<LootDrop> rollA = new List<LootDrop>();
+                List<LootDrop> rollB = new List<LootDrop>();
+                List<LootDrop> rollC = new List<LootDrop>();
+
+                emberChest.LootTable.Roll(emberChest.Seed, rollA);
+                emberChest.LootTable.Roll(emberChest.Seed, rollB);
+                emberChest.LootTable.Roll(emberChest.Seed + 977, rollC);
+
+                Check(rollA.Count == rollB.Count && rollA.Count > 0, $"a seeded roll produced contents ({rollA.Count} drops)");
+
+                bool identical = rollA.Count == rollB.Count;
+                for (int i = 0; i < rollA.Count && identical; i++)
+                {
+                    if (rollA[i].Item != rollB[i].Item || rollA[i].Amount != rollB[i].Amount) identical = false;
+                }
+                Check(identical, "the same seed rolled the same contents twice");
+
+                bool otherSeedDiffers = rollC.Count != rollA.Count;
+                for (int i = 0; i < rollA.Count && !otherSeedDiffers; i++)
+                {
+                    if (rollC[i].Item != rollA[i].Item || rollC[i].Amount != rollA[i].Amount) otherSeedDiffers = true;
+                }
+                Check(otherSeedDiffers, "a different seed rolled something different, so the roll is really seeded");
+
+                for (int i = 0; i < rollA.Count; i++)
+                {
+                    Check(rollA[i].Item != null && rollA[i].Amount > 0, $"drop {i} is a real item and amount ({rollA[i]})");
+                }
+
+                // ---- opening a chest hands its loot to the run host
+                inventory.Clear();
+                yield return WaitFrames(2);
+
+                Check(supplyChest.CanInteract(out string supplyBlocked), "the supply chest can be opened");
+                int unitsBefore = inventory.TotalUnits;
+                int valueBefore = _director.LootValue;
+
+                Check(supplyChest.Open(), "opening the supply chest handed something over");
+                Check(supplyChest.Opened, "the chest records that it was opened");
+                Check(inventory.TotalUnits > unitsBefore,
+                    $"the player received the loot ({unitsBefore} -> {inventory.TotalUnits} units)");
+                Check(_director.LootValue > valueBefore,
+                    $"the run recorded the recovered value ({valueBefore} -> {_director.LootValue})");
+                Check(supplyChest.TakenCount > 0 && supplyChest.Remaining.Count == 0,
+                    $"everything came out ({supplyChest.TakenCount} taken, {supplyChest.Remaining.Count} left)");
+
+                // The lid swings over about three quarters of a second, so the check waits for it.
+                yield return WaitSeconds(1.2f);
+                Check(supplyChest.Lid != null && Quaternion.Angle(supplyChest.Lid.localRotation, Quaternion.identity) > 30f,
+                    "the lid actually swung open");
+
+                Check(!supplyChest.CanInteract(out string emptyReason), "an emptied chest cannot be opened again");
+                Check(!string.IsNullOrEmpty(emptyReason) && emptyReason.Contains("empty"),
+                    $"the chest says so ({emptyReason})");
+
+                // ---- a full bag leaves loot in the chest, and reopening finishes the job
+                int fill = 0;
+                while (inventory.TryAdd(cuirass, 1)) fill++;
+                Check(fill > 0, $"bag filled with {fill} cuirasses to test leftovers");
+
+                Check(emberChest.Open(), "the ember chest was opened with a nearly full bag");
+                Check(emberChest.Opened, "the ember chest records that it was opened");
+                Check(emberChest.Remaining.Count > 0,
+                    $"loot the player could not carry stayed in the chest ({emberChest.Remaining.Count} stacks)");
+                Check(emberChest.LeftBehindCount > 0, $"the chest counted the refusals ({emberChest.LeftBehindCount})");
+                Check(emberChest.IsEmpty == false, "a chest with leftovers is not empty");
+
+                int dropsLeft = emberChest.Remaining.Count;
+                int carriedAfterPartial = inventory.TotalUnits;
+                inventory.Clear();
+                yield return WaitFrames(2);
+
+                Check(emberChest.Open(), "reopening the same chest finished the job");
+                Check(emberChest.Remaining.Count == 0, "nothing is left in the chest after a second open");
+                Check(emberChest.IsEmpty, "the chest now reports itself empty");
+                Check(inventory.TotalUnits > 0 && inventory.TotalUnits <= carriedAfterPartial,
+                    $"the leftover loot was still there to be taken ({dropsLeft} drops -> {inventory.TotalUnits} units)");
+
+                // ---- the sealed chest is gated by what the run has already recovered
+                sealedChest.CanInteract(out string sealedReason);
+                Debug.Log($"[Emberdelve][Smoke:items] sealed chest gate: {sealedReason}");
+
+                if (_director.LootValue < ChestInteractable.SealedUnlockValue)
+                {
+                    Check(!sealedChest.CanInteract(out string stillSealed),
+                        $"a sealed chest stays shut until the run has earned it ({stillSealed})");
+                    Check(stillSealed != null && stillSealed.Contains("Sealed"), $"the gate explains itself ({stillSealed})");
+
+                    _director.CollectLoot(relic, 1);
+                    Check(_director.LootValue >= ChestInteractable.SealedUnlockValue,
+                        $"recovering value opens the gate ({_director.LootValue})");
+                }
+
+                Check(sealedChest.CanInteract(out string nowOpenReason), "the sealed chest will open now");
+                Check(sealedChest.Open(), "the sealed chest opened");
+                Check(sealedChest.Remaining.Count == 0, "the sealed chest gave everything up");
+
+                bool gotRelic = inventory.IndexOfItem(relic) >= 0;
+                Check(gotRelic, "the sealed chest produced its guaranteed relic");
+
+                // ---- the interact path itself: prompt, hold rules and range
+                ChestInteractable target = FindNearestChest(spawner, _rig.transform.position);
+                if (target != null)
+                {
+                    Vector2Int cell = CellOf(_layout, target.transform.position);
+                    Vector3 stand = _layout.CellCenterWorld(cell) - _layout.CellCenterWorld(Vector2Int.zero) * 0f;
+                    PlacePlayerAtCell(cell, target.transform.position);
+
+                    yield return WaitFrames(3);
+
+                    float distance = Vector3.Distance(_rig.transform.position, target.transform.position);
+                    Check(distance <= _director.Config.interactionRange + 1.2f,
+                        $"the player can stand close enough to interact ({distance:F1}m against a {_director.Config.interactionRange:F1}m range)");
+
+                    Collider collider = target.GetComponent<Collider>();
+                    Check(collider != null, "the chest carries a collider the interact probe can find");
+                    Check(collider == null || collider.gameObject.layer == LayerMask.NameToLayer(GameConfig.InteractLayerName),
+                        $"the chest is on the interact layer ({(collider != null ? collider.gameObject.layer : -1)})");
+
+                    IInteractable asInteractable = target;
+                    Check(!string.IsNullOrEmpty(asInteractable.PromptText), $"the chest offers a prompt ({asInteractable.PromptText})");
+                }
+
+                Debug.Log($"[Emberdelve][Smoke:items] chest summary: {DescribeChests(spawner)}");
+            }
+
+            private static ChestInteractable FindChest(ChestSpawner spawner, ChestVariant variant)
+            {
+                for (int i = 0; i < spawner.Chests.Count; i++)
+                {
+                    if (spawner.Chests[i] != null && spawner.Chests[i].Variant == variant) return spawner.Chests[i];
+                }
+                return null;
+            }
+
+            private static ChestInteractable FindNearestChest(ChestSpawner spawner, Vector3 from)
+            {
+                ChestInteractable best = null;
+                float bestDistance = float.MaxValue;
+
+                for (int i = 0; i < spawner.Chests.Count; i++)
+                {
+                    ChestInteractable chest = spawner.Chests[i];
+                    if (chest == null) continue;
+
+                    float distance = Vector3.Distance(from, chest.transform.position);
+                    if (distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        best = chest;
+                    }
+                }
+
+                return best;
+            }
+
+            private static Vector2Int CellOf(DungeonLayoutData layout, Vector3 world)
+            {
+                return layout != null ? layout.CellFromWorld(world) : Vector2Int.zero;
+            }
+
+            private void PlacePlayerAtCell(Vector2Int cell, Vector3 chestPosition)
+            {
+                Vector3 approach = chestPosition - _layout.CellCenterWorld(cell);
+                approach.y = 0f;
+                if (approach.sqrMagnitude < 0.01f) approach = Vector3.back;
+                approach.Normalize();
+
+                Vector3 stand = _layout.CellCenterWorld(cell) + approach * 1.1f;
+                stand.y = _rig.transform.position.y;
+
+                _rig.transform.position = stand;
+                _rig.transform.rotation = Quaternion.LookRotation(-approach);
+                Physics.SyncTransforms();
+            }
+
+            private static string DescribeChests(ChestSpawner spawner)
+            {
+                System.Text.StringBuilder builder = new System.Text.StringBuilder();
+                for (int i = 0; i < spawner.Chests.Count; i++)
+                {
+                    ChestInteractable chest = spawner.Chests[i];
+                    if (chest == null) continue;
+                    if (builder.Length > 0) builder.Append(" | ");
+                    builder.Append(chest.Variant).Append(" seed=").Append(chest.Seed)
+                           .Append(" taken=").Append(chest.TakenCount)
+                           .Append(" left=").Append(chest.Remaining.Count);
+                }
+                return builder.ToString();
+            }
+
             // ---------------------------------------------------------------- warrior skills
 
             /// <summary>
@@ -1448,8 +3358,14 @@ namespace Emberdelve.EditorTools
                 Check(caster.PassiveSkills[0] != null && !string.IsNullOrEmpty(caster.PassiveSkills[0].displayName) &&
                       !string.IsNullOrEmpty(caster.PassiveSkills[0].description), "passives expose a name and a description");
 
-                Check(mana.MaxMana == classData.EffectiveMaxMana,
-                    $"mana pool comes from the class asset ({mana.MaxMana} vs {classData.EffectiveMaxMana})");
+                // U2A8 fixture migration. Old assumption: the mana ceiling is the raw class field
+                // (EffectiveMaxMana = the authored 75). Accepted rule: max_mana = max(10, authored 75 +
+                // 5 * INT modifier) with the warrior's INT 8 -> floor((8-10)/2) = -1 -> 70 (Docs/Design/
+                // ATTRIBUTES.md). The authored base is asserted separately so a class asset written by
+                // equipment is still caught.
+                Check(classData.maxMana == 75, $"warrior class asset still authors the base mana 75 ({classData.maxMana})");
+                Check(mana.MaxMana == 70,
+                    $"mana pool is the derived 75 + 5*-1 (got {mana.MaxMana}, expected 70)");
                 Check(mana.CurrentMana >= mana.MaxMana - 0.5f, $"mana starts full ({mana.CurrentMana:F0}/{mana.MaxMana})");
                 Check(mana.RegenPerSecond > 0f, $"mana regen configured ({mana.RegenPerSecond:F1}/s)");
 
@@ -1470,7 +3386,13 @@ namespace Emberdelve.EditorTools
                 // ---- passive 1: Ashen Might, measured as the authority's own damage number
                 float outgoingMelee = _rig.GetOutgoingDamageMultiplier(sword);
                 float outgoingRanged = _rig.GetOutgoingDamageMultiplier(_rig.Loadout != null ? _rig.Loadout.Secondary : null);
-                Check(Mathf.Abs(outgoingMelee - 1.2f) < 0.03f, $"Ashen Might multiplies melee damage by 1.20 ({outgoingMelee:F2})");
+                // U2A8 fixture migration. Old assumption: the only melee factor is the Ashen Might passive
+                // (1.20). Since U2A4 the authority reads ONE outgoing multiplier that already carries the
+                // attribute term: warrior STR 16 -> floor((16-10)/2) = 3 -> 1 + 0.04*3 = 1.12, then the
+                // passive 1.20, giving 1.344 (Docs/Design/ATTRIBUTES.md; the same number
+                // EmberdelveAttributeActionGate asserts through the real authority).
+                Check(Mathf.Abs(outgoingMelee - 1.344f) < 0.03f,
+                    $"Ashen Might 1.20 x STR factor 1.12 = 1.344 ({outgoingMelee:F3})");
                 Check(Mathf.Abs(outgoingRanged - 1f) < 0.03f, $"Ashen Might does not touch ranged damage ({outgoingRanged:F2})");
 
                 EnemyAgent mightTarget = PickAliveEnemy();
@@ -1723,6 +3645,14 @@ namespace Emberdelve.EditorTools
                     Check(closed < unslowedWouldClose * 0.8f,
                         $"the slow measurably reduces the distance it closes ({closed:F2}m < {unslowedWouldClose:F2}m unslowed)");
 
+                    // The chase measurement is finished, so this hostile must not stay live 3-4m in front of
+                    // the player: the cooldown wait and the mana measurement below are long, and a monster
+                    // that is still walking at the caster can kill them mid-measurement. Death suspends mana
+                    // regeneration on purpose (SkillCaster.HandleDeath -> ManaComponent.SetRegenerationActive),
+                    // so a corpse would be reported as a regen bug. Same isolation the archer kit already
+                    // applies to its volley and piercing targets, applied after the slow/chase assertions.
+                    ParkEnemyFar(cryTarget, "the cry target must not chase the player during the cooldown and mana measurements");
+
                     RestoreClearedCorridor();
                 }
 
@@ -1739,6 +3669,7 @@ namespace Emberdelve.EditorTools
                 Check(caster.CooldownRemaining(0) <= 0f && caster.CooldownRemaining(1) <= 0f,
                     $"both warrior skills are off cooldown before the mana refusal test ({caster.CooldownRemaining(0):F1}/{caster.CooldownRemaining(1):F1}s)");
 
+                Check(!_rig.IsDead, $"the warrior is alive for the mana refusal test ({_rig.CurrentHealth:F0}/{_rig.MaxHealth})");
                 mana.TrySpend((int)mana.CurrentMana);
                 Check(mana.CurrentMana < dash.EffectiveManaCost, $"mana drained below the kit's cheapest cost ({mana.CurrentMana:F0})");
                 Check(!caster.CanCastSlot(0, out string manaReason), "Dash is refused when mana cannot cover it");
@@ -1762,7 +3693,38 @@ namespace Emberdelve.EditorTools
                 Check(mana.TrySpend(30), "mana spend accepted for the regen measurement");
                 float afterSpend = mana.CurrentMana;
                 Check(mana.RegenDelayRemaining > 0f, "spending mana pauses regeneration");
+
+                // ManaComponent.Update only moves the pool while the component is enabled and active, the pool
+                // is configured, not full and allowed to regenerate, and scaled game time is advancing. Each
+                // of those is asserted before the wait so a pool that never moved names which one broke
+                // instead of leaving the regen arithmetic to guess between a runtime bug and a dead caster.
+                Check(!_rig.IsDead, $"the warrior is alive for the mana regen measurement ({_rig.CurrentHealth:F0}/{_rig.MaxHealth})");
+                Check(mana.RegenerationAllowed, "mana regeneration is allowed for this living warrior");
+                Check(mana.enabled && mana.gameObject.activeInHierarchy,
+                    "the mana pool component is enabled and active in the hierarchy");
+                Check(ReferenceEquals(_rig.Mana, mana) &&
+                      _rig.Skills != null && ReferenceEquals(_rig.Skills.GetComponent<ManaComponent>(), mana) &&
+                      _rig.GetComponents<ManaComponent>().Length == 1,
+                      $"rig, caster and harness read one single mana pool (instance {mana.GetInstanceID()})");
+                Check(Time.timeScale > 0.9f, $"the scaled clock is running for the regen tick ({Time.timeScale:F2})");
+
+                ManaRegenDiag("before", mana, afterSpend, 0f, 0f);
+                float regenScaledStart = Time.time;
+                float regenUnscaledStart = Time.unscaledTime;
+
                 yield return WaitSeconds(classData.manaRegenDelay + 1.5f);
+
+                float regenScaledElapsed = Time.time - regenScaledStart;
+                float regenUnscaledElapsed = Time.unscaledTime - regenUnscaledStart;
+                ManaRegenDiag("after", mana, afterSpend, regenScaledElapsed, regenUnscaledElapsed);
+
+                Check(!_rig.IsDead, $"the warrior survived the regen window ({_rig.CurrentHealth:F0}/{_rig.MaxHealth}, run state {(_director != null ? _director.State.ToString() : "none")})");
+                Check(mana.RegenerationAllowed, "mana regeneration was still allowed at the end of the regen window");
+                Check(mana.enabled && mana.gameObject.activeInHierarchy,
+                    "the mana pool component was still enabled and active at the end of the regen window");
+                Check(regenScaledElapsed >= classData.manaRegenDelay && regenScaledElapsed >= regenUnscaledElapsed - 0.5f,
+                    $"scaled game time advanced with the real clock over the regen window ({regenScaledElapsed:F2}s scaled vs {regenUnscaledElapsed:F2}s unscaled, delay {classData.manaRegenDelay:F1}s)");
+
                 Check(mana.CurrentMana > afterSpend + 0.5f, $"mana regenerates after its delay ({afterSpend:F0} -> {mana.CurrentMana:F0})");
                 Check(mana.CurrentMana <= mana.MaxMana + 0.01f, $"mana regen does not overshoot the pool ({mana.CurrentMana:F0}/{mana.MaxMana})");
 
@@ -1824,17 +3786,45 @@ namespace Emberdelve.EditorTools
                 // ---- passive 1: Fleet Footing, measured through the resolved speed rule
                 float walk = _rig.Movement.ResolveGroundSpeed(false, false);
                 float sprint = _rig.Movement.ResolveGroundSpeed(true, false);
-                Check(Mathf.Abs(walk - classData.moveSpeed * 1.15f) < 0.06f,
-                    $"Fleet Footing raises walk speed ({walk:F2} vs class {classData.moveSpeed:F2})");
-                Check(Mathf.Abs(sprint - classData.sprintSpeed * 1.15f) < 0.06f,
-                    $"Fleet Footing raises sprint speed ({sprint:F2} vs class {classData.sprintSpeed:F2})");
+                // U2A8 fixture migration. Old assumption: Fleet Footing's 1.15 is the only multiplier on the
+                // authored speeds. Accepted walking rule (Docs/Design/ATTRIBUTES.md, U2A4):
+                // clamp(authored 4.3 * max(0.5, 1 + 0.025 * DEX modifier) * passive + flat, 2, 8), and sprint
+                // keeps its own authored 6.4 base with the same DEX factor. Archer DEX 16 ->
+                // floor((16-10)/2) = 3 -> factor 1.075, Fleet Footing 1.15: walk 4.3*1.075*1.15 = 5.315875,
+                // sprint 6.4*1.075*1.15 = 7.912.
+                Check(Mathf.Abs(walk - 5.315875f) < 0.06f,
+                    $"Fleet Footing sits on top of the DEX term ({walk:F4} against 4.3*1.075*1.15 = 5.315875)");
+                Check(Mathf.Abs(sprint - 7.912f) < 0.06f,
+                    $"sprint keeps its authored 6.4 base with the same factors ({sprint:F4} against 6.4*1.075*1.15 = 7.912)");
                 Check(sprint > walk + 0.1f, $"the resolved speed rule still distinguishes sprint from walk ({sprint:F2} > {walk:F2})");
 
                 // ---- passive 2: Farshot
                 float outgoingRanged = _rig.GetOutgoingDamageMultiplier(bow);
                 float outgoingMelee = _rig.GetOutgoingDamageMultiplier(loadout != null ? loadout.Secondary : null);
-                Check(Mathf.Abs(outgoingRanged - 1.18f) < 0.03f, $"Farshot multiplies ranged damage by 1.18 ({outgoingRanged:F2})");
-                Check(Mathf.Abs(outgoingMelee - 1f) < 0.03f, $"Farshot does not touch melee damage ({outgoingMelee:F2})");
+                // U2A8 fixture migration. Old assumption: the ranged factor is Farshot's 1.18 alone and the
+                // melee factor is 1. Accepted: the archer's DEX 16 -> modifier 3 -> 1 + 0.04*3 = 1.12 rides on
+                // the bow (bow/crossbow scale off DEX), so 1.12*1.18 = 1.3216; the archer's secondary is the
+                // rapier, whose authored finesse marker makes it read the better of STR 0 and DEX 3 -> 1.12,
+                // with no 1.18 in it. Both numbers still separate the passive from the attribute term.
+                Check(Mathf.Abs(outgoingRanged - 1.3216f) < 0.03f,
+                    $"Farshot 1.18 x DEX factor 1.12 = 1.3216 ({outgoingRanged:F4})");
+                Check(Mathf.Abs(outgoingMelee - 1.12f) < 0.03f,
+                    $"Farshot adds nothing to the finesse rapier: max(STR 0, DEX 3) gives 1.12, not 1.18 or 1.3216 ({outgoingMelee:F4})");
+
+                // ---- the per-activation ability scale both actives carry
+                // Accepted rule (Docs/Design/ATTRIBUTES.md, proven live in U2A5): ability effect_scale =
+                // clamp(1 + 0.04 * CHA modifier, 0.6, 1.4) rides on a skill activation's damage magnitude.
+                // It never scales mana cost, cooldown or the number of projectiles, and an ordinary arrow
+                // never carries it. The expectation below is fixture arithmetic from the authored class
+                // score - floor((8-10)/2) = -1 -> 1 - 0.04 = 0.96 - not a call into the resolver whose
+                // resolved DamageInfo.Amount is what it asserts.
+                int authoredCha = classData != null ? classData.charisma : 0;
+                Check(classData != null && authoredCha == 8,
+                    $"the archer class asset authors CHA 8 ({authoredCha})");
+                int chaModifier = Mathf.FloorToInt((authoredCha - 10) / 2f);
+                float abilityScale = Mathf.Clamp(1f + 0.04f * chaModifier, 0.6f, 1.4f);
+                Check(chaModifier == -1 && Mathf.Abs(abilityScale - 0.96f) < 0.0001f,
+                    $"CHA 8 -> modifier {chaModifier} -> effect scale {abilityScale:F4} (clamp(1 + 0.04 * -1, 0.6, 1.4))");
 
                 // ---- ammo refusal: a skill cannot fire without the rounds the weapon actually holds
                 int magazineStart = ranged.Magazine;
@@ -1868,22 +3858,25 @@ namespace Emberdelve.EditorTools
                 Check(mana.CurrentMana >= mana.MaxMana - 0.01f, $"mana restored for the skill tests ({mana.CurrentMana:F0}/{mana.MaxMana})");
 
                 // ---- active 1: Multi-shot, three arrows into three separate targets
-                Check(PlacePlayerAtSpawnFacing(1), "player re-seated facing a clear corridor for the volley");
-                ClearEnemiesNear(_rig.transform.position, 10f, "the volley corridor");
-
                 // The lane the volley actually needs comes from the skill's own spread angle, not from a
-                // guess: at depth d the outer arrows sit at d * tan(spread / 2) to either side.
+                // guess: at depth d the outer arrows sit at d * tan(spread / 2) to either side, and each of
+                // them needs its own target footprint. Those bounds are settled BEFORE any target is placed,
+                // and the player is then seated in the first cell / orientation the level really offers for
+                // a lane that size (PlacePlayerInClearLane), instead of being pinned to the spawn cell where
+                // Chest_Supply_5_4_0 stands 1.475m to the side of the corridor and a 1.62m half lane cannot
+                // fit past it.
                 float volleyDepth = 4.0f;
                 float volleyLateral = volleyDepth * Mathf.Tan(Mathf.Max(1f, multi.spreadDegrees) * 0.5f * Mathf.Deg2Rad);
                 float volleyLaneHalf = volleyLateral + 0.7f;
 
-                ClearCorridorAhead(_rig.transform.position, FlatForward(_rig.transform), volleyDepth + 1.5f, volleyLaneHalf, "the volley corridor");
+                bool volleyLanePlaced = PlacePlayerInClearLane(volleyDepth + 0.4f, volleyLaneHalf,
+                    "the volley corridor", out Vector2Int volleyCell, out Vector2Int volleyFacing);
                 yield return WaitFrames(2);
 
-                bool volleyLaneClear = CorridorIsClear(_rig.transform.position, FlatForward(_rig.transform),
+                bool volleyLaneClear = volleyLanePlaced && CorridorIsClear(_rig.transform.position, FlatForward(_rig.transform),
                     volleyDepth + 0.4f, volleyLaneHalf, "the volley corridor");
                 Check(volleyLaneClear,
-                    $"the volley lane is clear for a {multi.spreadDegrees:F0} degree spread out to {volleyDepth:F1}m (lane half width {volleyLaneHalf:F2}m)");
+                    $"the volley lane is clear for a {multi.spreadDegrees:F0} degree spread out to {volleyDepth:F1}m (lane half width {volleyLaneHalf:F2}m, cell {volleyCell} facing {volleyFacing} at {_rig.transform.position})");
 
                 EnemyAgent shotA = PickAliveEnemy();
                 EnemyAgent shotB = PickAliveEnemyExcept(shotA);
@@ -1939,8 +3932,11 @@ namespace Emberdelve.EditorTools
                     {
                         if (!pair.Value.IsValid) continue;
                         hitTargets++;
+                        // Weapon falloff x the skill's own authored multiplier x the archer's outgoing ranged
+                        // factor (DEX 1.12 x Farshot 1.18) x the CHA 8 activation scale 0.96 x headshot if the
+                        // arrow actually took one. 34 * 0.7 * 1.3216 * 0.96 = 30.1959168 on a body hit.
                         float expected = bow.DamageAtRange(Vector3.Distance(pair.Value.SourcePosition, pair.Value.Point))
-                                         * multi.damageMultiplier * outgoingRanged
+                                         * multi.damageMultiplier * outgoingRanged * abilityScale
                                          * (pair.Value.Headshot ? DamageResolver.HeadshotMultiplier : 1f);
                         Check(Mathf.Abs(pair.Value.Amount - expected) < 0.9f,
                             $"target {pair.Key.name} took one arrow's damage ({pair.Value.Amount:F1} vs expected {expected:F1}), not several");
@@ -2058,11 +4054,14 @@ namespace Emberdelve.EditorTools
 
                 if (pierceDamageA.IsValid)
                 {
+                    // Same chain as the volley arrow, with Piercing Shot's authored 1.35 instead of 0.7 and the
+                    // same CHA 8 activation scale: 34 * 1.35 * 1.3216 * 0.96 = 58.2349824 on a body hit, which
+                    // is the number the accepted U2A5 gate measures for this same class at this same CHA.
                     float expected = bow.DamageAtRange(Vector3.Distance(pierceDamageA.SourcePosition, pierceDamageA.Point))
-                                     * pierce.damageMultiplier * outgoingRanged
+                                     * pierce.damageMultiplier * outgoingRanged * abilityScale
                                      * (pierceDamageA.Headshot ? DamageResolver.HeadshotMultiplier : 1f);
                     Check(Mathf.Abs(pierceDamageA.Amount - expected) < 0.9f,
-                        $"the piercing arrow's damage is weapon falloff x skill multiplier x Farshot ({pierceDamageA.Amount:F1} vs expected {expected:F1})");
+                        $"the piercing arrow's damage is weapon falloff x skill multiplier x Farshot x CHA effect scale ({pierceDamageA.Amount:F1} vs expected {expected:F1})");
                     Check(pierceDamageA.Amount > bow.baseDamage * 0.9f,
                         $"the piercing multiplier made it a heavy arrow ({pierceDamageA.Amount:F1} vs bow base {bow.baseDamage:F1})");
                 }
@@ -2167,6 +4166,152 @@ namespace Emberdelve.EditorTools
                 }
 
                 return false;
+            }
+
+            /// <summary>
+            /// Extra clearance a lane search demands beyond the lane the test asked for, so a candidate that
+            /// only misses a chest by centimetres is not chosen. It only decides which lane is picked; the
+            /// assertion a flow makes afterwards still uses the lane the skill actually needs.
+            /// </summary>
+            private const float LaneClearanceMargin = 0.35f;
+
+            /// <summary>How far behind the standing cell a lane probe starts, so geometry sitting in the
+            /// player's own cell is seen: a raycast that begins inside a box reports nothing.</summary>
+            private const float LaneProbeBackOff = 0.75f;
+
+            /// <summary>
+            /// Seats the player in the nearest walkable cell / cardinal orientation the level really offers
+            /// for a lane of the requested size, decided BEFORE any target is placed. Two bounds are applied:
+            /// the nav cells the lane rectangle touches must all be walkable - grown by a full wall thickness,
+            /// because a wall box is centred on the boundary of a blocked cell and sticks half its thickness
+            /// into the walkable one - and the lane is then proven with the same multi-height probe
+            /// CorridorIsClear already uses, after the bookkeeping the other corridors already do
+            /// (ClearEnemiesNear parks the enemies out of it, ClearCorridorAhead moves the loot pickups, both
+            /// undone by ParkEnemyFar's parking record / RestoreClearedCorridor). Level geometry is never
+            /// moved, filtered, shrunk or ignored: a chest, prop or wall in the lane fails that candidate and
+            /// the search moves on, and a level with no lane this size returns false so the caller keeps its
+            /// own precondition failure visible.
+            /// </summary>
+            private bool PlacePlayerInClearLane(float laneLength, float laneHalfWidth, string reason,
+                out Vector2Int chosenCell, out Vector2Int chosenFacing)
+            {
+                chosenCell = _layout != null ? _layout.playerStartCell : Vector2Int.zero;
+                chosenFacing = Vector2Int.zero;
+
+                if (_rig == null || _layout == null || _grid == null) return false;
+
+                int cell = Mathf.Max(1, _layout.CellSize);
+                float wallInset = Mathf.Max(0.05f, _layout.wallThickness);
+                Vector2Int reference = _layout.CellFromWorld(_rig.transform.position);
+
+                Vector2Int[] directions =
+                {
+                    new Vector2Int(0, 1), new Vector2Int(1, 0), new Vector2Int(-1, 0), new Vector2Int(0, -1)
+                };
+
+                // Nearest first, so the fixture stays in the room it was already standing in.
+                List<Vector2Int> cells = new List<Vector2Int>();
+                for (int y = 0; y < _grid.height; y++)
+                {
+                    for (int x = 0; x < _grid.width; x++)
+                    {
+                        if (_grid.IsWalkable(x, y)) cells.Add(new Vector2Int(x, y));
+                    }
+                }
+
+                cells.Sort((a, b) =>
+                {
+                    int da = (a.x - reference.x) * (a.x - reference.x) + (a.y - reference.y) * (a.y - reference.y);
+                    int db = (b.x - reference.x) * (b.x - reference.x) + (b.y - reference.y) * (b.y - reference.y);
+                    if (da != db) return da.CompareTo(db);
+                    if (a.x != b.x) return a.x.CompareTo(b.x);
+                    return a.y.CompareTo(b.y);
+                });
+
+                // The lane is a rectangle starting at the standing cell's centre: laneLength long ahead,
+                // laneHalfWidth to either side. The player stands at a cell centre, not a cell edge, so the
+                // grown rectangle reaches half a cell further than its own length in cell counts.
+                int depthCells = Mathf.FloorToInt((laneLength + LaneClearanceMargin + wallInset) / cell + 0.5f);
+                int lateralCells = Mathf.FloorToInt((laneHalfWidth + LaneClearanceMargin + wallInset) / cell + 0.5f);
+
+                for (int c = 0; c < cells.Count; c++)
+                {
+                    Vector2Int candidate = cells[c];
+
+                    for (int d = 0; d < directions.Length; d++)
+                    {
+                        Vector2Int facing = directions[d];
+                        Vector2Int side = new Vector2Int(facing.y, -facing.x); // Cross(up, forward) in cell space
+
+                        bool boundsOk = true;
+                        for (int j = 0; j <= depthCells && boundsOk; j++)
+                        {
+                            for (int k = -lateralCells; k <= lateralCells; k++)
+                            {
+                                if (_grid.IsWalkable(candidate.x + facing.x * j + side.x * k,
+                                                      candidate.y + facing.y * j + side.y * k)) continue;
+                                boundsOk = false;
+                            }
+                        }
+                        if (!boundsOk) continue;
+
+                        Vector3 anchor = _layout.CellCenterWorld(candidate) + Vector3.up * 0.15f;
+                        Vector3 forward = new Vector3(facing.x, 0f, facing.y);
+
+                        // Seat the player before probing, so the probe sees the configuration the test will
+                        // actually run in, and refuse a cell something already occupies.
+                        _rig.transform.position = anchor;
+                        _rig.transform.rotation = Quaternion.LookRotation(forward);
+                        Physics.SyncTransforms();
+
+                        if (!StandingSpotIsFree(anchor)) continue;
+
+                        ClearEnemiesNear(anchor, laneLength + laneHalfWidth + 1f, reason);
+                        ClearCorridorAhead(anchor, forward, laneLength + LaneClearanceMargin,
+                            laneHalfWidth + LaneClearanceMargin, reason);
+
+                        bool laneClear = CorridorIsClear(anchor - forward * LaneProbeBackOff, forward,
+                            laneLength + LaneClearanceMargin + LaneProbeBackOff,
+                            laneHalfWidth + LaneClearanceMargin, reason);
+                        if (!laneClear) continue;
+
+                        chosenCell = candidate;
+                        chosenFacing = facing;
+                        Debug.Log($"[Emberdelve][Smoke:{Mode}] {reason} lane chosen at cell {candidate} facing {facing} " +
+                                  $"(anchor {anchor}, {laneLength:F2}m long, {laneHalfWidth * 2f:F2}m wide, " +
+                                  $"proven with {LaneClearanceMargin:F2}m extra clearance and {LaneProbeBackOff:F2}m back-off)");
+                        return true;
+                    }
+                }
+
+                // No lane of that size exists: put the player back at the spawn cell the way the other tests
+                // do and let the caller report its own precondition failure rather than hiding it.
+                PlacePlayerAtSpawnFacing(1);
+                Debug.Log($"[Emberdelve][Smoke:{Mode}] no walkable cell offers a clear {laneLength:F2}m x {laneHalfWidth * 2f:F2}m lane for {reason}");
+                return false;
+            }
+
+            /// <summary>True when nothing solid occupies the cell the player would be seated in. A chest or
+            /// prop standing on walkable ground is still an obstacle, and a lane probe that starts inside it
+            /// cannot report it, so the standing cell is checked as its own volume.</summary>
+            private bool StandingSpotIsFree(Vector3 anchor)
+            {
+                if (_rig == null) return false;
+
+                Collider[] overlaps = Physics.OverlapSphere(anchor + Vector3.up * 0.9f, 0.5f, ~0, QueryTriggerInteraction.Ignore);
+                if (overlaps == null) return true;
+
+                for (int i = 0; i < overlaps.Length; i++)
+                {
+                    Collider collider = overlaps[i];
+                    if (collider == null) continue;
+                    if (collider.transform == _rig.transform || collider.transform.IsChildOf(_rig.transform)) continue;
+
+                    Debug.Log($"[Emberdelve][Smoke:{Mode}] standing spot at {anchor} is occupied by '{collider.name}' of '{collider.transform.root.name}' layer={collider.gameObject.layer}");
+                    return false;
+                }
+
+                return true;
             }
 
             /// <summary>Finds the walkable cell nearest the player that has a blocked neighbour, for the Dash collision test.</summary>
@@ -2584,6 +4729,32 @@ namespace Emberdelve.EditorTools
 
                 trail = sb.ToString();
                 return ok;
+            }
+
+            /// <summary>
+            /// One concise line covering everything a mana regen tick depends on, so a pool that did not move
+            /// can be attributed to a named precondition (dead caster, suspended regen, disabled pool, paused
+            /// clock, a second pool, a live attacker still in reach) rather than guessed at. Read-only.
+            /// </summary>
+            private void ManaRegenDiag(string stage, ManaComponent mana, float afterSpend, float scaledElapsed, float unscaledElapsed)
+            {
+                if (mana == null || _rig == null) return;
+
+                int liveEnemies = 0;
+                float nearestLive = -1f;
+                EnemyAgent[] agents = FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None);
+                for (int i = 0; i < agents.Length; i++)
+                {
+                    if (agents[i] == null || agents[i].IsDead || !agents[i].enabled) continue;
+                    liveEnemies++;
+                    float distance = Vector3.Distance(agents[i].transform.position, _rig.transform.position);
+                    if (nearestLive < 0f || distance < nearestLive) nearestLive = distance;
+                }
+
+                SkillCaster caster = _rig.Skills;
+                ManaComponent casterPool = caster != null ? caster.GetComponent<ManaComponent>() : null;
+
+                Debug.Log($"[Emberdelve][Smoke:{Mode}] mana regen diag {stage}: mana={mana.CurrentMana:F2}/{mana.MaxMana} spentForMeasurement={afterSpend:F0} poolInstance={mana.GetInstanceID()} rigPool={(_rig.Mana != null ? _rig.Mana.GetInstanceID() : -1)} casterPool={(casterPool != null ? casterPool.GetInstanceID() : -1)} poolsOnRig={_rig.GetComponents<ManaComponent>().Length} componentEnabled={mana.enabled} gameObjectActive={mana.gameObject.activeInHierarchy} regenAllowed={mana.RegenerationAllowed} regenRate={mana.RegenPerSecond:F1} regenDelayRemaining={mana.RegenDelayRemaining:F2} isFull={mana.IsFull} hp={_rig.CurrentHealth:F0}/{_rig.MaxHealth} dead={_rig.IsDead} runState={(_director != null ? _director.State.ToString() : "none")} timeScale={Time.timeScale:F2} scaledElapsed={scaledElapsed:F2} unscaledElapsed={unscaledElapsed:F2} liveEnabledEnemies={liveEnemies} nearestLiveEnemy={nearestLive:F1}m");
             }
 
             private void Check(bool condition, string label)

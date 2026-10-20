@@ -6,6 +6,7 @@ using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 using Emberdelve.Core;
 using Emberdelve.InputLayer;
+using Emberdelve.Level;
 
 namespace Emberdelve.EditorTools
 {
@@ -363,6 +364,55 @@ namespace Emberdelve.EditorTools
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
             Debug.Log("[Emberdelve][Diag] Wired actions on " + input.name);
+        }
+
+        /// <summary>
+        /// Repair / bootstrap: gives the dungeon scene's RunDirector the layout asset so containers are built
+        /// from data at run start. This is a reference assignment on an existing scene, not a rebuild, so the
+        /// scene a previous milestone produced keeps working.
+        /// </summary>
+        [MenuItem(Menu + "Wire Layout Into Dungeon Scene")]
+        public static void WireLayoutInDungeon()
+        {
+            BuildDataOnly();
+
+            DungeonLayoutData layout = AssetDatabase.LoadAssetAtPath<DungeonLayoutData>(
+                EmberdelvePaths.Data + "/DungeonLayout_AshenHalls.asset");
+
+            if (layout == null)
+            {
+                Debug.LogWarning("[Emberdelve][Wire] No layout asset; chests cannot be spawned.");
+                return;
+            }
+
+            EditorSceneManager.OpenScene(EmberdelvePaths.DungeonScenePath, OpenSceneMode.Single);
+
+            layout = AssetDatabase.LoadAssetAtPath<DungeonLayoutData>(EmberdelvePaths.Data + "/DungeonLayout_AshenHalls.asset");
+
+            Emberdelve.Flow.RunDirector director = Object.FindFirstObjectByType<Emberdelve.Flow.RunDirector>();
+            if (director == null)
+            {
+                Debug.LogWarning("[Emberdelve][Wire] No RunDirector in the dungeon scene.");
+                return;
+            }
+
+            SerializedObject serialized = new SerializedObject(director);
+            SerializedProperty property = serialized.FindProperty("layout");
+
+            if (property == null)
+            {
+                Debug.LogWarning("[Emberdelve][Wire] RunDirector has no 'layout' serialized property.");
+                return;
+            }
+
+            property.objectReferenceValue = layout;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            Scene scene = SceneManager.GetActiveScene();
+            EditorSceneManager.MarkSceneDirty(scene);
+            EditorSceneManager.SaveScene(scene);
+
+            Debug.Log($"[Emberdelve][Wire] RunDirector.layout = {layout.levelName} ({layout.chestSpawns.Count} chest specs) on {director.name}");
         }
     }
 }

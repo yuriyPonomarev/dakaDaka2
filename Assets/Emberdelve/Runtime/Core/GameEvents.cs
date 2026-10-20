@@ -18,6 +18,7 @@ namespace Emberdelve.Core
         public static event Action<HitFeedback> DamageDealt;
         public static event Action<ItemData, int> ItemCollected;
         public static event Action InventoryChanged;
+        public static event Action<ItemData, bool> EquipmentChanged;
         public static event Action<int, int> AmmoChanged;
         public static event Action<string> InteractionPromptChanged;
         public static event Action<float> InteractionHoldChanged;
@@ -38,6 +39,7 @@ namespace Emberdelve.Core
         public static void RaiseDamageDealt(HitFeedback feedback) => DamageDealt?.Invoke(feedback);
         public static void RaiseItemCollected(ItemData item, int totalCollected) => ItemCollected?.Invoke(item, totalCollected);
         public static void RaiseInventoryChanged() => InventoryChanged?.Invoke();
+        public static void RaiseEquipmentChanged(ItemData item, bool equipped) => EquipmentChanged?.Invoke(item, equipped);
         public static void RaiseAmmo(int current, int reserve) => AmmoChanged?.Invoke(current, reserve);
         public static void RaiseInteractionPrompt(string prompt) => InteractionPromptChanged?.Invoke(prompt);
         public static void RaiseInteractionHold(float progress) => InteractionHoldChanged?.Invoke(progress);

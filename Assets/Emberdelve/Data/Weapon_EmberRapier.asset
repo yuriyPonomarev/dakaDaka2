@@ -24,6 +24,7 @@ MonoBehaviour:
   reach: 2.7
   arcAngle: 70
   hitSphereRadius: 0.45
+  finesse: 1
   ammoDisplayName: Ammo
   rangedRange: 42
   projectileSpeed: 36

@@ -27,6 +27,10 @@ namespace Emberdelve.Core
         public float interactSphereRadius = 0.45f;
 
         [Header("Inventory")]
+        [Tooltip("Carried items live in a width x height cell grid. A 2x3 sword needs a 2x3 hole.")]
+        public int inventoryGridWidth = 10;
+        public int inventoryGridHeight = 4;
+        [Tooltip("Used when a grid shape has not been chosen, e.g. an older class asset asking for a bag size.")]
         public int inventoryCapacity = 8;
 
         [Header("Look")]
@@ -52,6 +56,8 @@ namespace Emberdelve.Core
         {
             if (interactionRange <= 0f) interactionRange = 2.4f;
             if (inventoryCapacity <= 0) inventoryCapacity = 8;
+            if (inventoryGridWidth <= 0) inventoryGridWidth = 10;
+            if (inventoryGridHeight <= 0) inventoryGridHeight = 4;
             if (extractionHoldDuration <= 0f) extractionHoldDuration = 3f;
             if (hitMask.value == 0) hitMask = LayerMask.GetMask(PlayerLayerName, EnemyLayerName);
             if (interactMask.value == 0) interactMask = LayerMask.GetMask(LootLayerName, InteractLayerName);

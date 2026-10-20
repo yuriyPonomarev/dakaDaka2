@@ -297,6 +297,7 @@ namespace Emberdelve.EditorTools
             SetReference(director, "config", config);
             SetReference(director, "fallbackClass", EmberdelveAssetLibrary.Warrior);
             SetReference(director, "playerRig", rig);
+            SetReference(director, "layout", EmberdelveAssetLibrary.Layout);
             return director;
         }
 
@@ -337,14 +338,22 @@ namespace Emberdelve.EditorTools
             Interactor interactor = rigGo.AddComponent<Interactor>();
             HotbarController hotbar = rigGo.AddComponent<HotbarController>();
 
-            // Vitals and kit state the skill system owns. PlayerRig also creates these on demand, so a rig
-            // authored before this milestone still works; a rebuilt scene has them serialized instead.
-            ManaComponent mana = rigGo.AddComponent<ManaComponent>();
-            StatusComponent status = rigGo.AddComponent<StatusComponent>();
-            SkillCaster skills = rigGo.AddComponent<SkillCaster>();
+            // Vitals and kit state the rig owns. PlayerRig.WireRig (its Awake) Ensures exactly this set, so
+            // the builder Ensures the same way instead of adding its own copies: whether or not Awake already
+            // ran on this GameObject, each one exists once and builder, rig and caster end up holding the same
+            // pool, status set and caster. In an edit-mode build Awake has not run, so Ensure is also what
+            // puts all five on the GameObject - stamina included - for the wiring below to serialize.
+            ManaComponent mana = ManaComponent.Ensure(rigGo);
+            StaminaComponent stamina = StaminaComponent.Ensure(rigGo);
+            StatusComponent status = StatusComponent.Ensure(rigGo);
+            Equipment equipment = Equipment.Ensure(rigGo);
+            SkillCaster skills = rigGo.GetComponent<SkillCaster>();
+            if (skills == null) skills = rigGo.AddComponent<SkillCaster>();
             mana.name = "Mana";
+            stamina.name = "Stamina";
             status.name = "Status";
             skills.name = "SkillCaster";
+            equipment.name = "Equipment";
 
             GameObject pivot = new GameObject("Look_Pivot");
             pivot.transform.SetParent(rigGo.transform, false);
@@ -389,7 +398,12 @@ namespace Emberdelve.EditorTools
             SetReference(rig, "movement", movement);
             SetReference(rig, "look", look);
             SetReference(rig, "health", health);
+            SetReference(rig, "mana", mana);
+            SetReference(rig, "stamina", stamina);
+            SetReference(rig, "status", status);
+            SetReference(rig, "skills", skills);
             SetReference(rig, "inventory", inventory);
+            SetReference(rig, "equipment", equipment);
             SetReference(rig, "loadout", loadout);
             SetReference(loadout, "weaponAnchor", weaponAnchor.transform);
             SetReference(loadout, "meleeCombat", melee);

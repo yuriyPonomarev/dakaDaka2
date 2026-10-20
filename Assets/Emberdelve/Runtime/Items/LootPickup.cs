@@ -13,8 +13,146 @@ namespace Emberdelve.Items
     }
 
     /// <summary>
+    /// The counted half of the loot contract, for a host that can say how much of an offer it actually
+    /// committed. A source container (a chest, a pickup on the ground) has to decrement what it holds by the
+    /// units that really landed, and <see cref="ILootHost.CollectLoot"/> cannot express a partial result:
+    /// its bool is true only when everything landed, so a false leaves the container guessing.
+    ///
+    /// A host that only implements <see cref="ILootHost"/> keeps working unchanged; the containers fall back
+    /// to measuring the bag that host reports, which is what <see cref="LootCollection"/> does explicitly
+    /// rather than reading a false as zero.
+    /// </summary>
+    public interface ICountedLootHost : ILootHost
+    {
+        /// <summary>
+        /// Commits as much of <paramref name="amount"/> as the host can carry and returns the exact number of
+        /// units it took: 0 when it took none, <paramref name="amount"/> when it took all of them, and
+        /// something in between when it took part. It never returns a negative number or more than was asked.
+        /// </summary>
+        int CollectLootCounted(ItemData item, int amount);
+    }
+
+    /// <summary>
+    /// The optional instance half of the loot contract (U2B9): a host that can take an item that already
+    /// exists - one concrete rolled gear item with its UID, its rarity and its accepted affix records - and
+    /// take it as <em>that</em> item.
+    ///
+    /// It is deliberately separate from <see cref="ILootHost"/> and <see cref="ICountedLootHost"/> rather than
+    /// an extra method on them: a host written before instances existed keeps compiling and keeps behaving
+    /// exactly as it did, and a container can tell the two apart instead of guessing. A host that does not
+    /// implement this interface is a refusal for a rolled drop, never a fallback - handing an already-rolled
+    /// item to <see cref="ILootHost.CollectLoot"/> would take only its definition, mint a fresh Common
+    /// identity and throw the rolled rarity and affixes away.
+    /// </summary>
+    public interface IInstanceLootHost : ILootHost
+    {
+        /// <summary>
+        /// Takes this exact instance, or refuses and changes nothing. The instance the host accepts is the same
+        /// object it was handed: no mint, no copy, no reroll, no quantity change. The reason says why a refusal
+        /// happened (no room, a duplicate identity, a run state that may not receive loot, a host that does not
+        /// carry instances at all).
+        /// </summary>
+        bool TryCollectLootInstance(ItemInstance instance, out string reason);
+    }
+
+    /// <summary>
+    /// The one rule a loot source uses to find out how much of what it offered actually arrived, so a
+    /// partial collection shrinks the source by exactly that much instead of keeping or discarding the whole
+    /// offer.
+    /// </summary>
+    public static class LootCollection
+    {
+        /// <summary>
+        /// Hands <paramref name="amount"/> units to the host and returns how many the host actually committed.
+        ///
+        /// Counted host: the host's own number, clamped into the range that was offered.
+        ///
+        /// Legacy bool-only host: the bool cannot name a count, so the count is read off the bag that host
+        /// reports - the units its <see cref="ILootHost.Inventory"/> gained during the call are the units that
+        /// were committed, and that is what the source is shrunk by. A bag that shrank or gained more than was
+        /// offered is clamped, and a disagreement with the host's own bool is logged instead of being guessed.
+        /// When the host reports no bag at all there is nothing to measure, and the only reading left is the
+        /// documented bool contract (true = everything landed, false = nothing landed), which is exactly the
+        /// pre-count behavior: explicit, and never a silent partial credit.
+        /// </summary>
+        public static int CollectAccepted(ILootHost host, ItemData item, int amount)
+        {
+            if (host == null || item == null) return 0;
+
+            int requested = Mathf.Max(0, amount);
+            if (requested <= 0) return 0;
+
+            if (host is ICountedLootHost counted)
+                return Mathf.Clamp(counted.CollectLootCounted(item, requested), 0, requested);
+
+            Inventory bag = host.Inventory;
+            if (bag == null) return host.CollectLoot(item, requested) ? requested : 0;
+
+            int before = bag.TotalUnits;
+            bool tookAll = host.CollectLoot(item, requested);
+            int committed = Mathf.Clamp(bag.TotalUnits - before, 0, requested);
+
+            if (tookAll && committed != requested)
+            {
+                Debug.LogWarning($"[Emberdelve][Loot] host {host.GetType().Name} answered true for {requested} " +
+                                 $"{item.displayName} but its bag only gained {committed} units; the source is " +
+                                 "shrunk by what the bag actually gained, not by the bool.");
+            }
+
+            return committed;
+        }
+
+        /// <summary>
+        /// Hands one already-rolled instance to the host and says whether the host took it.
+        ///
+        /// A host that implements <see cref="IInstanceLootHost"/> decides for itself - the run host puts the very
+        /// instance into the player's bag through the bag's own instance path, so the accepted item is the same
+        /// object with the same UID, rarity and rolls.
+        ///
+        /// A host that does not is a refusal with a reason, and the source keeps the instance it already had.
+        /// There is deliberately no fallback to <see cref="ILootHost.CollectLoot"/>: that path is given an
+        /// <see cref="ItemData"/> and would remint a Common identity and discard the rolled metadata, which is
+        /// the exact thing this contract exists to prevent.
+        /// </summary>
+        public static bool TryCollectInstance(ILootHost host, ItemInstance instance, out string reason)
+        {
+            if (instance == null)
+            {
+                reason = "no item instance to hand over";
+                return false;
+            }
+
+            if (host == null)
+            {
+                reason = "no loot host: the rolled item has nowhere to go";
+                return false;
+            }
+
+            if (host is IInstanceLootHost instanceHost)
+            {
+                if (instanceHost.TryCollectLootInstance(instance, out reason)) return true;
+
+                if (string.IsNullOrEmpty(reason))
+                {
+                    reason = $"host {host.GetType().Name} refused {instance.Describe()}";
+                }
+                return false;
+            }
+
+            reason = $"host {host.GetType().Name} does not implement IInstanceLootHost: " +
+                     $"{instance.Definition.displayName} [{instance.UidText}] {instance.Rarity} is not handed to " +
+                     "CollectLoot(ItemData), because that path mints a new Common identity and discards the " +
+                     "rolled rarity and affixes";
+            return false;
+        }
+    }
+
+    /// <summary>
     /// A piece of loot lying in the world. Interacting with it asks the run layer to add the item to
-    /// the inventory; the pickup only disappears when that succeeds, so a full bag is a real risk.
+    /// the inventory; the pickup only disappears when the whole stack landed, so a full bag is a real risk.
+    /// A bag that took part of the stack keeps the remainder on the ground with the units that did not land,
+    /// so a partial pickup neither duplicates what was carried nor silently throws the rest away, and nothing
+    /// is re-rolled or re-created on the way.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class LootPickup : MonoBehaviour, IInteractable
@@ -84,7 +222,23 @@ namespace Emberdelve.Items
                 return;
             }
 
-            if (_host.CollectLoot(item, amount)) Destroy(gameObject);
+            int requested = Mathf.Max(1, amount);
+            int accepted = LootCollection.CollectAccepted(_host, item, requested);
+
+            // Nothing moved: the pickup stays exactly as it was, same amount, same object.
+            if (accepted <= 0) return;
+
+            int left = requested - accepted;
+            if (left <= 0)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
+            // Partial: only the units the bag did not commit are still lying here.
+            amount = left;
+            Debug.Log($"[Emberdelve][LootPickup] {name}: took {accepted} of {requested} {item.displayName}, " +
+                      $"{amount} left on the ground");
         }
 
         public void OnHoldComplete() => OnInteractInstant();

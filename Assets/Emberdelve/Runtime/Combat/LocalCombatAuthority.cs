@@ -114,7 +114,10 @@ namespace Emberdelve.Combat
                 return Reject(intent, "line of sight is blocked");
             }
 
-            DamageInfo damage = DamageResolver.Resolve(intent.Weapon, intent, hit, target, OutgoingMultiplier(instigator, intent.Weapon));
+            // Both instigator factors are read from the authority's own validated entity, never from the
+            // intent: the multiplier channel and the separate flat weapon-base channel.
+            DamageInfo damage = DamageResolver.Resolve(intent.Weapon, intent, hit, target,
+                OutgoingMultiplier(instigator, intent.Weapon), FlatWeaponBonus(instigator, intent.Weapon));
             if (!damage.IsValid) return Reject(intent, "resolver produced no damage");
 
             target.ApplyDamage(damage);
@@ -192,7 +195,13 @@ namespace Emberdelve.Combat
                 return RejectSkill(intent, "line of sight is blocked");
             }
 
-            DamageInfo damage = DamageResolver.ResolveSkill(intent, hit, target, OutgoingMultiplier(instigator, intent.Weapon));
+            // The instigator's multipliers are read from the instigator; the ability scale is the bounded
+            // per-activation value this cast carried; the flat weapon-base bonus is read from the instigator
+            // on its own channel and only reaches a skill that scales the weapon held (DamageResolver applies
+            // each of them exactly once, and a skill with its own flat damage gets no weapon bonus at all).
+            DamageInfo damage = DamageResolver.ResolveSkill(intent, hit, target,
+                OutgoingMultiplier(instigator, intent.Weapon), intent.EffectScale,
+                FlatWeaponBonus(instigator, intent.Weapon));
             if (!damage.IsValid) return RejectSkill(intent, "resolver produced no damage");
 
             target.ApplyDamage(damage);
@@ -266,6 +275,24 @@ namespace Emberdelve.Combat
         {
             if (instigator is IDamageOutgoingProvider provider) return Mathf.Max(0f, provider.GetOutgoingDamageMultiplier(weapon));
             return 1f;
+        }
+
+        /// <summary>
+        /// The instigator's FLAT weapon-base bonus, read from the instigator on its own typed provider channel
+        /// at the same accepted-hit boundary as the multiplier. AttackIntent and SkillIntent carry no bonus
+        /// and cannot be made to: this is authority-side state about an entity the authority already resolved
+        /// from its own registry, which is the shape a server would fill from replicated gear. An instigator
+        /// that is not a provider (an enemy, an entity with no rolled gear) contributes 0, and a claim that is
+        /// NaN, ±Infinity or negative is sanitized to 0 here as well as inside WeaponData, so no provider can
+        /// poison a resolved hit. Local plumbing only - it is not proof of real server authority (U3).
+        /// </summary>
+        private static float FlatWeaponBonus(ICombatEntity instigator, WeaponData weapon)
+        {
+            if (instigator is IDamageFlatWeaponBonusProvider provider)
+            {
+                return WeaponData.SanitizeBaseDamageBonus(provider.GetFlatWeaponDamageBonus(weapon));
+            }
+            return 0f;
         }
 
         private bool RejectSkill(SkillIntent intent, string reason)

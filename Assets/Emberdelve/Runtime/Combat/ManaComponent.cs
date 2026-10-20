@@ -80,6 +80,28 @@ namespace Emberdelve.Combat
 
         public bool HasAmount(int amount) => _current + 0.0001f >= Mathf.Max(0, amount);
 
+        /// <summary>
+        /// Changes the ceiling mid-run the way equipment does: a smaller ceiling clamps the current value
+        /// down, a bigger ceiling raises the ceiling only and never pays out the difference. Spending mana
+        /// is the only thing that lowers the pool, and a gear change never refills it.
+        /// </summary>
+        public void SetMax(int newMax)
+        {
+            int clamped = Mathf.Max(1, newMax);
+            if (clamped == maxMana) return;
+
+            maxMana = clamped;
+            if (_current > maxMana) _current = maxMana;
+            Changed?.Invoke(_current, maxMana);
+        }
+
+        /// <summary>Regeneration rate changed by something worn rather than by the class asset.</summary>
+        public void SetRegen(float rate, float delay)
+        {
+            regenPerSecond = Mathf.Max(0f, rate);
+            regenDelay = Mathf.Max(0f, delay);
+        }
+
         public bool TrySpend(int amount)
         {
             int cost = Mathf.Max(0, amount);
