@@ -177,6 +177,19 @@ namespace Emberdelve.Core
     {
     }
 
+    /// <summary>
+    /// The weapon the AUTHORITY believes an entity is holding right now. The combat authority resolves the
+    /// weapon from here and rejects an <see cref="Emberdelve.Combat.AttackIntent"/> that names a different one,
+    /// so damage, reach and cooldown never come from a client-chosen asset. A player reports its loadout's
+    /// active hand; an enemy reports its authored attack weapon. An instigator that does not implement this
+    /// cannot submit weapon attacks at all (reject by default, not trust by default). Local seam only: a server
+    /// would read the same answer from replicated equipment.
+    /// </summary>
+    public interface IActiveWeaponProvider
+    {
+        Emberdelve.Data.WeaponData ActiveWeapon { get; }
+    }
+
     /// <summary>Defenders expose their active guard through this so damage is reduced by the authority, not by the attacker.</summary>
     public interface IDefenseProvider
     {

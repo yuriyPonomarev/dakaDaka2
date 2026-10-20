@@ -15,7 +15,7 @@ namespace Emberdelve.AI
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class EnemyAgent : MonoBehaviour, ICombatEntity, IStatusTarget, IDamageOutgoingProvider
+    public sealed class EnemyAgent : MonoBehaviour, ICombatEntity, IStatusTarget, IDamageOutgoingProvider, IActiveWeaponProvider
     {
         [Header("Data")]
         [SerializeField] private EnemyData data;
@@ -53,6 +53,9 @@ namespace Emberdelve.AI
         public int TeamId => CombatTeams.MonsterTeam;
         public Vector3 CombatCenter => transform.position + Vector3.up * 1.15f;
         public Collider HeadCollider => headCollider;
+
+        /// <summary>An enemy attacks with its authored attack weapon and nothing else.</summary>
+        public WeaponData ActiveWeapon => data != null ? data.attackWeapon : null;
         public bool IsDead => _health != null && _health.IsDead;
         public float CurrentHealth => _health != null ? _health.CurrentHealth : 0f;
         public float MaxHealth => _health != null ? _health.MaxHealth : 0f;
@@ -366,7 +369,12 @@ namespace Emberdelve.AI
             AttackIntent intent = new AttackIntent(_combatId, EntityKind.Enemy, data.attackWeapon, 1f,
                 origin, direction, maxRange, sequence, Time.time);
 
-            HitCandidate hit = new HitCandidate(target.CombatId, aimPoint, false);
+            LastAttackWhiffed = false;
+
+            // The wedge/range gate above decides WHETHER an attack is submitted. The hit point is the target's own
+            // centre: the committed telegraph direction can pass beside a strafing player, and the authority
+            // only accepts a hit point that lies on the target.
+            HitCandidate hit = new HitCandidate(target.CombatId, target.CombatCenter, false);
 
             authority.SubmitAttack(intent, hit);
         }

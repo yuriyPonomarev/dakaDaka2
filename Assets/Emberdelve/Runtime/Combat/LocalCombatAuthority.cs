@@ -25,6 +25,25 @@ namespace Emberdelve.Combat
         [SerializeField] private float maxOriginOffsetFromInstigator = 4f;
         [SerializeField] private bool logRejections = true;
 
+        [Header("Weapon attack geometry")]
+        [Tooltip("A claimed hit point further than this from the target's own centre is not on the target and is rejected.")]
+        [SerializeField] private float hitPointTolerance = DefaultHitPointTolerance;
+
+        /// <summary>Largest distance between a claimed hit point and the target's authoritative centre.</summary>
+        public const float DefaultHitPointTolerance = 1.5f;
+
+        /// <summary>
+        /// Radius of the sphere around a target's centre the authority treats as its body when it measures
+        /// distance. A claimed point is pulled inside it, so a client cannot shorten the distance (and skip
+        /// range falloff) by claiming a point in front of the target.
+        /// </summary>
+        public const float TargetBodyRadius = 0.5f;
+
+        /// <summary>A claimed head hit only counts when the claimed point lies on the target's head collider.</summary>
+        public const float HeadSurfaceEpsilon = 0.05f;
+
+        private System.Func<float> _clock;
+
         private readonly Dictionary<int, float> _lastAttackTime = new Dictionary<int, float>();
         private readonly Dictionary<int, int> _lastSequence = new Dictionary<int, int>();
         private readonly Dictionary<int, Dictionary<string, float>> _lastSkillTime = new Dictionary<int, Dictionary<string, float>>();
@@ -32,6 +51,19 @@ namespace Emberdelve.Combat
 
         /// <summary>Small slack so a locally legal cast is not rejected for float rounding.</summary>
         private const float SkillClockTolerance = 0.05f;
+
+        /// <summary>
+        /// The authority's own time. Cooldowns are measured on this clock and never on a timestamp carried by
+        /// an intent. Defaults to Time.time; <see cref="SetClock"/> injects a controllable one for tests (a
+        /// server would use its own tick time).
+        /// </summary>
+        public float Now => _clock != null ? _clock() : Time.time;
+
+        /// <summary>Injects the authority clock (null restores Time.time). Test and replay seam.</summary>
+        public void SetClock(System.Func<float> clock) => _clock = clock;
+
+        /// <summary>Reason the most recent weapon attack was rejected (empty after an accepted one).</summary>
+        public string LastAttackRejectReason { get; private set; } = string.Empty;
 
         public int AcceptedCount { get; private set; }
         public int RejectedCount { get; private set; }
@@ -57,7 +89,7 @@ namespace Emberdelve.Combat
             if (weapon == null) return 0f;
             float last = LastAttackTimeFor(combatId);
             if (float.IsNegativeInfinity(last)) return 0f;
-            return Mathf.Max(0f, last + Mathf.Max(0.1f, weapon.cooldown) * cooldownGrace - Time.time);
+            return Mathf.Max(0f, last + Mathf.Max(0.1f, weapon.cooldown) * cooldownGrace - Now);
         }
 
         private void Awake()
@@ -71,60 +103,118 @@ namespace Emberdelve.Combat
             GameServices.Unregister<ICombatAuthority>(this);
         }
 
-        public bool SubmitAttack(AttackIntent intent, HitCandidate hit)
+        public bool SubmitAttack(AttackIntent intent, HitCandidate hit) => SubmitAttack(intent, hit, out _);
+
+        /// <summary>
+        /// Weapon attack. The intent is a REQUEST. What is applied is decided here:
+        /// - the weapon is the one the instigator entity actually holds (a different claim is rejected);
+        /// - reach, falloff and cooldown come from that weapon, measured on the authority's own clock;
+        /// - distance and line of sight are measured between the two entities' own positions, and a claimed hit
+        ///   point is only accepted when it lies on the target and is then pulled inside the target's body;
+        /// - headshot comes from the target's head collider at that point, never from the claimed flag;
+        /// - the damage direction is derived from the entities' positions.
+        /// Returns accept/reject with a reason so callers (and tests) can attribute a rejection to a rule.
+        /// </summary>
+        public bool SubmitAttack(AttackIntent intent, HitCandidate hit, out string reason)
         {
-            if (intent.Weapon == null) return Reject(intent, "weapon data missing");
-            if (!CombatRegistry.TryGet(intent.InstigatorCombatId, out ICombatEntity instigator)) return Reject(intent, "unknown instigator id");
-            if (instigator.IsDead) return Reject(intent, "instigator is dead");
-            if (!CombatRegistry.TryGet(hit.TargetCombatId, out ICombatEntity target)) return Reject(intent, "unknown target id");
-            if (target.IsDead) return false;
-            if (target == instigator) return Reject(intent, "self hit");
-            if (!CombatTeams.AreHostile(instigator, target)) return Reject(intent, "target is not hostile to the instigator");
+            reason = string.Empty;
+            LastAttackRejectReason = string.Empty;
+
+            if (!CombatRegistry.TryGet(intent.InstigatorCombatId, out ICombatEntity instigator)) return Reject(intent, "unknown instigator id", out reason);
+            if (instigator.IsDead) return Reject(intent, "instigator is dead", out reason);
+
+            // The weapon is resolved from the instigator, never from the intent.
+            if (!(instigator is IActiveWeaponProvider holder)) return Reject(intent, "instigator has no authoritative weapon", out reason);
+            WeaponData weapon = holder.ActiveWeapon;
+            if (weapon == null) return Reject(intent, "instigator holds no weapon", out reason);
+            if (intent.WeaponId != weapon.weaponId || (intent.Weapon != null && intent.Weapon != weapon))
+            {
+                return Reject(intent, $"claimed weapon '{intent.WeaponId}' is not the equipped weapon '{weapon.weaponId}'", out reason);
+            }
+
+            if (!CombatRegistry.TryGet(hit.TargetCombatId, out ICombatEntity target)) return Reject(intent, "unknown target id", out reason);
+            if (target.IsDead)
+            {
+                reason = "target is dead";
+                LastAttackRejectReason = reason;
+                return false;
+            }
+            if (target == instigator) return Reject(intent, "self hit", out reason);
+            if (!CombatTeams.AreHostile(instigator, target)) return Reject(intent, "target is not hostile to the instigator", out reason);
 
             if (_lastSequence.TryGetValue(intent.InstigatorCombatId, out int lastSequence) && intent.Sequence <= lastSequence)
             {
-                return Reject(intent, "stale or repeated command sequence");
+                return Reject(intent, "stale or repeated command sequence", out reason);
             }
             _lastSequence[intent.InstigatorCombatId] = intent.Sequence;
 
-            float cooldown = Mathf.Max(0.1f, intent.Weapon.cooldown);
-            if (_lastAttackTime.TryGetValue(intent.InstigatorCombatId, out float lastAttack))
+            // Cooldown on the authority's clock. intent.Timestamp is ignored on purpose.
+            float now = Now;
+            float cooldown = Mathf.Max(0.1f, weapon.cooldown);
+            if (_lastAttackTime.TryGetValue(intent.InstigatorCombatId, out float lastAttack) && now - lastAttack < cooldown * cooldownGrace)
             {
-                if (intent.Timestamp - lastAttack < cooldown * cooldownGrace)
-                {
-                    return Reject(intent, "attack faster than weapon cooldown");
-                }
-            }
-            _lastAttackTime[intent.InstigatorCombatId] = intent.Timestamp;
-
-            if (Vector3.Distance(instigator.CombatCenter, intent.Origin) > maxOriginOffsetFromInstigator)
-            {
-                return Reject(intent, "attack origin is not attached to the instigator");
+                return Reject(intent, "attack faster than weapon cooldown", out reason);
             }
 
-            float distance = Vector3.Distance(intent.Origin, hit.HitPoint);
-            if (distance > intent.MaxRange + rangeTolerance)
+            // Authoritative reach of the weapon actually held. A claim of more than that is a forgery.
+            float reach = weapon.IsRanged ? Mathf.Max(1f, weapon.rangedRange) : weapon.reach + weapon.hitSphereRadius;
+            if (!(intent.MaxRange <= reach + rangeTolerance))
             {
-                return Reject(intent, $"hit claimed at {distance:F1}m, weapon reaches {intent.MaxRange:F1}m");
+                return Reject(intent, $"claimed range {intent.MaxRange:F1}m exceeds the weapon's {reach:F1}m", out reason);
+            }
+
+            Vector3 origin = instigator.CombatCenter;
+            if (!(Vector3.Distance(origin, intent.Origin) <= maxOriginOffsetFromInstigator))
+            {
+                return Reject(intent, "attack origin is not attached to the instigator", out reason);
+            }
+
+            Vector3 targetCenter = target.CombatCenter;
+            if (!(Vector3.Distance(hit.HitPoint, targetCenter) <= hitPointTolerance))
+            {
+                return Reject(intent, "claimed hit point is not on the target", out reason);
+            }
+
+            // The point the authority measures with: the claim, pulled inside the target's body sphere.
+            Vector3 authoritativePoint = targetCenter + Vector3.ClampMagnitude(hit.HitPoint - targetCenter, TargetBodyRadius);
+            float distance = Vector3.Distance(origin, authoritativePoint);
+            if (distance > reach + rangeTolerance)
+            {
+                return Reject(intent, $"target at {distance:F1}m, weapon reaches {reach:F1}m", out reason);
             }
 
             LayerMask levelMask = config != null ? config.levelMask : Physics.DefaultRaycastLayers;
-            if (!HitScanner.HasLineOfSight(intent.Origin, target.CombatCenter, levelMask, 0.35f))
+            if (!HitScanner.HasLineOfSight(origin, targetCenter, levelMask, 0.35f))
             {
-                return Reject(intent, "line of sight is blocked");
+                return Reject(intent, "line of sight is blocked", out reason);
             }
+
+            // Headshot is the authority's reading of the target's own head collider, not the claimed flag.
+            Collider head = target.HeadCollider;
+            bool headshot = head != null && head.enabled
+                            && (head.ClosestPoint(hit.HitPoint) - hit.HitPoint).sqrMagnitude <= HeadSurfaceEpsilon * HeadSurfaceEpsilon;
+
+            Vector3 direction = authoritativePoint - origin;
+            if (direction.sqrMagnitude < 0.0001f) direction = intent.Direction;
+
+            AttackIntent resolved = new AttackIntent(instigator.CombatId, instigator.Kind, weapon, intent.Charge,
+                origin, direction, reach, intent.Sequence, now);
+            HitCandidate resolvedHit = new HitCandidate(target.CombatId, authoritativePoint, headshot);
 
             // Both instigator factors are read from the authority's own validated entity, never from the
             // intent: the multiplier channel and the separate flat weapon-base channel.
-            DamageInfo damage = DamageResolver.Resolve(intent.Weapon, intent, hit, target,
-                OutgoingMultiplier(instigator, intent.Weapon), FlatWeaponBonus(instigator, intent.Weapon));
-            if (!damage.IsValid) return Reject(intent, "resolver produced no damage");
+            DamageInfo damage = DamageResolver.Resolve(weapon, resolved, resolvedHit, target,
+                OutgoingMultiplier(instigator, weapon), FlatWeaponBonus(instigator, weapon));
+            if (!damage.IsValid) return Reject(intent, "resolver produced no damage", out reason);
+
+            // Only an accepted attack spends the cooldown.
+            _lastAttackTime[intent.InstigatorCombatId] = now;
 
             target.ApplyDamage(damage);
 
             AcceptedCount++;
 
-            HitFeedback feedback = new HitFeedback(hit.HitPoint, damage.Amount, damage.Blocked, damage.Headshot,
+            HitFeedback feedback = new HitFeedback(authoritativePoint, damage.Amount, damage.Blocked, damage.Headshot,
                 target.IsDead, target.Kind);
 
             if (instigator.Kind == EntityKind.LocalPlayer) GameEvents.RaiseDamageDealt(feedback);
@@ -305,8 +395,10 @@ namespace Emberdelve.Combat
             return false;
         }
 
-        private bool Reject(AttackIntent intent, string reason)
+        private bool Reject(AttackIntent intent, string reason, out string reasonOut)
         {
+            reasonOut = reason;
+            LastAttackRejectReason = reason;
             RejectedCount++;
             if (logRejections)
             {

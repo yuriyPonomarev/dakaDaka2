@@ -2200,6 +2200,16 @@ namespace Emberdelve.EditorTools
                 CheckClose($"{label}: outgoing multiplier the authority reads", 1.3216f, rig.GetOutgoingDamageMultiplier(_bow),
                     "DEX 1.12 x Farshot 1.18: the same number at CHA 8, 10 and 18, so CHA is not in it");
 
+                // R1a S1: the expected hit point is derived from the fixture's own geometry, independent of what
+                // the authority reports: a raycast from the muzzle along the aim against the host, pulled into
+                // the 0.5 m body sphere the authority documents (LocalCombatAuthority.TargetBodyRadius).
+                Vector3 expectedPoint = host.CombatCenter;
+                if (Physics.Raycast(rig.GetMuzzlePosition(), rig.AimDirection, out RaycastHit probe, distance + 5f, ~0, QueryTriggerInteraction.Ignore)
+                    && probe.collider != null && probe.collider.GetComponentInParent<TestTarget>() == host)
+                {
+                    expectedPoint = host.CombatCenter + Vector3.ClampMagnitude(probe.point - host.CombatCenter, LocalCombatAuthority.TargetBodyRadius);
+                }
+
                 float healthBefore = host.CurrentHealth;
                 int magazineBefore = ranged.Magazine;
                 int acceptedBefore = _authority.AcceptedCount;
@@ -2211,6 +2221,26 @@ namespace Emberdelve.EditorTools
                 yield return WaitForCaptured(ResolveTimeout);
 
                 Check(_captured.Count == 1, $"{label}: the shot resolved as exactly one DamageInfo from the authority (got {_captured.Count})");
+
+                // R1a: the authority measures range falloff itself, from the shooter's own position to the point
+                // it accepted on the target (DamageInfo.Point), not from the muzzle the client fired at. Inside
+                // the falloff ramp the fixture therefore derives its expectation from that authoritative distance
+                // (the hand constant assumed muzzle-to-centre geometry the authority no longer trusts) and still
+                // pins the result to the nominal figure within a metre of falloff so the ramp stays covered.
+                if (distance > _bow.falloffStartRange && _captured.Count > 0)
+                {
+                    Check(Vector3.Distance(expectedPoint, _captured[0].Point) < 0.05f,
+                        $"{label}: the accepted point equals the fixture's own raycast-derived point (off by {Vector3.Distance(expectedPoint, _captured[0].Point):F3} m)");
+                    float authoritativeDistance = Vector3.Distance(rig.CombatCenter, expectedPoint);
+                    float nominal = expectedDamage;
+                    expectedDamage = _bow.DamageAtRange(authoritativeDistance, rig.GetFlatWeaponDamageBonus(_bow))
+                                     * Mathf.Lerp(_bow.minChargeDamageScale, 1f, charge) * rig.GetOutgoingDamageMultiplier(_bow);
+                    Check(Mathf.Abs(authoritativeDistance - distance) < 1f,
+                        $"{label}: the authoritative distance {authoritativeDistance:F2} m is within a metre of the nominal {distance:F0} m");
+                    Check(Mathf.Abs(expectedDamage - nominal) < 1.2f && expectedDamage < _bow.DamageAtRange(_bow.falloffStartRange) * rig.GetOutgoingDamageMultiplier(_bow) - 0.5f,
+                        $"{label}: the falloff expectation ({expectedDamage:F3}) stays near the nominal {nominal:F3} and below the unfalloffed damage");
+                }
+
                 CheckClose($"{label}: resolved damage", expectedDamage, healthBefore - host.CurrentHealth,
                     $"charge {charge:F2}: authored falloff band x 1.3216 instigator multipliers, and no CHA term anywhere");
                 CheckInt($"{label}: the shot spent exactly one arrow", 1, magazineBefore - ranged.Magazine,

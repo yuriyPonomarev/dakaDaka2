@@ -34,7 +34,7 @@ namespace Emberdelve.Combat
 
             if (hit.Headshot) amount *= HeadshotMultiplier;
 
-            return Finalize(amount, intent.Weapon, intent.Direction, intent.Origin, intent.InstigatorCombatId,
+            return Finalize(amount, weapon, intent.Direction, intent.Origin, intent.InstigatorCombatId,
                 intent.InstigatorKind, hit, target);
         }
 

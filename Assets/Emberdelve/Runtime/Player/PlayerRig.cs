@@ -20,7 +20,7 @@ namespace Emberdelve.Player
     [RequireComponent(typeof(PlayerMovement))]
     [RequireComponent(typeof(PlayerLook))]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider
+    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider
     {
         [Header("Components")]
         [SerializeField] private EmberdelveInput input;
@@ -57,6 +57,9 @@ namespace Emberdelve.Player
         public int TeamId => CombatTeams.PlayerTeam;
         public Vector3 CombatCenter => transform.position + Vector3.up * 1.1f;
         public Collider HeadCollider => null;
+
+        /// <summary>The weapon the loadout actually has in hand; the combat authority resolves attacks against this.</summary>
+        public WeaponData ActiveWeapon => loadout != null ? loadout.ActiveWeapon : null;
 
         public bool IsDead => health != null && health.IsDead;
         public float CurrentHealth => health != null ? health.CurrentHealth : 0f;

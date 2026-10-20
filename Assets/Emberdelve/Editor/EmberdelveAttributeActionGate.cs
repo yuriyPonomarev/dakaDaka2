@@ -295,7 +295,10 @@ namespace Emberdelve.EditorTools
 
                 EnsureTarget();
 
+                // The gate's monotonic clock IS the authority's clock (injected), so rate tests advance
+                // authority time deterministically instead of forging a timestamp inside the intent.
                 _clock = Time.time;
+                _authority.SetClock(() => _clock);
             }
 
             private void CheckAuthoredData()
@@ -426,9 +429,14 @@ namespace Emberdelve.EditorTools
                 Check(Mathf.Abs(LastDelta - 26f * 1.344f * 1.12f) > 1f,
                     $"the sword delta is not the attribute factor applied twice ({LastDelta:F3} against {26f * 1.344f * 1.12f:F3})");
 
-                // 8. DEX crossbow: a ranged weapon on a STR-heavy class still reads DEX.
+                // 8. DEX crossbow: a ranged weapon on a STR-heavy class still reads DEX. The authority only
+                // accepts the weapon the rig actually holds, so the crossbow comes into the hand through the
+                // class's authored secondary slot (real loadout swap) instead of being named in the intent.
+                Check(rig.Loadout.SwitchToSlot(1), "the warrior loadout switched to its authored crossbow secondary");
+                Check(rig.MainHandWeapon == _crossbow, "the crossbow is the weapon the warrior actually holds");
                 SubmitAttack("warrior crossbow at 10m (inside its 12m falloff start)", rig, _crossbow, 10f, 1f,
                     _crossbow.rangedRange, true, 24f, "24 * 1.0 (DEX modifier 0), no STR contribution");
+                Check(rig.Loadout.SwitchToSlot(0), "the warrior loadout switched back to the sword");
 
                 // 9. Finesse rapier through the real gear path: the Fang Blade puts it in the main hand.
                 CarryItem(rig, _fangBlade);
@@ -468,6 +476,7 @@ namespace Emberdelve.EditorTools
                 Check(_authority.RejectedCount == rejectedBefore + 1, "the authority counted the too-fast attack as a rejection");
                 CheckClose("the rejected attack applied no damage", 0f, healthBefore - _target.CurrentHealth, "a rejection is not a partial hit");
 
+                Check(rig.Loadout.SwitchToSlot(1) && rig.MainHandWeapon == _crossbow, "the crossbow is back in the warrior's hand for the range and line of sight checks");
                 rejectedBefore = _authority.RejectedCount;
                 healthBefore = _target.CurrentHealth;
                 SubmitAttackExpecting("warrior crossbow claimed 60m outside its 34m range", rig, _crossbow, 60f, 1f,
@@ -492,6 +501,7 @@ namespace Emberdelve.EditorTools
 
                 SubmitAttack("warrior crossbow again once the wall is gone", rig, _crossbow, 10f, 1f,
                     _crossbow.rangedRange, true, 24f, "the same shot is legal with a clear line");
+                Check(rig.Loadout.SwitchToSlot(0), "the warrior loadout ends on the sword");
 
                 Debug.Log($"{Tag} warrior movement end: walk={rig.Movement.ResolveGroundSpeed(false, false):F4} " +
                           $"sprint={rig.Movement.ResolveGroundSpeed(true, false):F4} crouch={rig.Movement.ResolveGroundSpeed(false, true):F4} " +
@@ -682,12 +692,13 @@ namespace Emberdelve.EditorTools
             /// <summary>
             /// The isolated fixed-distance target: no defense, no AI, no collider, a pool big enough that
             /// nothing in this pass can kill it. Its CombatCenter is placed exactly <c>distance</c> from the
-            /// attacker's AimOrigin along the attacker's facing, so the distance the authority measures is
-            /// the distance this pass asserts.
+            /// attacker's CombatCenter along the attacker's facing. Since R1a the authority measures reach and
+            /// falloff from the instigator's own CombatCenter (not from a client-supplied eye/muzzle origin), so
+            /// this is exactly the distance the authority measures and the distance this pass asserts.
             /// </summary>
             private void PlaceTarget(PlayerRig rig, float distance)
             {
-                Vector3 origin = rig.AimOrigin;
+                Vector3 origin = rig.CombatCenter;
                 Vector3 hitPoint = origin + rig.Facing * distance;
                 _target.transform.position = hitPoint - Vector3.up * 1.1f;
                 Physics.SyncTransforms();

@@ -300,9 +300,9 @@ namespace Emberdelve.EditorTools
                 _claims.Clear();
                 WatchComponentSequences();
 
-                // Runs first on purpose. The synthetic authority tests below deliberately use future
-                // timestamps, and the authority records the last accepted attack time per combat id, so a
-                // real-time crossbow shot fired after them would be rejected as faster than the cooldown.
+                // Runs first so the real crossbow shot happens before the synthetic authority tests below
+                // have spent the sword cooldown clock. (Those tests now wait for the authority's own
+                // cooldown instead of forging timestamps; see WaitForWeaponReady.)
                 yield return LoadoutFlow();
 
                 EnemyAgent enemy = PickAliveEnemy();
@@ -428,55 +428,84 @@ namespace Emberdelve.EditorTools
 
                 int acceptedBefore = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
                 int rejectedBefore = _localAuthority != null ? _localAuthority.RejectedCount : 0;
-                // Synthetic intents take their sequences from the same per-combat-id allocator the combat
-                // components use, so they are shaped exactly like real ones.
-                float baseTime = Time.time;
+
+                // The cooldown is measured on the AUTHORITY clock, never on a timestamp inside the intent,
+                // so these intents carry plain Time.time and the test waits for the real cooldown instead of
+                // stamping synthetic future times. The target is frozen so it cannot walk or strike back
+                // while the fixture waits on real time; it is re-enabled afterwards if it survives.
+                enemy.enabled = false;
+                yield return WaitForWeaponReady(_rig.CombatId, weapon);
 
                 // Validation must refuse a hit claimed 40m away with a 2m sword.
                 int tooFarSequence = CombatRegistry.NextSequence(_rig.CombatId);
                 int consumedBeforeTooFar = _localAuthority != null ? _localAuthority.LastSequenceFor(_rig.CombatId) : -1;
                 AttackIntent tooFar = new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, weapon, 1f,
-                    _rig.CombatCenter, Vector3.forward, weapon.reach, tooFarSequence, baseTime);
+                    _rig.CombatCenter, Vector3.forward, weapon.reach, tooFarSequence, Time.time);
                 bool farAccepted = _authority.SubmitAttack(tooFar,
                     new HitCandidate(enemy.CombatId, _rig.CombatCenter + Vector3.forward * 40f, false));
-                Check(!farAccepted, "authority rejects a hit claimed beyond weapon reach");
+                Check(!farAccepted, "authority rejects a hit point claimed 40 m from the target (hit-point rule; real melee reach rejection is in EmberdelveCombatAuthorityGate)");
+                Check(_localAuthority != null && _localAuthority.LastAttackRejectReason.Contains("not on the target"),
+                    "the far claim is rejected as a hit point that is not on the target (" + (_localAuthority != null ? _localAuthority.LastAttackRejectReason : "n/a") + ")");
                 if (farAccepted) SequenceDiag("tooFar", _rig.CombatId, tooFarSequence);
 
                 // The replay test reuses the exact sequence the authority has now consumed. tooFar passed
                 // the sequence rule - which is what makes it the last consumed one - and only then failed
-                // on range. Asserted before the replay so the reuse is proven, not assumed.
+                // on geometry. Asserted before the replay so the reuse is proven, not assumed.
                 Check(_localAuthority != null && tooFarSequence > consumedBeforeTooFar &&
                       _localAuthority.LastSequenceFor(_rig.CombatId) == tooFarSequence,
                       $"authority consumed {consumedBeforeTooFar} -> {tooFarSequence} for #{_rig.CombatId}, so the replay reuses a live sequence");
 
                 AttackIntent replay = new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, weapon, 1f,
-                    _rig.CombatCenter, Vector3.forward, weapon.reach, tooFarSequence, baseTime + 10f);
+                    _rig.CombatCenter, Vector3.forward, weapon.reach, tooFarSequence, Time.time);
                 bool replayAccepted = _authority.SubmitAttack(replay, new HitCandidate(enemy.CombatId, enemy.CombatCenter, false));
                 Check(!replayAccepted, "authority rejects a repeated command sequence");
+                Check(_localAuthority != null && _localAuthority.LastAttackRejectReason.Contains("sequence"),
+                    "the replay is rejected by the sequence rule (" + (_localAuthority != null ? _localAuthority.LastAttackRejectReason : "n/a") + ")");
                 if (replayAccepted) SequenceDiag("replay", _rig.CombatId, tooFarSequence);
 
-                // Faster than the weapon cooldown must be rejected, and on a fresh later sequence so the
-                // rejection can only come from the cooldown rule.
+                // Cooldown. Only an ACCEPTED attack spends the weapon cooldown on the authority clock, so
+                // one legitimate attack is made first, then an immediate second one on a fresh sequence is the
+                // only thing that can trip the cooldown rule. Its claimed timestamp is a far-future stamp on
+                // purpose: the authority ignores it.
+                float healthBefore = enemy.CurrentHealth;
+                int firstSequence = CombatRegistry.NextSequence(_rig.CombatId);
+                Check(firstSequence > tooFarSequence, $"the first legitimate attack claims a fresh sequence ({tooFarSequence} -> {firstSequence})");
+                Vector3 firstOrigin = _rig.CombatCenter;
+                AttackIntent first = new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, weapon, 1f,
+                    firstOrigin, (enemy.CombatCenter - firstOrigin).normalized, weapon.reach + weapon.hitSphereRadius, firstSequence, Time.time);
+                bool firstAccepted = _authority.SubmitAttack(first, new HitCandidate(enemy.CombatId, enemy.CombatCenter, false));
+                Check(firstAccepted, "authority accepts a legitimate attack once the cooldown has expired (" + (_localAuthority != null ? _localAuthority.LastAttackRejectReason : "n/a") + ")");
+
+                // The legitimate attack can kill a weakened target; the cooldown rule precedes every geometry
+                // rule, so the probe may use any live hostile id and can only fail on the cooldown.
+                EnemyAgent spamTarget = enemy.IsDead ? PickAliveEnemy() : enemy;
+                Check(spamTarget != null, "a live hostile is available for the cooldown probe");
+                if (spamTarget == null) yield break;
+
                 int spamSequence = CombatRegistry.NextSequence(_rig.CombatId);
-                Check(spamSequence > tooFarSequence,
-                    $"the cooldown intent claims a fresh sequence ({tooFarSequence} -> {spamSequence})");
+                Check(spamSequence > firstSequence,
+                    $"the cooldown intent claims a fresh sequence ({firstSequence} -> {spamSequence})");
                 AttackIntent spam = new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, weapon, 1f,
-                    _rig.CombatCenter, Vector3.forward, weapon.reach, spamSequence, baseTime + 0.05f);
-                bool spamAccepted = _authority.SubmitAttack(spam, new HitCandidate(enemy.CombatId, enemy.CombatCenter, false));
+                    firstOrigin, (enemy.CombatCenter - firstOrigin).normalized, weapon.reach + weapon.hitSphereRadius, spamSequence, Time.time + 100f);
+                bool spamAccepted = _authority.SubmitAttack(spam, new HitCandidate(spamTarget.CombatId, spamTarget.CombatCenter, false));
                 Check(!spamAccepted, "authority rejects attacks faster than the weapon cooldown");
+                Check(_localAuthority != null && _localAuthority.LastAttackRejectReason.Contains("cooldown"),
+                    "the spam is rejected by the cooldown rule even with a far-future timestamp (" + (_localAuthority != null ? _localAuthority.LastAttackRejectReason : "n/a") + ")");
                 if (spamAccepted) SequenceDiag("spam", _rig.CombatId, spamSequence);
 
                 Check(_localAuthority != null && _localAuthority.RejectedCount >= rejectedBefore + 3 &&
-                      _localAuthority.AcceptedCount == acceptedBefore,
+                      _localAuthority.AcceptedCount == acceptedBefore + 1,
                     $"rejections recorded (rejected {(_localAuthority != null ? _localAuthority.RejectedCount : 0)}, accepted {(_localAuthority != null ? _localAuthority.AcceptedCount : 0)})");
 
                 // Now attack properly until the enemy drops. Every one of these is meant to be valid, so
-                // each must claim a sequence strictly greater than the one the authority last consumed.
-                float healthBefore = enemy.CurrentHealth;
-                int accepted = 0;
+                // each must claim a sequence strictly greater than the one the authority last consumed, and
+                // each waits for the authority real weapon cooldown before it is submitted.
+                int accepted = firstAccepted ? 1 : 0;
                 bool everySequenceFresh = true;
                 for (int i = 0; i < 16 && !enemy.IsDead; i++)
                 {
+                    yield return WaitForWeaponReady(_rig.CombatId, weapon);
+
                     Vector3 origin = _rig.CombatCenter;
                     Vector3 direction = (enemy.CombatCenter - origin).normalized;
                     int consumedBefore = _localAuthority != null ? _localAuthority.LastSequenceFor(_rig.CombatId) : -1;
@@ -484,12 +513,14 @@ namespace Emberdelve.EditorTools
                     if (freshSequence <= consumedBefore) everySequenceFresh = false;
 
                     AttackIntent intent = new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, weapon, 1f,
-                        origin, direction, weapon.reach + weapon.hitSphereRadius, freshSequence, baseTime + 5f + i * 1.5f);
+                        origin, direction, weapon.reach + weapon.hitSphereRadius, freshSequence, Time.time);
 
                     if (_authority.SubmitAttack(intent, new HitCandidate(enemy.CombatId, enemy.CombatCenter, false))) accepted++;
                     else SequenceDiag($"validAttack[{i}] consumedBefore={consumedBefore}", _rig.CombatId, freshSequence);
-                    yield return WaitFrames(2);
+                    yield return WaitFrames(1);
                 }
+
+                if (!enemy.IsDead) enemy.enabled = true;
 
                 Check(everySequenceFresh, "every intended-valid attack claimed a sequence greater than the last one consumed");
                 Check(accepted > 0, $"authority accepted valid attacks ({accepted})");
@@ -705,6 +736,87 @@ namespace Emberdelve.EditorTools
                 yield return GuardReductionFlow(enemy);
 
                 _rig.Health.Damaged -= CaptureDamage;
+
+                yield return OffAxisWindupFlow(enemy);
+            }
+
+            /// <summary>
+            /// R1a M1: the real enemy windup path with a player who strafes after the direction was committed.
+            /// Inside the warned wedge the hit must still land (the enemy submits the player's own centre, which
+            /// the authority accepts); outside the wedge no intent is submitted at all and the attack whiffs.
+            /// </summary>
+            private IEnumerator OffAxisWindupFlow(EnemyAgent enemy)
+            {
+                if (enemy == null || enemy.IsDead || enemy.Data == null) yield break;
+
+                MeleeCombat melee = _rig.GetComponent<MeleeCombat>();
+                if (melee != null) melee.enabled = false;
+                _rig.SetGuardHeld(false);
+
+                Vector3 anchor = _rig.transform.position;
+                Vector3 enemyHome = enemy.transform.position;
+                float standoff = Mathf.Min(1.8f, enemy.Data.attackRange * 0.85f);
+                float halfCone = Mathf.Clamp(enemy.Data.attackTelegraphCone, 40f, 200f) * 0.5f;
+
+                float[] angles = { 45f, -45f, halfCone + 40f };
+                bool[] expectHit = { true, true, false };
+
+                for (int i = 0; i < angles.Length; i++)
+                {
+                    string label = $"off-axis windup {angles[i]:F0} deg ({(expectHit[i] ? "inside" : "outside")} the {halfCone * 2f:F0} deg wedge)";
+
+                    _rig.transform.position = anchor;
+                    _rig.Health.SetHealth(_rig.MaxHealth);
+                    enemy.transform.position = enemyHome;
+                    Physics.SyncTransforms();
+                    enemy.enabled = true;
+                    yield return WaitFrames(2);
+
+                    float deadline = Time.unscaledTime + 9f;
+                    while (!enemy.IsWindingUp && Time.unscaledTime < deadline) yield return null;
+                    Check(enemy.IsWindingUp, $"{label}: the real enemy brain started a windup");
+                    if (!enemy.IsWindingUp) break;
+
+                    // The direction is committed now. The player strafes to angles[i] off that direction.
+                    Vector3 warned = enemy.Brain.TelegraphDirection;
+                    warned.y = 0f;
+                    warned.Normalize();
+                    Vector3 offset = Quaternion.AngleAxis(angles[i], Vector3.up) * warned * standoff;
+                    _rig.transform.position = new Vector3(enemy.transform.position.x + offset.x, anchor.y, enemy.transform.position.z + offset.z);
+                    Physics.SyncTransforms();
+
+                    float before = _rig.CurrentHealth;
+                    int acceptedBefore = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
+                    int rejectedBefore = _localAuthority != null ? _localAuthority.RejectedCount : 0;
+
+                    deadline = Time.unscaledTime + 4f;
+                    while (enemy.IsWindingUp && Time.unscaledTime < deadline) yield return null;
+                    yield return WaitFrames(2);
+
+                    float lost = before - _rig.CurrentHealth;
+                    if (expectHit[i])
+                    {
+                        Check(lost > 0f, $"{label}: the strike landed on the strafing player ({lost:F1} damage)");
+                        Check(_localAuthority != null && _localAuthority.AcceptedCount == acceptedBefore + 1 && _localAuthority.RejectedCount == rejectedBefore,
+                            $"{label}: the authority accepted exactly one attack and rejected none");
+                    }
+                    else
+                    {
+                        Check(lost <= 0f, $"{label}: no damage when the player left the warned wedge ({lost:F1})");
+                        Check(_localAuthority != null && _localAuthority.AcceptedCount == acceptedBefore && _localAuthority.RejectedCount == rejectedBefore,
+                            $"{label}: no intent was submitted for the whiff");
+                        Check(enemy.LastAttackWhiffed, $"{label}: the enemy recorded a whiff");
+                    }
+
+                    enemy.enabled = false;
+                    yield return WaitFrames(2);
+                }
+
+                enemy.enabled = false;
+                _rig.transform.position = anchor;
+                _rig.Health.SetHealth(_rig.MaxHealth);
+                Physics.SyncTransforms();
+                if (melee != null) melee.enabled = true;
             }
 
             private IEnumerator GuardReductionFlow(EnemyAgent enemy)
@@ -725,7 +837,6 @@ namespace Emberdelve.EditorTools
                 toSource.Normalize();
                 Vector3 towardSource = -toSource;
                 float maxRange = Mathf.Max(1f, enemy.Data.attackRange) + 0.4f;
-                float stamp = Time.time + 30f;
                 int enemyConsumedBefore = _localAuthority != null ? _localAuthority.LastSequenceFor(enemy.CombatId) : -1;
 
                 // MeleeCombat re-asserts guard from input every frame, and headless batch mode has no
@@ -741,11 +852,14 @@ namespace Emberdelve.EditorTools
                 Physics.SyncTransforms();
                 yield return WaitFrames(2);
 
+                // Each submission waits for the enemy weapon real cooldown on the authority clock; the
+                // three intents carry Time.time, not synthetic future stamps.
+                yield return WaitForWeaponReady(enemy.CombatId, claw);
                 float before = _rig.CurrentHealth;
                 _capturedValid = false;
                 int frontSequence = CombatRegistry.NextSequence(enemy.CombatId);
                 bool frontAccepted = _authority.SubmitAttack(
-                    new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f, origin, toSource, maxRange, frontSequence, stamp),
+                    new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f, origin, toSource, maxRange, frontSequence, Time.time),
                     new HitCandidate(_rig.CombatId, _rig.CombatCenter, false));
                 float blockedDamage = before - _rig.CurrentHealth;
 
@@ -765,11 +879,12 @@ namespace Emberdelve.EditorTools
                 Physics.SyncTransforms();
                 yield return WaitFrames(2);
 
+                yield return WaitForWeaponReady(enemy.CombatId, claw);
                 before = _rig.CurrentHealth;
                 _capturedValid = false;
                 int behindSequence = CombatRegistry.NextSequence(enemy.CombatId);
                 bool behindAccepted = _authority.SubmitAttack(
-                    new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f, origin, toSource, maxRange, behindSequence, stamp + 2f),
+                    new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f, origin, toSource, maxRange, behindSequence, Time.time),
                     new HitCandidate(_rig.CombatId, _rig.CombatCenter, false));
                 float behindDamage = before - _rig.CurrentHealth;
 
@@ -785,11 +900,12 @@ namespace Emberdelve.EditorTools
                 Physics.SyncTransforms();
                 yield return WaitFrames(2);
 
+                yield return WaitForWeaponReady(enemy.CombatId, claw);
                 before = _rig.CurrentHealth;
                 _capturedValid = false;
                 int sideSequence = CombatRegistry.NextSequence(enemy.CombatId);
                 bool sideAccepted = _authority.SubmitAttack(
-                    new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f, origin, toSource, maxRange, sideSequence, stamp + 4f),
+                    new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f, origin, toSource, maxRange, sideSequence, Time.time),
                     new HitCandidate(_rig.CombatId, _rig.CombatCenter, false));
                 float sideDamage = before - _rig.CurrentHealth;
 
@@ -1115,10 +1231,12 @@ namespace Emberdelve.EditorTools
                 float healthAtStart = _rig.CurrentHealth;
                 int accepted = 0;
                 int sequenceRejections = 0;
-                float baseTime = Time.time;
 
                 for (int i = 0; i < 24 && !_rig.IsDead; i++)
                 {
+                    // Real cooldown wait on the authority clock instead of a stamp 1.2s per step ahead.
+                    yield return WaitForWeaponReady(enemy.CombatId, claw);
+                    if (_rig.IsDead) break;
                     enemy.transform.position = _rig.transform.position + new Vector3(0f, 0f, -1.1f);
                     Vector3 origin = enemy.CombatCenter;
                     Vector3 direction = (_rig.CombatCenter - origin).normalized;
@@ -1128,7 +1246,7 @@ namespace Emberdelve.EditorTools
                     if (freshSequence <= consumedBefore) sequenceRejections++;
 
                     AttackIntent intent = new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f,
-                        origin, direction, claw.reach + claw.hitSphereRadius, freshSequence, baseTime + i * 1.2f);
+                        origin, direction, claw.reach + claw.hitSphereRadius, freshSequence, Time.time);
 
                     if (_authority.SubmitAttack(intent, new HitCandidate(_rig.CombatId, _rig.CombatCenter, false))) accepted++;
                     else if (freshSequence <= consumedBefore) SequenceDiag($"deathAttack[{i}] consumedBefore={consumedBefore}", enemy.CombatId, freshSequence);
@@ -3051,7 +3169,6 @@ namespace Emberdelve.EditorTools
             }
 
             private const float MeasuredStandoffDistance = 1.6f;
-            private const float MeasuredStampSpacing = 3f;
 
             /// <summary>
             /// One controlled submission. The rig is re-seated at the same anchor and turned
@@ -3097,6 +3214,8 @@ namespace Emberdelve.EditorTools
                 result.maxRange = Mathf.Max(1f, enemy.Data.attackRange) + 0.6f;
                 result.turnFromSource = turnFromSource;
 
+                // Real wait for the enemy weapon cooldown on the authority clock (no forged stamp).
+                yield return WaitForWeaponReady(enemy.CombatId, claw);
                 _rig.Health.SetHealth(_rig.MaxHealth);
                 _rig.SetGuardHeld(true);
                 yield return WaitFrames(1);
@@ -3114,7 +3233,7 @@ namespace Emberdelve.EditorTools
                 result.sequence = sequence;
                 result.accepted = _authority.SubmitAttack(
                     new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f, origin, travel, result.maxRange,
-                        sequence, Time.time + 60f + hitIndex * MeasuredStampSpacing),
+                        sequence, Time.time),
                     new HitCandidate(_rig.CombatId, hitPoint, false));
 
                 result.damage = before - _rig.CurrentHealth;
@@ -3498,14 +3617,14 @@ namespace Emberdelve.EditorTools
                     Physics.SyncTransforms();
                     yield return WaitFrames(2);
 
-                    // The Milestone 1 validation tests deliberately stamp synthetic future timestamps, and the
-                    // authority records the last accepted attack per combat id, so a real-time swing fired too
-                    // soon after them is correctly refused as faster than the cooldown. Wait for the authority's
-                    // own clock to clear instead of pretending the rejection did not happen.
+                    // The authority records the last accepted attack per combat id on its own clock, so a
+                    // real-time swing fired too soon after the validation attacks is correctly refused as faster
+                    // than the cooldown. Wait for the authority own clock to clear instead of pretending the
+                    // rejection did not happen.
                     float weaponClock = _localAuthority != null ? _localAuthority.WeaponCooldownRemaining(_rig.CombatId, sword) : 0f;
                     if (weaponClock > 0f)
                     {
-                        Debug.Log($"[Emberdelve][Smoke:{Mode}] authority weapon clock for #{_rig.CombatId} is {weaponClock:F1}s ahead from the synthetic validation stamps; waiting for it to clear before the passive swing");
+                        Debug.Log($"[Emberdelve][Smoke:{Mode}] authority weapon clock for #{_rig.CombatId} still has {weaponClock:F1}s of cooldown from the validation attacks; waiting for it to clear before the passive swing");
                         yield return WaitUntil(() => _localAuthority == null || _localAuthority.WeaponCooldownRemaining(_rig.CombatId, sword) <= 0f, weaponClock + 4f);
                     }
 
@@ -4860,6 +4979,20 @@ namespace Emberdelve.EditorTools
                     _failures++;
                     Debug.LogError($"[Emberdelve][Smoke:{Mode}] FAIL {label}");
                 }
+            }
+
+            /// <summary>
+            /// Waits (real time) until the authority would accept another attack from this entity with this
+            /// weapon. This is how fixtures drive legitimate attacks now that cooldowns run on the authority
+            /// own clock and an intent timestamp can no longer be used to skip them.
+            /// </summary>
+            private IEnumerator WaitForWeaponReady(int combatId, WeaponData weapon)
+            {
+                if (_localAuthority == null || weapon == null) yield break;
+                yield return WaitUntil(() => _localAuthority.WeaponCooldownRemaining(combatId, weapon) <= 0f,
+                    Mathf.Max(0.1f, weapon.cooldown) * 2f + 1f);
+                Check(_localAuthority.WeaponCooldownRemaining(combatId, weapon) <= 0f,
+                    $"the authority weapon cooldown for #{combatId} cleared in real time");
             }
 
             private static IEnumerator WaitFrames(int count)
