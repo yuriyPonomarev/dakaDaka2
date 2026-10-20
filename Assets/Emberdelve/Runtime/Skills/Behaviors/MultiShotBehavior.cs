@@ -17,7 +17,7 @@ namespace Emberdelve.Skills
         {
             SkillData skill = context.Skill;
             int shots = Mathf.Max(1, skill.projectileCount);
-            int ammoNeeded = skill.consumesAmmoPerProjectile ? shots : 0;
+            int ammoNeeded = skill.AmmoPerCast;
 
             return RangedSkillUtility.CanFireRangedSkill(context, ammoNeeded, out reason);
         }
@@ -25,13 +25,10 @@ namespace Emberdelve.Skills
         public bool Cast(SkillContext context)
         {
             SkillData skill = context.Skill;
-            int shots = Mathf.Max(1, skill.projectileCount);
+            int shots = skill.ProjectilesPerCast;
 
-            if (skill.consumesAmmoPerProjectile)
-            {
-                if (!context.Ranged.TryConsumeAmmo(shots)) return false;
-            }
-
+            // Ammo was already spent by the combat authority when it opened this activation; spending it
+            // here as well would be a double spend.
             context.Ranged.CancelDraw();
             context.ResetScratch();
 

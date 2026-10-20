@@ -160,6 +160,26 @@ namespace Emberdelve.Data
             ? StatusSpec.None
             : new StatusSpec(selfStatus, selfStatusDuration, selfStatusMagnitude);
 
+        /// <summary>Projectile skills (the combat authority requires a ranged weapon for them).</summary>
+        public bool IsProjectileSkill => effect == SkillEffectKind.SpreadShot || effect == SkillEffectKind.PiercingShot;
+
+        /// <summary>Projectiles one cast fires. Single definition shared by the behaviors and the authority.</summary>
+        public int ProjectilesPerCast =>
+            effect == SkillEffectKind.SpreadShot ? Mathf.Max(1, projectileCount) : effect == SkillEffectKind.PiercingShot ? 1 : 0;
+
+        /// <summary>Rounds one cast spends from the active weapon's magazine.</summary>
+        public int AmmoPerCast => consumesAmmoPerProjectile ? ProjectilesPerCast : 0;
+
+        /// <summary>
+        /// The most hits one activation of this skill can legitimately resolve: an area burst hits at most
+        /// maxTargets bodies, a projectile skill at most projectiles x targets per projectile. Dash and every
+        /// other effect resolve none. The combat authority bounds an activation by this number.
+        /// </summary>
+        public int HitBudget =>
+            effect == SkillEffectKind.AreaCry ? Mathf.Max(1, maxTargets)
+            : IsProjectileSkill ? ProjectilesPerCast * Mathf.Max(1, projectileMaxTargets)
+            : 0;
+
         public float EffectiveCooldown => Mathf.Max(0f, cooldownSeconds);
         public int EffectiveManaCost => Mathf.Max(0, manaCost);
 

@@ -224,6 +224,9 @@ namespace Emberdelve.Movement
             return true;
         }
 
+        /// <summary>True when a dash can start at all (a controller and a class are present).</summary>
+        public bool CanDash => controller != null && _class != null;
+
         public void CancelDash()
         {
             _dashTimeRemaining = 0f;

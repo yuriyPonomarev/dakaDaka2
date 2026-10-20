@@ -176,6 +176,17 @@ namespace Emberdelve.Combat
             return true;
         }
 
+        /// <summary>
+        /// Gives rounds back to the magazine (never above its capacity). Used by the combat authority when it
+        /// cancels an activation it had already charged ammo for.
+        /// </summary>
+        internal void RefundAmmo(int count)
+        {
+            if (_weapon == null || !_weapon.IsRanged || count <= 0) return;
+            _magazine = Mathf.Min(Mathf.Clamp(_weapon.magazineSize, 1, 99), _magazine + count);
+            GameEvents.RaiseAmmo(_magazine, _reserve);
+        }
+
         /// <summary>Abandons an in-progress draw, e.g. because a skill is about to fire instead.</summary>
         public void CancelDraw()
         {
@@ -228,12 +239,15 @@ namespace Emberdelve.Combat
             AttackIntent intent = new AttackIntent(rig.CombatId, rig.Kind, _weapon, charge, muzzle, direction,
                 range, sequence, Time.time);
 
-            if (hasTarget && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority))
-            {
-                authority.SubmitAttack(intent, candidate);
-            }
+            // Ammo: the authority validates (it refuses a ranged attack from an empty magazine) and SPENDS the
+            // round for an attack it accepts, because it reads the magazine through IAmmoSource. A shot the
+            // authority did not accept (a miss, no target, a rejected intent) is still a fired round, so it is
+            // spent here. Exactly one of the two spends per shot: no double spend, no free accepted hit.
+            // Note: the draw Charge is still a client claim (clamped 0..1); a server draw timer is U3.
+            bool accepted = hasTarget && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
+                            && authority.SubmitAttack(intent, candidate);
 
-            _magazine = Mathf.Max(0, _magazine - 1);
+            if (!accepted) _magazine = Mathf.Max(0, _magazine - 1);
             GameEvents.RaiseAmmo(_magazine, _reserve);
 
             ProjectileVisual.SpawnArrow(muzzle, endpoint, _weapon);

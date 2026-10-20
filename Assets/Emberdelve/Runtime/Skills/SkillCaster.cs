@@ -57,6 +57,13 @@ namespace Emberdelve.Skills
         public bool KitValid => kitValid;
         public CharacterClassData AppliedClass => appliedClass;
 
+        /// <summary>
+        /// Changes whenever the kit is re-applied, cleared by death or restored. The combat authority stamps its
+        /// own cooldown records with it, so a respawn or a new run starts with fresh cooldowns on both sides
+        /// without the caster ever telling the authority to forget anything.
+        /// </summary>
+        public int KitEpoch { get; private set; }
+
         private void Awake()
         {
             if (rig == null) rig = GetComponent<PlayerRig>();
@@ -69,6 +76,7 @@ namespace Emberdelve.Skills
         {
             appliedClass = data;
             config = gameConfig;
+            KitEpoch++;
 
             if (authority == null && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority resolved)) authority = resolved;
             if (mana == null) mana = ManaComponent.Ensure(gameObject);
@@ -230,6 +238,12 @@ namespace Emberdelve.Skills
 
             if (authority == null && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority resolved)) authority = resolved;
 
+            if (authority == null)
+            {
+                reason = "no combat authority in the scene";
+                return false;
+            }
+
             BuildContext(skill);
 
             if (skill.requiresRangedWeapon && !_context.HasRangedInHand)
@@ -263,23 +277,30 @@ namespace Emberdelve.Skills
             ISkillBehavior behavior = SkillBehaviorCatalog.Resolve(skill.effect);
             BuildContext(skill);
 
-            int cost = skill.EffectiveManaCost;
-
-            // Spend before the effect runs: a behavior that fails cannot leave a free cast behind, and a
-            // behavior that needs mana has already been told it is available.
-            if (!mana.TrySpend(cost))
+            // The authority decides: it re-checks kit, weapon, cooldown (its own clock), mana and ammo and
+            // spends mana and ammo itself. Nothing is spent here, and the activation id the hits must carry
+            // is the one the authority hands back.
+            if (!authority.TryBeginSkillCast(rig.CombatId, skill.skillId, out int activationId, out string authorityReason))
             {
-                Reject(slot, $"not enough mana (needs {cost})");
+                Reject(slot, authorityReason);
                 return false;
             }
 
+            _context.ActivationId = activationId;
+
             bool performed = behavior.Cast(_context);
+
+            // The authority closes the activation either way and never refunds: mana, ammo and cooldown were
+            // spent when it opened the cast. Feasibility (e.g. a dash needs a controller) is checked in the
+            // behavior's CanCast BEFORE the cast opens, so a behavior failing here is a bug, not a refund.
+            authority.CompleteSkillCast(rig.CombatId, activationId);
 
             if (!performed)
             {
-                // The effect physically could not happen, so the cast is given back. Mana is refunded and
-                // the cooldown never starts.
-                mana.Restore(cost);
+                Debug.LogError($"[SkillCaster] '{skill.skillId}' passed CanCast but its effect did not run; the cast stays spent.", this);
+                _cooldownRemaining[slot] = skill.EffectiveCooldown;
+                _castableCache[slot] = false;
+                _readyCache[slot] = false;
                 Reject(slot, "the cast could not be performed");
                 GameEvents.RaiseSkillState(Snapshot(slot));
                 return false;
@@ -326,6 +347,7 @@ namespace Emberdelve.Skills
         /// <summary>Death clears the kit: cooldowns, temporary statuses and the dash, and mana stops regenerating.</summary>
         public void HandleDeath()
         {
+            KitEpoch++;
             for (int i = 0; i < ActiveSlotCapacity; i++)
             {
                 _cooldownRemaining[i] = 0f;
@@ -346,6 +368,7 @@ namespace Emberdelve.Skills
         /// <summary>Re-enables the kit after a respawn or a fresh run.</summary>
         public void HandleKitRestored()
         {
+            KitEpoch++;
             if (mana != null) mana.SetRegenerationActive(true);
             for (int i = 0; i < ActiveSlotCapacity; i++)
             {
@@ -369,23 +392,17 @@ namespace Emberdelve.Skills
             _context.Skill = skill;
             _context.Stats = _stats;
             _context.SnapshotEffectScale(ResolveEffectScale());
-            _context.ActivationId = CombatRegistry.NextActivationId();
+            _context.ActivationId = 0;
             _context.ResetScratch();
         }
 
         /// <summary>
-        /// The caster's own ability effect scale for the cast about to run (Docs/Design/ATTRIBUTES.md):
-        /// clamp(1 + 0.04 * CHA modifier, 0.6, 1.4), read from the live six-attribute component the rig owns
-        /// and already recalculated for the gear currently worn. It is taken here, once per cast, and nowhere
-        /// else: mana cost, cooldown, target validation and projectile count keep coming from the skill asset
-        /// unchanged, and a caster with no attribute component casts at scale 1 exactly as before.
+        /// The caster's own ability effect scale for the cast about to run (Docs/Design/ATTRIBUTES.md),
+        /// from the one definition on the rig. Used here only for LOCAL movement effects (the dash length);
+        /// statuses and damage use the scale the combat authority reads from the same rig itself, and no
+        /// scale is ever sent to the authority.
         /// </summary>
-        private float ResolveEffectScale()
-        {
-            StatsComponent attributes = rig != null ? rig.AttributeStats : null;
-            if (attributes == null || !attributes.IsReady) return 1f;
-            return attributes.GetAbilityEffectScale();
-        }
+        private float ResolveEffectScale() => rig != null ? rig.AbilityEffectScale : 1f;
 
         private void Reject(int slot, string reason)
         {

@@ -679,6 +679,9 @@ namespace Emberdelve.EditorTools
                 rig.WireRig();
 
                 body.AddComponent<Inventory>();
+                // R1b: the authority reads the magazine through the rig (IAmmoSource -> RangedCombat); a rig with
+                // no ranged component has no ammunition and its ranged attacks are refused.
+                body.AddComponent<RangedCombat>();
                 body.AddComponent<ClassLoadout>();
                 rig.WireRig();
 
@@ -725,6 +728,12 @@ namespace Emberdelve.EditorTools
                 float charge, float maxRange, bool expectAccepted, float expectedDamage, string note)
             {
                 PlaceTarget(rig, distance);
+
+                // R1b: the authority now refuses a ranged attack from an empty magazine. These fixtures test
+                // damage/range/LOS, not ammunition, so a legitimate round is loaded in the weapon in hand
+                // (RangedCombat.RefundAmmo) whenever the magazine is empty. The accepted attacks spend it.
+                RangedCombat ranged = weapon.IsRanged ? rig.GetComponent<RangedCombat>() : null;
+                if (ranged != null && ranged.Magazine < 1) ranged.RefundAmmo(3);
 
                 Vector3 origin = rig.AimOrigin;
                 Vector3 hitPoint = _target.CombatCenter;

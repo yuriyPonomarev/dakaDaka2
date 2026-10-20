@@ -45,8 +45,11 @@ namespace Emberdelve.Combat
     /// sequence from the same per-entity allocator, and can be replayed to a server unchanged.
     ///
     /// It carries no damage number. Damage comes from the skill asset plus the weapon actually held,
-    /// resolved by the authority. The one magnitude it does carry is the caster's bounded ability effect
-    /// scale, which the authority clamps to its legal band before applying it once.
+    /// resolved by the authority. Every other field is a REQUEST: the authority resolves the skill from the
+    /// activation it opened itself, rejects a claimed weapon or range it cannot confirm, and IGNORES
+    /// <see cref="Timestamp"/>, <see cref="TargetStatus"/> and <see cref="EffectScale"/> (cooldown uses the
+    /// authority clock; the status comes from the skill asset; the scale is read from the caster's own stats).
+    /// The fields stay so the data shape is unchanged and so tests can forge them.
     /// </summary>
     public readonly struct SkillIntent
     {
@@ -127,19 +130,58 @@ namespace Emberdelve.Combat
         bool SubmitAttack(AttackIntent intent, HitCandidate hit);
 
         /// <summary>
-        /// Returns true when the authority accepted the skill hit and applied its damage (and, when the
-        /// intent carries one, its status). Skills are validated on their own cooldown clock so a skill
-        /// cast cannot be rejected for breaking a weapon's cooldown, but they share the anti-replay
+        /// Opens a skill activation. This is the ONLY way a skill cast starts, and the authority decides
+        /// everything about it from its own state: the caster must own the skill in its kit, be alive, hold the
+        /// weapon the skill needs, be off cooldown on the authority clock, and be able to pay the mana and the
+        /// ammo, which the authority itself spends from the caster's own components. A cast that is refused
+        /// spends nothing. On success the authority allocates the activation id the cast's hits must carry
+        /// (<see cref="SkillIntent.ActivationId"/>); an id the authority did not hand to that caster for that
+        /// skill, or one past its hit budget or window, is refused by <see cref="SubmitSkill"/>. The caller
+        /// passes a skill id and nothing else: weapon, scale, status specs and costs come from the authority.
+        /// </summary>
+        bool TryBeginSkillCast(int casterCombatId, string skillId, out int activationId, out string reason);
+
+        /// <summary>
+        /// The caster reports that the effect finished. The authority closes the activation (no later hit can
+        /// ride on it) and applies the skill's own self status, taken from the skill asset and scaled by the
+        /// caster's own effect scale, after the hits so a cry does not empower itself. Skipping this call only
+        /// costs the caster its buff; calling it early only closes the activation early.
+        /// </summary>
+        bool CompleteSkillCast(int casterCombatId, int activationId);
+
+        /// <summary>
+        /// Returns true when the authority accepted the skill hit and applied its damage (and the skill's own
+        /// target status). The hit must belong to an open activation of this caster (see
+        /// <see cref="TryBeginSkillCast"/>); the claimed weapon, range, hit point, headshot flag, timestamp,
+        /// effect scale and status are requests that are bounded or ignored. Skills share the anti-replay
         /// sequence with everything else this entity does.
         /// </summary>
         bool SubmitSkill(SkillIntent intent, HitCandidate hit);
+    }
 
-        /// <summary>
-        /// Applies a status to an entity the authority can verify (self, or a hostile entity). Returns
-        /// false when the target is unknown, dead, or not a valid recipient. This is the only route a
-        /// status has into an entity, which keeps self-buffs server-checkable too.
-        /// </summary>
-        bool ApplyStatus(int targetCombatId, int sourceCombatId, StatusSpec spec);
+    /// <summary>
+    /// What the authority reads about a skill caster. Implemented by the entity (the player rig), never
+    /// supplied by a caller: the active kit decides which skills can be cast, the mana pool is the one the
+    /// authority spends from, the effect scale is the caster's own CHA-derived value and the epoch changes
+    /// whenever the kit is re-applied or cleared (class apply, death, respawn) so stale cooldown stamps die
+    /// with it. Local seam only: a server would read the same answers from replicated state.
+    /// </summary>
+    public interface ISkillCasterState
+    {
+        IReadOnlyList<SkillData> ActiveSkills { get; }
+        ManaComponent Mana { get; }
+        float AbilityEffectScale { get; }
+        int KitEpoch { get; }
+    }
+
+    /// <summary>
+    /// The ammunition the AUTHORITY can check and spend for an entity (the player's ranged magazine). An
+    /// instigator that is not an ammo source (an enemy) has no ammunition model and is never ammo gated.
+    /// </summary>
+    public interface IAmmoSource
+    {
+        bool HasAmmo(int count);
+        bool TryConsumeAmmo(int count);
     }
 
     /// <summary>
@@ -169,7 +211,6 @@ namespace Emberdelve.Combat
         private static readonly List<ICombatEntity> _ordered = new List<ICombatEntity>();
         private static readonly Dictionary<int, int> _lastSequence = new Dictionary<int, int>();
         private static int _nextId = 1;
-        private static int _nextActivationId = 1;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatic()
@@ -177,19 +218,10 @@ namespace Emberdelve.Combat
             _entities.Clear();
             _ordered.Clear();
             _lastSequence.Clear();
-            _nextActivationId = 1;
             _nextId = 1;
         }
 
         public static int AllocateId() => _nextId++;
-
-        /// <summary>
-        /// Next skill activation id. One key press is one activation even when its effect resolves as
-        /// several intents - a three arrow volley, or one arrow that pierces two bodies. The authority uses
-        /// it to tell "the rest of this cast" apart from "the player pressed the button again", which is the
-        /// same distinction a server would have to make.
-        /// </summary>
-        public static int NextActivationId() => _nextActivationId++;
 
         /// <summary>
         /// Next command sequence for a combat ENTITY. The sequence belongs to the entity, never to the

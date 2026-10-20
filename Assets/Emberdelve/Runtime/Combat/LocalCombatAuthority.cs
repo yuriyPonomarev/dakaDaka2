@@ -1,7 +1,10 @@
+using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Data;
+
+[assembly: InternalsVisibleTo("Assembly-CSharp-Editor")]
 
 namespace Emberdelve.Combat
 {
@@ -46,11 +49,47 @@ namespace Emberdelve.Combat
 
         private readonly Dictionary<int, float> _lastAttackTime = new Dictionary<int, float>();
         private readonly Dictionary<int, int> _lastSequence = new Dictionary<int, int>();
-        private readonly Dictionary<int, Dictionary<string, float>> _lastSkillTime = new Dictionary<int, Dictionary<string, float>>();
-        private readonly Dictionary<int, Dictionary<string, int>> _lastSkillActivation = new Dictionary<int, Dictionary<string, int>>();
+        [Header("Skill activations")]
+        [Tooltip("How long (authority clock) after a cast opens its hits are still accepted.")]
+        [SerializeField] private float skillActivationWindow = 1.5f;
+
+        /// <summary>
+        /// One open skill cast. Created only by <see cref="TryBeginSkillCast"/>; everything a hit needs
+        /// (skill, weapon, effect scale, hit budget) was resolved by the authority at that moment.
+        /// </summary>
+        private sealed class SkillActivation
+        {
+            public int Id;
+            public int CasterId;
+            public SkillData Skill;
+            public WeaponData Weapon;
+            public float Scale;
+            public float OpenedAt;
+            public int Budget;
+            public int Hits;
+            public readonly HashSet<int> Targets = new HashSet<int>();
+            public bool SelfStatusApplied;
+            public bool Completed;
+        }
+
+        private struct SkillStamp
+        {
+            public float Time;
+            public int Epoch;
+        }
+
+        private readonly Dictionary<int, SkillActivation> _activations = new Dictionary<int, SkillActivation>();
+        private readonly Dictionary<int, Dictionary<string, SkillStamp>> _skillStamps = new Dictionary<int, Dictionary<string, SkillStamp>>();
+        private int _nextActivationId = 1;
 
         /// <summary>Small slack so a locally legal cast is not rejected for float rounding.</summary>
         private const float SkillClockTolerance = 0.05f;
+
+        /// <summary>Reason the most recent skill cast or skill hit was rejected (empty after an accepted one).</summary>
+        public string LastSkillRejectReason { get; private set; } = string.Empty;
+
+        /// <summary>Activations currently open (observability for tools and tests).</summary>
+        public int OpenActivationCount => _activations.Count;
 
         /// <summary>
         /// The authority's own time. Cooldowns are measured on this clock and never on a timestamp carried by
@@ -59,8 +98,14 @@ namespace Emberdelve.Combat
         /// </summary>
         public float Now => _clock != null ? _clock() : Time.time;
 
-        /// <summary>Injects the authority clock (null restores Time.time). Test and replay seam.</summary>
-        public void SetClock(System.Func<float> clock) => _clock = clock;
+        /// <summary>
+        /// Injects the authority clock (null restores Time.time). TEST AND REPLAY SEAM ONLY: it is internal on
+        /// purpose, so gameplay code (Runtime assembly) cannot call it to rewind the cooldown clock; the Editor
+        /// assembly sees it through InternalsVisibleTo. There is no asmdef split, so within Assembly-CSharp any
+        /// runtime class could technically still call it; nothing does, and a grep gate belongs with the U3
+        /// server split.
+        /// </summary>
+        internal void SetClock(System.Func<float> clock) => _clock = clock;
 
         /// <summary>Reason the most recent weapon attack was rejected (empty after an accepted one).</summary>
         public string LastAttackRejectReason { get; private set; } = string.Empty;
@@ -158,42 +203,20 @@ namespace Emberdelve.Combat
 
             // Authoritative reach of the weapon actually held. A claim of more than that is a forgery.
             float reach = weapon.IsRanged ? Mathf.Max(1f, weapon.rangedRange) : weapon.reach + weapon.hitSphereRadius;
-            if (!(intent.MaxRange <= reach + rangeTolerance))
+
+            if (!TryResolveHit(instigator, target, reach, false, intent.MaxRange, intent.Origin, hit.HitPoint, true,
+                    out Vector3 authoritativePoint, out bool headshot, out string geometryReason))
             {
-                return Reject(intent, $"claimed range {intent.MaxRange:F1}m exceeds the weapon's {reach:F1}m", out reason);
+                return Reject(intent, geometryReason, out reason);
             }
+
+            // Ammunition: a ranged attack from an entity that owns a magazine needs a round in it. The
+            // authority reads it through IAmmoSource and spends it itself on an accepted attack (below);
+            // RangedCombat.Fire only spends the rounds of shots the authority did not accept.
+            IAmmoSource ammo = weapon.IsRanged ? instigator as IAmmoSource : null;
+            if (ammo != null && !ammo.HasAmmo(1)) return Reject(intent, "no ammunition in the magazine", out reason);
 
             Vector3 origin = instigator.CombatCenter;
-            if (!(Vector3.Distance(origin, intent.Origin) <= maxOriginOffsetFromInstigator))
-            {
-                return Reject(intent, "attack origin is not attached to the instigator", out reason);
-            }
-
-            Vector3 targetCenter = target.CombatCenter;
-            if (!(Vector3.Distance(hit.HitPoint, targetCenter) <= hitPointTolerance))
-            {
-                return Reject(intent, "claimed hit point is not on the target", out reason);
-            }
-
-            // The point the authority measures with: the claim, pulled inside the target's body sphere.
-            Vector3 authoritativePoint = targetCenter + Vector3.ClampMagnitude(hit.HitPoint - targetCenter, TargetBodyRadius);
-            float distance = Vector3.Distance(origin, authoritativePoint);
-            if (distance > reach + rangeTolerance)
-            {
-                return Reject(intent, $"target at {distance:F1}m, weapon reaches {reach:F1}m", out reason);
-            }
-
-            LayerMask levelMask = config != null ? config.levelMask : Physics.DefaultRaycastLayers;
-            if (!HitScanner.HasLineOfSight(origin, targetCenter, levelMask, 0.35f))
-            {
-                return Reject(intent, "line of sight is blocked", out reason);
-            }
-
-            // Headshot is the authority's reading of the target's own head collider, not the claimed flag.
-            Collider head = target.HeadCollider;
-            bool headshot = head != null && head.enabled
-                            && (head.ClosestPoint(hit.HitPoint) - hit.HitPoint).sqrMagnitude <= HeadSurfaceEpsilon * HeadSurfaceEpsilon;
-
             Vector3 direction = authoritativePoint - origin;
             if (direction.sqrMagnitude < 0.0001f) direction = intent.Direction;
 
@@ -206,6 +229,8 @@ namespace Emberdelve.Combat
             DamageInfo damage = DamageResolver.Resolve(weapon, resolved, resolvedHit, target,
                 OutgoingMultiplier(instigator, weapon), FlatWeaponBonus(instigator, weapon));
             if (!damage.IsValid) return Reject(intent, "resolver produced no damage", out reason);
+
+            if (ammo != null && !ammo.TryConsumeAmmo(1)) return Reject(intent, "no ammunition in the magazine", out reason);
 
             // Only an accepted attack spends the cooldown.
             _lastAttackTime[intent.InstigatorCombatId] = now;
@@ -223,94 +248,305 @@ namespace Emberdelve.Combat
             return true;
         }
 
-        public bool SubmitSkill(SkillIntent intent, HitCandidate hit)
+        /// <summary>
+        /// The geometry rules shared by weapon attacks and skill hits (R1a, reused unchanged for skills):
+        /// a claimed range above the authoritative reach is a forgery; the claimed origin must be attached to
+        /// the instigator; the claimed hit point must lie on the target and is then pulled inside the target's
+        /// body sphere, so it can never shorten the measured distance by more than the body radius; distance is
+        /// measured from the instigator's own centre; line of sight is checked between the entity centres; and
+        /// a headshot is the target's own head collider at the claimed point, never the claimed flag, and only
+        /// where the attack can headshot at all.
+        /// </summary>
+        private bool TryResolveHit(ICombatEntity instigator, ICombatEntity target, float reach, bool isSkill,
+            float claimedMaxRange, Vector3 claimedOrigin, Vector3 claimedPoint, bool allowHeadshot,
+            out Vector3 authoritativePoint, out bool headshot, out string reason)
         {
-            if (intent.Skill == null) return RejectSkill(intent, "skill data missing");
-            if (!CombatRegistry.TryGet(intent.InstigatorCombatId, out ICombatEntity instigator)) return RejectSkill(intent, "unknown instigator id");
-            if (instigator.IsDead) return RejectSkill(intent, "instigator is dead");
-            if (!CombatRegistry.TryGet(hit.TargetCombatId, out ICombatEntity target)) return RejectSkill(intent, "unknown target id");
-            if (target.IsDead) return false;
-            if (target == instigator) return RejectSkill(intent, "self hit");
-            if (!CombatTeams.AreHostile(instigator, target)) return RejectSkill(intent, "target is not hostile to the instigator");
+            authoritativePoint = default;
+            headshot = false;
+            reason = string.Empty;
+            string noun = isSkill ? "skill" : "weapon";
+
+            if (!(claimedMaxRange <= reach + rangeTolerance))
+            {
+                reason = $"claimed range {claimedMaxRange:F1}m exceeds the {noun}'s {reach:F1}m";
+                return false;
+            }
+
+            Vector3 origin = instigator.CombatCenter;
+            if (!(Vector3.Distance(origin, claimedOrigin) <= maxOriginOffsetFromInstigator))
+            {
+                reason = isSkill ? "skill origin is not attached to the instigator" : "attack origin is not attached to the instigator";
+                return false;
+            }
+
+            Vector3 targetCenter = target.CombatCenter;
+            if (!(Vector3.Distance(claimedPoint, targetCenter) <= hitPointTolerance))
+            {
+                reason = "claimed hit point is not on the target";
+                return false;
+            }
+
+            // The point the authority measures with: the claim, pulled inside the target's body sphere.
+            authoritativePoint = targetCenter + Vector3.ClampMagnitude(claimedPoint - targetCenter, TargetBodyRadius);
+            float distance = Vector3.Distance(origin, authoritativePoint);
+            if (distance > reach + rangeTolerance)
+            {
+                reason = $"target at {distance:F1}m, {noun} reaches {reach:F1}m";
+                return false;
+            }
+
+            LayerMask levelMask = config != null ? config.levelMask : Physics.DefaultRaycastLayers;
+            if (!HitScanner.HasLineOfSight(origin, targetCenter, levelMask, 0.35f))
+            {
+                reason = "line of sight is blocked";
+                return false;
+            }
+
+            Collider head = target.HeadCollider;
+            headshot = allowHeadshot && head != null && head.enabled
+                       && (head.ClosestPoint(claimedPoint) - claimedPoint).sqrMagnitude <= HeadSurfaceEpsilon * HeadSurfaceEpsilon;
+            return true;
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // Skills
+        // ------------------------------------------------------------------------------------------------
+
+        public bool TryBeginSkillCast(int casterCombatId, string skillId, out int activationId, out string reason)
+        {
+            activationId = 0;
+            reason = string.Empty;
+            LastSkillRejectReason = string.Empty;
+            PurgeExpiredActivations();
+
+            if (!CombatRegistry.TryGet(casterCombatId, out ICombatEntity caster)) return RejectCast(casterCombatId, skillId, "unknown instigator id", out reason);
+            if (caster.IsDead) return RejectCast(casterCombatId, skillId, "instigator is dead", out reason);
+            if (!(caster is ISkillCasterState state)) return RejectCast(casterCombatId, skillId, "instigator has no skill kit", out reason);
+            if (!(caster is IActiveWeaponProvider holder)) return RejectCast(casterCombatId, skillId, "instigator has no authoritative weapon", out reason);
+            if (string.IsNullOrEmpty(skillId)) return RejectCast(casterCombatId, skillId, "skill id missing", out reason);
+
+            // The skill is resolved from the caster's own kit. A skill that is not one of its active skills
+            // (unknown, foreign, a passive, a different class's) cannot be cast, whatever the caller holds.
+            SkillData skill = null;
+            IReadOnlyList<SkillData> kit = state.ActiveSkills;
+            if (kit != null)
+            {
+                for (int i = 0; i < kit.Count; i++)
+                {
+                    SkillData candidate = kit[i];
+                    if (candidate != null && candidate.IsActive && candidate.skillId == skillId)
+                    {
+                        skill = candidate;
+                        break;
+                    }
+                }
+            }
+            if (skill == null) return RejectCast(casterCombatId, skillId, $"skill '{skillId}' is not in the caster's kit", out reason);
+
+            // Weapon requirement against the weapon the authority knows is in hand.
+            WeaponData weapon = holder.ActiveWeapon;
+            if ((skill.requiresRangedWeapon || skill.IsProjectileSkill) && (weapon == null || !weapon.IsRanged))
+            {
+                return RejectCast(casterCombatId, skillId, "needs a ranged weapon in hand", out reason);
+            }
+            if (skill.requiresMeleeWeapon && (weapon == null || weapon.IsRanged))
+            {
+                return RejectCast(casterCombatId, skillId, "needs a melee weapon in hand", out reason);
+            }
+            if (!skill.UsesFlatDamage && skill.HitBudget > 0 && weapon == null)
+            {
+                return RejectCast(casterCombatId, skillId, "needs a weapon in hand", out reason);
+            }
+
+            // Cooldown on the authority clock. A stamp from an older kit epoch (a death, a respawn, a new
+            // class application) no longer counts, exactly like the caster's own cleared cooldowns.
+            float now = Now;
+            float cooldown = skill.EffectiveCooldown;
+            Dictionary<string, SkillStamp> stamps = SkillStampsFor(casterCombatId);
+            bool hadStamp = stamps.TryGetValue(skillId, out SkillStamp previous);
+            if (hadStamp && previous.Epoch == state.KitEpoch && cooldown > 0f && now - previous.Time < cooldown - SkillClockTolerance)
+            {
+                return RejectCast(casterCombatId, skillId, $"{skillId} cast faster than its {cooldown:F1}s cooldown", out reason);
+            }
+
+            // Mana and ammo are validated against the caster's own components, then spent here.
+            int manaCost = skill.EffectiveManaCost;
+            ManaComponent mana = state.Mana;
+            if (manaCost > 0)
+            {
+                if (mana == null) return RejectCast(casterCombatId, skillId, "no mana pool", out reason);
+                if (!mana.HasAmount(manaCost)) return RejectCast(casterCombatId, skillId, $"not enough mana (needs {manaCost})", out reason);
+            }
+
+            int ammoNeeded = skill.AmmoPerCast;
+            IAmmoSource ammo = caster as IAmmoSource;
+            if (ammoNeeded > 0 && (ammo == null || !ammo.HasAmmo(ammoNeeded)))
+            {
+                return RejectCast(casterCombatId, skillId, $"not enough ammunition (needs {ammoNeeded})", out reason);
+            }
+
+            if (manaCost > 0 && !mana.TrySpend(manaCost)) return RejectCast(casterCombatId, skillId, $"not enough mana (needs {manaCost})", out reason);
+            if (ammoNeeded > 0 && !ammo.TryConsumeAmmo(ammoNeeded))
+            {
+                if (manaCost > 0) mana.Restore(manaCost);
+                return RejectCast(casterCombatId, skillId, $"not enough ammunition (needs {ammoNeeded})", out reason);
+            }
+
+            // The effect scale is the caster's own, read here once per cast and kept with the activation.
+            float scale = DamageResolver.ClampEffectScale(state.AbilityEffectScale);
+
+            SkillActivation activation = new SkillActivation
+            {
+                Id = _nextActivationId++,
+                CasterId = casterCombatId,
+                Skill = skill,
+                Weapon = weapon,
+                Scale = scale,
+                OpenedAt = now,
+                Budget = skill.HitBudget,
+            };
+            _activations[activation.Id] = activation;
+            stamps[skillId] = new SkillStamp { Time = now, Epoch = state.KitEpoch };
+
+            activationId = activation.Id;
+            return true;
+        }
+
+        public bool CompleteSkillCast(int casterCombatId, int activationId)
+        {
+            if (!_activations.TryGetValue(activationId, out SkillActivation activation)) return false;
+            if (activation.CasterId != casterCombatId || activation.Completed) return false;
+            if (!CombatRegistry.TryGet(casterCombatId, out ICombatEntity caster) || caster.IsDead) return false;
+
+            // Closed: no further hit can ride on this activation.
+            activation.Completed = true;
+
+            // The self buff comes from the skill asset, scaled by the caster's own effect scale (the one read
+            // when the cast opened). It lands even when the burst hit nothing, and it lands AFTER the hits,
+            // so a cry does not empower its own damage - the same order the behavior always had.
+            SkillData skill = activation.Skill;
+            if (skill.affectsSelf && caster is IStatusTarget self)
+            {
+                StatusSpec selfStatus = ScaleStatus(skill.SelfStatusSpec, activation.Scale);
+                if (!selfStatus.IsNone)
+                {
+                    self.ApplyStatus(selfStatus, casterCombatId);
+                    activation.SelfStatusApplied = true;
+                }
+            }
+
+            return true;
+        }
+
+        public bool SubmitSkill(SkillIntent intent, HitCandidate hit) => SubmitSkill(intent, hit, out _);
+
+        /// <summary>
+        /// A skill hit. The intent is a REQUEST for one hit of an activation this authority opened
+        /// (<see cref="TryBeginSkillCast"/>): the skill, weapon, effect scale and hit budget are the
+        /// activation's, not the intent's. A claimed weapon or skill that differs is rejected, a claimed range
+        /// beyond the skill's authoritative reach is rejected, the hit point/headshot/range rules are the same
+        /// as for weapon attacks (<see cref="TryResolveHit"/>), and Timestamp, TargetStatus and EffectScale are
+        /// ignored. The cooldown was stamped when the cast opened, on the authority clock.
+        /// </summary>
+        public bool SubmitSkill(SkillIntent intent, HitCandidate hit, out string reason)
+        {
+            reason = string.Empty;
+            LastSkillRejectReason = string.Empty;
+
+            if (!CombatRegistry.TryGet(intent.InstigatorCombatId, out ICombatEntity instigator)) return RejectSkill(intent, "unknown instigator id", out reason);
+            if (instigator.IsDead) return RejectSkill(intent, "instigator is dead", out reason);
+            if (!(instigator is IActiveWeaponProvider holder)) return RejectSkill(intent, "instigator has no authoritative weapon", out reason);
+            if (!CombatRegistry.TryGet(hit.TargetCombatId, out ICombatEntity target)) return RejectSkill(intent, "unknown target id", out reason);
+            if (target.IsDead)
+            {
+                reason = "target is dead";
+                LastSkillRejectReason = reason;
+                return false;
+            }
+            if (target == instigator) return RejectSkill(intent, "self hit", out reason);
+            if (!CombatTeams.AreHostile(instigator, target)) return RejectSkill(intent, "target is not hostile to the instigator", out reason);
+
+            // The activation is the authority's own record. An id it did not hand to this entity is a forgery.
+            if (intent.ActivationId <= 0 || !_activations.TryGetValue(intent.ActivationId, out SkillActivation activation))
+            {
+                return RejectSkill(intent, $"no open activation {intent.ActivationId}", out reason);
+            }
+            if (activation.CasterId != instigator.CombatId) return RejectSkill(intent, "activation belongs to another entity", out reason);
+
+            float now = Now;
+            if (now - activation.OpenedAt > skillActivationWindow)
+            {
+                _activations.Remove(activation.Id);
+                return RejectSkill(intent, "activation window expired", out reason);
+            }
+            if (intent.SkillId != activation.Skill.skillId || (intent.Skill != null && intent.Skill != activation.Skill))
+            {
+                return RejectSkill(intent, $"claimed skill '{intent.SkillId}' is not the skill activation {activation.Id} was opened for ('{activation.Skill.skillId}')", out reason);
+            }
+            if (activation.Completed) return RejectSkill(intent, $"activation {activation.Id} is closed (the cast finished)", out reason);
+            if (activation.Hits >= activation.Budget)
+            {
+                return RejectSkill(intent, $"activation {activation.Id} is past its hit budget ({activation.Budget})", out reason);
+            }
+            if (activation.Targets.Contains(target.CombatId)) return RejectSkill(intent, "target already hit by this activation", out reason);
 
             // Skills share the entity-wide sequence with weapon attacks, so one entity cannot get two
             // different command streams that a server would have to reconcile.
             if (_lastSequence.TryGetValue(intent.InstigatorCombatId, out int lastSequence) && intent.Sequence <= lastSequence)
             {
-                return RejectSkill(intent, "stale or repeated command sequence");
+                return RejectSkill(intent, "stale or repeated command sequence", out reason);
             }
             _lastSequence[intent.InstigatorCombatId] = intent.Sequence;
 
-            // A skill is validated against its own cooldown, not against the weapon cooldown clock, so a
-            // Warrior may battle cry one frame after a sword swing without that being spam.
-            //
-            // One activation can legitimately submit several intents - a three arrow volley, or one arrow
-            // that pierces two bodies - so the cooldown rule is applied per activation id, not per intent.
-            // A genuinely repeated cast carries a new activation id and is still refused.
-            Dictionary<string, int> activations = SkillActivationFor(intent.InstigatorCombatId);
-            bool sameActivation = intent.ActivationId > 0
-                                  && activations.TryGetValue(intent.SkillId, out int lastActivation)
-                                  && lastActivation == intent.ActivationId;
-
-            if (!sameActivation)
+            WeaponData weapon = activation.Weapon;
+            if (holder.ActiveWeapon != weapon) return RejectSkill(intent, "the equipped weapon changed since the cast opened", out reason);
+            if (intent.Weapon != weapon)
             {
-                float cooldown = intent.Skill.EffectiveCooldown;
-                Dictionary<string, float> clock = SkillClockFor(intent.InstigatorCombatId);
-                bool hasCastBefore = clock.TryGetValue(intent.SkillId, out float lastCast);
-
-                if (hasCastBefore && cooldown > 0f && intent.Timestamp - lastCast < cooldown - SkillClockTolerance)
-                {
-                    return RejectSkill(intent, $"{intent.SkillId} cast faster than its {cooldown:F1}s cooldown");
-                }
+                string claimed = intent.Weapon != null ? intent.Weapon.weaponId : "none";
+                string held = weapon != null ? weapon.weaponId : "none";
+                return RejectSkill(intent, $"claimed weapon '{claimed}' is not the equipped weapon '{held}'", out reason);
             }
 
-            // The cooldown clock is only stamped once a hit of this activation is accepted, so a shot that
-            // failed on range or line of sight cannot spend the skill's cooldown.
-            bool startsCooldown = !sameActivation;
+            SkillData skill = activation.Skill;
+            float reach = skill.IsProjectileSkill ? Mathf.Max(1f, weapon.rangedRange) : skill.radius;
 
-            if (Vector3.Distance(instigator.CombatCenter, intent.Origin) > maxOriginOffsetFromInstigator)
+            if (!TryResolveHit(instigator, target, reach, true, intent.MaxRange, intent.Origin, hit.HitPoint,
+                    skill.IsProjectileSkill, out Vector3 authoritativePoint, out bool headshot, out string geometryReason))
             {
-                return RejectSkill(intent, "skill origin is not attached to the instigator");
+                return RejectSkill(intent, geometryReason, out reason);
             }
 
-            float distance = Vector3.Distance(intent.Origin, hit.HitPoint);
-            if (distance > intent.MaxRange + rangeTolerance)
-            {
-                return RejectSkill(intent, $"skill hit claimed at {distance:F1}m, {intent.SkillId} reaches {intent.MaxRange:F1}m");
-            }
+            Vector3 origin = instigator.CombatCenter;
+            Vector3 direction = authoritativePoint - origin;
+            if (direction.sqrMagnitude < 0.0001f) direction = intent.Direction;
 
-            LayerMask levelMask = config != null ? config.levelMask : Physics.DefaultRaycastLayers;
-            if (!HitScanner.HasLineOfSight(intent.Origin, target.CombatCenter, levelMask, 0.35f))
-            {
-                return RejectSkill(intent, "line of sight is blocked");
-            }
+            // CHA scale: the caster's own value from the activation. A skill with its own flat number keeps it
+            // (the cry's CHA term lives in its two statuses, ScaleStatus), a weapon-based skill is scaled once.
+            float damageScale = skill.UsesFlatDamage ? 1f : activation.Scale;
 
-            // The instigator's multipliers are read from the instigator; the ability scale is the bounded
-            // per-activation value this cast carried; the flat weapon-base bonus is read from the instigator
-            // on its own channel and only reaches a skill that scales the weapon held (DamageResolver applies
-            // each of them exactly once, and a skill with its own flat damage gets no weapon bonus at all).
-            DamageInfo damage = DamageResolver.ResolveSkill(intent, hit, target,
-                OutgoingMultiplier(instigator, intent.Weapon), intent.EffectScale,
-                FlatWeaponBonus(instigator, intent.Weapon));
-            if (!damage.IsValid) return RejectSkill(intent, "resolver produced no damage");
+            SkillIntent resolved = new SkillIntent(instigator.CombatId, instigator.Kind, skill, weapon, origin, direction,
+                reach, intent.Sequence, now, default, activation.Id, damageScale);
+            HitCandidate resolvedHit = new HitCandidate(target.CombatId, authoritativePoint, headshot);
+
+            // The instigator's multipliers and the flat weapon-base bonus are read from the instigator.
+            DamageInfo damage = DamageResolver.ResolveSkill(resolved, resolvedHit, target,
+                OutgoingMultiplier(instigator, weapon), damageScale, FlatWeaponBonus(instigator, weapon));
+            if (!damage.IsValid) return RejectSkill(intent, "resolver produced no damage", out reason);
+
+            activation.Hits++;
+            activation.Targets.Add(target.CombatId);
 
             target.ApplyDamage(damage);
 
-            if (startsCooldown)
+            StatusSpec targetStatus = ScaleStatus(skill.TargetStatusSpec, activation.Scale);
+            if (!targetStatus.IsNone && target is IStatusTarget statusTarget)
             {
-                Dictionary<string, float> acceptedClock = SkillClockFor(intent.InstigatorCombatId);
-                acceptedClock[intent.SkillId] = intent.Timestamp;
-                if (intent.ActivationId > 0) activations[intent.SkillId] = intent.ActivationId;
-            }
-
-            if (!intent.TargetStatus.IsNone && target is IStatusTarget statusTarget)
-            {
-                statusTarget.ApplyStatus(intent.TargetStatus, intent.InstigatorCombatId);
+                statusTarget.ApplyStatus(targetStatus, intent.InstigatorCombatId);
             }
 
             AcceptedCount++;
 
-            HitFeedback feedback = new HitFeedback(hit.HitPoint, damage.Amount, damage.Blocked, damage.Headshot,
+            HitFeedback feedback = new HitFeedback(authoritativePoint, damage.Amount, damage.Blocked, damage.Headshot,
                 target.IsDead, target.Kind);
 
             if (instigator.Kind == EntityKind.LocalPlayer) GameEvents.RaiseDamageDealt(feedback);
@@ -319,43 +555,48 @@ namespace Emberdelve.Combat
             return true;
         }
 
-        public bool ApplyStatus(int targetCombatId, int sourceCombatId, StatusSpec spec)
+        /// <summary>
+        /// CHA scales a status's duration and the DELTA its magnitude means from neutral 1, never the
+        /// authored magnitude wholesale: a 1.25 buff becomes 1 + 0.25 * scale and a 0.55 slow becomes
+        /// 1 - 0.45 * scale. The scale is the caster's own (already clamped to 0.6..1.4), StatusSpec clamps
+        /// duration and magnitude to non-negative, and StatusComponent still clamps the multipliers those
+        /// magnitudes become, so no bound is bypassed and the shared skill asset is only ever read.
+        /// </summary>
+        public static StatusSpec ScaleStatus(StatusSpec spec, float scale)
         {
-            if (spec.IsNone) return false;
-            if (!CombatRegistry.TryGet(targetCombatId, out ICombatEntity target)) return false;
-            if (target.IsDead) return false;
-            if (!(target is IStatusTarget statusTarget)) return false;
+            if (spec.IsNone) return StatusSpec.None;
 
-            bool isSelf = targetCombatId == sourceCombatId;
-            if (!isSelf)
-            {
-                if (!CombatRegistry.TryGet(sourceCombatId, out ICombatEntity source)) return false;
-                if (!CombatTeams.AreHostile(source, target)) return false;
-            }
-
-            statusTarget.ApplyStatus(spec, sourceCombatId);
-            return true;
+            return new StatusSpec(spec.Kind, spec.Duration * scale, 1f + (spec.Magnitude - 1f) * scale);
         }
 
-        private Dictionary<string, int> SkillActivationFor(int combatId)
+        private void PurgeExpiredActivations()
         {
-            if (!_lastSkillActivation.TryGetValue(combatId, out Dictionary<string, int> activations))
+            if (_activations.Count == 0) return;
+
+            float now = Now;
+            List<int> expired = null;
+            foreach (KeyValuePair<int, SkillActivation> pair in _activations)
             {
-                activations = new Dictionary<string, int>();
-                _lastSkillActivation[combatId] = activations;
+                if (now - pair.Value.OpenedAt > skillActivationWindow + 5f)
+                {
+                    if (expired == null) expired = new List<int>();
+                    expired.Add(pair.Key);
+                }
             }
-            return activations;
+
+            if (expired != null) for (int i = 0; i < expired.Count; i++) _activations.Remove(expired[i]);
         }
 
-        private Dictionary<string, float> SkillClockFor(int combatId)
+        private Dictionary<string, SkillStamp> SkillStampsFor(int combatId)
         {
-            if (!_lastSkillTime.TryGetValue(combatId, out Dictionary<string, float> clock))
+            if (!_skillStamps.TryGetValue(combatId, out Dictionary<string, SkillStamp> stamps))
             {
-                clock = new Dictionary<string, float>();
-                _lastSkillTime[combatId] = clock;
+                stamps = new Dictionary<string, SkillStamp>();
+                _skillStamps[combatId] = stamps;
             }
-            return clock;
+            return stamps;
         }
+
 
         /// <summary>
         /// Read from the instigator, never from the caller: passives and temporary buffs belong to the
@@ -385,8 +626,22 @@ namespace Emberdelve.Combat
             return 0f;
         }
 
-        private bool RejectSkill(SkillIntent intent, string reason)
+        private bool RejectCast(int casterId, string skillId, string reason, out string reasonOut)
         {
+            reasonOut = reason;
+            LastSkillRejectReason = reason;
+            RejectedCount++;
+            if (logRejections)
+            {
+                Debug.Log($"[CombatAuthority] Rejected skill cast '{skillId}' from #{casterId}: {reason}", this);
+            }
+            return false;
+        }
+
+        private bool RejectSkill(SkillIntent intent, string reason, out string reasonOut)
+        {
+            reasonOut = reason;
+            LastSkillRejectReason = reason;
             RejectedCount++;
             if (logRejections)
             {

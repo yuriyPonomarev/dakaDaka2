@@ -85,15 +85,12 @@ namespace Emberdelve.Skills
                 if (context.AlreadyHit.Contains(hit.TargetCombatId)) continue;
 
                 int sequence = CombatRegistry.NextSequence(context.Rig.CombatId);
-
-                // The cast's CHA snapshot travels with the command, so every arrow of one volley and every
-                // body one piercing shot passes through resolves on the same scale, and the authority - not
-                // this behavior - is the one that multiplies anything by it, exactly once per accepted hit.
-                // Range, spread, projectile count, charge and distance falloff are the weapon's own numbers
+                // The intent names the activation the authority opened and nothing it could be trusted for:
+                // the authority reads the CHA scale from the caster itself and applies it exactly once per
+                // accepted hit. Range, spread, projectile count, charge and distance falloff are the weapon's
                 // and are deliberately not scaled here or anywhere else in this path.
                 SkillIntent intent = new SkillIntent(context.Rig.CombatId, context.Rig.Kind, skill, weapon,
-                    origin, aim, range, sequence, Time.time, skill.TargetStatusSpec, context.ActivationId,
-                    context.EffectScale);
+                    origin, aim, range, sequence, Time.time, default, context.ActivationId);
 
                 if (context.Authority.SubmitSkill(intent, hit))
                 {

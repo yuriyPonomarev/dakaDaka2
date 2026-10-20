@@ -18,7 +18,7 @@ namespace Emberdelve.Skills
     {
         public bool CanCast(SkillContext context, out string reason)
         {
-            if (context.Rig == null || context.Rig.Movement == null)
+            if (context.Rig == null || context.Rig.Movement == null || !context.Rig.Movement.CanDash)
             {
                 reason = "no movement component";
                 return false;

@@ -409,7 +409,7 @@ namespace Emberdelve.EditorTools
                 {
                     Debug.Log($"[Emberdelve][Smoke:{Mode}] swing target #{enemy.CombatId} died to the real swing; validation tests need a live target");
                     enemy = PickAliveEnemy();
-                    Check(enemy != null, "a live enemy is available for the authority validation tests");
+                    if (enemy == null) Check(false, "a live enemy is available for the authority validation tests");
                     if (enemy == null) yield break;
 
                     if (!TryPlaceEnemyBesideSpawn(enemy, _rig.transform.position, 1, DominantAxis(_rig.transform.forward), out enemySpot))
@@ -4237,21 +4237,30 @@ namespace Emberdelve.EditorTools
                           pierceCooldownReason != null && pierceCooldownReason.ToLower().Contains("cooldown"),
                           $"the refusal names the cooldown ({pierceCooldownReason})");
 
-                    if (lineA != null && !lineA.IsDead && _authority != null)
+                    // M2 (R1b review): this block used lineA, which the Piercing Shot above kills, so it never ran. lineC
+                    // is never hit by that shot (the target cap is 2), so it is alive and the checks really execute.
+                    if (lineC != null && !lineC.IsDead && _authority != null)
                     {
                         Vector3 muzzle = _rig.GetMuzzlePosition();
-                        Vector3 toward = lineA.CombatCenter - muzzle;
+                        Vector3 toward = lineC.CombatCenter - muzzle;
                         if (toward.sqrMagnitude > 0.0001f)
                         {
                             int forgedSequence = CombatRegistry.NextSequence(_rig.CombatId);
                             SkillIntent forged = new SkillIntent(_rig.CombatId, EntityKind.LocalPlayer, pierce, bow,
                                 muzzle, toward.normalized, Mathf.Max(1f, bow.rangedRange), forgedSequence, Time.time,
-                                pierce.TargetStatusSpec, CombatRegistry.NextActivationId());
+                                pierce.TargetStatusSpec, 987654321);
 
                             int acceptedBeforeForged = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
-                            bool forgedAccepted = _authority.SubmitSkill(forged, new HitCandidate(lineA.CombatId, lineA.CombatCenter, false));
+                            bool forgedAccepted = _authority.SubmitSkill(forged, new HitCandidate(lineC.CombatId, lineC.CombatCenter, false));
 
-                            Check(!forgedAccepted, "the authority refuses a new activation of the same skill while its cooldown runs");
+                            // R1b: the old fixture minted a fresh activation id client side (CombatRegistry.NextActivationId)
+                            // and expected the cooldown to refuse it. Ids are now allocated by the authority, so the two
+                            // halves of that claim are asserted separately: an id the authority never issued carries no
+                            // hit, and a genuine new cast request (TryBeginSkillCast) is refused by the cooldown.
+                            Check(!forgedAccepted, "the authority refuses a hit that carries an activation id it never issued");
+                            bool beginAgain = _authority.TryBeginSkillCast(_rig.CombatId, pierce.skillId, out int _, out string beginReason);
+                            Check(!beginAgain && beginReason != null && beginReason.ToLower().Contains("cooldown"),
+                                $"the authority refuses a new activation of the same skill while its cooldown runs ({beginReason})");
                             Check(_localAuthority != null && _localAuthority.AcceptedCount == acceptedBeforeForged,
                                 "the refused activation added no accepted hit");
                         }
@@ -4991,7 +5000,7 @@ namespace Emberdelve.EditorTools
                 if (_localAuthority == null || weapon == null) yield break;
                 yield return WaitUntil(() => _localAuthority.WeaponCooldownRemaining(combatId, weapon) <= 0f,
                     Mathf.Max(0.1f, weapon.cooldown) * 2f + 1f);
-                Check(_localAuthority.WeaponCooldownRemaining(combatId, weapon) <= 0f,
+                if (_localAuthority.WeaponCooldownRemaining(combatId, weapon) > 0f) Check(false,
                     $"the authority weapon cooldown for #{combatId} cleared in real time");
             }
 

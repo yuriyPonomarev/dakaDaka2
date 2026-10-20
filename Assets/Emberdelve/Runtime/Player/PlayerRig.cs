@@ -20,7 +20,7 @@ namespace Emberdelve.Player
     [RequireComponent(typeof(PlayerMovement))]
     [RequireComponent(typeof(PlayerLook))]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider
+    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, ISkillCasterState, IAmmoSource
     {
         [Header("Components")]
         [SerializeField] private EmberdelveInput input;
@@ -60,6 +60,27 @@ namespace Emberdelve.Player
 
         /// <summary>The weapon the loadout actually has in hand; the combat authority resolves attacks against this.</summary>
         public WeaponData ActiveWeapon => loadout != null ? loadout.ActiveWeapon : null;
+
+        // ---- what the combat authority reads about this caster (ISkillCasterState / IAmmoSource) ----
+
+        IReadOnlyList<SkillData> ISkillCasterState.ActiveSkills => skills != null ? skills.ActiveSkills : null;
+        ManaComponent ISkillCasterState.Mana => mana;
+        int ISkillCasterState.KitEpoch => skills != null ? skills.KitEpoch : 0;
+        float ISkillCasterState.AbilityEffectScale => AbilityEffectScale;
+
+        /// <summary>
+        /// The caster's own ability effect scale (Docs/Design/ATTRIBUTES.md): clamp(1 + 0.04 * CHA modifier,
+        /// 0.6, 1.4) from the live attribute component, 1 when the rig has none. The only definition: the
+        /// authority reads it for statuses and damage, and the skill kit reads it for local movement effects.
+        /// </summary>
+        public float AbilityEffectScale =>
+            _attributeStats != null && _attributeStats.IsReady ? _attributeStats.GetAbilityEffectScale() : 1f;
+
+        private RangedCombat _ranged;
+        private RangedCombat Ranged => _ranged != null ? _ranged : (_ranged = GetComponent<RangedCombat>());
+
+        bool IAmmoSource.HasAmmo(int count) => Ranged != null && Ranged.HasAmmo(count);
+        bool IAmmoSource.TryConsumeAmmo(int count) => Ranged != null && Ranged.TryConsumeAmmo(count);
 
         public bool IsDead => health != null && health.IsDead;
         public float CurrentHealth => health != null ? health.CurrentHealth : 0f;
