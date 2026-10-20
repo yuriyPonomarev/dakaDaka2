@@ -1,4 +1,5 @@
 using UnityEngine;
+using Emberdelve.Combat;
 using Emberdelve.Core;
 using Emberdelve.InputLayer;
 using Emberdelve.Player;
@@ -25,6 +26,7 @@ namespace Emberdelve.Interaction
         private MonoBehaviour _currentHost;
         private float _holdProgress;
         private string _lastPrompt = string.Empty;
+        private HealthComponent _health;
 
         public IInteractable CurrentTarget => _current;
         public float HoldProgress => _holdProgress;
@@ -73,7 +75,17 @@ namespace Emberdelve.Interaction
                     {
                         _holdProgress = 0f;
                         GameEvents.RaiseInteractionHold(0f);
-                        _current.OnHoldComplete();
+
+                        // The target may have become invalid during the hold (rule changed, run ended):
+                        // ask again instead of trusting the answer from when the hold began.
+                        if (_current.CanInteract(out string blockedReason))
+                        {
+                            _current.OnHoldComplete();
+                        }
+                        else
+                        {
+                            GameEvents.RaiseToast(string.IsNullOrEmpty(blockedReason) ? "Cannot interact" : blockedReason);
+                        }
                     }
                 }
                 else if (_holdProgress > 0f)
@@ -159,8 +171,24 @@ namespace Emberdelve.Interaction
             }
         }
 
+        private void OnEnable()
+        {
+            _health = GetComponent<HealthComponent>();
+            if (_health != null) _health.Damaged += OnDamaged;
+        }
+
+        // Any damage event interrupts a hold in progress: the player has to start over.
+        private void OnDamaged(DamageInfo info)
+        {
+            if (_holdProgress <= 0f) return;
+            _holdProgress = 0f;
+            GameEvents.RaiseInteractionHold(0f);
+        }
+
         private void OnDisable()
         {
+            if (_health != null) _health.Damaged -= OnDamaged;
+            _health = null;
             ClearTarget();
         }
     }

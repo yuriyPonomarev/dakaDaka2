@@ -51,7 +51,15 @@ namespace Emberdelve.InputLayer
         public bool SecondaryHeld => _secondary != null && _secondary.IsPressed();
         public bool SecondaryPressed => _secondary != null && _secondary.WasPressedThisFrame();
         public bool InteractPressed => _interact != null && _interact.WasPressedThisFrame();
-        public bool InteractHeld => _interact != null && _interact.IsPressed();
+        /// <summary>
+        /// Test seam for batch-mode harnesses that have no input device: when set, it replaces the real
+        /// interact-held reading, but still respects disabled gameplay input. Null (the default) means the real action is read. Never set in game code.
+        /// </summary>
+        public bool? InteractHeldOverride { get; set; }
+
+        public bool InteractHeld => InteractHeldOverride.HasValue
+            ? InteractHeldOverride.Value && _playerMap != null && _playerMap.enabled
+            : _interact != null && _interact.IsPressed();
         public bool ReloadPressed => _reload != null && _reload.WasPressedThisFrame();
         public bool SwapPressed => _swap != null && _swap.WasPressedThisFrame();
         public bool Skill1Pressed => _skill1 != null && _skill1.WasPressedThisFrame();

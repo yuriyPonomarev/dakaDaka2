@@ -12,6 +12,7 @@ using Emberdelve.Combat;
 using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.Flow;
+using Emberdelve.InputLayer;
 using Emberdelve.Interaction;
 using Emberdelve.Items;
 using Emberdelve.Level;
@@ -976,12 +977,8 @@ namespace Emberdelve.EditorTools
                 ExtractionPoint gate = FindFirstObjectByType<ExtractionPoint>();
                 Check(gate != null, "extraction point present in the level");
 
-                if (_director.LootValue <= 0)
-                {
-                    LootPickup loot = FindFirstObjectByType<LootPickup>();
-                    if (loot != null) loot.OnInteractInstant();
-                }
-                Check(_director.LootValue > 0, "loot requirement satisfied before extraction");
+                bool startedEmpty = _director.LootValue <= 0;
+                Check(startedEmpty, $"run starts with no recovered loot (value {_director.LootValue})");
 
                 if (gate != null && _layout != null)
                 {
@@ -995,9 +992,103 @@ namespace Emberdelve.EditorTools
                         "interactor targets the ember gate when standing on it");
 
                     Check(gate.RequiresHold && gate.HoldDuration > 0f, $"gate requires a {gate.HoldDuration:F1}s hold");
-                    Check(gate.CanInteract(out string reason), $"gate accepts interaction ({reason ?? "ok"})");
 
-                    gate.OnHoldComplete();
+                    Check(!gate.CanInteract(out string emptyReason) && !string.IsNullOrEmpty(emptyReason),
+                        $"gate refuses interaction with no loot ({emptyReason ?? "no reason"})");
+
+                    if (interactor != null && _rig.Input != null)
+                    {
+                        EmberdelveInput input = _rig.Input;
+                        float fullHold = gate.HoldDuration + 1.0f;
+                        int endedCount = 0;
+                        string lastToast = null;
+                        System.Action<RunResult> onEnded = _ => endedCount++;
+                        System.Action<string> onToast = message => lastToast = message;
+
+                        // Live enemies would damage the player and legitimately interrupt the holds below, so the
+                        // fixture parks them; damage is injected deliberately in step (3).
+                        foreach (EnemyAgent agent in FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None))
+                            agent.gameObject.SetActive(false);
+                        GameEvents.RunEnded += onEnded;
+                        GameEvents.ToastRaised += onToast;
+
+                        try
+                        {
+                            // (4) the authority itself refuses a direct call with zero loot.
+                            bool directAccepted = _director.BeginExtraction(out string directReason);
+                            Check(!directAccepted && !string.IsNullOrEmpty(directReason),
+                                $"RunDirector.BeginExtraction refuses zero loot ({directReason ?? "no reason"})");
+                            Check(_director.State == RunState.Running && endedCount == 0,
+                                $"direct refused call left the run Running (got {_director.State})");
+
+                            // (1) zero loot + a full real hold through the Interactor: nothing extracts. The toast is
+                            // cleared first, so only the hold path itself can satisfy the surfaced-reason check.
+                            lastToast = null;
+                            input.InteractHeldOverride = true;
+                            yield return WaitSeconds(fullHold);
+                            input.InteractHeldOverride = false;
+
+                            Check(_director.State == RunState.Running && endedCount == 0,
+                                $"zero loot + full hold does not extract (state {_director.State})");
+                            Check(!string.IsNullOrEmpty(lastToast) && lastToast.Contains("relic"),
+                                $"hold path surfaced the refusal reason ({lastToast ?? "none"})");
+
+                            // Let the bar drain to zero so later steps start from a known state.
+                            yield return WaitUntil(() => interactor.HoldProgress <= 0.0001f, 5f);
+                            Check(interactor.HoldProgress <= 0.0001f,
+                                $"hold progress drained to zero after release ({interactor.HoldProgress:F3})");
+
+                            // Give the player loot, as the original flow did.
+                            LootPickup loot = FindFirstObjectByType<LootPickup>();
+                            if (loot != null) loot.OnInteractInstant();
+                            Check(_director.LootValue > 0, "loot requirement satisfied before extraction");
+                            Check(gate.CanInteract(out string reason), $"gate accepts interaction ({reason ?? "ok"})");
+
+                            // Disabled gameplay input blocks the hold even while the override says "held".
+                            input.SetGameplayInputEnabled(false);
+                            input.InteractHeldOverride = true;
+                            yield return WaitSeconds(gate.HoldDuration * 0.6f);
+                            Check(interactor.HoldProgress <= 0.0001f && _director.State == RunState.Running,
+                                $"disabled input does not advance the hold ({interactor.HoldProgress:F2})");
+                            input.InteractHeldOverride = false;
+                            input.SetGameplayInputEnabled(true);
+                            yield return WaitFrames(2);
+
+                            // (3) damage mid-hold resets the progress.
+                            input.InteractHeldOverride = true;
+                            yield return WaitSeconds(gate.HoldDuration * 0.5f);
+                            float before = interactor.HoldProgress;
+                            Check(before > 0.25f && before < 0.9f, $"hold is part-way before damage ({before:F2})");
+                            _rig.ApplyDamage(new DamageInfo(1f, _rig.transform.position, Vector3.forward,
+                                _rig.transform.position + Vector3.forward, 0, EntityKind.Enemy, DamageType.Physical,
+                                false, false, 0f));
+                            yield return WaitFrames(2);
+                            float after = interactor.HoldProgress;
+                            Check(after < before * 0.5f && after < 0.2f,
+                                $"damage mid-hold reset the progress ({before:F2} -> {after:F2})");
+                            Check(_director.State == RunState.Running, "run still Running after the interrupted hold");
+
+                            // (2) with loot, an uninterrupted full hold extracts.
+                            yield return WaitSeconds(fullHold);
+                            input.InteractHeldOverride = false;
+                            yield return WaitFrames(3);
+                            Check(endedCount == 1, $"full hold with loot extracted (RunEnded x{endedCount})");
+                            Check(_director.State == RunState.Extracted, $"state is Extracted after the hold (got {_director.State})");
+
+                            // A second attempt through every layer must not extract again.
+                            gate.OnHoldComplete();
+                            bool again = _director.BeginExtraction(out string againReason);
+                            Check(!again && !string.IsNullOrEmpty(againReason), $"second BeginExtraction refused ({againReason ?? "no reason"})");
+                            yield return WaitFrames(2);
+                            Check(endedCount == 1, $"extraction fired exactly once even after repeat attempts (RunEnded x{endedCount})");
+                        }
+                        finally
+                        {
+                            GameEvents.RunEnded -= onEnded;
+                            GameEvents.ToastRaised -= onToast;
+                            input.InteractHeldOverride = null;
+                        }
+                    }
                 }
 
                 yield return WaitFrames(3);

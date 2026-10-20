@@ -171,9 +171,20 @@ namespace Emberdelve.Flow
             return true;
         }
 
-        public void BeginExtraction()
+        /// <summary>
+        /// The authority for the extraction rule: re-validates here, whatever the caller already checked,
+        /// and refuses with a reason instead of completing the run.
+        /// </summary>
+        public bool BeginExtraction(out string reason)
         {
+            if (!ExtractionAllowed(out reason))
+            {
+                GameEvents.RaiseToast(reason);
+                return false;
+            }
+
             Complete(RunState.Extracted);
+            return true;
         }
 
         private void Complete(RunState outcome)

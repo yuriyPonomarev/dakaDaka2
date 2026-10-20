@@ -11,7 +11,7 @@ namespace Emberdelve.Interaction
     public interface IExtractionSink
     {
         bool ExtractionAllowed(out string reason);
-        void BeginExtraction();
+        bool BeginExtraction(out string reason);
     }
 
     /// <summary>
@@ -59,7 +59,17 @@ namespace Emberdelve.Interaction
             return _sink.ExtractionAllowed(out reason);
         }
 
-        public void OnHoldComplete() => _sink?.BeginExtraction();
+        public void OnHoldComplete()
+        {
+            if (_sink == null) return;
+            if (!CanInteract(out string reason))
+            {
+                GameEvents.RaiseToast(reason ?? "Cannot escape yet");
+                return;
+            }
+
+            _sink.BeginExtraction(out _);
+        }
 
         public void OnInteractInstant()
         {

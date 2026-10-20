@@ -918,7 +918,7 @@ namespace Emberdelve.EditorTools
                 yield return CastBattleCry("warrior CHA 18 (scale 1.16)", 1.16f, 3);
 
                 UnequipAll(_warrior);
-                EquipCharm(_warrior, "u2a5_warrior_cha-2_cry", EquipmentSlot.Head, -2);
+                EquipCharm(_warrior, "u2a5_warrior_chaneg2_cry", EquipmentSlot.Head, -2);
                 CheckInt("warrior CHA 8 after the cursed charm", 8, _warrior.AttributeStats.GetAttribute(SixAttribute.Charisma), "10 - 2");
                 CheckClose("warrior ability scale query at CHA 8", 0.96f, _warrior.AttributeStats.GetAbilityEffectScale(), "modifier -1");
                 yield return CastBattleCry("warrior CHA 8 (scale 0.96)", 0.96f, 3);
@@ -1301,7 +1301,11 @@ namespace Emberdelve.EditorTools
                 charm.statModifiers = null;
                 charm.attributeBonuses = new[] { new AttributeBonusEntry(SixAttribute.Charisma, charismaBonus) };
 
-                Check(rig.Inventory.TryAdd(charm, 1), $"{id} placed in the bag");
+                // Surface the bag's own refusal reason (for example an unstable item id) in the log, so a
+                // fixture that can never be worn explains itself instead of failing only downstream.
+                bool placed = rig.Inventory.TryAdd(charm, 1, out string addReason);
+                Check(placed, $"{id} placed in the bag{(placed ? string.Empty : " refused: " + addReason)}");
+                if (!placed) Debug.LogError($"[AttributeSkill] charm '{id}' was refused by Inventory.TryAdd: {addReason}");
 
                 bool ok = rig.Equipment.TryEquipItem(charm, out string reason);
                 Check(ok, $"equip {id} in {slot}{(ok ? string.Empty : " refused: " + reason)}");
