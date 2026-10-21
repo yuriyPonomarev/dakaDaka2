@@ -85,6 +85,45 @@ namespace Emberdelve.Data
         }
 
         /// <summary>
+        /// Player-facing name of a key ("max_health" shows as "Max health", "armor" as "Armour"). Pure display
+        /// text: no rule, roll or save format reads it. Empty for an unknown value.
+        /// </summary>
+        public static string DisplayName(AffixStatKey key)
+        {
+            switch (key)
+            {
+                case AffixStatKey.Strength: return "Strength";
+                case AffixStatKey.Dexterity: return "Dexterity";
+                case AffixStatKey.Constitution: return "Constitution";
+                case AffixStatKey.Intelligence: return "Intelligence";
+                case AffixStatKey.Wisdom: return "Wisdom";
+                case AffixStatKey.Charisma: return "Charisma";
+                case AffixStatKey.Armor: return "Armour";
+                case AffixStatKey.MaxHealth: return "Max health";
+                case AffixStatKey.MaxMana: return "Max mana";
+                case AffixStatKey.MoveSpeed: return "Move speed";
+                case AffixStatKey.MeleeDamage: return "Melee damage";
+                case AffixStatKey.ProjectileDamage: return "Projectile damage";
+                case AffixStatKey.ManaRegen: return "Mana regen";
+                default: return string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// One rolled value as a player reads it: sign first ("+3 Strength", "-2 Strength", "+0.09 Move speed",
+        /// "+0.2/s Mana regen"). A negative number never prints as "+-".
+        /// </summary>
+        public static string DisplayLine(AffixStatKey key, float value)
+        {
+            string number = IsIntegralKey(key)
+                ? System.Math.Abs((int)System.Math.Round(value)).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : System.Math.Abs(value).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            string sign = value < 0f ? "-" : "+";
+            string unit = key == AffixStatKey.ManaRegen ? "/s" : string.Empty;
+            return sign + number + unit + " " + DisplayName(key);
+        }
+
+        /// <summary>
         /// Strict allowlist parse for the persistence/transfer boundary: only the canonical keys are
         /// accepted, compared after trimming and case folding. Anything else returns false and leaves the
         /// out parameter at the first legal key rather than guessing.

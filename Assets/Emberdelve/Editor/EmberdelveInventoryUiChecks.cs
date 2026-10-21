@@ -132,6 +132,7 @@ namespace Emberdelve.EditorTools
                 yield return CancelAndCloseConserveEverything(fixture);
                 yield return ExternalBagChangeKeepsSelectionHonest(fixture);
                 yield return CloakSlotAndTooltips(fixture);
+                yield return PlayerFacingFixes(fixture);
 
                 check(!rig.IsDead, $"the rig survived the pointer tests ({rig.CurrentHealth:F0}/{rig.MaxHealth:F0})");
             }
@@ -830,6 +831,221 @@ namespace Emberdelve.EditorTools
                 foreach (Button b in f.UiRoot.GetComponentsInChildren<Button>(true)) if (b.name == "TabBag") b.onClick.Invoke();
                 yield return WaitFrames(2);
             }
+        }
+
+        // ------------------------------------------------------------------ P4c
+
+        /// <summary>
+        /// P4c player-facing gates: rarity colours, affix display names, equip labels, right-click equip for
+        /// every kind of gear (with and without a leftover selection), prompt text and hint-line fit.
+        /// </summary>
+        private static IEnumerator PlayerFacingFixes(Fixture f)
+        {
+            Debug.Log("[Emberdelve][Smoke:inventoryui] ---- P4c player-facing fixes");
+
+            // ---- rarity colours: distinct from the body text colour and readable on the panel
+            Color body = ItemTooltip.NeutralColor;
+            Color panelBg = new Color(0.055f, 0.05f, 0.045f, 1f);
+            Color tipBg = new Color(0.045f, 0.04f, 0.036f, 1f);
+            foreach (AffixRarity rarity in new[] { AffixRarity.Common, AffixRarity.Uncommon, AffixRarity.Rare })
+            {
+                Color c = ItemTooltip.RarityColor(rarity);
+                float distance = Mathf.Sqrt((c.r - body.r) * (c.r - body.r) + (c.g - body.g) * (c.g - body.g) + (c.b - body.b) * (c.b - body.b));
+                f.Check(distance >= 0.2f, $"{rarity} colour is clearly distinct from the body text colour (RGB distance {distance:F2})");
+                f.Check(ItemTooltip.ContrastRatio(c, panelBg) >= 4.5f && ItemTooltip.ContrastRatio(c, tipBg) >= 4.5f,
+                    $"{rarity} colour is readable on the panel and tooltip backgrounds (contrast {ItemTooltip.ContrastRatio(c, tipBg):F1}:1)");
+            }
+            Color rare = ItemTooltip.RareColor;
+            f.Check(rare.b > rare.r + 0.3f && rare.b > rare.g + 0.2f, "Rare is a readable blue");
+
+            // ---- affix display names: every key, no raw underscores, signs handled
+            int values = System.Enum.GetValues(typeof(AffixStatKey)).Length;
+            f.Check(values == AffixStatKeys.KeyCount, $"the enum has {values} keys, the vocabulary says {AffixStatKeys.KeyCount}");
+            for (int i = 0; i < AffixStatKeys.KeyCount; i++)
+            {
+                AffixStatKey key = (AffixStatKey)i;
+                string name = AffixStatKeys.DisplayName(key);
+                string plus = AffixStatKeys.DisplayLine(key, 3f);
+                string minus = AffixStatKeys.DisplayLine(key, -3f);
+                f.Check(name.Length > 0 && !name.Contains("_") && char.IsUpper(name[0]), $"{key} has a display name ({name})");
+                f.Check(!plus.Contains("_") && !minus.Contains("_") && !plus.Contains("+-") && !minus.Contains("+-") &&
+                        plus.StartsWith("+") && minus.StartsWith("-"), $"{key} lines read cleanly: {plus} / {minus}");
+            }
+            f.Check(AffixStatKeys.DisplayLine(AffixStatKey.Armor, 4f) == "+4 Armour", "armor shows as Armour (British, like the fixed lines)");
+            f.Check(AffixStatKeys.DisplayLine(AffixStatKey.Strength, -2f) == "-2 Strength", "a negative attribute prints -2 Strength");
+            f.Check(AffixStatKeys.DisplayLine(AffixStatKey.MoveSpeed, 0.09f) == "+0.09 Move speed", "move_speed shows as Move speed with its decimal");
+
+            // ---- right-click equips every kind of gear, even with a leftover selection
+            ItemData cloak = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_AshenCloak.asset");
+            ItemData[] gear = { cloak, f.Cuirass, f.Boots, f.Blade };
+            foreach (ItemData item in gear)
+            {
+                foreach (bool withSelection in new[] { false, true })
+                {
+                    ResetBag(f);
+                    yield return WaitFrames(2);
+                    OpenScreen(f);
+                    yield return WaitFrames(2);
+
+                    Vector2Int origin = new Vector2Int(0, 0);
+                    Vector2Int coinCell = new Vector2Int(8, 3);
+                    bool added = f.Inventory.TryAddAt(item, 1, origin, out string why);
+                    if (withSelection) added &= f.Inventory.TryAddAt(f.Coin, 1, coinCell, out why);
+                    f.Check(added, $"{item.displayName} placed for the right-click test ({why})");
+                    if (!added) continue;
+                    yield return WaitFrames(2);
+
+                    if (withSelection)
+                    {
+                        yield return ClickCell(f, coinCell);
+                        f.Check(f.Screen.SelectedItem == f.Coin, "a coin is selected before the right click");
+                    }
+
+                    yield return ClickCell(f, origin, true);
+                    f.Check(f.Equipment.Equipped(item.equipSlot) == item && f.Inventory.IndexOfItem(item) < 0,
+                        $"right click wore {item.displayName} into {item.equipSlot}{(withSelection ? " (with a selection pending)" : "")}");
+                    f.Check(f.Screen.SelectedItem == null, "the right click leaves no selection behind");
+                }
+            }
+
+            // ---- the worn Back slot keeps its slot label and shows the item separately
+            ResetBag(f);
+            yield return WaitFrames(2);
+            OpenScreen(f);
+            f.Check(f.Inventory.TryAddAt(cloak, 1, new Vector2Int(0, 0), out string cloakWhy), "cloak placed: " + cloakWhy);
+            yield return WaitFrames(2);
+            yield return ClickCell(f, new Vector2Int(0, 0), true);
+            RectTransform backLabel = FindChildRect(f.UiRoot, "EquipLabel_Back");
+            Text backText = backLabel != null ? backLabel.GetComponent<Text>() : null;
+            f.Check(backText != null && backText.text.Contains("Back") && backText.text.Contains(cloak.displayName),
+                "the Back label names both the slot and the worn item: " + (backText != null ? backText.text.Replace("\n", " / ") : "missing"));
+            RectTransform emptyLabel = FindChildRect(f.UiRoot, "EquipLabel_Head");
+            Text emptyText = emptyLabel != null ? emptyLabel.GetComponent<Text>() : null;
+            f.Check(emptyText != null && emptyText.text == "Head", "an empty slot shows only its slot name");
+
+            // ---- the worn-slot tooltip sits beside the column, not over the other slot rows
+            RectTransform backSlot = FindChildRect(f.UiRoot, "Equip_Back");
+            RectTransform tipRect = FindChildRect(f.UiRoot, "TooltipPanel");
+            if (backSlot != null && tipRect != null)
+            {
+                f.Screen.ShowTooltipAt(ScreenPoint(f, backSlot));
+                Canvas.ForceUpdateCanvases();
+                Vector3[] tipCorners = new Vector3[4];
+                Vector3[] slotCorners = new Vector3[4];
+                tipRect.GetWorldCorners(tipCorners);
+                backSlot.GetWorldCorners(slotCorners);
+                f.Check(tipRect.gameObject.activeInHierarchy && tipCorners[2].x <= slotCorners[0].x + 0.5f,
+                    $"the worn-slot tooltip ends left of the equipment column (tip right {tipCorners[2].x:F0}, slot left {slotCorners[0].x:F0})");
+                Image tipImage = tipRect.GetComponent<Image>();
+                f.Check(tipImage != null && tipImage.color.a >= 0.999f, "the tooltip background is fully opaque");
+            }
+
+            // ---- the hint line fits its rectangle, idle and with a selection
+            ResetBag(f);
+            yield return WaitFrames(2);
+            OpenScreen(f);
+            f.Check(f.Inventory.TryAddAt(f.Cuirass, 1, new Vector2Int(0, 0), out string cWhy), "cuirass placed: " + cWhy);
+            yield return WaitFrames(2);
+            RectTransform carry = FindChildRect(f.UiRoot, "Carry");
+            Text carryText = carry != null ? carry.GetComponent<Text>() : null;
+            RectTransform panelRect = FindChildRect(f.UiRoot, "SatchelPanel");
+            f.Check(carryText != null && panelRect != null, "the hint label and the panel exist");
+            if (carryText != null && panelRect != null)
+            {
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    if (pass == 1) { yield return ClickCell(f, new Vector2Int(0, 0)); yield return WaitFrames(2); }
+                    Vector3[] pc = new Vector3[4];
+                    Vector3[] lc = new Vector3[4];
+                    panelRect.GetWorldCorners(pc);
+                    carry.GetWorldCorners(lc);
+                    f.Check(carryText.preferredHeight <= carry.rect.height + 0.5f,
+                        $"the {(pass == 0 ? "idle" : "selection")} hint ({carryText.preferredHeight:F0}px of text) fits its {carry.rect.height:F0}px rectangle");
+                    f.Check(Contains(pc, lc, 0.5f), "the hint rectangle lies inside the satchel panel");
+                }
+            }
+
+            // ---- M1: right click on a selected consumable is "let go", never "drink it"
+            ItemData draught = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_BloodDraught.asset");
+            foreach (ItemData consumable in new[] { draught, f.Coin })
+            {
+                if (consumable == null) { f.Check(false, "consumable asset loadable"); continue; }
+                ResetBag(f);
+                yield return WaitFrames(2);
+                OpenScreen(f);
+                yield return WaitFrames(2);
+                f.Check(f.Inventory.TryAddAt(consumable, 3, new Vector2Int(0, 0), out string cwhy), "consumable stack placed: " + cwhy);
+                yield return WaitFrames(2);
+                int unitsBefore = f.Inventory.TotalUnits;
+                float healthBefore = f.Rig.CurrentHealth;
+                yield return ClickCell(f, new Vector2Int(0, 0));
+                f.Check(f.Screen.SelectedItem == consumable, consumable.displayName + " selected");
+                yield return ClickCell(f, new Vector2Int(0, 0), true);
+                f.Check(f.Inventory.TotalUnits == unitsBefore && f.Rig.CurrentHealth <= healthBefore + 0.01f,
+                    $"right click on the selected {consumable.displayName} did not use it (units {unitsBefore} -> {f.Inventory.TotalUnits})");
+                f.Check(f.Screen.SelectedItem == null, "the right click let go of the selection");
+                RectTransform carryRect = FindChildRect(f.UiRoot, "Carry");
+                Text carryLabel = carryRect != null ? carryRect.GetComponent<Text>() : null;
+                f.Check(carryLabel != null && !carryLabel.text.StartsWith("Selected"), "the UI was rebuilt: no stale Selected hint");
+                f.Check(FindChildRect(f.UiRoot, "Selected_" + consumable.displayName) == null, "the selection highlight frame is gone");
+            }
+
+            // ---- player-visible tooltip text for a rolled affix (the screen's own text, not the canonical keys)
+            {
+                ResetBag(f);
+                yield return WaitFrames(2);
+                OpenScreen(f);
+                List<AffixDefinition> defs = new List<AffixDefinition>();
+                foreach (string guid in AssetDatabase.FindAssets("t:AffixDefinition", new[] { EmberdelveAssetLibrary.AffixFolder }))
+                    defs.Add(AssetDatabase.LoadAssetAtPath<AffixDefinition>(AssetDatabase.GUIDToAssetPath(guid)));
+                bool authOk = ItemInstanceAuthority.TryCreate(new[] { cloak }, defs, null, out ItemInstanceAuthority authority, out string aReason);
+                f.Check(authOk, "authority for the display-text check: " + aReason);
+                if (authOk)
+                {
+                    bool minted = ItemInstance.TryCreateNew(cloak, 1, AffixRarity.Rare,
+                        new[] { new AffixRecord("affix_armor", AffixStatKey.Armor, 4), new AffixRecord("affix_max_health", AffixStatKey.MaxHealth, 9) },
+                        authority, out ItemInstance rolled, out aReason);
+                    minted &= f.Inventory.TryAddInstanceAt(rolled, new Vector2Int(0, 0), out aReason);
+                    f.Check(minted, "rare cloak with two rolls placed: " + aReason);
+                    yield return WaitFrames(2);
+                    RectTransform cell00 = FindChildRect(f.UiRoot, "Cell_0_0");
+                    if (minted && cell00 != null)
+                    {
+                        f.Screen.ShowTooltipAt(ScreenPoint(f, cell00));
+                        RectTransform bodyRect = FindChildRect(f.UiRoot, "TooltipBody");
+                        string shown = bodyRect != null ? bodyRect.GetComponent<Text>().text : string.Empty;
+                        f.Check(shown.Contains("+4 Armour") && shown.Contains("+9 Max health") && !shown.Contains("max_health") && !shown.Contains("+4 armor"),
+                            "the tooltip on screen reads +4 Armour / +9 Max health: " + shown.Replace("\n", " | "));
+                    }
+                }
+            }
+
+            // ---- prompt text never says hold twice
+            GameObject probe = new GameObject("P4c_PromptProbe");
+            PromptProbe stub = probe.AddComponent<PromptProbe>();
+            stub.Text = "Hold to open chest"; stub.Hold = true;
+            string holdPrompt = Emberdelve.Interaction.Interactor.PromptFor(stub);
+            f.Check(holdPrompt == "Hold to open chest", "a prompt that already says Hold is not suffixed: " + holdPrompt);
+            stub.Text = "Open the gate"; stub.Hold = true;
+            f.Check(Emberdelve.Interaction.Interactor.PromptFor(stub) == "Open the gate  (hold)", "a plain label on a hold target gets one (hold)");
+            stub.Text = "Open chest"; stub.Hold = false;
+            f.Check(Emberdelve.Interaction.Interactor.PromptFor(stub) == "Open chest", "an instant target gets no suffix");
+            UnityEngine.Object.Destroy(probe);
+
+            ResetBag(f);
+            yield return WaitFrames(2);
+        }
+
+        private sealed class PromptProbe : MonoBehaviour, IInteractable
+        {
+            public string Text;
+            public bool Hold;
+            public string PromptText => Text;
+            public bool RequiresHold => Hold;
+            public float HoldDuration => 1f;
+            public bool CanInteract(out string blockedReason) { blockedReason = null; return true; }
+            public void OnHoldComplete() { }
+            public void OnInteractInstant() { }
         }
 
         // ------------------------------------------------------------------ click plumbing

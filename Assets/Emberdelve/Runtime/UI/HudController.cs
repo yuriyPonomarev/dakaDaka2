@@ -51,6 +51,7 @@ namespace Emberdelve.UI
         private readonly SkillSlotWidget[] _skillSlots = new SkillSlotWidget[Skills.SkillCaster.ActiveSlotCapacity];
         private Text _promptLabel;
         private Image _holdFill;
+        private Image _holdBack;
         private RectTransform _holdFillRect;
         private Text _toastLabel;
         private Text _pauseLabel;
@@ -309,13 +310,16 @@ namespace Emberdelve.UI
             UiFactory.SetRect(_promptLabel.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
                 new Vector2(760f, 32f), new Vector2(0f, 150f));
 
-            UiFactory.CreateImage(_root, "HoldBack", new Color(0.08f, 0.07f, 0.06f, 0.85f),
+            _holdBack = UiFactory.CreateImage(_root, "HoldBack", new Color(0.08f, 0.07f, 0.06f, 0.85f),
                 new Vector2(300f, 12f), new Vector2(0f, 128f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f));
 
             _holdFill = UiFactory.CreateImage(_root, "HoldFill", new Color(0.95f, 0.78f, 0.35f, 1f),
                 new Vector2(300f, 12f), new Vector2(-150f, 128f), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f));
             _holdFill.rectTransform.pivot = new Vector2(0f, 0.5f);
             _holdFillRect = _holdFill.rectTransform;
+            // Nothing is being held when the HUD is built: the bar must not sit on screen full until the first hold.
+            _holdFill.gameObject.SetActive(false);
+            _holdBack.gameObject.SetActive(false);
 
             _toastLabel = UiFactory.CreateText(_root, "ToastLabel", "", 20, new Color(1f, 0.92f, 0.7f, 0f), TextAnchor.MiddleCenter);
             UiFactory.SetRect(_toastLabel.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
@@ -558,7 +562,11 @@ namespace Emberdelve.UI
                 Text label = UiFactory.CreateText(chip.transform, "Label", HotbarLabel(item, slot.Count), 12,
                     new Color(0.93f, 0.89f, 0.81f, 1f), TextAnchor.MiddleCenter);
                 UiFactory.SetRect(label.rectTransform, Vector2.zero, Vector2.one,
-                    new Vector2(-34f, -14f), new Vector2(10f, 0f));
+                    new Vector2(-30f, -8f), new Vector2(12f, 0f));
+                // Best fit shrinks the text to the chip instead of letting a long word break in the middle.
+                label.resizeTextForBestFit = true;
+                label.resizeTextMinSize = 8;
+                label.resizeTextMaxSize = 12;
                 label.horizontalOverflow = HorizontalWrapMode.Wrap;
                 label.verticalOverflow = VerticalWrapMode.Truncate;
                 label.raycastTarget = false;
@@ -744,7 +752,8 @@ namespace Emberdelve.UI
 
             if (widget.KeyLabel != null) widget.KeyLabel.text = snapshot.KeyLabel;
             if (widget.NameLabel != null) widget.NameLabel.text = snapshot.DisplayName;
-            if (widget.CostLabel != null) widget.CostLabel.text = snapshot.ManaCost + " MP  " + snapshot.Summary;
+            // Summary already reads "24 MP  |  7s cooldown"; prefixing the cost again printed it twice.
+            if (widget.CostLabel != null) widget.CostLabel.text = snapshot.Summary;
 
             float fraction = snapshot.CooldownFraction;
             if (widget.CooldownFill != null)
@@ -786,6 +795,7 @@ namespace Emberdelve.UI
             if (_holdFill == null) return;
 
             bool active = _holdProgress > 0.001f;
+            if (_holdBack != null) _holdBack.gameObject.SetActive(active);
             _holdFill.gameObject.SetActive(active);
             _holdFillRect.sizeDelta = new Vector2(300f * _holdProgress, 12f);
         }

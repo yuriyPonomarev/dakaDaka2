@@ -72,6 +72,9 @@ namespace Emberdelve.EditorTools
         /// <summary>U1C1: satchel pointer routing and conserving cursor operations (move/swap/merge/equip/cancel).</summary>
         public static void RunInventoryUiFlow() => StartRun("inventoryui");
 
+        /// <summary>P4c: enemy telegraph/body geometry near the player (no screen-filling artefact, readable body).</summary>
+        public static void RunEnemyVisual() => StartRun("enemyvisual");
+
         private static void StartRun(string mode)
         {
             EmberdelveAssetLibrary.BuildAll();
@@ -256,6 +259,7 @@ namespace Emberdelve.EditorTools
                     if (Mode == "combat") yield return CombatFlow();
                     else if (Mode == "realcombat") yield return RealCombatWarriorFlow();
                     else if (Mode == "ai") yield return EnemyAiFlow();
+                    else if (Mode == "enemyvisual") yield return EnemyVisualFlow();
                     else if (Mode == "extract") yield return ExtractionFlow();
                     else if (Mode == "death") yield return DeathFlow();
                     else if (Mode == "resultloop") yield return ResultLoopFlow();
@@ -1061,6 +1065,123 @@ namespace Emberdelve.EditorTools
 
             // ---------------------------------------------------------------- enemy ai
 
+            // ---------------------------------------------------------------- P4c enemy visuals
+
+            private IEnumerator EnemyVisualFlow()
+            {
+                EnemyAgent enemy = PickAliveEnemy();
+                Check(enemy != null, "an enemy agent is present");
+                if (enemy == null) yield break;
+
+                if (!TryPlaceEnemyBesideSpawn(enemy, _rig.transform.position, 2, Vector2Int.zero, out Vector3 spot))
+                {
+                    Check(false, "could not find a walkable cell two cells from the spawn");
+                    yield break;
+                }
+
+                enemy.transform.position = spot;
+                Physics.SyncTransforms();
+
+                Camera cam = FindFirstObjectByType<Camera>();
+                Check(cam != null, "camera present");
+                if (cam == null) yield break;
+
+                foreach (Renderer near in FindObjectsByType<Renderer>(FindObjectsSortMode.None))
+                {
+                    if (near == null || Vector3.Distance(near.bounds.center, enemy.transform.position + Vector3.up) > 3f) continue;
+                    Material nm = near.sharedMaterial;
+                    Debug.Log($"[Emberdelve][Smoke:enemyvisual] near-enemy renderer {near.name} parent={near.transform.parent?.name} active={near.gameObject.activeInHierarchy} centre={near.bounds.center} size={near.bounds.size} mat={(nm != null ? nm.name : "none")}");
+                }
+
+                // P4c: sconces are mounted on a wall (a level collider within 0.3 m), never floating in the corridor.
+                yield return WaitFrames(3);
+                int sconces = 0, floating = 0;
+                foreach (Transform t in FindObjectsByType<Transform>(FindObjectsSortMode.None))
+                {
+                    if (t.name != "Sconce") continue;
+                    sconces++;
+                    if (!Physics.CheckSphere(t.position, 0.3f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)) { floating++; Debug.Log($"[Emberdelve][Smoke:enemyvisual] floating sconce at {t.position} light at {t.parent.position}"); }
+                }
+                Check(sconces > 0 && floating == 0, $"every torch sconce touches a wall ({sconces} sconces, {floating} floating)");
+
+                // P4c: enemy bodies are not near-black: material base colour luminance clears 0.3 and carries an emissive tint.
+                Renderer bodyRenderer = enemy.transform.Find("Body") != null ? enemy.transform.Find("Body").GetComponent<Renderer>() : null;
+                Check(bodyRenderer != null && bodyRenderer.sharedMaterial != null, "enemy body renderer found");
+                if (bodyRenderer != null && bodyRenderer.sharedMaterial != null)
+                {
+                    Color bc = bodyRenderer.sharedMaterial.GetColor("_BaseColor");
+                    Color ec = bodyRenderer.sharedMaterial.GetColor("_EmissionColor");
+                    float lum = 0.2126f * bc.r + 0.7152f * bc.g + 0.0722f * bc.b;
+                    Check(lum >= 0.3f, $"enemy body base colour is readable (luminance {lum:F2})");
+                    Check(ec.maxColorComponent > 0.05f, "enemy body carries an emissive rim tint");
+                }
+
+                // P4c: the hand torch must not blow out whatever the player faces at contact range.
+                Emberdelve.Feedback.TorchFlicker handTorch = null;
+                foreach (Emberdelve.Feedback.TorchFlicker tf in _rig.GetComponentsInChildren<Emberdelve.Feedback.TorchFlicker>(true)) handTorch = tf;
+                Check(handTorch != null, "the player's hand torch exists");
+                if (handTorch != null)
+                {
+                    enemy.enabled = false;
+                    Vector3 flatForward = Vector3.ProjectOnPlane(cam.transform.forward, Vector3.up).normalized;
+                    enemy.transform.position = _rig.transform.position + flatForward * 0.9f;
+                    Physics.SyncTransforms();
+                    yield return WaitSeconds(0.6f);
+                    float contactScale = handTorch.NearScale;
+                    enemy.transform.position = _rig.transform.position + flatForward * 12f;
+                    Physics.SyncTransforms();
+                    yield return WaitSeconds(0.8f);
+                    float farScale = handTorch.NearScale;
+                    Debug.Log($"[Emberdelve][Smoke:enemyvisual] hand torch near scale contact={contactScale:F2} far={farScale:F2}");
+                    Check(contactScale < 0.4f, $"the hand torch dims when an enemy stands at contact range (scale {contactScale:F2})");
+                    Check(farScale > 0.9f, $"the hand torch is back at full strength with nothing close (scale {farScale:F2})");
+                    enemy.enabled = true;
+                    if (TryPlaceEnemyBesideSpawn(enemy, _rig.transform.position, 2, Vector2Int.zero, out Vector3 respot)) enemy.transform.position = respot;
+                    Physics.SyncTransforms();
+                }
+
+                HashSet<string> seen = new HashSet<string>();
+                int telegraphSamples = 0;
+                float maxExtent = 0f, maxHeight = 0f, maxScale = 0f;
+                float end = Time.unscaledTime + 10f;
+                while (Time.unscaledTime < end)
+                {
+                    Renderer[] all = FindObjectsByType<Renderer>(FindObjectsSortMode.None);
+                    for (int i = 0; i < all.Length; i++)
+                    {
+                        Renderer r = all[i];
+                        if (r == null || !r.enabled || !r.gameObject.activeInHierarchy) continue;
+                        Bounds b = r.bounds;
+                        float distance = Vector3.Distance(cam.transform.position, b.ClosestPoint(cam.transform.position));
+                        bool telegraph = r.gameObject.name == "Attack_Telegraph";
+                        if (telegraph)
+                        {
+                            telegraphSamples++;
+                            maxExtent = Mathf.Max(maxExtent, Mathf.Max(b.size.x, b.size.z));
+                            maxHeight = Mathf.Max(maxHeight, b.size.y);
+                            maxScale = Mathf.Max(maxScale, r.transform.lossyScale.x);
+                        }
+
+                        string key = r.gameObject.name + "|" + r.transform.parent?.name;
+                        if ((telegraph || b.size.magnitude > 1.5f && distance < 4f) && seen.Add(key))
+                        {
+                            Material m = r.sharedMaterial;
+                            Debug.Log($"[Emberdelve][Smoke:enemyvisual] renderer {key} dist={distance:F2} centre={b.center} size={b.size} lossy={r.transform.lossyScale} shader={(m != null ? m.shader.name : "none")} colour={(m != null && m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor").ToString() : "n/a")}");
+                        }
+                    }
+                    yield return null;
+                }
+
+                Debug.Log($"[Emberdelve][Smoke:enemyvisual] telegraph samples={telegraphSamples} maxExtentXZ={maxExtent:F2} maxHeight={maxHeight:F2} maxLossyScale={maxScale:F2}");
+                Check(telegraphSamples > 0, "the enemy wound up and showed its telegraph during the sample window");
+                if (telegraphSamples > 0)
+                {
+                    float reach = 4f;
+                    Check(maxExtent <= 2f * reach + 0.5f, $"telegraph footprint is a bounded ground wedge (extent {maxExtent:F2} m)");
+                    Check(maxHeight <= 0.25f, $"telegraph is flat on the floor (height {maxHeight:F2} m)");
+                }
+            }
+
             private IEnumerator EnemyAiFlow()
             {
                 EnemyAgent enemy = PickAliveEnemy();
@@ -1242,6 +1363,11 @@ namespace Emberdelve.EditorTools
                 Check(claw != null, $"enemy has an attack weapon ({(claw != null ? claw.displayName : "none")})");
                 if (claw == null) yield break;
 
+                // P4c: the satchel is open when the player dies; the death must close it (and its tooltip).
+                Emberdelve.UI.InventoryScreenController deathScreen = FindFirstObjectByType<Emberdelve.UI.InventoryScreenController>();
+                bool satchelOpenedBeforeDeath = false;
+                if (deathScreen != null) { deathScreen.Open(); satchelOpenedBeforeDeath = deathScreen.IsOpen; }
+                Check(satchelOpenedBeforeDeath, "the satchel was open before the death");
                 float healthAtStart = _rig.CurrentHealth;
                 int accepted = 0;
                 int sequenceRejections = 0;
@@ -1276,6 +1402,11 @@ namespace Emberdelve.EditorTools
                 Check(_rig.IsDead, "player health reached zero");
                 Check(_director.State == RunState.Dead, $"run state is Dead (got {_director.State})");
                 Check(GameObject.Find("Emberdelve_Result") != null, "result screen built after death");
+
+                Check(deathScreen != null && !deathScreen.IsOpen && deathScreen.CurrentTooltip == null && !deathScreen.HasSelection,    
+                "dying closed the satchel, its tooltip and its selection");
+                if (deathScreen != null) deathScreen.HandleClick(new Vector2(Screen.width * 0.5f, Screen.height * 0.5f), false);
+                Check(deathScreen != null && !deathScreen.IsOpen, "a click aimed at the satchel under the death screen does nothing");
                 Check(RunContext.HasResult && RunContext.LastResult.Outcome == RunState.Dead,
                     "death recorded in the run result");
 

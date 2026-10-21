@@ -45,9 +45,9 @@ namespace Emberdelve.EditorTools
             Blade = Create("Blade_Metal", new Color(0.7f, 0.72f, 0.76f), 0.78f, null);
             Grip = Create("Grip_Leather", new Color(0.17f, 0.11f, 0.07f), 0.3f, null);
 
-            EnemyBody = Create("Enemy_Body", new Color(0.23f, 0.22f, 0.26f), 0.25f, null);
+            EnemyBody = Create("Enemy_Body", new Color(0.4f, 0.36f, 0.42f), 0.25f, new Color(0.1f, 0.06f, 0.09f));
             EnemyHead = Create("Enemy_Head", new Color(0.42f, 0.37f, 0.32f), 0.3f, new Color(0.12f, 0.03f, 0.02f));
-            EliteBody = Create("Enemy_EliteBody", new Color(0.34f, 0.15f, 0.13f), 0.3f, new Color(0.18f, 0.04f, 0.02f));
+            EliteBody = Create("Enemy_EliteBody", new Color(0.5f, 0.22f, 0.18f), 0.3f, new Color(0.3f, 0.08f, 0.04f));
 
             RelicMat = Create("Loot_Relic", new Color(0.85f, 0.66f, 0.22f), 0.6f, new Color(0.5f, 0.34f, 0.06f));
             CoinMat = Create("Loot_Coin", new Color(0.62f, 0.45f, 0.16f), 0.65f, null);

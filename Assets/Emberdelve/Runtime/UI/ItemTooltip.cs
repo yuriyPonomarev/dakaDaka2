@@ -33,6 +33,8 @@ namespace Emberdelve.UI
         public string UidShort = string.Empty;
         public readonly List<string> FixedLines = new List<string>(6);
         public readonly List<string> RolledLines = new List<string>(2);
+        /// <summary>The same rolls as players read them ("+9 Max health"); RolledLines keeps the canonical keys for gates and tooling.</summary>
+        public readonly List<string> RolledDisplayLines = new List<string>(2);
 
         public bool HasRolledSection => RolledLines.Count > 0;
 
@@ -73,9 +75,9 @@ namespace Emberdelve.UI
     public static class ItemTooltip
     {
         public static readonly Color NeutralColor = new Color(0.88f, 0.84f, 0.78f, 1f);
-        public static readonly Color CommonColor = new Color(0.82f, 0.82f, 0.8f, 1f);
-        public static readonly Color UncommonColor = new Color(0.38f, 0.86f, 0.42f, 1f);
-        public static readonly Color RareColor = new Color(0.4f, 0.62f, 1f, 1f);
+        public static readonly Color CommonColor = new Color(0.58f, 0.62f, 0.68f, 1f);
+        public static readonly Color UncommonColor = new Color(0.36f, 0.8f, 0.38f, 1f);
+        public static readonly Color RareColor = new Color(0.38f, 0.6f, 1f, 1f);
 
         public const int ShortUidLength = 8;
 
@@ -122,7 +124,7 @@ namespace Emberdelve.UI
             IReadOnlyList<AffixRecord> records = instance.Affixes;
             if (records != null)
             {
-                for (int i = 0; i < records.Count; i++) model.RolledLines.Add(DescribeAffix(records[i]));
+                for (int i = 0; i < records.Count; i++) { model.RolledLines.Add(DescribeAffix(records[i])); model.RolledDisplayLines.Add(DescribeAffixDisplay(records[i])); }
             }
 
             return model;
@@ -167,6 +169,26 @@ namespace Emberdelve.UI
             return Signed(record.Value, record.HasKnownKey && AffixStatKeys.IsIntegralKey(record.StatKey)) + " " + key;
         }
 
+        /// <summary>One rolled record for players: "+9 Max health", "-2 Strength", never a raw key.</summary>
+        public static string DescribeAffixDisplay(AffixRecord record)
+        {
+            if (!record.HasKnownKey) return "Unknown effect";
+            return AffixStatKeys.DisplayLine(record.StatKey, record.Value);
+        }
+
+        /// <summary>WCAG-style contrast ratio between two opaque colours (used by the gates for rarity vs panel / body text).</summary>
+        public static float ContrastRatio(Color a, Color b)
+        {
+            float la = RelativeLuminance(a), lb = RelativeLuminance(b);
+            float hi = Mathf.Max(la, lb), lo = Mathf.Min(la, lb);
+            return (hi + 0.05f) / (lo + 0.05f);
+        }
+
+        private static float RelativeLuminance(Color c)
+        {
+            return 0.2126f * Mathf.GammaToLinearSpace(c.r) + 0.7152f * Mathf.GammaToLinearSpace(c.g) + 0.0722f * Mathf.GammaToLinearSpace(c.b);
+        }
+
         private static void AddFixedLines(ItemData definition, List<string> lines)
         {
             if (definition.GrantsWeapon && definition.grantedWeapon != null)
@@ -208,7 +230,7 @@ namespace Emberdelve.UI
         {
             string name = modifier.stat == SkillStat.Armor ? "Armour" : Words(modifier.stat.ToString());
             string number = modifier.value.ToString("0.##", CultureInfo.InvariantCulture);
-            return modifier.mode == SkillModifierMode.Multiplier ? name + " x" + number : name + " +" + number;
+            return modifier.mode == SkillModifierMode.Multiplier ? name + " x" + number : name + (modifier.value < 0f ? " " : " +") + number;
         }
 
         /// <summary>"MaxHealth" to "Max health".</summary>

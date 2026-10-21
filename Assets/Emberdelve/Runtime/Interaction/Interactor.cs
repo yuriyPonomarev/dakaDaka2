@@ -27,6 +27,7 @@ namespace Emberdelve.Interaction
         private float _holdProgress;
         private string _lastPrompt = string.Empty;
         private HealthComponent _health;
+        private bool _runEnded;
 
         public IInteractable CurrentTarget => _current;
         public float HoldProgress => _holdProgress;
@@ -43,7 +44,7 @@ namespace Emberdelve.Interaction
             EmberdelveInput input = rig.Input;
             if (input == null) return;
 
-            if (rig.IsDead)
+            if (rig.IsDead || _runEnded)
             {
                 ClearTarget();
                 return;
@@ -57,10 +58,21 @@ namespace Emberdelve.Interaction
                 _currentHost = target as MonoBehaviour;
                 _holdProgress = 0f;
                 GameEvents.RaiseInteractionHold(0f);
-                GameEvents.RaiseInteractionPrompt(target == null ? string.Empty : BuildPrompt(target, out _));
+                _lastPrompt = target == null ? string.Empty : BuildPrompt(target, out _);
+                GameEvents.RaiseInteractionPrompt(_lastPrompt);
             }
 
             if (_current == null) return;
+
+            // The prompt text can change while the same target stays aimed at (a chest that just emptied, a
+            // rule that now blocks the gate): re-read it every frame and only raise it when it differs, so a
+            // line that was true when the target was first seen cannot outlive the truth.
+            string prompt = BuildPrompt(_current, out _);
+            if (prompt != _lastPrompt)
+            {
+                _lastPrompt = prompt;
+                GameEvents.RaiseInteractionPrompt(prompt);
+            }
 
             if (_current.RequiresHold)
             {
@@ -100,7 +112,10 @@ namespace Emberdelve.Interaction
             }
         }
 
-        private string BuildPrompt(IInteractable target, out string reason)
+        /// <summary>The line the HUD shows for a target (public so a gate can assert on the exact text).</summary>
+        public static string PromptFor(IInteractable target) { return BuildPrompt(target, out _); }
+
+        private static string BuildPrompt(IInteractable target, out string reason)
         {
             string label = target.PromptText;
 
@@ -110,7 +125,9 @@ namespace Emberdelve.Interaction
                 return label + "  -  " + blocked;
             }
 
-            return target.RequiresHold ? label + "  (hold)" : label;
+            // A prompt that already says "Hold ..." must not be told it is a hold twice.
+            bool saysHold = label != null && label.IndexOf("hold", System.StringComparison.OrdinalIgnoreCase) >= 0;
+            return target.RequiresHold && !saysHold ? label + "  (hold)" : label;
         }
 
         private IInteractable ResolveTarget()
@@ -167,6 +184,7 @@ namespace Emberdelve.Interaction
                 _currentHost = null;
                 _holdProgress = 0f;
                 GameEvents.RaiseInteractionHold(0f);
+                _lastPrompt = string.Empty;
                 GameEvents.RaiseInteractionPrompt(string.Empty);
             }
         }
@@ -175,6 +193,14 @@ namespace Emberdelve.Interaction
         {
             _health = GetComponent<HealthComponent>();
             if (_health != null) _health.Damaged += OnDamaged;
+            GameEvents.RunStateChanged += OnRunState;
+        }
+
+        // A finished run has nothing left to interact with: drop the target and its prompt at once.
+        private void OnRunState(RunState state)
+        {
+            _runEnded = state == RunState.Dead || state == RunState.Extracted;
+            if (_runEnded) ClearTarget();
         }
 
         // Any damage event interrupts a hold in progress: the player has to start over.
@@ -188,6 +214,7 @@ namespace Emberdelve.Interaction
         private void OnDisable()
         {
             if (_health != null) _health.Damaged -= OnDamaged;
+            GameEvents.RunStateChanged -= OnRunState;
             _health = null;
             ClearTarget();
         }

@@ -49,14 +49,17 @@ namespace Emberdelve.UI
         private const float PanelWidth = 760f;
         private const float PanelHeight = 430f;
         private const float PanelCenterX = -40f;
-        private const float PanelCenterY = 20f;
+        // 66 (was 20): lifts the panel so its bottom edge (y 509 from the top at 720p) clears the bottom-right skill cards
+        // (top edge y 514) instead of hiding the Dash card under its corner.
+        private const float PanelCenterY = 66f;
         private const float PanelInset = 16f;
         private const float ColumnGap = 10f;
         private const float EquipLabelGap = 10f;
         private const float EquipLabelWidth = 118f;
         private const float HeaderHeight = 26f;
-        private const float DetailHeight = 74f;
-        private const float CarryHeight = 56f;
+        private const float DetailHeight = 56f;
+        // The instruction band needs three 13pt lines (the selected-item hint); the detail line only ever wraps to two.
+        private const float CarryHeight = 74f;
 
         // The satchel screen has two tabs in the header band: the bag, which is everything above, and the
         // character pane, which reuses the bag's own column (grid + detail + instructions) as its drawing
@@ -82,7 +85,7 @@ namespace Emberdelve.UI
 
         private const float PanePadding = 10f;
 
-        private static readonly Color PanelColor = new Color(0.055f, 0.05f, 0.045f, 0.94f);
+        private static readonly Color PanelColor = new Color(0.055f, 0.05f, 0.045f, 1f);
         private static readonly Color CellColor = new Color(0.13f, 0.12f, 0.11f, 1f);
         private static readonly Color CellBlockedColor = new Color(0.2f, 0.13f, 0.1f, 1f);
         private static readonly Color SlotColor = new Color(0.1f, 0.11f, 0.13f, 1f);
@@ -129,6 +132,8 @@ namespace Emberdelve.UI
         private Image _tipPanel;
         private Text _tipBody;
         private Vector2 _tipAnchor;
+        private bool _tipFromSlot;
+        private float _equipColumnLeftRoot;
         private bool _showCharacter;
 
         private readonly List<Image> _cellImages = new List<Image>(64);
@@ -150,6 +155,8 @@ namespace Emberdelve.UI
         private int _selectedAmount;
 
         public bool IsOpen { get; private set; }
+
+        private bool RunEnded => _director != null && (_director.State == RunState.Dead || _director.State == RunState.Extracted);
 
         /// <summary>The stack the cursor is pointing at. It is still carried in the bag.</summary>
         public ItemData SelectedItem => _selectedItem;
@@ -183,12 +190,14 @@ namespace Emberdelve.UI
         {
             GameEvents.InventoryChanged += OnInventoryChanged;
             GameEvents.EquipmentChanged += OnEquipmentChanged;
+            GameEvents.RunStateChanged += OnRunState;
         }
 
         private void OnDisable()
         {
             GameEvents.InventoryChanged -= OnInventoryChanged;
             GameEvents.EquipmentChanged -= OnEquipmentChanged;
+            GameEvents.RunStateChanged -= OnRunState;
 
             // Dying, pausing out of the run or the HUD being torn down must not leave a selection behind
             // that someone later tries to put somewhere. The stack was never removed, so clearing is free.
@@ -197,7 +206,7 @@ namespace Emberdelve.UI
 
         public void Open()
         {
-            if (IsOpen) return;
+            if (IsOpen || RunEnded) return;
             IsOpen = true;
 
             if (_root != null) _root.gameObject.SetActive(true);
@@ -205,10 +214,18 @@ namespace Emberdelve.UI
             Cursor.visible = true;
 
             Rebuild();
-            GameEvents.RaiseStatusLine("Satchel open");
         }
 
         public void Close()
+        {
+            Close(true);
+        }
+
+        /// <summary>
+        /// Closes the screen. relockCursor is false when the run has ended: the result screen needs a free
+        /// pointer, so the cursor is left exactly as the run layer set it.
+        /// </summary>
+        public void Close(bool relockCursor)
         {
             if (!IsOpen) return;
             IsOpen = false;
@@ -217,9 +234,28 @@ namespace Emberdelve.UI
             // nothing to return, nothing to spawn at the player's feet and nothing to credit as loot.
             ClearSelection();
 
+            // The floating tooltip belongs to the screen: it goes with it and is rebuilt on the next hover.
+            _hoverInstance = null;
+            _hoverDefinition = null;
+            _currentTooltip = null;
+            if (_tipPanel != null) _tipPanel.gameObject.SetActive(false);
+
             if (_root != null) _root.gameObject.SetActive(false);
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
+            if (relockCursor)
+            {
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+            }
+        }
+
+        /// <summary>
+        /// A finished run (death, extraction) or a return to the lobby shuts the satchel and its tooltip at
+        /// once, so nothing under the result screen is left open or clickable. The cursor stays free.
+        /// </summary>
+        private void OnRunState(RunState state)
+        {
+            if (state == RunState.Dead || state == RunState.Extracted || state == RunState.Lobby)
+                Close(false);
         }
 
         public void Toggle()
@@ -281,6 +317,9 @@ namespace Emberdelve.UI
         public void HandlePointer()
         {
             if (!IsOpen) return;
+
+            // Belt and braces for the run-state event: a satchel still open after the run ended closes here.
+            if (RunEnded) { Close(false); return; }
 
             // The run layer owns the pointer while the satchel is closed and hands it over in Open(). A
             // resume from pause re-locks it as part of unpausing, and it does that after the pause
@@ -513,10 +552,25 @@ namespace Emberdelve.UI
         {
             // Right click is cancel first. The selected stack never left the bag, so cancelling has nothing
             // to put back and cannot drop, duplicate, collect or credit anything.
+            // ...except over an EQUIPPABLE bag item: a right click on gear is "wear this one" whatever is
+            // selected (P4c: a leftover selection used to swallow the click, so the cloak was never worn).
+            // The selection is only a cursor mark, so dropping it here moves, spends and credits nothing.
             if (_selectedItem != null)
             {
-                CancelSelection();
-                return;
+                bool overEquippable = false;
+                if (TryCellAt(screen, out Vector2Int overCell) && !TryEquipSlotAt(screen, out _) && _inventory != null)
+                {
+                    int overIndex = _inventory.IndexAtCell(overCell);
+                    overEquippable = overIndex >= 0 && _inventory.Slots[overIndex].Item != null && _inventory.Slots[overIndex].Item.IsEquippable;
+                }
+                bool overBagItem = overEquippable;
+                if (!overBagItem)
+                {
+                    CancelSelection();
+                    return;
+                }
+
+                ClearSelection();
             }
 
             if (TryEquipSlotAt(screen, out EquipmentSlot slot))
@@ -569,6 +623,8 @@ namespace Emberdelve.UI
         {
             if (!_showCharacter) return;
             _showCharacter = false;
+            _hoverInstance = null; // the tooltip was hidden with the tab; forget it so the next frame re-shows it without a pointer move
+            _hoverDefinition = null;
             ApplyTabVisibility();
             Rebuild();
         }
@@ -644,9 +700,11 @@ namespace Emberdelve.UI
         {
             ItemInstance instance = null;
             ItemData definition = null;
+            bool overSlot = false;
 
             if (TryEquipSlotAt(screen, out EquipmentSlot slot))
             {
+                overSlot = true;
                 if (_equipment != null)
                 {
                     instance = _equipment.EquippedInstance(slot);
@@ -664,6 +722,7 @@ namespace Emberdelve.UI
             }
 
             if (instance == null && definition == null) ResolveSelectedItem(out instance, out definition);
+            _tipFromSlot = overSlot;
 
             if (_root != null && RectTransformUtility.ScreenPointToLocalPointInRectangle(_root, screen, CanvasCamera, out Vector2 local))
                 _tipAnchor = local;
@@ -761,9 +820,9 @@ namespace Emberdelve.UI
             {
                 builder.Append("<color=#").Append(sectionColor).Append('>').Append(ItemTooltipModel.RolledHeader).Append("</color>\n");
                 lines++;
-                for (int i = 0; i < model.RolledLines.Count; i++)
+                for (int i = 0; i < model.RolledDisplayLines.Count; i++)
                 {
-                    builder.Append("  <color=#").Append(rarityColor).Append('>').Append(model.RolledLines[i]).Append("</color>\n");
+                    builder.Append("  <color=#").Append(rarityColor).Append('>').Append(model.RolledDisplayLines[i]).Append("</color>\n");
                     lines++;
                 }
             }
@@ -794,7 +853,11 @@ namespace Emberdelve.UI
             float top = PanelCenterY + PanelHeight * 0.5f - TooltipEdgeMargin;
             float bottom = PanelCenterY - PanelHeight * 0.5f + TooltipEdgeMargin;
 
-            float x = Mathf.Clamp(_tipAnchor.x + TooltipPointerOffset, left, Mathf.Max(left, right - size.x));
+            // P4c: keep clear of the worn-kit column. Over a worn slot the tooltip sits beside the column (left of
+            // it); over the grid it is clamped so its right edge stops at the column.
+            if (_equipColumnLeftRoot > left + size.x) right = Mathf.Min(right, _equipColumnLeftRoot - TooltipEdgeMargin * 2f);
+            float wantedX = _tipFromSlot ? right - size.x : _tipAnchor.x + TooltipPointerOffset;
+            float x = Mathf.Clamp(wantedX, left, Mathf.Max(left, right - size.x));
             float y = Mathf.Clamp(_tipAnchor.y - TooltipPointerOffset, Mathf.Min(top, bottom + size.y), top);
 
             _tipPanel.rectTransform.anchoredPosition = new Vector2(x, y);
@@ -1016,7 +1079,7 @@ namespace Emberdelve.UI
             _detailLabel.horizontalOverflow = HorizontalWrapMode.Wrap;
             _detailLabel.verticalOverflow = VerticalWrapMode.Truncate;
 
-            _carryLabel = UiFactory.CreateText(_root, "Carry", "", 15, TextColor, TextAnchor.UpperLeft);
+            _carryLabel = UiFactory.CreateText(_root, "Carry", "", 13, TextColor, TextAnchor.UpperLeft);
             _carryLabel.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
             _carryLabel.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
             _carryLabel.rectTransform.pivot = new Vector2(0f, 1f);
@@ -1070,7 +1133,7 @@ namespace Emberdelve.UI
 
             // The floating tooltip panel is created last so it draws above every other widget. It never receives
             // pointer events, and it is clamped inside the satchel panel when it is positioned.
-            _tipPanel = UiFactory.CreateImage(_root, "TooltipPanel", new Color(0.03f, 0.03f, 0.03f, 0.97f),
+            _tipPanel = UiFactory.CreateImage(_root, "TooltipPanel", new Color(0.045f, 0.04f, 0.036f, 1f),
                 new Vector2(TooltipPanelWidth, 80f), Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
             _tipPanel.rectTransform.pivot = new Vector2(0f, 1f);
             _tipPanel.raycastTarget = false;
@@ -1287,6 +1350,7 @@ namespace Emberdelve.UI
             Vector2 equipCenter = PanelToRoot(equipCentrePanel);
             _equipOrigin = equipCenter + new Vector2(-EquipSlotSize * 0.5f, equipColumnHeight * 0.5f);
             _equipGroup.anchoredPosition = equipCenter;
+            _equipColumnLeftRoot = _equipOrigin.x;
 
             for (int i = 0; i < order.Length; i++)
             {
@@ -1310,13 +1374,27 @@ namespace Emberdelve.UI
                 // slot block, so its foreground cannot follow the item icon colour (Footpad Boots' near-black
                 // icon colour rendered the name invisible). Use the panel's readable light text colour; empty
                 // slots keep DimColor.
+                // P4c: the slot name is always shown (so a worn Back item cannot hide which slot it is); the
+                // worn item is a second line under it, in its rarity colour.
+                string slotName = ItemTooltip.SlotLabel(kind);
+                string labelText = slotName;
+                if (worn != null)
+                {
+                    ItemInstance wornInstance = _equipment.EquippedInstance(kind);
+                    Color nameColor = wornInstance != null ? ItemTooltip.RarityColor(wornInstance.Rarity) : TextColor;
+                    labelText = "<color=#" + ColorUtility.ToHtmlStringRGB(DimColor) + "><size=11>" + slotName + "</size></color>\n" +
+                                "<color=#" + ColorUtility.ToHtmlStringRGB(nameColor) + ">" + worn.displayName + "</color>";
+                }
                 Text label = UiFactory.CreateText(_equipGroup.transform, "EquipLabel_" + kind,
-                    worn != null ? worn.displayName : kind.ToString(), 13,
-                    worn != null ? TextColor : DimColor, TextAnchor.MiddleLeft, FontStyle.Bold);
+                    labelText, 13, worn != null ? TextColor : DimColor, TextAnchor.MiddleLeft, FontStyle.Bold);
+                label.horizontalOverflow = HorizontalWrapMode.Wrap;
+                label.verticalOverflow = VerticalWrapMode.Truncate;
+                label.supportRichText = true;
+                label.raycastTarget = false;
                 label.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
                 label.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
                 label.rectTransform.pivot = new Vector2(0f, 0.5f);
-                label.rectTransform.sizeDelta = new Vector2(EquipLabelWidth, 18f);
+                label.rectTransform.sizeDelta = new Vector2(EquipLabelWidth, EquipSlotSize);
                 label.rectTransform.anchoredPosition = center - equipCenter +
                     new Vector2(EquipSlotSize * 0.5f + EquipLabelGap, 0f);
 
@@ -1370,9 +1448,9 @@ namespace Emberdelve.UI
             if (_carryLabel != null)
             {
                 _carryLabel.text = _selectedItem != null
-                    ? $"Selected {_selectedItem.displayName} x{_selectedAmount} at cell {_selectedOrigin} ({_selectedItem.ShortSummary})   " +
-                      "left click a cell to move it, left click another stack to swap or combine, right click to let go"
-                    : "left click an item to select it   right click a bag item to wear or use it   right click a worn item to take it off";
+                    ? $"Selected {_selectedItem.displayName} x{_selectedAmount} ({SelectedSummary()})   " +
+                      "left click: move, swap, combine or wear   right click: let go"
+                    : "left click: select   right click a bag item: wear or use it   right click a worn item: take it off";
                 _carryLabel.rectTransform.sizeDelta = new Vector2(leftColumnWidth, InstructionHeight);
                 _carryLabel.rectTransform.anchoredPosition = PanelToRoot(new Vector2(innerLeft, instructionTop));
             }
@@ -1434,6 +1512,13 @@ namespace Emberdelve.UI
                     _carryGhost.gameObject.SetActive(false);
                 }
             }
+        }
+
+        /// <summary>Fixed property lines of the selected item, in the same wording as the tooltip (no raw modifier text).</summary>
+        private string SelectedSummary()
+        {
+            ItemTooltipModel model = ItemTooltip.ForDefinition(_selectedItem);
+            return model != null && model.FixedLines.Count > 0 ? string.Join(", ", model.FixedLines) : _selectedItem.kind.ToString().ToLower();
         }
 
         private string BuildDetailText()

@@ -46,7 +46,9 @@ namespace Emberdelve.UI
 
             int count = Mathf.Max(1, classes.Count);
             const float cardWidth = 420f;
-            const float cardHeight = 420f;
+            // 380 tall and 36px below centre: at 1280x720 the cards span y 206..586 and stop 13px above the DESCEND
+            // button (y 599..661); the previous 420px cards ran to y 630 and sat under it.
+            const float cardHeight = 380f;
             float gap = 40f;
             float totalWidth = count * cardWidth + (count - 1) * gap;
 
@@ -58,7 +60,7 @@ namespace Emberdelve.UI
                 float x = -totalWidth * 0.5f + cardWidth * (i + 0.5f) + gap * i;
 
                 Image card = UiFactory.CreateImage(root, "Card_" + classData.classId, new Color(0.09f, 0.075f, 0.06f, 0.95f),
-                    new Vector2(cardWidth, cardHeight), new Vector2(x, -60f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+                    new Vector2(cardWidth, cardHeight), new Vector2(x, -36f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
 
                 Button button = card.gameObject.AddComponent<Button>();
                 button.targetGraphic = card;
