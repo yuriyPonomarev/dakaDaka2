@@ -657,7 +657,10 @@ namespace Emberdelve.Combat
             RejectedCount++;
             if (logRejections)
             {
-                Debug.Log($"[CombatAuthority] Rejected attack from #{intent.InstigatorCombatId} ({intent.WeaponId}): {reason}", this);
+                // Once per reason per second per instigator: a held button or an enemy retrying every frame
+                // must not flood the log, but the first occurrence of each reason is always visible.
+                CombatDiagnostics.Log($"reject:{intent.InstigatorCombatId}:{reason}",
+                    $"[CombatAuthority] Rejected attack from #{intent.InstigatorCombatId} ({intent.WeaponId}): {reason}", this);
             }
             return false;
         }

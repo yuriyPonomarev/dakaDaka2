@@ -45,9 +45,29 @@ namespace Emberdelve.InputLayer
         public bool JumpPressed => _jump != null && _jump.WasPressedThisFrame();
         public bool SprintHeld => _sprint != null && _sprint.IsPressed();
         public bool CrouchPressed => _crouch != null && _crouch.WasPressedThisFrame();
-        public bool PrimaryPressed => _primary != null && _primary.WasPressedThisFrame();
-        public bool PrimaryHeld => _primary != null && _primary.IsPressed();
-        public bool PrimaryReleased => _primary != null && _primary.WasReleasedThisFrame();
+        /// <summary>
+        /// Test seam for batch-mode harnesses that have no pointer device (the same idea as
+        /// <see cref="InteractHeldOverride"/>): when set, each replaces the real primary-attack reading for the
+        /// edge or level it names, so the REAL MeleeCombat/RangedCombat Update path runs from a button press
+        /// instead of a hand-built intent. They still respect disabled gameplay input. Null (the default)
+        /// means the real action is read. A harness holds one for exactly one frame to produce an edge.
+        /// Never set in game code.
+        /// </summary>
+        public bool? PrimaryPressedOverride { get; set; }
+        public bool? PrimaryHeldOverride { get; set; }
+        public bool? PrimaryReleasedOverride { get; set; }
+
+        private bool OverrideLive => _playerMap != null && _playerMap.enabled;
+
+        public bool PrimaryPressed => PrimaryPressedOverride.HasValue
+            ? PrimaryPressedOverride.Value && OverrideLive
+            : _primary != null && _primary.WasPressedThisFrame();
+        public bool PrimaryHeld => PrimaryHeldOverride.HasValue
+            ? PrimaryHeldOverride.Value && OverrideLive
+            : _primary != null && _primary.IsPressed();
+        public bool PrimaryReleased => PrimaryReleasedOverride.HasValue
+            ? PrimaryReleasedOverride.Value && OverrideLive
+            : _primary != null && _primary.WasReleasedThisFrame();
         public bool SecondaryHeld => _secondary != null && _secondary.IsPressed();
         public bool SecondaryPressed => _secondary != null && _secondary.WasPressedThisFrame();
         public bool InteractPressed => _interact != null && _interact.WasPressedThisFrame();

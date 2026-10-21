@@ -60,6 +60,12 @@ namespace Emberdelve.EditorTools
         public static void RunArcherFlow() => StartRun("archer");
         public static void RunResultLoop() => StartRun("resultloop");
 
+        /// <summary>P4b: warrior sword and crossbow through the REAL input -> component -> authority path.</summary>
+        public static void RunRealCombatWarrior() => StartRun("realcombat");
+
+        /// <summary>P4b: archer bow and rapier through the REAL input -> component -> authority path.</summary>
+        public static void RunRealCombatArcher() => StartRun("realcombatarcher");
+
         /// <summary>Milestone 5: grid storage, equipment slots and containers.</summary>
         public static void RunInventoryFlow() => StartRun("items");
 
@@ -77,7 +83,7 @@ namespace Emberdelve.EditorTools
             // The item flows need the archer, whose class carries no shield, so they go through the lobby the
             // same way the archer flow does. The satchel pointer flow needs that same class plus the dungeon
             // HUD that builds the screen it clicks, so it descends through the lobby too.
-            string scenePath = (mode == "lobby" || mode == "archer" || mode == "items" || mode == "inventoryui")
+            string scenePath = (mode == "lobby" || mode == "archer" || mode == "items" || mode == "inventoryui" || mode == "realcombatarcher")
                 ? EmberdelvePaths.LobbyScenePath
                 : EmberdelvePaths.DungeonScenePath;
             EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
@@ -216,6 +222,13 @@ namespace Emberdelve.EditorTools
                     yield return LobbyFlow();
                     yield return ArcherFlow();
                 }
+                else if (Mode == "realcombatarcher")
+                {
+                    yield return LobbyFlow();
+                    _rig = FindFirstObjectByType<PlayerRig>();
+                    _director = FindFirstObjectByType<RunDirector>();
+                    yield return RealCombatArcherFlow();
+                }
                 else if (Mode == "items")
                 {
                     // Same reason: the item tests need the class that carries no shield by default.
@@ -241,6 +254,7 @@ namespace Emberdelve.EditorTools
                     yield return DungeonBaseline();
 
                     if (Mode == "combat") yield return CombatFlow();
+                    else if (Mode == "realcombat") yield return RealCombatWarriorFlow();
                     else if (Mode == "ai") yield return EnemyAiFlow();
                     else if (Mode == "extract") yield return ExtractionFlow();
                     else if (Mode == "death") yield return DeathFlow();
@@ -1577,6 +1591,353 @@ namespace Emberdelve.EditorTools
                 };
                 InputSystem.QueueStateEvent(mouse, state);
             }
+            // ---------------------------------------------------------------- P4b: real input path
+
+            // These flows exist because the first windowed review (P4a) reported "combat looks unwinnable".
+            // Every earlier combat fixture called BeginSwing()/Fire() directly and parked the enemy at the exact
+            // distance the scan measures, so a defect anywhere between the button press and the authority could
+            // hide behind them. Here the only thing the harness does is press the primary button (the
+            // EmberdelveInput override seam) and place an enemy where a player would find one - at ordinary
+            // distances, in front, slightly off-axis, standing and after the player really moved. Everything
+            // else (Update state machine, probe origin, hit point, authority validation, damage) is the shipped
+            // path, and a rejection is attributed to the authority's own reason string.
+
+            private struct RealCase
+            {
+                public string Label;
+                public float Distance;
+                public float YawOffset;
+                public bool ExpectHit;
+            }
+
+            private IEnumerator RealCombatWarriorFlow()
+            {
+                if (!PrepareRealCombat(out EmberdelveInput input)) yield break;
+
+                ClassLoadout loadout = _rig.Loadout;
+                MeleeCombat melee = _rig.GetComponent<MeleeCombat>();
+                RangedCombat ranged = _rig.GetComponent<RangedCombat>();
+                Check(loadout != null && melee != null && ranged != null, "warrior rig has loadout, melee and ranged components");
+                if (loadout == null || melee == null || ranged == null) yield break;
+
+                Check(_rig.ActiveWeapon != null && _rig.ActiveWeapon == melee.Weapon && melee.enabled,
+                    $"the authority-visible weapon is the weapon the melee component swings ({Name(_rig.ActiveWeapon)})");
+
+                yield return RealMeleeMatrix("warrior sword standing", input, melee, false);
+
+                yield return MovePlayerForReal(1.6f);
+                yield return RealMeleeMatrix("warrior sword after moving", input, melee, true);
+
+                Check(loadout.SwitchWeapon() && ranged.enabled && !melee.enabled, "warrior switched to the crossbow");
+                yield return RealRangedMatrix("warrior crossbow", input, ranged);
+                loadout.SwitchToSlot(0);
+                CleanupRealCombat(input);
+            }
+
+            private IEnumerator RealCombatArcherFlow()
+            {
+                if (!PrepareRealCombat(out EmberdelveInput input)) yield break;
+
+                ClassLoadout loadout = _rig.Loadout;
+                MeleeCombat melee = _rig.GetComponent<MeleeCombat>();
+                RangedCombat ranged = _rig.GetComponent<RangedCombat>();
+                Check(loadout != null && melee != null && ranged != null, "archer rig has loadout, melee and ranged components");
+                if (loadout == null || melee == null || ranged == null) yield break;
+
+                Check(_rig.ActiveWeapon != null && _rig.ActiveWeapon == ranged.Weapon && ranged.enabled,
+                    $"the authority-visible weapon is the weapon the ranged component fires ({Name(_rig.ActiveWeapon)})");
+
+                yield return RealRangedMatrix("archer bow", input, ranged);
+
+                Check(loadout.SwitchWeapon() && melee.enabled && !ranged.enabled, "archer switched to the rapier");
+                yield return RealMeleeMatrix("archer rapier standing", input, melee, false);
+                yield return MovePlayerForReal(1.6f);
+                yield return RealMeleeMatrix("archer rapier after moving", input, melee, true);
+
+                loadout.SwitchToSlot(0);
+                CleanupRealCombat(input);
+            }
+
+            private bool PrepareRealCombat(out EmberdelveInput input)
+            {
+                input = null;
+                if (_rig == null || _director == null)
+                {
+                    Check(false, "real combat flow found a rig and a director");
+                    return false;
+                }
+
+                _authority = null;
+                if (GameServices.TryGet<ICombatAuthority>(out ICombatAuthority resolved)) _authority = resolved;
+                _localAuthority = resolved as LocalCombatAuthority;
+                Check(_localAuthority != null, "the offline authority is the one under test");
+                input = _rig.Input;
+                Check(input != null, "rig exposes the input layer");
+                if (_localAuthority == null || input == null) return false;
+
+                // The player is not under test for damage taken: freeze every enemy in place (they stay
+                // registered, collidable and hostile - only their own AI Update stops), so each case measures
+                // the player's attack and nothing else.
+                EnemyAgent[] agents = FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None);
+                for (int i = 0; i < agents.Length; i++) agents[i].enabled = false;
+                Check(agents.Length > 0, $"enemies present for the real input cases ({agents.Length})");
+                return agents.Length > 0;
+            }
+
+            private void CleanupRealCombat(EmberdelveInput input)
+            {
+                input.PrimaryPressedOverride = null;
+                input.PrimaryReleasedOverride = null;
+                input.PrimaryHeldOverride = null;
+                EnemyAgent[] agents = FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None);
+                for (int i = 0; i < agents.Length; i++) agents[i].enabled = true;
+            }
+
+            /// <summary>Moves the player with the CharacterController (as movement does), in an open direction.</summary>
+            private IEnumerator MovePlayerForReal(float metres)
+            {
+                CharacterController controller = _rig.GetComponent<CharacterController>();
+                if (controller == null) { Check(false, "player has a CharacterController to move"); yield break; }
+
+                Vector3 start = _rig.transform.position;
+                float yaw = FindOpenYaw(metres + 0.6f, 0f, metres + 1f, out bool found, true);
+                Check(found, "an open direction exists to move the player");
+                if (!found) yield break;
+
+                Vector3 direction = Quaternion.Euler(0f, yaw, 0f) * Vector3.forward;
+                _rig.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+                const int steps = 12;
+                for (int i = 0; i < steps; i++)
+                {
+                    controller.Move(direction * (metres / steps));
+                    yield return null;
+                }
+
+                float moved = Vector3.Distance(start, _rig.transform.position);
+                Check(moved > metres * 0.6f, $"the player really moved ({moved:F2} m of {metres:F1})");
+            }
+
+            private Vector3 RealCasePoint(float yaw, float distance, float yawOffset)
+            {
+                Vector3 dir = Quaternion.Euler(0f, yaw + yawOffset, 0f) * Vector3.forward;
+                return _rig.transform.position + dir * distance;
+            }
+
+            /// <summary>
+            /// Picks a player yaw whose whole fan of case points is open floor with a clear line from the
+            /// player's body, so a case can only fail for a combat reason and never because it stands in a wall.
+            /// </summary>
+            private float FindOpenYaw(float maxDistance, float maxOffset, float clearance, out bool found, bool straightOnly = false)
+            {
+                LayerMask levelMask = _director != null && _director.Config != null ? _director.Config.levelMask : Physics.DefaultRaycastLayers;
+                float[] offsets = straightOnly ? new[] { 0f } : new[] { -maxOffset, 0f, maxOffset };
+
+                for (int step = 0; step < 16; step++)
+                {
+                    float yaw = _rig.transform.eulerAngles.y + step * 22.5f;
+                    bool ok = true;
+
+                    for (int o = 0; o < offsets.Length && ok; o++)
+                    {
+                        for (float d = 0.8f; d <= maxDistance + 0.01f && ok; d += 0.6f)
+                        {
+                            Vector3 p = RealCasePoint(yaw, d, offsets[o]);
+                            Vector2Int cell = _layout.CellFromWorld(p);
+                            if (!_grid.IsWalkable(cell.x, cell.y)) ok = false;
+                        }
+
+                        Vector3 far = RealCasePoint(yaw, Mathf.Max(maxDistance, clearance), offsets[o]) + Vector3.up * 1.1f;
+                        if (ok && !HitScanner.HasLineOfSight(_rig.CombatCenter, far, levelMask, 0.2f)) ok = false;
+                    }
+
+                    if (ok) { found = true; return yaw; }
+                }
+
+                found = false;
+                return _rig.transform.eulerAngles.y;
+            }
+
+            private IEnumerator RealMeleeMatrix(string label, EmberdelveInput input, MeleeCombat melee, bool subset)
+            {
+                WeaponData weapon = melee.Weapon;
+                Check(weapon != null && melee.enabled, $"{label}: melee component live with {Name(weapon)}");
+                if (weapon == null || !melee.enabled) yield break;
+
+                float halfArc = weapon.arcAngle * 0.5f;
+                float maxReach = weapon.reach + weapon.hitSphereRadius;
+                float far = Mathf.Max(0.9f, maxReach - 0.4f);   // inside the probe once the eye/centre height gap is counted
+                float[] distances = subset ? new[] { 1.4f, far } : new[] { 0.9f, 1.8f, far };
+                float[] offsets = subset ? new[] { 0f, halfArc * 0.5f } : new[] { 0f, halfArc * 0.35f, halfArc * 0.7f };
+
+                float yaw = FindOpenYaw(far, halfArc * 0.7f, far + 1.5f, out bool found);
+                Check(found, $"{label}: an open fan of floor exists around the player");
+                if (!found) yield break;
+
+                _rig.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+                Physics.SyncTransforms();
+
+                EnemyAgent enemy = PickAliveEnemy();
+                Check(enemy != null, $"{label}: an enemy is available");
+                if (enemy == null) yield break;
+
+                List<RealCase> cases = new List<RealCase>();
+                for (int d = 0; d < distances.Length; d++)
+                {
+                    for (int o = 0; o < offsets.Length; o++)
+                    {
+                        cases.Add(new RealCase { Label = $"d={distances[d]:F1}m off={offsets[o]:F0}deg", Distance = distances[d], YawOffset = offsets[o], ExpectHit = true });
+                        if (offsets[o] > 0.5f)
+                            cases.Add(new RealCase { Label = $"d={distances[d]:F1}m off=-{offsets[o]:F0}deg", Distance = distances[d], YawOffset = -offsets[o], ExpectHit = true });
+                    }
+                }
+
+                if (!subset)
+                {
+                    // Controls: the harness must be able to tell "no hit" from "hit", or green means nothing.
+                    cases.Add(new RealCase { Label = "behind the player (180deg)", Distance = 1.5f, YawOffset = 180f, ExpectHit = false });
+                    cases.Add(new RealCase { Label = $"beyond reach ({maxReach + 1.2f:F1}m)", Distance = maxReach + 1.2f, YawOffset = 0f, ExpectHit = false });
+                }
+
+                int exercised = 0;
+                for (int i = 0; i < cases.Count; i++)
+                {
+                    RealCase c = cases[i];
+                    Vector3 spot = RealCasePoint(yaw, c.Distance, c.YawOffset);
+
+                    // Controls may land in a wall; skip them rather than test a wall.
+                    if (!c.ExpectHit)
+                    {
+                        Vector2Int cell = _layout.CellFromWorld(spot);
+                        if (!_grid.IsWalkable(cell.x, cell.y))
+                        {
+                            Debug.Log($"[Emberdelve][Smoke:{Mode}] {label}: control '{c.Label}' skipped (not open floor)");
+                            continue;
+                        }
+                    }
+
+                    enemy.Health.Heal(10000f);
+                    Vector3 root = enemy.transform.position;
+                    enemy.transform.position = new Vector3(spot.x, root.y, spot.z);
+                    Physics.SyncTransforms();
+
+                    // Ready: the swing machine idle and past its cooldown, and the authority's own cooldown over.
+                    yield return WaitUntil(() => !melee.IsSwinging && melee.CooldownRemaining <= 0f
+                        && _localAuthority.WeaponCooldownRemaining(_rig.CombatId, weapon) <= 0f, weapon.cooldown + 2f);
+                    yield return WaitFrames(2);
+
+                    float healthBefore = enemy.CurrentHealth;
+                    int acceptedBefore = _localAuthority.AcceptedCount;
+                    int rejectedBefore = _localAuthority.RejectedCount;
+                    Vector3 eye = _rig.AimOrigin;
+                    float eyeDist = (enemy.CombatCenter - eye).magnitude;
+                    float angle = Vector3.Angle(_rig.AimDirection, enemy.CombatCenter - eye);
+
+                    // The scan's arc is a 3D angle from the eye to the target's chest, so at point blank the
+                    // drop from eye to chest (about 30 degrees at 0.9 m) eats part of a narrow arc. That is the
+                    // documented HitScanner rule, not what this matrix tests: a case whose own measured angle is
+                    // outside the arc is reported and skipped instead of asserted as a hit (P4b.md, finding F4).
+                    if (c.ExpectHit && angle > halfArc - 2f)
+                    {
+                        Debug.Log($"[Emberdelve][Smoke:{Mode}] {label}: {c.Label} skipped, its measured {angle:F0}deg is outside the {weapon.arcAngle:F0}deg arc");
+                        continue;
+                    }
+
+                    // THE REAL PATH: one press of the primary button, held for exactly one frame.
+                    input.PrimaryPressedOverride = true;
+                    yield return null;
+                    input.PrimaryPressedOverride = null;
+
+                    yield return WaitUntil(() => !melee.IsSwinging, 2f);
+                    yield return WaitFrames(2);
+
+                    bool damaged = enemy.CurrentHealth < healthBefore;
+                    bool accepted = _localAuthority.AcceptedCount > acceptedBefore;
+                    string diag = $"eye-to-centre {eyeDist:F2}m, {angle:F0}deg off aim, reach {maxReach:F2}m, authority: " +
+                                  $"{(accepted ? "accepted" : $"rejected x{_localAuthority.RejectedCount - rejectedBefore} '{_localAuthority.LastAttackRejectReason}'")}";
+
+                    if (c.ExpectHit)
+                    {
+                        Check(damaged && accepted, $"{label}: {c.Label} -> real swing damaged the enemy ({healthBefore:F0} -> {enemy.CurrentHealth:F0}; {diag})");
+                    }
+                    else
+                    {
+                        Check(!damaged && !accepted, $"{label}: {c.Label} -> no hit, as it must be ({diag})");
+                    }
+                    exercised++;
+                }
+
+                Check(exercised >= (subset ? 4 : 10), $"{label}: enough cases were exercised ({exercised})");
+            }
+
+            private IEnumerator RealRangedMatrix(string label, EmberdelveInput input, RangedCombat ranged)
+            {
+                WeaponData weapon = ranged.Weapon;
+                Check(weapon != null && weapon.IsRanged && ranged.enabled, $"{label}: ranged component live with {Name(weapon)}");
+                if (weapon == null || !ranged.enabled) yield break;
+
+                // Distances a player actually shoots at; lateral offsets stay inside the body.
+                float[] distances = { 3f, 6f, 10f };
+                float yaw = FindOpenYaw(10f, 0f, 11f, out bool found, true);
+                if (!found) yaw = FindOpenYaw(6f, 0f, 7f, out found, true);
+                Check(found, $"{label}: an open firing lane exists");
+                if (!found) yield break;
+
+                _rig.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+                Physics.SyncTransforms();
+
+                EnemyAgent enemy = PickAliveEnemy();
+                Check(enemy != null, $"{label}: an enemy is available");
+                if (enemy == null) yield break;
+
+                Vector3 right = Quaternion.Euler(0f, yaw, 0f) * Vector3.right;
+                int cases = 0;
+                for (int i = 0; i < distances.Length; i++)
+                {
+                    for (int side = 0; side < 2; side++)
+                    {
+                        float lateral = side == 0 ? 0f : 0.15f;
+                        Vector3 spot = RealCasePoint(yaw, distances[i], 0f) + right * lateral;
+                        Vector2Int cell = _layout.CellFromWorld(spot);
+                        if (!_grid.IsWalkable(cell.x, cell.y)) continue;
+
+                        // Refill so the matrix measures aim and authority, not the size of the magazine.
+                        if (ranged.Magazine < 2) ranged.RefundAmmo(weapon.magazineSize);
+
+                        enemy.Health.Heal(10000f);
+                        Vector3 root = enemy.transform.position;
+                        enemy.transform.position = new Vector3(spot.x, root.y, spot.z);
+                        Physics.SyncTransforms();
+
+                        yield return WaitUntil(() => _localAuthority.WeaponCooldownRemaining(_rig.CombatId, weapon) <= 0f, weapon.cooldown + 2f);
+                        yield return WaitFrames(2);
+
+                        int magazineBefore = ranged.Magazine;
+                        float healthBefore = enemy.CurrentHealth;
+                        int acceptedBefore = _localAuthority.AcceptedCount;
+                        int rejectedBefore = _localAuthority.RejectedCount;
+
+                        // THE REAL PATH: press, hold for the draw, release.
+                        input.PrimaryPressedOverride = true;
+                        yield return null;
+                        input.PrimaryPressedOverride = null;
+                        yield return WaitSeconds(Mathf.Max(0.1f, weapon.drawTime) + 0.12f);
+                        input.PrimaryReleasedOverride = true;
+                        yield return null;
+                        input.PrimaryReleasedOverride = null;
+                        yield return WaitFrames(3);
+
+                        bool damaged = enemy.CurrentHealth < healthBefore;
+                        bool accepted = _localAuthority.AcceptedCount > acceptedBefore;
+                        string diag = $"authority: {(accepted ? "accepted" : $"rejected x{_localAuthority.RejectedCount - rejectedBefore} '{_localAuthority.LastAttackRejectReason}'")}, magazine {magazineBefore} -> {ranged.Magazine}";
+                        Check(damaged && accepted && ranged.Magazine == magazineBefore - 1,
+                            $"{label}: {distances[i]:F0}m lateral {lateral:F2}m -> real shot damaged the enemy ({healthBefore:F0} -> {enemy.CurrentHealth:F0}; {diag})");
+                        cases++;
+                    }
+                }
+
+                Check(cases >= 4, $"{label}: at least four open firing cases were exercised ({cases})");
+            }
+
             // ---------------------------------------------------------------- result screen loop
 
             /// <summary>

@@ -247,6 +247,9 @@ namespace Emberdelve.Combat
             bool accepted = hasTarget && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
                             && authority.SubmitAttack(intent, candidate);
 
+            CombatDiagnostics.Log("ranged-shot",
+                $"[RangedCombat] shot #{sequence} ({_weapon.weaponId}) charge {charge:F2}: {(hasTarget ? $"ray hit #{candidate.TargetCombatId}" : "ray hit no combat entity")}, accepted={accepted}", this);
+
             if (!accepted) _magazine = Mathf.Max(0, _magazine - 1);
             GameEvents.RaiseAmmo(_magazine, _reserve);
 

@@ -36,6 +36,9 @@ namespace Emberdelve.Combat
 
         public WeaponData Weapon => _weapon;
         public bool IsSwinging => _phase != Phase.Idle;
+
+        /// <summary>Seconds until the swing state machine would start another swing (0 when ready).</summary>
+        public float CooldownRemaining => Mathf.Max(0f, _readyTime - Time.time);
         public float SwingProgress
         {
             get
@@ -169,8 +172,17 @@ namespace Emberdelve.Combat
 
             if (found)
             {
-                authority.SubmitAttack(_pendingIntent, best);
+                bool accepted = authority.SubmitAttack(_pendingIntent, best);
+                CombatDiagnostics.Log("melee-swing",
+                    $"[MeleeCombat] swing #{_pendingIntent.Sequence} ({_weapon.weaponId}): {count} candidate(s), submitted to #{best.TargetCombatId}, accepted={accepted}", this);
                 SwingResolved?.Invoke(best);
+            }
+            else if (CombatDiagnostics.ShouldLog("melee-swing"))
+            {
+                string nearest = CombatRegistry.TryGetNearest(origin, EntityKind.Enemy, 8f, out ICombatEntity near)
+                    ? $"nearest enemy #{near.CombatId} centre {Vector3.Distance(origin, near.CombatCenter):F2}m from the eye, {Vector3.Angle(direction, near.CombatCenter - origin):F0} deg off the aim (reach {_weapon.reach + _weapon.hitSphereRadius:F2}m, arc {_weapon.arcAngle:F0})"
+                    : "no live enemy within 8m";
+                Debug.Log($"[MeleeCombat] swing #{_pendingIntent.Sequence} ({_weapon.weaponId}): no target in the arc; {nearest}", this);
             }
 
             _phase = Phase.Active;
