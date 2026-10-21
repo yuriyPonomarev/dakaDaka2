@@ -243,6 +243,8 @@ namespace Emberdelve.EditorTools
             private readonly List<GameObject> _objects = new List<GameObject>(32);
             private readonly List<GameObject> _targets = new List<GameObject>(24);
             private readonly List<ItemData> _tempItems = new List<ItemData>(12);
+            private ItemCatalog _testCatalog;
+            private int _charmSerial;
             private readonly List<DamageInfo> _captured = new List<DamageInfo>(8);
             private readonly List<TestTarget> _subscribed = new List<TestTarget>(8);
 
@@ -1290,7 +1292,11 @@ namespace Emberdelve.EditorTools
                 ItemData charm = ScriptableObject.CreateInstance<ItemData>();
                 _tempItems.Add(charm);
 
-                charm.itemId = id;
+                // R3 fixture: one item id names exactly one definition in a catalog, and this helper is called
+                // several times with the same label for different bonuses (for example the cursed -2 charm in two
+                // scenarios). The label stays in every message; the definition's own id gets a serial so each
+                // ephemeral charm is a distinct catalog entry.
+                charm.itemId = id + "_" + (++_charmSerial);
                 charm.displayName = "U2A5 CHA " + (charismaBonus >= 0 ? "+" : string.Empty) + charismaBonus;
                 charm.description = "Ephemeral U2A5 gate item: one authored CHA bonus, no other modifiers.";
                 charm.kind = ItemKind.Armor;
@@ -1300,6 +1306,11 @@ namespace Emberdelve.EditorTools
                 charm.value = 1;
                 charm.statModifiers = null;
                 charm.attributeBonuses = new[] { new AttributeBonusEntry(SixAttribute.Charisma, charismaBonus) };
+
+                // R3 fixture: the charm is an ad-hoc definition, not a production catalog entry, so the bag mints
+                // against an explicit TEST catalog (production items + this charm).
+                bool adopted = EmberdelveTestCatalog.Adopt(ref _testCatalog, rig.Inventory, charm, out string adoptReason);
+                Check(adopted, $"{id} registered in the test catalog{(adopted ? string.Empty : ": " + adoptReason)}");
 
                 // Surface the bag's own refusal reason (for example an unstable item id) in the log, so a
                 // fixture that can never be worn explains itself instead of failing only downstream.
@@ -1579,6 +1590,7 @@ namespace Emberdelve.EditorTools
                     if (_tempItems[i] != null) UnityEngine.Object.Destroy(_tempItems[i]);
                 }
                 _tempItems.Clear();
+                EmberdelveTestCatalog.Release(ref _testCatalog);
             }
 
             // --------------------------------------------- shared scenario plumbing (U2A5-R3)

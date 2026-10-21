@@ -204,7 +204,9 @@ namespace Emberdelve.Interaction
 
             if (!_rolled)
             {
-                if (!lootTable.TryRoll(seed, _remaining, out string rollReason))
+                // R3: gear is rolled against the run's one item catalog, which the host's bag carries.
+                ItemCatalog catalog = _host != null && _host.Inventory != null ? _host.Inventory.Catalog : null;
+                if (!lootTable.TryRoll(seed, _remaining, catalog, out string rollReason))
                 {
                     Debug.LogError($"[Emberdelve][Chest] {name} variant={variant} seed={seed}: contents refused, " +
                                     $"nothing was produced - {rollReason}", this);

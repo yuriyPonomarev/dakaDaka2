@@ -1,4 +1,5 @@
 using UnityEngine;
+using Emberdelve.Items;
 
 namespace Emberdelve.Core
 {
@@ -32,6 +33,10 @@ namespace Emberdelve.Core
         public int inventoryGridHeight = 4;
         [Tooltip("Used when a grid shape has not been chosen, e.g. an older class asset asking for a bag size.")]
         public int inventoryCapacity = 8;
+
+        [Header("Items")]
+        [Tooltip("The one runtime item catalog (R3): every ItemData and the affix catalog. Built by the asset library.")]
+        public ItemCatalog itemCatalog;
 
         [Header("Look")]
         [Range(0.1f, 10f)] public float mouseSensitivity = 1.2f;

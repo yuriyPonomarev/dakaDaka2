@@ -26,6 +26,8 @@ var bag=rig.Inventory;var gear=rig.Equipment;gear.Clear();bag.Clear();bag.Config
 var boots=AssetDatabase.LoadAssetAtPath<ItemData>("Assets/Emberdelve/Data/Item_FootpadBoots.asset");
 var defs=new AffixDefinition[6];for(int i=0;i<6;i++){defs[i]=Make<AffixDefinition>();defs[i].id="stat_"+i;defs[i].statKey=(AffixStatKey)i;defs[i].allowedCategories=AffixCategory.Boots;}
 ItemInstanceAuthority auth;string reason;Check(ItemInstanceAuthority.TryCreate(new[]{boots},defs,out auth,out reason),"attribute affix catalog");
+// R3 fixture: the gate rolls with its own ad-hoc affix definitions, which the production catalog does not own and the bag now validates every instance against, so the bag carries an explicit TEST catalog (real boots + exactly those affixes).
+var testCatalog=ItemCatalog.CreateForTest(new[]{boots},defs);cleanup.Add(testCatalog);bag.SetCatalog(testCatalog);
 Check(rig.AttributeStats.GetAttribute(Emberdelve.Stats.SixAttribute.Constitution)==14&&rig.MaxHealth==120&&rig.Mana.MaxMana==70,"bare warrior baseline");
 string classBefore=EditorJsonUtility.ToJson(rig.Class),bootsBefore=EditorJsonUtility.ToJson(boots);
 ItemInstance rare;Check(ItemInstance.TryCreateNew(boots,1,AffixRarity.Rare,new[]{new AffixRecord("stat_2",AffixStatKey.Constitution,3),new AffixRecord("stat_3",AffixStatKey.Intelligence,3)},auth,out rare,out reason),"rare CON INT gear");

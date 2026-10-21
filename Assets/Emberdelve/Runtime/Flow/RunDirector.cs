@@ -52,8 +52,90 @@ namespace Emberdelve.Flow
 
         private void Awake()
         {
-            if (config != null) config.EnsureValid();
+            if (config != null)
+            {
+                config.EnsureValid();
+
+                // R3: the run's one item catalog is validated once, up front. An invalid catalog is a data error
+                // that makes every gear mint refuse, so it is reported here rather than item by item.
+                if (config.itemCatalog == null)
+                    Debug.LogError("[RunDirector] GameConfig has no itemCatalog; gear cannot be minted.", this);
+                else if (!config.itemCatalog.IsValid(out string catalogReason))
+                    Debug.LogError("[RunDirector] Item catalog is invalid: " + catalogReason, this);
+                else
+                    ReportCatalogCoverage(config.itemCatalog);
+            }
+
             GameServices.Register<RunDirector>(this);
+        }
+
+        /// <summary>
+        /// R3: every item this run can hand out (chest tables and their affixes, floor loot, enemy drops, the
+        /// class starting kits) must be an entry of the item catalog, otherwise a chest silently refuses to roll or
+        /// a pickup is refused at the bag. One aggregated error names everything missing; nothing is changed.
+        /// </summary>
+        private void ReportCatalogCoverage(ItemCatalog catalog)
+        {
+            System.Collections.Generic.List<string> missing = new System.Collections.Generic.List<string>();
+
+            void CheckItem(ItemData item, string where)
+            {
+                if (item != null && !catalog.Contains(item)) missing.Add($"{item.name} ({item.itemId}) in {where}");
+            }
+
+            void CheckClass(CharacterClassData data)
+            {
+                if (data == null || data.startingItems == null) return;
+                for (int i = 0; i < data.startingItems.Length; i++) CheckItem(data.startingItems[i], "starting kit of " + data.name);
+            }
+
+            if (layout != null)
+            {
+                if (layout.chestSpawns != null)
+                {
+                    for (int i = 0; i < layout.chestSpawns.Count; i++)
+                    {
+                        LootTable table = layout.chestSpawns[i] != null ? layout.chestSpawns[i].lootTable : null;
+                        if (table == null) continue;
+                        if (table.entries != null)
+                        {
+                            for (int k = 0; k < table.entries.Length; k++)
+                                if (table.entries[k] != null) CheckItem(table.entries[k].item, "loot table " + table.name);
+                        }
+                        if (table.affixCatalog != null)
+                        {
+                            for (int k = 0; k < table.affixCatalog.Length; k++)
+                            {
+                                AffixDefinition a = table.affixCatalog[k];
+                                if (a != null && (!catalog.TryResolveAffix(a.id, out AffixDefinition owned, out _) || owned != a))
+                                    missing.Add($"affix {a.id} in loot table {table.name}");
+                            }
+                        }
+                    }
+                }
+
+                if (layout.lootSpawns != null)
+                {
+                    for (int i = 0; i < layout.lootSpawns.Count; i++)
+                        if (layout.lootSpawns[i] != null) CheckItem(layout.lootSpawns[i].item, "floor loot");
+                }
+
+                if (layout.enemySpawns != null)
+                {
+                    for (int i = 0; i < layout.enemySpawns.Count; i++)
+                    {
+                        EnemyData enemy = layout.enemySpawns[i] != null ? layout.enemySpawns[i].enemy : null;
+                        if (enemy == null || enemy.lootTable == null) continue;
+                        for (int k = 0; k < enemy.lootTable.Length; k++) CheckItem(enemy.lootTable[k], "drops of " + enemy.name);
+                    }
+                }
+            }
+
+            CheckClass(fallbackClass);
+            CheckClass(RunContext.SelectedClass);
+
+            if (missing.Count > 0)
+                Debug.LogError("[RunDirector] Items not in the item catalog (rebuild the data assets): " + string.Join("; ", missing), this);
         }
 
         private void Start()

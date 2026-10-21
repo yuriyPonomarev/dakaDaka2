@@ -76,6 +76,13 @@ namespace Emberdelve.Player
 
             if (rig.Inventory != null)
             {
+                // R3: the bag mints the starting kit against the run's one item catalog and nothing else. A
+                // config without a catalog leaves a catalog the bag already has untouched (a fixture's explicit
+                // one); a bag that ends up with none mints no gear and the kit's gear is refused with a reason.
+                if (config.itemCatalog != null) rig.Inventory.SetCatalog(config.itemCatalog);
+                else if (rig.Inventory.Catalog == null)
+                    Debug.LogError("[Emberdelve][ClassLoadout] GameConfig has no itemCatalog: gear cannot be minted for the starting kit.", this);
+
                 rig.Inventory.ConfigureGrid(config.inventoryGridWidth, config.inventoryGridHeight);
                 rig.Inventory.GiveStartingItems(data.startingItems);
             }

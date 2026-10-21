@@ -12,15 +12,22 @@ public static class ManagerInventoryGeometryProbe
         ItemData blade = ScriptableObject.CreateInstance<ItemData>();
         ItemData boots = ScriptableObject.CreateInstance<ItemData>();
         int failures = 0;
+        ItemCatalog testCatalogForCleanup = null;
         try
         {
+            blade.itemId = "probe_blade";
             blade.displayName = "Probe Blade";
             blade.gridFootprint = new Vector2Int(1, 3);
             blade.equipSlot = EquipmentSlot.Weapon;
+            boots.itemId = "probe_boots";
             boots.displayName = "Probe Boots";
             boots.gridFootprint = new Vector2Int(2, 2);
             boots.equipSlot = EquipmentSlot.Legs;
             Inventory bag = owner.AddComponent<Inventory>();
+            // R3: the bag mints gear only for catalog entries, so the probe plates are listed in an explicit TEST catalog.
+            ItemCatalog testCatalog = ItemCatalog.CreateForTest(new[] { blade, boots }, null);
+            testCatalogForCleanup = testCatalog;
+            bag.SetCatalog(testCatalog);
             bag.ConfigureGrid(10, 4);
             bag.Clear();
             bool setup = bag.TryAddAt(blade, 1, new Vector2Int(0, 0), out _) &&
@@ -36,6 +43,7 @@ public static class ManagerInventoryGeometryProbe
         finally
         {
             Object.DestroyImmediate(owner);
+            if (testCatalogForCleanup != null) Object.DestroyImmediate(testCatalogForCleanup);
             Object.DestroyImmediate(blade);
             Object.DestroyImmediate(boots);
         }

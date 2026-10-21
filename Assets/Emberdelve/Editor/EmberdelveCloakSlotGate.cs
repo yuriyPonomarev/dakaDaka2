@@ -321,6 +321,12 @@ namespace Emberdelve.EditorTools
                 "authority over the real items and affixes: " + reason);
             if (auth == null) return;
 
+            // R3 fixture: bigCloak is an ad-hoc definition the production catalog does not own, so the bag carries an
+            // explicit TEST catalog (the real items + the 13 real affixes + bigCloak) for the rest of this pass.
+            ItemCatalog gateCatalog = ItemCatalog.CreateForTest(new[] { ashen, mantle, bigCloak, boots, blade }, affixes);
+            cleanup.Add(gateCatalog);
+            bag.SetCatalog(gateCatalog);
+
             // Rolled values stay inside each affix definition's own band (1..3 attributes, 1..6 armor, 5..15 pools).
             ItemInstance rareAshen = Mint(auth, ashen, AffixRarity.Rare,
                 new AffixRecord("affix_armor", AffixStatKey.Armor, 4), new AffixRecord("affix_wisdom", AffixStatKey.Wisdom, 2));
@@ -518,6 +524,9 @@ namespace Emberdelve.EditorTools
             LootTable seal = AssetDatabase.LoadAssetAtPath<LootTable>(EmberdelvePaths.Data + "/Loot_SealedChest.asset");
             var byId = new Dictionary<string, AffixDefinition>();
             foreach (var a in affixes) byId[a.id] = a;
+            // R3: real tables roll against the one real item catalog asset.
+            ItemCatalog realCatalog = AssetDatabase.LoadAssetAtPath<ItemCatalog>(EmberdelveAssetLibrary.ItemCatalogPath);
+            Check(realCatalog != null, "the item catalog asset exists");
 
             int commonSeen = 0, uncommonSeen = 0, rareSeen = 0;
             var rolledKeys = new HashSet<AffixStatKey>();
@@ -527,7 +536,7 @@ namespace Emberdelve.EditorTools
                 {
                     var drops = new List<LootDrop>();
                     var again = new List<LootDrop>();
-                    bool ok = table.TryRoll(seed, drops, out string reason) & table.TryRoll(seed, again, out string reason2);
+                    bool ok = table.TryRoll(seed, drops, realCatalog, out string reason) & table.TryRoll(seed, again, realCatalog, out string reason2);
                     if (!ok) { Check(false, table.tableId + " seed " + seed + " refused: " + reason + " " + reason2); continue; }
                     Check(drops.Count == again.Count, table.tableId + "/" + seed + " same seed gives the same drop count (full determinism is asserted in the AffixProfile gate)");
 

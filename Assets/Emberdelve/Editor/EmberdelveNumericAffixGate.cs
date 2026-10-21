@@ -26,7 +26,9 @@ var boots=AssetDatabase.LoadAssetAtPath<ItemData>("Assets/Emberdelve/Data/Item_F
 var keys=new[]{AffixStatKey.MaxHealth,AffixStatKey.MaxMana,AffixStatKey.MoveSpeed,AffixStatKey.ManaRegen,AffixStatKey.Constitution};
 var defs=new AffixDefinition[5];float[] lows={5,5,.03f,.1f,1},highs={15,15,.12f,.4f,3},steps={1,1,.01f,.1f,1};
 for(int i=0;i<5;i++){defs[i]=Make<AffixDefinition>();defs[i].id="numeric_"+i;defs[i].statKey=keys[i];defs[i].minValue=lows[i];defs[i].maxValue=highs[i];defs[i].step=steps[i];defs[i].allowedCategories=AffixCategory.Boots;}
-ItemInstanceAuthority auth;string reason;Check(ItemInstanceAuthority.TryCreate(new[]{boots},defs,out auth,out reason),"catalog");string before=EditorJsonUtility.ToJson(boots);
+ItemInstanceAuthority auth;string reason;Check(ItemInstanceAuthority.TryCreate(new[]{boots},defs,out auth,out reason),"catalog");
+// R3 fixture: the gate rolls with its own ad-hoc affix definitions, which the production catalog does not own and the bag now validates every instance against, so the bag carries an explicit TEST catalog (real boots + exactly those affixes).
+var testCatalog=ItemCatalog.CreateForTest(new[]{boots},defs);cleanup.Add(testCatalog);bag.SetCatalog(testCatalog);string before=EditorJsonUtility.ToJson(boots);
 ItemInstance pools;Check(ItemInstance.TryCreateNew(boots,1,AffixRarity.Rare,new[]{new AffixRecord("numeric_0",AffixStatKey.MaxHealth,10),new AffixRecord("numeric_1",AffixStatKey.MaxMana,10)},auth,out pools,out reason),"pool gear");
 rig.Mana.TrySpend(20);float hp=rig.CurrentHealth,mp=rig.Mana.CurrentMana,delay=rig.Mana.RegenDelayRemaining;
 Check(bag.TryAddInstance(pools,out reason),"add pool gear");

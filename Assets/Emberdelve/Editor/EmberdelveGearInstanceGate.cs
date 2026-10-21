@@ -28,6 +28,8 @@ var big=Make<ItemData>();big.itemId="gate_big_boots";big.kind=ItemKind.Armor;big
 var filler=Make<ItemData>();filler.itemId="gate_filler";filler.kind=ItemKind.Relic;filler.gridFootprint=Vector2Int.one;filler.maxStack=1;
 var dex=Make<AffixDefinition>();dex.id="agile";dex.statKey=AffixStatKey.Dexterity;dex.allowedCategories=AffixCategory.Boots;
 ItemInstanceAuthority auth;string reason;Check(ItemInstanceAuthority.TryCreate(new[]{boots,big},new[]{dex},out auth,out reason),"catalog");
+// R3 fixture: the ad-hoc boots/big boots are not production catalog entries (and the legacy-mint check at the end needs a catalog that owns them), so the bag carries an explicit TEST catalog listing exactly what this gate's authority holds.
+var testCatalog=ItemCatalog.CreateForTest(new[]{boots,big},new[]{dex});cleanup.Add(testCatalog);bag.SetCatalog(testCatalog);
 ItemInstance a,b,c;Check(ItemInstance.TryCreateNew(boots,1,AffixRarity.Uncommon,new[]{new AffixRecord("agile",AffixStatKey.Dexterity,1)},auth,out a,out reason),"first rolled boots");
 Check(ItemInstance.TryCreateNew(boots,1,AffixRarity.Uncommon,new[]{new AffixRecord("agile",AffixStatKey.Dexterity,3)},auth,out b,out reason),"same-base different rolled boots");
 Check(ItemInstance.TryCreateNew(big,1,AffixRarity.Common,null,auth,out c,out reason),"large gear");

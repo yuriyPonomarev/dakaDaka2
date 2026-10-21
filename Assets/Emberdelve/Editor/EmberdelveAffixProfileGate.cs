@@ -116,7 +116,7 @@ namespace Emberdelve.EditorTools
                 for (int seed = 1; seed <= 300; seed++)
                 {
                     var a = new List<LootDrop>(); var b = new List<LootDrop>();
-                    bool okA = table.TryRoll(seed, a, out string ra), okB = table.TryRoll(seed, b, out string rb);
+                    bool okA = table.TryRoll(seed, a, EmberdelveAssetLibrary.ItemCatalogAsset, out string ra), okB = table.TryRoll(seed, b, EmberdelveAssetLibrary.ItemCatalogAsset, out string rb);
                     if (!okA || !okB) { Check(false, $"{table.tableId} seed {seed} refused: {ra} {rb}"); continue; }
                     bool same = a.Count == b.Count;
                     for (int i = 0; i < a.Count; i++)
@@ -163,7 +163,7 @@ namespace Emberdelve.EditorTools
                 foreach (var table in new[] { supply, ember, seal })
                 {
                     var drops = new List<LootDrop>();
-                    Check(table.TryRoll(seed, drops, out string rr), $"{table.tableId} seed {seed} rolls: {rr}");
+                    Check(table.TryRoll(seed, drops, EmberdelveAssetLibrary.ItemCatalogAsset, out string rr), $"{table.tableId} seed {seed} rolls: {rr}");
                     foreach (var d in drops)
                     {
                         if (d.Instance == null) continue;

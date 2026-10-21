@@ -77,10 +77,15 @@ namespace Emberdelve.Items
     ///
     /// U2B4: worn or held gear is stored as an actual <see cref="ItemInstance"/>, one identity per occupied
     /// gear stack. A legacy add of an equippable definition mints exactly one explicit Common instance for
-    /// each gear object it accepts (quantity 1 each) through this bag's own local issuer and catalog boundary -
-    /// a local trusted boundary for one process, not proof of server minting. <see cref="TryAddInstance"/> is
-    /// the path for an instance that already exists and keeps its uid, rarity and rolls. Carried stacks
-    /// (currency, consumables, relics) keep the definition-only behavior in this slice.
+    /// each gear object it accepts (quantity 1 each) through this bag's own issuer.
+    ///
+    /// R3: the bag no longer builds a catalog out of whatever definition it is handed. It holds the run's one
+    /// <see cref="ItemCatalog"/> (<see cref="SetCatalog"/>, wired from the game config by the class loadout),
+    /// and a gear definition that is not that catalog's own entry is refused before any state changes - no UID
+    /// is minted for an arbitrary ItemData. A bag with no catalog mints nothing. <see cref="TryAddInstance"/>
+    /// is the path for an instance that already exists and keeps its uid, rarity and rolls; when a catalog is
+    /// set the instance's definition must be a catalog entry too. Carried stacks (currency, consumables,
+    /// relics) keep the definition-only behavior in this slice.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class Inventory : MonoBehaviour
@@ -102,18 +107,7 @@ namespace Emberdelve.Items
             public ItemData Definition => Instance != null ? Instance.Definition : Item;
         }
 
-        /// <summary>
-        /// The bag's own local catalog: one single-entry trusted catalog per definition object it has been asked
-        /// to carry, so the accepted trusted-definition gate always sees the very object being minted against.
-        /// </summary>
-        private sealed class LocalCatalog
-        {
-            public ItemData Definition;
-            public ItemInstanceAuthority Authority;
-        }
-
         private readonly List<Stack> _stacks = new List<Stack>();
-        private readonly List<LocalCatalog> _localCatalogs = new List<LocalCatalog>();
         private readonly List<InventorySlot> _views = new List<InventorySlot>();
         private int[] _cells = new int[40];
 
@@ -123,7 +117,23 @@ namespace Emberdelve.Items
         // Local identity plumbing (U2B4). A local trusted issuer for one process, not a network authority.
         private ItemIdentityIssuer _issuer;
         private Equipment _equipment;
-        private string _lastCatalogFailure;
+
+        // R3: the run's one item catalog. Null until the loadout (or a test) supplies it; gear is only minted
+        // against it.
+        private ItemCatalog _catalog;
+
+        /// <summary>The item catalog this bag mints and admits gear against, or null when none was supplied.</summary>
+        public ItemCatalog Catalog => _catalog;
+
+        /// <summary>
+        /// Supplies the run's item catalog. Setting the same catalog again is a no-op; passing null clears it
+        /// (and a bag with no catalog mints no gear). Production wiring is ClassLoadout.Apply from
+        /// GameConfig.itemCatalog; a fixture passes an explicit test catalog (ItemCatalog.CreateForTest).
+        /// </summary>
+        public void SetCatalog(ItemCatalog catalog)
+        {
+            _catalog = catalog;
+        }
 
         public int GridWidth => gridWidth;
         public int GridHeight => gridHeight;
@@ -279,6 +289,15 @@ namespace Emberdelve.Items
                 return false;
             }
 
+            // R3: gear identity is minted against the run's catalog only. Decided before any state is touched,
+            // so a refused definition leaves the bag exactly as it was.
+            if (item.IsEquippable && !CanMintGear(item, out string mintRefusal))
+            {
+                reason = $"could not give {item.displayName} an item identity: {mintRefusal}";
+                GameEvents.RaiseToast(reason);
+                return false;
+            }
+
             EnsureGrid();
 
             int remaining = amount;
@@ -368,6 +387,12 @@ namespace Emberdelve.Items
             if (item == null || amount <= 0)
             {
                 reason = "nothing to place";
+                return false;
+            }
+
+            if (item.IsEquippable && !CanMintGear(item, out string mintRefusal))
+            {
+                reason = $"could not give {item.displayName} an item identity: {mintRefusal}";
                 return false;
             }
 
@@ -536,6 +561,30 @@ namespace Emberdelve.Items
                 return false;
             }
 
+            // R3: an instance is admitted only against this bag's catalog (a bag with no catalog admits nothing),
+            // and it is re-validated against the catalog's one authority: the definition must be the catalog's own
+            // object and every affix id, key, band, step and category must be the catalog's. A hand-built instance
+            // carrying a forged roll is refused here, with the bag untouched.
+            if (_catalog == null)
+            {
+                reason = $"{definition.displayName} [{instance.UidText}] cannot be admitted: this bag has no item catalog " +
+                         "(Inventory.SetCatalog) to validate it against";
+                return false;
+            }
+
+            if (!_catalog.Contains(definition))
+            {
+                reason = $"{definition.displayName} [{instance.UidText}] is built from a definition that is not an " +
+                         "entry of this bag's item catalog";
+                return false;
+            }
+
+            if (!ItemInstance.TryValidateSnapshot(instance.ToSnapshot(), _catalog.Authority, out string validationReason))
+            {
+                reason = $"{definition.displayName} [{instance.UidText}] does not validate against the item catalog: {validationReason}";
+                return false;
+            }
+
             EnsureGrid();
 
             if (HoldsInstanceUid(instance.Uid))
@@ -584,10 +633,24 @@ namespace Emberdelve.Items
         }
 
         /// <summary>
-        /// Mints the one Common instance a legacy gear add needs. The mint goes through the accepted issuer and
-        /// catalog boundary (<see cref="ItemIdentityIssuer.TryCreateInstance"/>, which validates everything and
-        /// mints only after that), so a refused definition mints nothing. A mint failure is a refusal of the
-        /// whole add and rolls back every stack this call placed.
+        /// Read-only pre-check for a gear add: does this bag have a catalog, and is the definition one of its
+        /// entries? Touches nothing and mints nothing.
+        /// </summary>
+        private bool CanMintGear(ItemData definition, out string reason)
+        {
+            if (_catalog == null)
+            {
+                reason = "this bag has no item catalog (Inventory.SetCatalog), so it cannot mint gear identities";
+                return false;
+            }
+
+            return _catalog.CanMint(definition, out reason);
+        }
+
+        /// <summary>
+        /// Mints the one Common instance a legacy gear add needs, through the run's catalog
+        /// (<see cref="ItemCatalog.TryMintCommon"/>): a definition that is not a catalog entry mints nothing.
+        /// A mint failure is a refusal of the whole add and rolls back every stack this call placed.
         /// </summary>
         private bool TryMintCommonInstance(ItemData definition, out ItemInstance instance, out string reason)
         {
@@ -599,43 +662,33 @@ namespace Emberdelve.Items
                 return false;
             }
 
-            if (_issuer == null) _issuer = ItemIdentityIssuer.CreateLocalTrusted();
-
-            ItemInstanceAuthority authority = LocalCatalogFor(definition);
-            if (authority == null)
+            if (_catalog == null)
             {
-                reason = _lastCatalogFailure ?? "no local item catalog could be built for this definition";
+                reason = "this bag has no item catalog (Inventory.SetCatalog), so it cannot mint gear identities";
                 return false;
             }
 
-            return _issuer.TryCreateInstance(definition, 1, AffixRarity.Common, null, authority,
-                out instance, out reason);
+            if (_issuer == null) _issuer = ItemIdentityIssuer.CreateLocalTrusted();
+
+            return _catalog.TryMintCommon(_issuer, definition, out instance, out reason);
         }
 
         /// <summary>
-        /// The catalog this bag trusts is the definition object it was handed, indexed on its own so the
-        /// accepted gate that demands "the catalog's own object for that id" is satisfied for the exact object
-        /// being minted. Two distinct objects that claim one item id (an ephemeral test clone, a probe plate
-        /// copied from a shipped asset) therefore each get their own catalog instead of making the whole
-        /// lookup ambiguous. This is a local carrying boundary, not an item database and not a network authority.
+        /// Restores one saved item into the bag as itself: the snapshot is resolved by id through the bag's
+        /// catalog (an unknown id or any tampered field refuses, and nothing is placed), then the restored
+        /// instance goes through <see cref="TryAddInstance"/> with its saved UID and rolls. No mint, no reroll.
         /// </summary>
-        private ItemInstanceAuthority LocalCatalogFor(ItemData definition)
+        public bool TryAddSnapshot(ItemSnapshot snapshot, out string reason)
         {
-            for (int i = 0; i < _localCatalogs.Count; i++)
+            if (_catalog == null)
             {
-                if (ReferenceEquals(_localCatalogs[i].Definition, definition)) return _localCatalogs[i].Authority;
+                reason = "this bag has no item catalog, so a snapshot cannot be resolved";
+                return false;
             }
 
-            ItemInstanceAuthority authority;
-            if (!ItemInstanceAuthority.TryCreate(new ItemData[] { definition }, new AffixDefinition[0],
-                out authority, out string reason))
-            {
-                _lastCatalogFailure = reason;
-                return null;
-            }
+            if (!_catalog.TryRestore(snapshot, out ItemInstance restored, out reason)) return false;
 
-            _localCatalogs.Add(new LocalCatalog { Definition = definition, Authority = authority });
-            return authority;
+            return TryAddInstance(restored, out reason);
         }
 
         /// <summary>

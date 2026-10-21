@@ -109,7 +109,7 @@ namespace Emberdelve.Data
     /// drew, on the counted partial path, exactly as every table authored before this slice;</item>
     /// <item>an equippable entry is one concrete <see cref="Emberdelve.Items.ItemInstance"/> per unit, Common
     /// included: the table builds each unit once through the accepted seeded
-    /// <see cref="Emberdelve.Items.LootRoller"/> and issuer, against the item catalog this table itself names,
+    /// <see cref="Emberdelve.Items.LootRoller"/> and issuer, against the run's one item catalog (R3, the table only restricts what it may roll from it),
     /// at the rarity that entry declared. A Common gear unit mints one UID, carries zero affix records, keeps
     /// the definition's fixed stats and consumes no affix RNG at all; an Uncommon or Rare unit additionally
     /// rolls that many accepted affixes, which is what this table's <see cref="affixCatalog"/> is for.</item>
@@ -194,15 +194,14 @@ namespace Emberdelve.Data
         }
 
         /// <summary>
-        /// The legacy call shape, kept for every existing caller: roll the table into <paramref name="output"/>.
-        /// It is now a thin wrapper over <see cref="TryRoll(int, List{LootDrop}, out string)"/> and it does not
-        /// hide an invalid profile: a table whose entries, catalog or rarity claims cannot be produced logs the
-        /// reason and leaves the output empty, instead of quietly handing out a Common stand-in for gear it was
-        /// asked to roll.
+        /// Roll the table into <paramref name="output"/> against the run's item catalog. It does not hide an
+        /// invalid profile: a table whose entries, catalog or rarity claims cannot be produced logs the reason
+        /// and leaves the output empty, instead of quietly handing out a Common stand-in for gear it was asked
+        /// to roll.
         /// </summary>
-        public void Roll(int seed, List<LootDrop> output)
+        public void Roll(int seed, List<LootDrop> output, ItemCatalog catalog)
         {
-            if (TryRoll(seed, output, out string reason)) return;
+            if (TryRoll(seed, output, catalog, out string reason)) return;
 
             Debug.LogError($"[Emberdelve][LootTable] {name}: seeded roll refused: {reason}", this);
         }
@@ -212,9 +211,9 @@ namespace Emberdelve.Data
         /// Uses a fresh local trusted issuer for this roll, which is what an offline container does today; a
         /// run or a future server that wants to count or own the minting passes its own issuer to the overload.
         /// </summary>
-        public bool TryRoll(int seed, List<LootDrop> output, out string reason)
+        public bool TryRoll(int seed, List<LootDrop> output, ItemCatalog catalog, out string reason)
         {
-            return TryRoll(seed, output, ItemIdentityIssuer.CreateLocalTrusted(), out reason);
+            return TryRoll(seed, output, catalog, ItemIdentityIssuer.CreateLocalTrusted(), out reason);
         }
 
         /// <summary>
@@ -238,7 +237,8 @@ namespace Emberdelve.Data
         /// boots from one entry that drew amount 2.</item>
         /// </list>
         /// </summary>
-        public bool TryRoll(int seed, List<LootDrop> output, ItemIdentityIssuer issuer, out string reason)
+        public bool TryRoll(int seed, List<LootDrop> output, ItemCatalog catalog, ItemIdentityIssuer issuer,
+            out string reason)
         {
             reason = null;
 
@@ -322,12 +322,13 @@ namespace Emberdelve.Data
                 return false;
             }
 
-            // Any worn gear at all needs the trusted item catalog, because the accepted roller and issuer only
-            // mint for the definition object that catalog owns for that item id. A table that only ever drops
-            // carried definitions still needs no catalog at all, which is what keeps every pre-U2B9 table
-            // rolling exactly as it did.
+            // Any worn gear at all needs the run's item catalog (R3), because the accepted roller and issuer only
+            // mint for the definition object that catalog owns for that item id. The table never builds a
+            // catalog out of its own entries any more: a gear entry that is not a catalog item is a refusal. A
+            // table that only ever drops carried definitions still needs no catalog at all, which is what keeps
+            // every pre-U2B9 table rolling exactly as it did.
             ItemInstanceAuthority authority = null;
-            if (requestsGearInstances && !TryBuildAuthority(out authority, out reason)) return false;
+            if (requestsGearInstances && !TryDeriveAuthority(catalog, out authority, out reason)) return false;
 
             // ---- 2. the shape loop, consuming exactly what the legacy loop consumed.
             System.Random random = new System.Random(seed);
@@ -425,46 +426,33 @@ namespace Emberdelve.Data
         }
 
         /// <summary>
-        /// The trusted catalog this table mints gear against: the item definitions its own entries name, and
-        /// the affix definitions it authored (possibly none - an empty affix list is a legal Common-only
-        /// catalog, which is all a table that only mints Common gear needs, because the accepted roller and
-        /// issuer demand the catalog's own object for an item id before they believe a single field of it).
-        /// Repeated references to the same definition object are listed once - the weighted entries themselves
-        /// are never touched, so deduplicating the catalog cannot change the loot shape. Two different
-        /// definition objects that both claim one item id are a refusal, because an item id has to name exactly
-        /// one definition for a minted identity to mean anything.
+        /// The rolling authority for this table, derived from the run's item catalog (R3): the gear definitions
+        /// its own entries name and the affix subset it authored (possibly none - an empty affix list is a
+        /// legal Common-only table). Every member must be the catalog's own object, so a table can restrict what
+        /// it rolls but can never introduce an item or affix the catalog does not own. Carried (non-gear)
+        /// entries are not minted and are not listed. Repeated references to one definition object are listed
+        /// once - the weighted entries themselves are never touched, so this cannot change the loot shape. Two
+        /// different definition objects that claim one item id cannot both be catalog entries, so the second is
+        /// refused.
         /// </summary>
-        private bool TryBuildAuthority(out ItemInstanceAuthority authority, out string reason)
+        private bool TryDeriveAuthority(ItemCatalog catalog, out ItemInstanceAuthority authority, out string reason)
         {
             authority = null;
+
+            if (catalog == null)
+            {
+                reason = $"{name}: no item catalog was supplied, and this table drops gear: gear identities are " +
+                         "only minted for definitions the run's item catalog owns";
+                return false;
+            }
 
             List<ItemData> items = new List<ItemData>();
 
             for (int i = 0; i < entries.Length; i++)
             {
                 LootEntry entry = entries[i];
-                if (entry == null || entry.item == null) continue;
-
-                bool alreadyListed = false;
-                for (int k = 0; k < items.Count; k++)
-                {
-                    if (!ReferenceEquals(items[k], entry.item)) continue;
-                    alreadyListed = true;
-                    break;
-                }
-                if (alreadyListed) continue;
-
-                for (int k = 0; k < items.Count; k++)
-                {
-                    if (items[k].itemId != entry.item.itemId) continue;
-
-                    reason = $"{name}: catalog entry {k} and entry {i} are two different item definitions that " +
-                             $"both claim item id '{entry.item.itemId}': one item id names exactly one " +
-                             "definition, so this table cannot be trusted to say which item it drops";
-                    return false;
-                }
-
-                items.Add(entry.item);
+                if (entry == null || entry.item == null || !entry.item.IsEquippable) continue;
+                if (!items.Contains(entry.item)) items.Add(entry.item);
             }
 
             List<AffixDefinition> affixes = new List<AffixDefinition>();
@@ -473,28 +461,20 @@ namespace Emberdelve.Data
             {
                 for (int i = 0; i < affixCatalog.Length; i++)
                 {
-                    AffixDefinition definition = affixCatalog[i];
-                    if (definition == null)
+                    if (affixCatalog[i] == null)
                     {
                         reason = $"{name}: affix catalog entry {i} is null";
                         return false;
                     }
 
-                    bool listed = false;
-                    for (int k = 0; k < affixes.Count; k++)
-                    {
-                        if (ReferenceEquals(affixes[k], definition)) { listed = true; break; }
-                    }
-                    if (listed) continue;
-
-                    affixes.Add(definition);
+                    if (!affixes.Contains(affixCatalog[i])) affixes.Add(affixCatalog[i]);
                 }
             }
 
-            if (!ItemInstanceAuthority.TryCreate(items, affixes, out authority, out reason))
+            if (!catalog.TryDeriveAuthority(items, affixes, out authority, out reason))
             {
                 authority = null;
-                reason = $"{name}: the table's item/affix catalog is not a usable trusted catalog: {reason}";
+                reason = $"{name}: the table is not backed by the item catalog: {reason}";
                 return false;
             }
 

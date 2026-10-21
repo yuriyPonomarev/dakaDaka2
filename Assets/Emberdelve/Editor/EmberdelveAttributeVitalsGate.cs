@@ -184,6 +184,7 @@ namespace Emberdelve.EditorTools
 
             private readonly List<GameObject> _rigs = new List<GameObject>();
             private readonly List<ItemData> _tempItems = new List<ItemData>();
+            private ItemCatalog _testCatalog;
 
             private PlayerRig _notifyRig;
             private bool _notifyArmed;
@@ -230,6 +231,7 @@ namespace Emberdelve.EditorTools
                     for (int i = 0; i < _tempItems.Count; i++) if (_tempItems[i] != null) Object.Destroy(_tempItems[i]);
                     _rigs.Clear();
                     _tempItems.Clear();
+                    EmberdelveTestCatalog.Release(ref _testCatalog);
                 }
 
                 int exitCode = _failures == 0 ? 0 : 1;
@@ -554,6 +556,10 @@ namespace Emberdelve.EditorTools
 
             private void CarryItem(PlayerRig rig, ItemData item)
             {
+                // R3 fixture: the charms/gems this gate builds are ad-hoc definitions, not production catalog
+                // entries, so the bag mints against an explicit TEST catalog (production items + these fixtures).
+                bool adopted = EmberdelveTestCatalog.Adopt(ref _testCatalog, rig.Inventory, item, out string adoptReason);
+                Check(adopted, $"{item.itemId} registered in the test catalog{(adopted ? string.Empty : ": " + adoptReason)}");
                 Check(rig.Inventory.TryAdd(item, 1), $"{item.itemId} placed in the bag");
             }
 

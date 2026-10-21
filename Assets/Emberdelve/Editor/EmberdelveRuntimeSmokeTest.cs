@@ -16,6 +16,7 @@ using Emberdelve.InputLayer;
 using Emberdelve.Interaction;
 using Emberdelve.Items;
 using Emberdelve.Level;
+using Emberdelve.Movement;
 using Emberdelve.Player;
 using Emberdelve.Skills;
 
@@ -550,7 +551,18 @@ namespace Emberdelve.EditorTools
 
                 yield return DroppedLootFlow();
                 yield return LootFlow();
+                // Test-environment control: only the enemy DefenseFlow uses stays live; every other enemy is parked
+                // for the flow and restored afterwards, so nothing else can hit the player mid-measurement.
+                EnemyAgent defenseEnemy = PickAliveEnemy();
+                List<EnemyAgent> parked = new List<EnemyAgent>();
+                foreach (EnemyAgent other in FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None))
+                {
+                    if (other == null || other == defenseEnemy || other.IsDead) continue;
+                    other.gameObject.SetActive(false);
+                    parked.Add(other);
+                }
                 yield return DefenseFlow();
+                for (int p = 0; p < parked.Count; p++) if (parked[p] != null) parked[p].gameObject.SetActive(true);
                 yield return WarriorSkillFlow();
             }
 
@@ -771,6 +783,18 @@ namespace Emberdelve.EditorTools
                 if (melee != null) melee.enabled = false;
                 _rig.SetGuardHeld(false);
 
+                // Test-environment control (R3 review, flake fix). The environment is made deterministic, the
+                // assertion intent is unchanged (inside the wedge => the hit lands, outside => a whiff):
+                //  - every other enemy is parked by the caller, so nothing else can hit the player;
+                //  - the player's PlayerMovement is frozen, so no gravity/depenetration moves the body between
+                //    placing it and the strike (the collider stays, the enemy still has something to hit);
+                //  - the enemy spot is chosen so all three strafe spots are walkable, clear of colliders and in
+                //    line of sight of the enemy; if no such spot exists the check fails with a diagnostic.
+                PlayerMovement movement = _rig.GetComponent<PlayerMovement>();
+                CharacterController body = _rig.GetComponent<CharacterController>();
+                bool movementWasEnabled = movement != null && movement.enabled;
+                if (movement != null) movement.enabled = false;
+
                 Vector3 anchor = _rig.transform.position;
                 Vector3 enemyHome = enemy.transform.position;
                 float standoff = Mathf.Min(1.8f, enemy.Data.attackRange * 0.85f);
@@ -778,6 +802,75 @@ namespace Emberdelve.EditorTools
 
                 float[] angles = { 45f, -45f, halfCone + 40f };
                 bool[] expectHit = { true, true, false };
+                int levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
+                Vector3 centerOffset = _rig.CombatCenter - _rig.transform.position;
+
+                System.Func<Vector3, bool> spotClear = spot =>
+                {
+                    if (_layout == null || _grid == null) return false;
+                    Vector2Int cell = _layout.CellFromWorld(spot);
+                    if (!_grid.IsWalkable(cell.x, cell.y)) return false;
+                    if (body != null)
+                    {
+                        float r = Mathf.Max(0.1f, body.radius * 0.95f);
+                        float half = Mathf.Max(r, body.height * 0.5f);
+                        // lifted a hair so the floor the controller stands on is not an overlap
+                        Vector3 mid = spot + body.center + Vector3.up * 0.12f;
+                        if (Physics.CheckCapsule(mid + Vector3.up * (half - r), mid - Vector3.up * (half - r), r, levelMask,
+                                QueryTriggerInteraction.Ignore)) return false;
+                    }
+                    return true;
+                };
+
+                string arenaWhy = string.Empty;
+                System.Func<Vector3, float, Vector3, bool> allSpotsGood = (home, y, towardPlayer) =>
+                {
+                    Vector3 flat = towardPlayer; flat.y = 0f;
+                    if (flat.sqrMagnitude < 0.0001f) { arenaWhy += $"[{home}: no direction]"; return false; }
+                    flat.Normalize();
+                    if (!spotClear(home)) { arenaWhy += $"[{home}: enemy spot blocked]"; return false; }
+                    for (int a = 0; a < angles.Length; a++)
+                    {
+                        Vector3 spot = home + Quaternion.AngleAxis(angles[a], Vector3.up) * flat * standoff;
+                        spot.y = y;
+                        if (!spotClear(spot)) { arenaWhy += $"[{home}: strafe {angles[a]} at {spot} blocked/unwalkable]"; return false; }
+                        Vector3 eye = home + Vector3.up * 1.15f;
+                        if (!HitScanner.HasLineOfSight(eye, spot + centerOffset, levelMask, 0.3f)) { arenaWhy += $"[{home}: strafe {angles[a]} at {spot} no line of sight]"; return false; }
+                    }
+                    return true;
+                };
+
+                // Candidate enemy spots around the anchor: the one DefenseFlow used first, then every cell 1-2 away.
+                Vector3 chosenHome = enemyHome;
+                bool found = allSpotsGood(enemyHome, anchor.y, anchor - enemyHome);
+                if (!found && _layout != null)
+                {
+                    Vector2Int from = _layout.CellFromWorld(anchor);
+                    Vector2Int[] dirs = { new Vector2Int(1, 0), new Vector2Int(-1, 0), new Vector2Int(0, 1), new Vector2Int(0, -1) };
+                    for (int offsetCells = 1; offsetCells <= 2 && !found; offsetCells++)
+                    {
+                        for (int d = 0; d < dirs.Length && !found; d++)
+                        {
+                            Vector2Int goal = from + dirs[d] * offsetCells;
+                            if (!_grid.IsWalkable(goal.x, goal.y)) continue;
+                            Vector3 candidate = _layout.CellCenterWorld(goal);
+                            candidate.y = enemyHome.y;
+                            if (allSpotsGood(candidate, anchor.y, anchor - candidate)) { chosenHome = candidate; found = true; }
+                        }
+                    }
+                }
+
+                Check(found, "off-axis windup: a clear arena exists (all three strafe spots walkable, collider-free and in line of sight of the enemy)");
+                if (!found)
+                {
+                    Debug.LogError($"[Emberdelve][Smoke:combat] off-axis windup arena search failed near anchor {anchor} (enemy home {enemyHome}): {arenaWhy}");
+                    if (movement != null) movement.enabled = movementWasEnabled;
+                    if (melee != null) melee.enabled = true;
+                    yield break;
+                }
+
+                enemyHome = chosenHome;
+                int enemyId = enemy.CombatId;
 
                 for (int i = 0; i < angles.Length; i++)
                 {
@@ -793,7 +886,13 @@ namespace Emberdelve.EditorTools
                     float deadline = Time.unscaledTime + 9f;
                     while (!enemy.IsWindingUp && Time.unscaledTime < deadline) yield return null;
                     Check(enemy.IsWindingUp, $"{label}: the real enemy brain started a windup");
-                    if (!enemy.IsWindingUp) break;
+                    if (!enemy.IsWindingUp)
+                    {
+                        Debug.LogError($"[Emberdelve][Smoke:combat] {label}: no windup. brain={(enemy.Brain != null ? enemy.Brain.State.ToString() : "n/a")} " +
+                                       $"distance={Vector3.Distance(enemy.transform.position, _rig.transform.position):F2} enemyHome={enemyHome} player={_rig.transform.position} " +
+                                       $"los={HitScanner.HasLineOfSight(enemy.CombatCenter, _rig.CombatCenter, levelMask, 0.3f)} nearby={DescribeNearbyEnemies(enemy)}");
+                        break;
+                    }
 
                     // The direction is committed now. The player strafes to angles[i] off that direction.
                     Vector3 warned = enemy.Brain.TelegraphDirection;
@@ -802,28 +901,53 @@ namespace Emberdelve.EditorTools
                     Vector3 offset = Quaternion.AngleAxis(angles[i], Vector3.up) * warned * standoff;
                     _rig.transform.position = new Vector3(enemy.transform.position.x + offset.x, anchor.y, enemy.transform.position.z + offset.z);
                     Physics.SyncTransforms();
+                    Vector3 strafeSpot = _rig.transform.position;
 
                     float before = _rig.CurrentHealth;
                     int acceptedBefore = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
                     int rejectedBefore = _localAuthority != null ? _localAuthority.RejectedCount : 0;
+                    int sequenceBefore = _localAuthority != null ? _localAuthority.LastSequenceFor(enemyId) : -1;
+                    int hitsFromEnemy = 0;
+                    System.Action<DamageInfo> countHit = info => { if (info.SourceCombatId == enemyId) hitsFromEnemy++; };
+                    _rig.Health.Damaged += countHit;
 
                     deadline = Time.unscaledTime + 4f;
                     while (enemy.IsWindingUp && Time.unscaledTime < deadline) yield return null;
                     yield return WaitFrames(2);
+                    _rig.Health.Damaged -= countHit;
 
                     float lost = before - _rig.CurrentHealth;
+                    int sequenceAfter = _localAuthority != null ? _localAuthority.LastSequenceFor(enemyId) : -1;
+                    bool ok;
                     if (expectHit[i])
                     {
-                        Check(lost > 0f, $"{label}: the strike landed on the strafing player ({lost:F1} damage)");
-                        Check(_localAuthority != null && _localAuthority.AcceptedCount == acceptedBefore + 1 && _localAuthority.RejectedCount == rejectedBefore,
-                            $"{label}: the authority accepted exactly one attack and rejected none");
+                        bool landed = lost > 0f;
+                        bool oneAccepted = _localAuthority != null && sequenceAfter > sequenceBefore && hitsFromEnemy == 1 &&
+                                           _localAuthority.AcceptedCount == acceptedBefore + 1 && _localAuthority.RejectedCount == rejectedBefore;
+                        Check(landed, $"{label}: the strike landed on the strafing player ({lost:F1} damage)");
+                        Check(oneAccepted, $"{label}: the authority accepted exactly one attack from this enemy and rejected none");
+                        Check(!enemy.LastAttackWhiffed, $"{label}: the enemy did not record a whiff");
+                        ok = landed && oneAccepted && !enemy.LastAttackWhiffed;
                     }
                     else
                     {
-                        Check(lost <= 0f, $"{label}: no damage when the player left the warned wedge ({lost:F1})");
-                        Check(_localAuthority != null && _localAuthority.AcceptedCount == acceptedBefore && _localAuthority.RejectedCount == rejectedBefore,
-                            $"{label}: no intent was submitted for the whiff");
+                        bool noDamage = lost <= 0f && hitsFromEnemy == 0;
+                        bool noIntent = _localAuthority != null && sequenceAfter == sequenceBefore &&
+                                        _localAuthority.AcceptedCount == acceptedBefore && _localAuthority.RejectedCount == rejectedBefore;
+                        Check(noDamage, $"{label}: no damage when the player left the warned wedge ({lost:F1})");
+                        Check(noIntent, $"{label}: no intent was submitted for the whiff");
                         Check(enemy.LastAttackWhiffed, $"{label}: the enemy recorded a whiff");
+                        ok = noDamage && noIntent && enemy.LastAttackWhiffed;
+                    }
+
+                    if (!ok)
+                    {
+                        Vector3 toPlayer = _rig.CombatCenter - enemy.CombatCenter; toPlayer.y = 0f;
+                        Debug.LogError($"[Emberdelve][Smoke:combat] {label} DIAGNOSTIC: brain={(enemy.Brain != null ? enemy.Brain.State.ToString() : "n/a")} " +
+                                       $"distance={toPlayer.magnitude:F2} angleToWarned={Vector3.Angle(warned, toPlayer):F1} " +
+                                       $"los={HitScanner.HasLineOfSight(enemy.CombatCenter, _rig.CombatCenter, levelMask, 0.3f)} whiffed={enemy.LastAttackWhiffed} " +
+                                       $"rejectReason={(_localAuthority != null ? _localAuthority.LastAttackRejectReason : string.Empty)} hitsFromEnemy={hitsFromEnemy} " +
+                                       $"strafeSpot={strafeSpot} playerNow={_rig.transform.position} nearby={DescribeNearbyEnemies(enemy)}");
                     }
 
                     enemy.enabled = false;
@@ -834,7 +958,21 @@ namespace Emberdelve.EditorTools
                 _rig.transform.position = anchor;
                 _rig.Health.SetHealth(_rig.MaxHealth);
                 Physics.SyncTransforms();
+                if (movement != null) movement.enabled = movementWasEnabled;
                 if (melee != null) melee.enabled = true;
+            }
+
+            /// <summary>Live enemies within 8 m of the given one, for failure diagnostics only.</summary>
+            private string DescribeNearbyEnemies(EnemyAgent around)
+            {
+                System.Text.StringBuilder sb = new System.Text.StringBuilder();
+                foreach (EnemyAgent other in FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None))
+                {
+                    if (other == null || other == around || other.IsDead) continue;
+                    float d = Vector3.Distance(other.transform.position, around.transform.position);
+                    if (d <= 8f) sb.Append($"[{other.name} {d:F1}m enabled={other.enabled}]");
+                }
+                return sb.Length == 0 ? "none" : sb.ToString();
             }
 
             private IEnumerator GuardReductionFlow(EnemyAgent enemy)
@@ -2894,6 +3032,15 @@ namespace Emberdelve.EditorTools
                 Check(probePlate.EffectiveFootprint == Vector2Int.one && probePlate.IsEquippable && !probePlate.CanStack,
                     "the cloned plate is a 1x1 equippable item, used only for geometry");
 
+                // R3 fixture: the clone is deliberately NOT a production catalog entry (and the bag now refuses to
+                // mint a UID for one). For this flow the bag carries an explicit TEST catalog that lists every
+                // production item plus the probe plate, and the production catalog is put back in the finally block.
+                ItemCatalog productionCatalog = UnityEditor.AssetDatabase.LoadAssetAtPath<ItemCatalog>(EmberdelveAssetLibrary.ItemCatalogPath);
+                ItemCatalog probeCatalog = ItemCatalog.CreateForTest(productionCatalog.Items, productionCatalog.Affixes);
+                Check(probeCatalog.RegisterForTest(probePlate, out string probeRegisterReason),
+                    $"the probe plate registers in the test catalog ({probeRegisterReason})");
+                inventory.SetCatalog(probeCatalog);
+
                 int collectedBefore = inventory.LifetimeCollected;
                 int recoveredBefore = inventory.RecoveredValue;
                 int collectedEvents = 0;
@@ -3404,6 +3551,8 @@ namespace Emberdelve.EditorTools
 
                     equipment.Clear();
                     inventory.Clear();
+                    inventory.SetCatalog(productionCatalog);
+                    UnityEngine.Object.Destroy(probeCatalog);
                     UnityEngine.Object.Destroy(probePlate);
                 }
             }
@@ -3832,9 +3981,11 @@ namespace Emberdelve.EditorTools
                 List<LootDrop> rollB = new List<LootDrop>();
                 List<LootDrop> rollC = new List<LootDrop>();
 
-                emberChest.LootTable.Roll(emberChest.Seed, rollA);
-                emberChest.LootTable.Roll(emberChest.Seed, rollB);
-                emberChest.LootTable.Roll(emberChest.Seed + 977, rollC);
+                // R3: rolls run against the one real item catalog asset (the same one the run's bag carries).
+                ItemCatalog realCatalog = UnityEditor.AssetDatabase.LoadAssetAtPath<ItemCatalog>(EmberdelveAssetLibrary.ItemCatalogPath);
+                emberChest.LootTable.Roll(emberChest.Seed, rollA, realCatalog);
+                emberChest.LootTable.Roll(emberChest.Seed, rollB, realCatalog);
+                emberChest.LootTable.Roll(emberChest.Seed + 977, rollC, realCatalog);
 
                 Check(rollA.Count == rollB.Count && rollA.Count > 0, $"a seeded roll produced contents ({rollA.Count} drops)");
 

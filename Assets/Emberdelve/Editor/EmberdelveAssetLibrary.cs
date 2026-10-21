@@ -3,6 +3,7 @@ using UnityEditor;
 using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Data;
+using Emberdelve.Items;
 using Emberdelve.Level;
 using Emberdelve.Stats;
 
@@ -58,6 +59,11 @@ namespace Emberdelve.EditorTools
         /// </summary>
         public static AffixDefinition[] Affixes;
 
+        /// <summary>R3: the one runtime item catalog asset (every ItemData + the affix catalog).</summary>
+        public static ItemCatalog ItemCatalogAsset;
+
+        public const string ItemCatalogPath = EmberdelvePaths.Data + "/EmberdelveItemCatalog.asset";
+
         public const string AffixFolder = EmberdelvePaths.Data + "/Affixes";
 
         public static CharacterClassData[] Classes => new[] { Warrior, Archer };
@@ -75,6 +81,7 @@ namespace Emberdelve.EditorTools
             ApplyAttributeVitalBases();
             ApplyAttributeActionBases();
             BuildAffixCatalog();
+            BuildItemCatalog();
             BuildLootTables();
             ApplyLootRarityProfiles();
             BuildEnemies();
@@ -1016,6 +1023,40 @@ namespace Emberdelve.EditorTools
             }
         }
 
+        /// <summary>
+        /// R3: populates the one runtime item catalog asset from every ItemData asset under the data folder
+        /// (sorted by asset path so the order is deterministic) plus the builder-owned affix catalog. The asset
+        /// is created once, then only rewritten when its lists actually differ, so a second build is a no-op
+        /// (stable GUID, byte-identical file). The result is validated with the catalog's own rules and every
+        /// problem is logged as an error.
+        /// </summary>
+        private static void BuildItemCatalog()
+        {
+            ItemCatalogAsset = LoadOrCreate<ItemCatalog>(ItemCatalogPath, c => { });
+
+            string[] guids = AssetDatabase.FindAssets("t:ItemData", new[] { EmberdelvePaths.Data });
+            List<string> paths = new List<string>(guids.Length);
+            for (int i = 0; i < guids.Length; i++) paths.Add(AssetDatabase.GUIDToAssetPath(guids[i]));
+            paths.Sort(System.StringComparer.Ordinal);
+
+            List<ItemData> items = new List<ItemData>(paths.Count);
+            for (int i = 0; i < paths.Count; i++)
+            {
+                ItemData item = AssetDatabase.LoadAssetAtPath<ItemData>(paths[i]);
+                if (item != null) items.Add(item);
+            }
+
+            if (ItemCatalogAsset.EditorSetContents(items.ToArray(), Affixes))
+            {
+                EditorUtility.SetDirty(ItemCatalogAsset);
+            }
+
+            if (!ItemCatalogAsset.IsValid(out string reason))
+            {
+                Debug.LogError("[Emberdelve][ItemCatalog] the item catalog is not valid: " + reason);
+            }
+        }
+
         private static void ApplyAffixOwnership(AffixDefinition definition, AffixSpec spec, float min, float max, float step)
         {
             if (definition == null) return;
@@ -1431,6 +1472,7 @@ namespace Emberdelve.EditorTools
             Config.inventoryGridHeight = 4;
             Config.mouseSensitivity = 1.2f;
             Config.fieldOfView = 68f;
+            Config.itemCatalog = ItemCatalogAsset;
 
             Config.levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
             Config.playerMask = LayerMask.GetMask(GameConfig.PlayerLayerName);
