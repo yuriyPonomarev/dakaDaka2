@@ -70,6 +70,11 @@ namespace Emberdelve.Items
     /// rarity of 7, a quantity of 0, a key that no definition owns - and <see cref="ItemInstance.TryRestore"/>
     /// refuses it. Nothing in this type clamps, defaults, trims, fills in a category or mints a UID, and the
     /// helpers below only report: they never repair.
+    ///
+    /// R9: this JsonUtility form is a single-item transfer DTO only (JsonUtility ignores unknown fields and defaults
+    /// a missing rarity to Common). Anything that is persisted goes through <see cref="ContainerSnapshot"/> /
+    /// <see cref="LoadoutSnapshot"/>: versioned, strict (unknown/missing/repeated fields refused), culture-
+    /// independent exact floats, checksummed, and validated through <see cref="ItemInstance.TryRestore"/>.
     /// </summary>
     [Serializable]
     public sealed class ItemSnapshot

@@ -691,6 +691,159 @@ namespace Emberdelve.Items
             return TryAddInstance(restored, out reason);
         }
 
+        // ------------------------------------------------------- container snapshot (R9)
+
+        /// <summary>The container id the bag writes into its snapshot and expects when restoring.</summary>
+        public const string SnapshotContainerId = "bag";
+
+        /// <summary>
+        /// The bag as a versioned, canonical, checksummed <see cref="ContainerSnapshot"/>: every gear stack as its
+        /// instance snapshot (uid, rarity, exact rolled values) at its origin cell, every carried stack as item id +
+        /// quantity with no uid. Read-only: nothing is minted, rerolled or changed. The same bag always produces the
+        /// same snapshot and the same JSON bytes (entries are in row/column order).
+        /// </summary>
+        public ContainerSnapshot ToContainerSnapshot()
+        {
+            EnsureGrid();
+
+            List<ContainerEntry> entries = new List<ContainerEntry>(_stacks.Count);
+            for (int i = 0; i < _stacks.Count; i++)
+            {
+                Stack stack = _stacks[i];
+                ItemData definition = stack != null ? stack.Definition : null;
+                if (definition == null) continue;
+
+                ItemSnapshot item = stack.Instance != null
+                    ? stack.Instance.ToSnapshot()
+                    : new ItemSnapshot { uid = "", itemId = definition.itemId, quantity = stack.Count, rarity = 0, affixes = new AffixSnapshot[0] };
+
+                entries.Add(new ContainerEntry { slot = "", x = stack.Origin.x, y = stack.Origin.y, item = item });
+            }
+
+            ContainerSnapshot snapshot = new ContainerSnapshot
+            {
+                schemaVersion = ContainerSnapshot.CurrentSchemaVersion,
+                kind = ContainerKinds.Bag,
+                containerId = SnapshotContainerId,
+                width = gridWidth,
+                height = gridHeight,
+                entries = entries.ToArray()
+            };
+
+            return snapshot.Seal();
+        }
+
+        /// <summary>
+        /// Replaces the bag's contents with a saved container, exactly (same uids, same rarity and rolled values, same
+        /// cells; nothing is minted or rerolled). All-or-nothing: the snapshot is fully validated against this bag's
+        /// catalog first (see <see cref="ContainerSnapshotValidator"/>) and a refusal leaves the bag byte-identical.
+        /// A catalog is mandatory; the snapshot's grid must equal this bag's grid; a uid this player's equipment
+        /// already wears is refused (restore bag and equipment together with <see cref="LoadoutSnapshot"/>), and
+        /// <paramref name="others"/> adds the uids held by other containers of the profile (for example the stash).
+        /// The lifetime/recovered-value counters are run statistics and are left as they are; TotalUnits and
+        /// CarriedValue are recomputed from the restored content.
+        /// </summary>
+        public bool TryRestore(ContainerSnapshot snapshot, out string reason)
+        {
+            return TryRestore(snapshot, null, out reason);
+        }
+
+        public bool TryRestore(ContainerSnapshot snapshot, ItemUidRegistry others, out string reason)
+        {
+            if (!TryPrepareRestore(snapshot, others, true, out ValidatedContainer validated, out reason)) return false;
+
+            // The ledger passed in is the profile's: it is updated together with the restore (it was already checked).
+            if (others != null && !others.TryReplaceOwner(validated.ContainerId, validated.Uids, out reason)) return false;
+
+            ApplyRestore(validated);
+            NotifyRestore();
+            return true;
+        }
+
+        /// <summary>Validation half of a restore: touches nothing.</summary>
+        internal bool TryPrepareRestore(ContainerSnapshot snapshot, ItemUidRegistry others, bool checkPartner,
+            out ValidatedContainer validated, out string reason)
+        {
+            validated = null;
+
+            if (_catalog == null)
+            {
+                reason = "this bag has no item catalog (Inventory.SetCatalog), so a container snapshot cannot be validated";
+                return false;
+            }
+
+
+            if (!ContainerSnapshotValidator.TryValidate(snapshot, _catalog, others, ContainerKinds.Bag, out validated, out reason))
+            {
+                validated = null;
+                return false;
+            }
+
+            if (validated.ContainerId != SnapshotContainerId)
+            {
+                validated = null;
+                reason = $"this bag restores container '{SnapshotContainerId}', not '{snapshot.containerId}'";
+                return false;
+            }
+
+            if (validated.Width != gridWidth || validated.Height != gridHeight)
+            {
+                reason = $"the snapshot is a {validated.Width}x{validated.Height} grid but this bag is {gridWidth}x{gridHeight}";
+                validated = null;
+                return false;
+            }
+
+            if (checkPartner)
+            {
+                Equipment partner = EquipmentPartner();
+                if (partner != null)
+                {
+                    for (int i = 0; i < validated.Uids.Count; i++)
+                    {
+                        if (partner.HoldsUid(validated.Uids[i]))
+                        {
+                            reason = $"uid {validated.Uids[i]:N} is already worn by this player's equipment: one uid is one item";
+                            validated = null;
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            reason = null;
+            return true;
+        }
+
+        /// <summary>
+        /// Apply half of a restore. Cannot fail (everything was resolved and checked by <see cref="TryPrepareRestore"/>)
+        /// and raises NO event, so a loadout restore can apply both containers before anyone is told.
+        /// </summary>
+        internal void ApplyRestore(ValidatedContainer validated)
+        {
+            _stacks.Clear();
+
+            int units = 0;
+            int value = 0;
+            for (int i = 0; i < validated.Entries.Count; i++)
+            {
+                ValidatedEntry entry = validated.Entries[i];
+                _stacks.Add(new Stack { Item = entry.Definition, Instance = entry.Instance, Count = entry.Quantity, Origin = entry.Origin });
+                units += entry.Quantity;
+                value += entry.Definition.value * entry.Quantity;
+            }
+
+            TotalUnits = units;
+            CarriedValue = value;
+            Recompute();
+        }
+
+        /// <summary>Notify half of a restore: a throwing subscriber is logged and cannot undo or abort an applied restore.</summary>
+        internal void NotifyRestore()
+        {
+            try { GameEvents.RaiseInventoryChanged(); }
+            catch (Exception e) { Debug.LogException(e); }
+        }
+
         /// <summary>
         /// The equipment that shares this identity boundary, when there is one. A bag on its own (a geometry
         /// probe, a container fixture) has none, and that is not an error.
@@ -722,7 +875,7 @@ namespace Emberdelve.Items
             int height = Mathf.Max(1, size.y);
 
             if (origin.x < 0 || origin.y < 0) return false;
-            if (origin.x + width > gridWidth || origin.y + height > gridHeight) return false;
+            if (origin.x > gridWidth - width || origin.y > gridHeight - height) return false; // overflow-safe: no origin + size sum
 
             for (int y = origin.y; y < origin.y + height; y++)
             {

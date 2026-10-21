@@ -414,14 +414,203 @@ namespace Emberdelve.Items
             return builder.ToString();
         }
 
+        // ------------------------------------------------------------ container snapshot (R9)
+
+        /// <summary>The container id the equipment writes into its snapshot and expects when restoring.</summary>
+        public const string SnapshotContainerId = "equipment";
+
+        internal Inventory BagPartner()
+        {
+            if (_inventory != null) return _inventory;
+            if (_rig != null && _rig.Inventory != null) return _rig.Inventory;
+            return GetComponent<Inventory>();
+        }
+
+        /// <summary>
+        /// What is worn as a versioned, canonical, checksummed <see cref="ContainerSnapshot"/> (kind equipment, no
+        /// grid): one entry per filled slot, in slot order, carrying the worn instance's uid, rarity and exact rolled
+        /// values. Read-only.
+        /// </summary>
+        public ContainerSnapshot ToContainerSnapshot()
+        {
+            List<ContainerEntry> entries = new List<ContainerEntry>();
+            for (int i = 1; i < SlotCount; i++)
+            {
+                ItemInstance worn = _gear[i];
+                if (worn == null) continue;
+                entries.Add(new ContainerEntry { slot = ((EquipmentSlot)i).ToString(), x = 0, y = 0, item = worn.ToSnapshot() });
+            }
+
+            ContainerSnapshot snapshot = new ContainerSnapshot
+            {
+                schemaVersion = ContainerSnapshot.CurrentSchemaVersion,
+                kind = ContainerKinds.Equipment,
+                containerId = SnapshotContainerId,
+                width = 0,
+                height = 0,
+                entries = entries.ToArray()
+            };
+
+            return snapshot.Seal();
+        }
+
+        /// <summary>
+        /// Replaces everything worn with a saved equipment container, exactly: the worn instances keep their saved uid,
+        /// rarity and rolled values (nothing is minted or rerolled) and the stats are re-applied through the existing
+        /// <see cref="RefreshStats"/> path, which replaces the equipment stat source wholesale and only moves pool
+        /// CEILINGS - so there is no free healing and no stat accumulation, however many times this runs. Weapons hand
+        /// the class hand back first and then take the saved weapon, like equipping. All-or-nothing: a snapshot that
+        /// fails validation (see <see cref="ContainerSnapshotValidator"/>), names an item for the wrong slot, a weapon
+        /// without a granted weapon, or a uid the bag already carries is refused and nothing changes. The catalog is
+        /// the bag's catalog; <paramref name="others"/> adds uids held by other containers of the profile.
+        /// </summary>
+        public bool TryRestore(ContainerSnapshot snapshot, out string reason)
+        {
+            return TryRestore(snapshot, null, out reason);
+        }
+
+        public bool TryRestore(ContainerSnapshot snapshot, ItemUidRegistry others, out string reason)
+        {
+            if (!TryPrepareRestore(snapshot, others, true, out ValidatedContainer validated, out reason)) return false;
+
+            // The ledger passed in is the profile's: it is updated together with the restore (it was already checked).
+            if (others != null && !others.TryReplaceOwner(validated.ContainerId, validated.Uids, out reason)) return false;
+
+            List<ItemData> removed = ApplyRestore(validated);
+            NotifyRestore(removed, validated);
+            return true;
+        }
+
+        /// <summary>Validation half of a restore: touches nothing.</summary>
+        internal bool TryPrepareRestore(ContainerSnapshot snapshot, ItemUidRegistry others, bool checkPartner,
+            out ValidatedContainer validated, out string reason)
+        {
+            validated = null;
+
+            Inventory bag = BagPartner();
+            ItemCatalog catalog = bag != null ? bag.Catalog : null;
+            if (catalog == null)
+            {
+                reason = "equipment has no item catalog (its bag has none), so a container snapshot cannot be validated";
+                return false;
+            }
+
+            if (!ContainerSnapshotValidator.TryValidate(snapshot, catalog, others, ContainerKinds.Equipment, out validated, out reason))
+            {
+                validated = null;
+                return false;
+            }
+
+            if (validated.ContainerId != SnapshotContainerId)
+            {
+                reason = $"equipment restores container '{SnapshotContainerId}', not '{snapshot.containerId}'";
+                validated = null;
+                return false;
+            }
+
+            for (int i = 0; i < validated.Entries.Count; i++)
+            {
+                ItemData definition = validated.Entries[i].Definition;
+                if (definition.GrantsWeapon && definition.grantedWeapon == null)
+                {
+                    reason = $"{definition.displayName} declares no weapon to hold";
+                    validated = null;
+                    return false;
+                }
+            }
+
+            if (checkPartner && bag != null)
+            {
+                for (int i = 0; i < validated.Uids.Count; i++)
+                {
+                    if (bag.HoldsInstanceUid(validated.Uids[i]))
+                    {
+                        reason = $"uid {validated.Uids[i]:N} is already carried in this player's bag: one uid is one item";
+                        validated = null;
+                        return false;
+                    }
+                }
+            }
+
+            reason = null;
+            return true;
+        }
+
+        /// <summary>
+        /// Apply half of a restore. Cannot fail (every entry was resolved and checked by <see cref="TryPrepareRestore"/>)
+        /// and raises none of this component's events: the slots are replaced first, then the hands, then the stats, so
+        /// whatever listens to a hand or pool change already sees the final slots. Returns the definitions that were
+        /// worn before, for <see cref="NotifyRestore"/>.
+        /// </summary>
+        internal List<ItemData> ApplyRestore(ValidatedContainer validated)
+        {
+            List<ItemData> removed = new List<ItemData>();
+            List<EquipmentSlot> handSlots = new List<EquipmentSlot>();
+
+            for (int i = 1; i < SlotCount; i++)
+            {
+                ItemInstance previous = _gear[i];
+                if (previous != null)
+                {
+                    removed.Add(previous.Definition);
+                    if (previous.Definition.GrantsWeapon) handSlots.Add((EquipmentSlot)i);
+                }
+                _gear[i] = null;
+            }
+
+            for (int i = 0; i < validated.Entries.Count; i++)
+            {
+                ValidatedEntry entry = validated.Entries[i];
+                _gear[SlotIndex(entry.Slot)] = entry.Instance;
+            }
+
+            RecomputeSlots();
+
+            // Hand every previously worn weapon back to the class first, so a slot that is no longer worn does not
+            // keep a saved weapon in the hand; then the restored weapons take their hands like equipping does.
+            for (int i = 0; i < handSlots.Count; i++) RestoreClassHand(handSlots[i]);
+            for (int i = 0; i < validated.Entries.Count; i++) ApplyHand(validated.Entries[i].Definition);
+
+            // Same refresh every equip/unequip uses: the equipment stat source is replaced wholesale and only the
+            // ceilings are re-applied (SetMax never pays out), so nothing heals and nothing accumulates.
+            RefreshStats();
+            return removed;
+        }
+
+        /// <summary>Notify half of a restore: removed items first, then restored ones; a throwing subscriber is logged and changes nothing.</summary>
+        internal void NotifyRestore(List<ItemData> removed, ValidatedContainer validated)
+        {
+            Guard(() => GameEvents.RaiseInventoryChanged());
+            for (int i = 0; i < removed.Count; i++)
+            {
+                ItemData item = removed[i];
+                Guard(() => GameEvents.RaiseEquipmentChanged(item, false));
+            }
+            for (int i = 0; i < validated.Entries.Count; i++)
+            {
+                ItemData item = validated.Entries[i].Definition;
+                Guard(() => GameEvents.RaiseEquipmentChanged(item, true));
+            }
+        }
+
+        private static void Guard(Action raise)
+        {
+            try { raise(); }
+            catch (Exception e) { Debug.LogException(e); }
+        }
+
         // ------------------------------------------------------------ internals
 
         private void ApplyToSlot(int index, ItemInstance instance)
         {
             _gear[index] = instance;
             RecomputeSlots();
+            ApplyHand(instance.Definition);
+        }
 
-            ItemData item = instance.Definition;
+        /// <summary>The hand half of wearing an item: a weapon or shield definition takes its hand, anything else does nothing.</summary>
+        private void ApplyHand(ItemData item)
+        {
             if (!item.GrantsWeapon) return;
 
             if (item.equipSlot == EquipmentSlot.OffHand)

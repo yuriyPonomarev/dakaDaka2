@@ -770,7 +770,7 @@ namespace Emberdelve.Items
         /// carried item is 1..its own effective stack cap (ItemData.StackLimitForFootprint, which is already
         /// 1 for anything that cannot stack). 0, negative and over-cap are refused, not clamped.
         /// </summary>
-        private static bool TryValidateQuantity(ItemData definition, int quantity, out string reason)
+        internal static bool TryValidateQuantity(ItemData definition, int quantity, out string reason)
         {
             if (definition.IsEquippable)
             {
