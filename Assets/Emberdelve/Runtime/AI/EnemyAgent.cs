@@ -16,7 +16,7 @@ namespace Emberdelve.AI
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class EnemyAgent : MonoBehaviour, ICombatEntity, IStatusTarget, IDamageOutgoingProvider, IActiveWeaponProvider
+    public sealed class EnemyAgent : MonoBehaviour, ICombatEntity, IStatusTarget, IDamageOutgoingProvider, IActiveWeaponProvider, IHitShapeProvider
     {
         [Header("Data")]
         [SerializeField] private EnemyData data;
@@ -56,6 +56,19 @@ namespace Emberdelve.AI
         public Vector3 CombatCenter => transform.position + Vector3.up * 1.15f;
         public Collider HeadCollider => headCollider;
 
+        private HitVolume[] _hitVolumes;
+
+        /// <summary>
+        /// D1a: this monster's hit volumes (head, torso, arms, legs, feet), sized from its body scale and created
+        /// once. They are analytic shapes the swept melee reads; the Body/Head colliders stay as they were (ranged
+        /// rays, movement blockers).
+        /// </summary>
+        public void CollectHitShapes(List<HitShape> shapes)
+        {
+            if (_hitVolumes == null) _hitVolumes = HitVolumeLayout.EnsureHumanoid(gameObject, data != null && data.isElite ? 1.25f : 1f);
+            HitVolumeLayout.Collect(_hitVolumes, shapes);
+        }
+
         /// <summary>An enemy attacks with its authored attack weapon and nothing else.</summary>
         public WeaponData ActiveWeapon => data != null ? data.attackWeapon : null;
         public bool IsDead => _health != null && _health.IsDead;
@@ -84,6 +97,7 @@ namespace Emberdelve.AI
             CombatRegistry.Register(_combatId, this);
             _lookRotation = transform.rotation;
             _bodyHomePosition = bodyTransform != null ? bodyTransform.localPosition : Vector3.zero;
+            _hitVolumes = HitVolumeLayout.EnsureHumanoid(gameObject, data != null && data.isElite ? 1.25f : 1f);
         }
 
         private void Start()

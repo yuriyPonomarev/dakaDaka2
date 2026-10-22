@@ -76,6 +76,7 @@ namespace Emberdelve.EditorTools
             BuildSkills();
             BuildClasses();
             ApplyDefenseKit();
+            ApplySwingPatterns();
             ApplySkillKit();
             ApplyAttributeDefinitions();
             ApplyAttributeVitalBases();
@@ -1520,6 +1521,145 @@ namespace Emberdelve.EditorTools
             EditorUtility.SetDirty(NavGrid);
         }
 
+        // ---------------------------------------------------------------- D1a swing patterns and hit locations
+
+        public static SwingPatternData SwordSlashLeftToRight;
+        public static SwingPatternData SwordSlashRightToLeft;
+        public static SwingPatternData SwordOverhead;
+        public static SwingPatternData RapierThrust;
+        public static HitLocationTable HitLocations;
+
+        /// <summary>
+        /// D1a: authors the swing patterns of the player's melee weapons as ScriptableObject data and assigns them
+        /// to the weapon assets, and the hit-location table. Idempotent and code-authoritative like the other Apply
+        /// passes: every run rewrites the pattern fields from the numbers below, so a retune is an edit here plus a
+        /// data build. All numbers are our own tunables (Docs/Tasks/D1a.md). Geometry is in the attacker's aim frame
+        /// (x right, y up, z forward, metres from the eye; yaw right-positive, pitch DOWN-positive, degrees) and
+        /// was tuned so the swing crosses the crosshair line at about 2 m.
+        /// </summary>
+        private static void ApplySwingPatterns()
+        {
+            // H1 retune (review D1a): reach and speed toward the reference genre. The segment is a 1.2 m blade held at
+            // arm's length (the hand sweeps an 0.85 m arc around the shoulder), effective reach (2.3 + 0.6) x 0.79 =
+            // 2.29 m from the eye, a 110 degree slash with a 0.30 s active phase. Our own tunables.
+            if (Sword != null && !Mathf.Approximately(Sword.activeWindow, 0.30f))
+            {
+                Sword.activeWindow = 0.30f;
+                EditorUtility.SetDirty(Sword);
+            }
+
+            SwordSlashLeftToRight = AuthorPattern("Pattern_SwordSlashLR", "sword_slash_lr", SwingKind.HorizontalLeftToRight, Sword,
+                0.79f, 0.94f, 0.15f, 0.020f, 4, 1f, ArcKeys(true));
+            SwordSlashRightToLeft = AuthorPattern("Pattern_SwordSlashRL", "sword_slash_rl", SwingKind.HorizontalRightToLeft, Sword,
+                0.79f, 0.94f, 0.15f, 0.020f, 4, 1f, ArcKeys(false));
+
+            // Overhead: slower and heavier, the hand comes down from above the head through the line of fire.
+            SwordOverhead = AuthorPattern("Pattern_SwordOverhead", "sword_overhead", SwingKind.Overhead, Sword,
+                0.79f, 0.94f, 0.15f, 0.016f, 2, 1.1f,
+                new SwingKey(0f, new Vector3(0.15f, 0.55f, 0.35f), 2f, -80f),
+                new SwingKey(0.5f, new Vector3(0.15f, 0.15f, 0.80f), 2f, -25f),
+                new SwingKey(1f, new Vector3(0.15f, -0.25f, 0.90f), 2f, 35f));
+            SetPatternTiming(SwordOverhead, 0.34f, 0.32f, 0.38f);
+            SetPatternTiming(SwordSlashLeftToRight, 0.24f, 0.30f, 0.30f);
+            SetPatternTiming(SwordSlashRightToLeft, 0.24f, 0.30f, 0.30f);
+
+            // Rapier thrust: a narrow line straight ahead, reach (2.7 + 0.45) x 0.74 = 2.33 m. Not an arc: a target 20
+            // degrees off the line is missed at range - the documented consequence of a thrust.
+            RapierThrust = AuthorPattern("Pattern_RapierThrust", "rapier_thrust", SwingKind.Thrust, Rapier,
+                0.74f, 1.08f, 0.10f, 0.020f, 2, 1f,
+                new SwingKey(0f, new Vector3(0.20f, -0.22f, 0.30f), -6f, -5f),
+                new SwingKey(1f, new Vector3(0.20f, -0.22f, 1.08f), -6f, -5f));
+
+            AssignPatterns(Sword, SwordSlashLeftToRight, SwordSlashRightToLeft, SwordOverhead);
+            AssignPatterns(Rapier, RapierThrust);
+
+            HitLocations = LoadOrCreate<HitLocationTable>(EmberdelvePaths.Data + "/HitLocationTable.asset", t => { });
+            if (HitLocations != null
+                && (!Mathf.Approximately(HitLocations.head, HitLocationTable.DefaultHead) || !Mathf.Approximately(HitLocations.body, HitLocationTable.DefaultBody)
+                    || !Mathf.Approximately(HitLocations.arms, HitLocationTable.DefaultArms) || !Mathf.Approximately(HitLocations.hands, HitLocationTable.DefaultHands)
+                    || !Mathf.Approximately(HitLocations.legs, HitLocationTable.DefaultLegs) || !Mathf.Approximately(HitLocations.feet, HitLocationTable.DefaultFeet)))
+            {
+                HitLocations.head = HitLocationTable.DefaultHead;
+                HitLocations.body = HitLocationTable.DefaultBody;
+                HitLocations.arms = HitLocationTable.DefaultArms;
+                HitLocations.hands = HitLocationTable.DefaultHands;
+                HitLocations.legs = HitLocationTable.DefaultLegs;
+                HitLocations.feet = HitLocationTable.DefaultFeet;
+                EditorUtility.SetDirty(HitLocations);
+            }
+
+            AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>
+        /// Hand path of a slash: the hand travels an arc of radius 0.85 m around a shoulder at (0.2, -0.3, 0.1) from -55 to
+        /// +55 degrees (or back), the blade points along the arm and rises 4 degrees, so the swing crosses the crosshair
+        /// line at about 2 m. Five keys approximate the arc.
+        /// </summary>
+        private static SwingKey[] ArcKeys(bool leftToRight)
+        {
+            SwingKey[] keys = new SwingKey[5];
+            for (int i = 0; i < 5; i++)
+            {
+                float yaw = leftToRight ? -55f + 27.5f * i : 55f - 27.5f * i;
+                float r = yaw * Mathf.Deg2Rad;
+                keys[i] = new SwingKey(i / 4f, new Vector3(0.2f + 0.85f * Mathf.Sin(r), -0.3f, 0.1f + 0.85f * Mathf.Cos(r)), yaw, -4f);
+            }
+            return keys;
+        }
+
+        private static SwingPatternData AuthorPattern(string assetName, string patternId, SwingKind kind, WeaponData weapon,
+            float reachScale, float reachInset, float sweepRadius, float contactWindow, int maxTargets, float damageMultiplier,
+            params SwingKey[] keys)
+        {
+            SwingPatternData p = LoadOrCreate<SwingPatternData>(EmberdelvePaths.Data + "/" + assetName + ".asset", x => { });
+            if (p == null) return null;
+
+            p.patternId = patternId;
+            p.kind = kind;
+            // Timing mirrors the weapon asset, so the swept swing feels exactly as long as the swing it replaces.
+            p.windupTime = weapon.windupTime;
+            p.activeTime = weapon.activeWindow;
+            p.recoveryTime = weapon.recoveryTime;
+            p.wallRecoilTime = 0.35f;
+            p.damageMultiplier = damageMultiplier;
+            p.moveSpeedMultiplier = 1f;
+            p.maxTargets = maxTargets;
+            p.reachScale = reachScale;
+            p.reachInset = reachInset;
+            p.sweepRadius = sweepRadius;
+            p.contactWindow = contactWindow;
+            p.restBase = new Vector3(0.26f, -0.20f, 0.30f);
+            p.restYaw = 12f;
+            p.restPitch = -8f;
+            p.restRoll = 14f;
+            p.trailMaterial = EmberdelveMaterials.SwingTrailMat;
+            p.keys = keys;
+            EditorUtility.SetDirty(p);
+            return p;
+        }
+
+        private static void SetPatternTiming(SwingPatternData p, float windup, float active, float recovery)
+        {
+            if (p == null) return;
+            p.windupTime = windup;
+            p.activeTime = active;
+            p.recoveryTime = recovery;
+            EditorUtility.SetDirty(p);
+        }
+
+        private static void AssignPatterns(WeaponData weapon, params SwingPatternData[] patterns)
+        {
+            if (weapon == null) return;
+
+            bool same = weapon.swingPatterns != null && weapon.swingPatterns.Length == patterns.Length;
+            for (int i = 0; same && i < patterns.Length; i++) same = weapon.swingPatterns[i] == patterns[i];
+            if (same) return;
+
+            weapon.swingPatterns = patterns;
+            EditorUtility.SetDirty(weapon);
+        }
+
         private static void BuildConfig()
         {
             Config = LoadOrCreate<GameConfig>(EmberdelvePaths.Data + "/EmberdelveGameConfig.asset", c =>
@@ -1540,6 +1680,7 @@ namespace Emberdelve.EditorTools
             Config.mouseSensitivity = 1.2f;
             Config.fieldOfView = 68f;
             Config.itemCatalog = ItemCatalogAsset;
+            Config.hitLocations = HitLocations;
 
             Config.levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
             Config.playerMask = LayerMask.GetMask(GameConfig.PlayerLayerName);

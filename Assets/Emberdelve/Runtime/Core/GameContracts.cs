@@ -9,6 +9,14 @@ namespace Emberdelve.Core
     public enum DamageType { Physical, Pierce, Fire, Holy }
 
     /// <summary>
+    /// Where on a target's body a hit landed (D1a). Decided by the AUTHORITY from the target's own hit volumes,
+    /// never claimed by the attacker. <see cref="Unspecified"/> is a hit that has no location (the legacy
+    /// arc-less melee/ranged paths and anything area based): its multiplier is 1. The numeric order is the
+    /// tie-break priority (lower wins) when two volumes are touched equally deep.
+    /// </summary>
+    public enum HitLocation { Unspecified = 0, Head = 1, Body = 2, Arms = 3, Hands = 4, Legs = 5, Feet = 6 }
+
+    /// <summary>
     /// A resolved damage application. Produced only by an <see cref="Emberdelve.Combat.ICombatAuthority"/>,
     /// never by the party that requested the attack. This is the shape a future authoritative
     /// server would broadcast to clients.
@@ -26,9 +34,14 @@ namespace Emberdelve.Core
         public readonly bool Headshot;
         public readonly float BlockReduction;
 
+        /// <summary>D1a: the hit volume the swept melee touched (Unspecified for every other damage source).</summary>
+        public readonly HitLocation Location;
+
         public DamageInfo(float amount, Vector3 point, Vector3 direction, Vector3 sourcePosition,
-            int sourceCombatId, EntityKind sourceKind, DamageType type, bool blocked, bool headshot, float blockReduction)
+            int sourceCombatId, EntityKind sourceKind, DamageType type, bool blocked, bool headshot, float blockReduction,
+            HitLocation location = HitLocation.Unspecified)
         {
+            Location = location;
             Amount = amount;
             Point = point;
             Direction = direction;
@@ -51,7 +64,7 @@ namespace Emberdelve.Core
         {
             blocked = reduction > 0f;
             return new DamageInfo(Mathf.Max(1f, Amount * (1f - Mathf.Clamp01(reduction))), Point, Direction,
-                SourcePosition, SourceCombatId, SourceKind, Type, blocked, Headshot, Mathf.Clamp01(reduction));
+                SourcePosition, SourceCombatId, SourceKind, Type, blocked, Headshot, Mathf.Clamp01(reduction), Location);
         }
     }
 
@@ -188,6 +201,18 @@ namespace Emberdelve.Core
     public interface IActiveWeaponProvider
     {
         Emberdelve.Data.WeaponData ActiveWeapon { get; }
+    }
+
+    /// <summary>
+    /// The authoritative aim pose of an entity that can swing a swept melee weapon (D1a): the eye position and
+    /// the yaw/pitch (degrees, pitch positive DOWN, i.e. Quaternion.Euler(pitch, yaw, 0)) of its view. The
+    /// combat authority reads this on its own tick to place the weapon segment, so a swing is positioned from
+    /// the attacker's pose and the pattern data, never from anything the client sends with the intent. Local
+    /// seam only: a server would read the same answer from the replicated pose.
+    /// </summary>
+    public interface IAimPoseProvider
+    {
+        bool TryGetAimPose(out Vector3 eye, out float yawDegrees, out float pitchDegrees);
     }
 
     /// <summary>Defenders expose their active guard through this so damage is reduced by the authority, not by the attacker.</summary>

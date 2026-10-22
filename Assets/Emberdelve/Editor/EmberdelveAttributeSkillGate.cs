@@ -1671,7 +1671,7 @@ namespace Emberdelve.EditorTools
 
             /// <summary>
             /// The warrior's ordinary attack, driven through the real MeleeCombat state machine (BeginSwing ->
-            /// windup -> EnterActive -> HitScanner.CollectMeleeHits -> LocalCombatAuthority.SubmitAttack) and
+            /// windup -> authority TryBeginMeleeSwing -> swept sweep through the host hit volumes) and
             /// asserted from the DamageInfo the authority actually produced, captured on the host before it
             /// reaches the health pool. Docs/Design/ATTRIBUTES.md gives CHA no part in an ordinary attack, so
             /// 26 base x 1.12 (STR 16 -> modifier 3 -> 1 + 0.04*3) x 1.2 (Ashen Might) = 34.944 has to come out
@@ -2357,7 +2357,7 @@ namespace Emberdelve.EditorTools
             /// ApplyDamage records the DamageInfo the authority produced before handing it to the real
             /// HealthComponent, which is what lets a scenario assert the resolved number itself.
             /// </summary>
-            private sealed class TestTarget : MonoBehaviour, ICombatEntity, IStatusTarget
+            private sealed class TestTarget : MonoBehaviour, ICombatEntity, IStatusTarget, IHitShapeProvider
             {
                 private HealthComponent _health;
                 private StatusComponent _status;
@@ -2375,6 +2375,18 @@ namespace Emberdelve.EditorTools
 
                 public Collider BodyCollider => _body;
                 public StatusComponent Status => _status;
+
+                /// <summary>
+                /// D1a fixture change: the warrior's sword and the archer's rapier are swept segments now, and a
+                /// sweep can only strike an entity that exposes hit volumes. This host gets ONE Body volume around
+                /// its collider (a 0.8 m tall, 0.45 m radius capsule centred on the transform), so every hit is a
+                /// body hit (location multiplier 1.0): the asserted damage numbers are unchanged by construction.
+                /// </summary>
+                public void CollectHitShapes(List<HitShape> shapes)
+                {
+                    Vector3 c = transform.position;
+                    shapes.Add(new HitShape(HitLocation.Body, c + Vector3.down * 0.4f, c + Vector3.up * 0.4f, 0.45f));
+                }
 
                 public bool IsDead => _health != null && _health.IsDead;
                 public float CurrentHealth => _health != null ? _health.CurrentHealth : 0f;

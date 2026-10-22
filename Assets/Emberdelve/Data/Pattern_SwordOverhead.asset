@@ -1,0 +1,45 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cb55b4f173a010344bfb125cbedb5e60, type: 3}
+  m_Name: Pattern_SwordOverhead
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.SwingPatternData
+  patternId: sword_overhead
+  kind: 2
+  windupTime: 0.34
+  activeTime: 0.32
+  recoveryTime: 0.38
+  wallRecoilTime: 0.35
+  damageMultiplier: 1.1
+  moveSpeedMultiplier: 1
+  maxTargets: 2
+  reachScale: 0.79
+  reachInset: 0.94
+  sweepRadius: 0.15
+  contactWindow: 0.016
+  trailMaterial: {fileID: 2100000, guid: f7920b32ca5c58345afaa7b757cc9827, type: 2}
+  restBase: {x: 0.26, y: -0.2, z: 0.3}
+  restYaw: 12
+  restPitch: -8
+  restRoll: 14
+  keys:
+  - t: 0
+    basePos: {x: 0.15, y: 0.55, z: 0.35}
+    bladeYaw: 2
+    bladePitch: -80
+  - t: 0.5
+    basePos: {x: 0.15, y: 0.15, z: 0.8}
+    bladeYaw: 2
+    bladePitch: -25
+  - t: 1
+    basePos: {x: 0.15, y: -0.25, z: 0.9}
+    bladeYaw: 2
+    bladePitch: 35

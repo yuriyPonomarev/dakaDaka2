@@ -34,6 +34,9 @@ namespace Emberdelve.Movement
         public Vector3 AimDirection => cameraTransform != null ? cameraTransform.forward : transform.forward;
         public float Pitch => _pitch;
 
+        /// <summary>The transform the player looks through (the aim frame the swing visual is placed in).</summary>
+        public Transform AimTransform => cameraTransform != null ? cameraTransform : transform;
+
         private void Awake()
         {
             if (input == null) input = GetComponent<EmberdelveInput>();

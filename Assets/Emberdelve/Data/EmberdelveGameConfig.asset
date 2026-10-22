@@ -26,6 +26,7 @@ MonoBehaviour:
   itemCatalog: {fileID: 11400000, guid: f3859776d17eaa3448ab3ad4e93ce4d8, type: 2}
   mouseSensitivity: 1.2
   fieldOfView: 68
+  hitLocations: {fileID: 11400000, guid: 860dbac334768ee41af067c3b89a33b1, type: 2}
   levelMask:
     serializedVersion: 2
     m_Bits: 16384

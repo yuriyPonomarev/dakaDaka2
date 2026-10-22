@@ -42,6 +42,10 @@ namespace Emberdelve.Core
         [Range(0.1f, 10f)] public float mouseSensitivity = 1.2f;
         [Range(20f, 120f)] public float fieldOfView = 68f;
 
+        [Header("Combat")]
+        [Tooltip("D1a hit-location damage multipliers. Empty = the code defaults (head 1.5, body 1, arms 0.8, hands 0.7, legs 0.6, feet 0.5).")]
+        public Emberdelve.Data.HitLocationTable hitLocations;
+
         [Header("Layers (must match ProjectSettings/TagManager)")]
         public LayerMask levelMask;
         public LayerMask playerMask;

@@ -33,6 +33,7 @@ namespace Emberdelve.EditorTools
         public static Material ChestEmberLid;
         public static Material ChestSealed;
         public static Material ChestSealedLid;
+        public static Material SwingTrailMat;
 
         public static void BuildAll()
         {
@@ -66,6 +67,7 @@ namespace Emberdelve.EditorTools
             ChestEmberLid = Create("Chest_EmberLid", new Color(0.62f, 0.36f, 0.14f), 0.4f, new Color(0.8f, 0.4f, 0.08f));
             ChestSealed = Create("Chest_Sealed", new Color(0.2f, 0.2f, 0.28f), 0.5f, null);
             ChestSealedLid = Create("Chest_SealedLid", new Color(0.34f, 0.34f, 0.46f), 0.6f, new Color(0.2f, 0.2f, 0.5f));
+            SwingTrailMat = CreateAdditive("Swing_Trail", new Color(1f, 0.74f, 0.32f, 0.7f));
         }
 
         private static Material Create(string name, Color baseColor, float smoothness, Color? emission)
@@ -104,6 +106,47 @@ namespace Emberdelve.EditorTools
             }
 
             AssetDatabase.CreateAsset(material, path);
+            return material;
+        }
+
+        /// <summary>
+        /// Additive, unlit, double sided, no depth write: the swing afterimage and sweep edge. Re-applied on every build so
+        /// the transparent state is always right (a material that only exists as a runtime fallback would be opaque).
+        /// </summary>
+        private static Material CreateAdditive(string name, Color color)
+        {
+            string path = EmberdelvePaths.Materials + "/" + name + ".mat";
+            Material material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            bool created = material == null;
+            if (created)
+            {
+                Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+                if (shader == null) shader = Shader.Find("Sprites/Default");
+                if (shader == null)
+                {
+                    Debug.LogError("[Emberdelve] No usable shader found; material '" + name + "' was skipped.");
+                    return null;
+                }
+                material = new Material(shader) { name = name };
+            }
+
+            SetPropertyColor(material, "_BaseColor", color);
+            SetPropertyColor(material, "_Color", color);
+            SetPropertyFloat(material, "_Surface", 1f);
+            SetPropertyFloat(material, "_Blend", 2f);
+            SetPropertyFloat(material, "_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            SetPropertyFloat(material, "_DstBlend", (float)UnityEngine.Rendering.BlendMode.One);
+            SetPropertyFloat(material, "_SrcBlendAlpha", (float)UnityEngine.Rendering.BlendMode.One);
+            SetPropertyFloat(material, "_DstBlendAlpha", (float)UnityEngine.Rendering.BlendMode.One);
+            SetPropertyFloat(material, "_ZWrite", 0f);
+            SetPropertyFloat(material, "_Cull", 0f);
+            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.SetOverrideTag("RenderType", "Transparent");
+            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            material.SetShaderPassEnabled("ShadowCaster", false);
+
+            if (created) AssetDatabase.CreateAsset(material, path);
+            else EditorUtility.SetDirty(material);
             return material;
         }
 

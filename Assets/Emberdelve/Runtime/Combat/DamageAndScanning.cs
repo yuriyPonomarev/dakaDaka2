@@ -39,6 +39,26 @@ namespace Emberdelve.Combat
         }
 
         /// <summary>
+        /// D1a swept melee damage. Same chain as <see cref="Resolve"/> (flat base bonus joins the weapon base,
+        /// then the instigator multiplier, then guard and armour in Finalize), with two differences: the pattern's
+        /// own damage multiplier applies, and the hit-location multiplier replaces the binary headshot factor.
+        /// <paramref name="locationMultiplier"/> comes from the authority's own location table and the volume the
+        /// sweep touched; a melee hit has no range falloff. DamageInfo.Headshot is true exactly for Head.
+        /// </summary>
+        public static DamageInfo ResolveSwing(WeaponData weapon, SwingPatternData pattern, in AttackIntent intent,
+            in HitCandidate hit, HitLocation location, float locationMultiplier, ICombatEntity target,
+            float instigatorMultiplier = 1f, float weaponBaseDamageBonus = 0f)
+        {
+            float amount = weapon.DamageAtRange(0f, weaponBaseDamageBonus);
+            amount *= pattern != null ? Mathf.Max(0.05f, pattern.damageMultiplier) : 1f;
+            amount *= Mathf.Max(0f, instigatorMultiplier);
+            amount *= Mathf.Max(0f, locationMultiplier);
+
+            return Finalize(amount, weapon, intent.Direction, intent.Origin, intent.InstigatorCombatId,
+                intent.InstigatorKind, hit, target, null, location);
+        }
+
+        /// <summary>
         /// Skill damage. A skill either brings its own number (flatDamage) or scales the weapon actually
         /// held, which is what keeps Multi-shot and Piercing Shot honest about the bow in the player's
         /// hands: range falloff, damage type and headshots all still come from the weapon asset.
@@ -105,12 +125,12 @@ namespace Emberdelve.Combat
 
         private static DamageInfo Finalize(float amount, WeaponData source, Vector3 direction, Vector3 origin,
             int instigatorCombatId, EntityKind instigatorKind, in HitCandidate hit, ICombatEntity target,
-            DamageType? overrideType = null)
+            DamageType? overrideType = null, HitLocation location = HitLocation.Unspecified)
         {
             DamageType type = overrideType ?? (source != null ? source.damageType : DamageType.Physical);
 
             DamageInfo info = new DamageInfo(Mathf.Max(1f, amount), hit.HitPoint, direction, origin,
-                instigatorCombatId, instigatorKind, type, false, hit.Headshot, 0f);
+                instigatorCombatId, instigatorKind, type, false, hit.Headshot, 0f, location);
 
             if (target is IDefenseProvider defender && defender.TryGetGuardReduction(info, out float reduction))
             {
@@ -169,11 +189,11 @@ namespace Emberdelve.Combat
             if (float.IsNaN(final) || float.IsInfinity(final)) final = 1f;
 
             return new DamageInfo(final, info.Point, info.Direction, info.SourcePosition, info.SourceCombatId,
-                info.SourceKind, info.Type, info.Blocked, info.Headshot, info.BlockReduction);
+                info.SourceKind, info.Type, info.Blocked, info.Headshot, info.BlockReduction, info.Location);
         }
     }
 
-    /// <summary>Geometry queries used by melee swings and line-of-sight checks.</summary>
+    /// <summary>Geometry queries used by ranged shots, area skills and line-of-sight checks. Melee no longer scans here: D1a swept melee lives in LocalCombatAuthority.</summary>
     public static class HitScanner
     {
         private const int MaxQueryResults = 24;
@@ -188,51 +208,6 @@ namespace Emberdelve.Combat
 
             int hits = Physics.RaycastNonAlloc(from, delta / distance, _rayBuffer, distance - tolerance, levelMask, QueryTriggerInteraction.Ignore);
             return hits == 0;
-        }
-
-        public static int CollectMeleeHits(Vector3 origin, Vector3 facing, WeaponData weapon, int instigatorId,
-            LayerMask hitMask, LayerMask levelMask, List<HitCandidate> output, int maxHits)
-        {
-            output.Clear();
-            if (weapon == null) return 0;
-
-            float probeDistance = weapon.reach * 0.55f;
-            float probeRadius = weapon.reach * 0.55f + weapon.hitSphereRadius;
-            Vector3 probeCenter = origin + facing * probeDistance;
-
-            int count = Physics.OverlapSphereNonAlloc(probeCenter, probeRadius, _overlapBuffer, hitMask, QueryTriggerInteraction.Ignore);
-            float halfArc = weapon.arcAngle * 0.5f;
-            int accepted = 0;
-
-            for (int i = 0; i < count && accepted < maxHits; i++)
-            {
-                Collider collider = _overlapBuffer[i];
-                if (collider == null) continue;
-
-                ICombatEntity entity = collider.GetComponentInParent<ICombatEntity>();
-                if (entity == null || entity.IsDead) continue;
-                if (entity.CombatId == instigatorId) continue;
-
-                Vector3 center = entity.CombatCenter;
-                Vector3 toTarget = center - origin;
-                float distance = toTarget.magnitude;
-                if (distance > weapon.reach + weapon.hitSphereRadius) continue;
-
-                if (distance > 0.4f)
-                {
-                    float angle = Vector3.Angle(facing, toTarget);
-                    if (angle > halfArc) continue;
-                    if (!HasLineOfSight(origin, center, levelMask)) continue;
-                }
-
-                Vector3 hitPoint = collider.ClosestPoint(origin);
-                bool headshot = entity.HeadCollider != null && collider == entity.HeadCollider;
-
-                output.Add(new HitCandidate(entity.CombatId, hitPoint, headshot));
-                accepted++;
-            }
-
-            return accepted;
         }
 
         /// <summary>

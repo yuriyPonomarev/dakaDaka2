@@ -262,10 +262,18 @@ namespace Emberdelve.Player
             return state;
         }
 
-        public void PlaySwingVisual(WeaponData weapon)
+        public void PlaySwingVisual(WeaponData weapon, SwingPatternData pattern)
         {
-            if (_visual != null) _visual.PlaySwing(weapon);
+            if (_visual != null) _visual.PlaySwing(weapon, pattern);
         }
+
+        public void PlaySwingRecoil()
+        {
+            if (_visual != null) _visual.PlayRecoil();
+        }
+
+        /// <summary>The first-person weapon visual (null when nothing is held). Exposed for tools and gates.</summary>
+        public WeaponVisualRig Visual => _visual;
 
         public void SetDrawVisual(float progress)
         {
@@ -281,7 +289,8 @@ namespace Emberdelve.Player
             }
 
             if (weapon == null || weaponAnchor == null) return;
-            _visual = WeaponVisualBuilder.Build(weapon, weaponAnchor);
+            Transform aimFrame = _rig != null && _rig.Look != null ? _rig.Look.AimTransform : weaponAnchor;
+            _visual = WeaponVisualBuilder.Build(weapon, weaponAnchor, aimFrame);
         }
 
         /// <summary>Per-weapon ammunition, so a swap cannot quietly refill a half-empty magazine.</summary>

@@ -25,6 +25,7 @@ MonoBehaviour:
   reach: 1.4
   arcAngle: 90
   hitSphereRadius: 0.45
+  swingPatterns: []
   twoHanded: 0
   ammoDisplayName: Ammo
   rangedRange: 42

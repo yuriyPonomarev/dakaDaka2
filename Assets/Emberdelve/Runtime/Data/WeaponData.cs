@@ -37,6 +37,10 @@ namespace Emberdelve.Data
         [Range(30f, 180f)] public float arcAngle = 110f;
         public float hitSphereRadius = 0.6f;
 
+        [Header("Swept melee (D1a)")]
+        [Tooltip("The swing patterns of this weapon at combo step 0 (D1b adds chained steps as more data). Empty = the legacy arc/overlap melee, which only enemies still use.")]
+        public SwingPatternData[] swingPatterns = new SwingPatternData[0];
+
         [Header("Hands")]
         [Tooltip("A two-handed weapon occupies both hands, so an off-hand shield cannot contribute its block while it is held.")]
         public bool twoHanded = false;
@@ -73,6 +77,34 @@ namespace Emberdelve.Data
         public Material gripMaterial;
 
         public bool IsRanged => kind == WeaponKind.Ranged;
+
+        /// <summary>True when a player/entity swings this weapon through the authority's swept-segment melee.</summary>
+        public bool UsesSweptMelee => !IsRanged && swingPatterns != null && swingPatterns.Length > 0;
+
+        /// <summary>
+        /// Resolves a (combat step, pattern index) pair to the pattern the weapon allows. The combo step is the
+        /// seam D1b needs: today only step 0 exists, so any other step is refused; D1b adds data (a chain per
+        /// step) behind this one function instead of touching the authority or the client.
+        /// </summary>
+        public bool TryResolveSwingPattern(int comboStep, int patternIndex, out SwingPatternData pattern)
+        {
+            pattern = null;
+            if (comboStep != 0) return false;
+            if (swingPatterns == null || patternIndex < 0 || patternIndex >= swingPatterns.Length) return false;
+            pattern = swingPatterns[patternIndex];
+            return pattern != null;
+        }
+
+        /// <summary>First pattern of a kind at combo step 0, or -1.</summary>
+        public int FindSwingPattern(SwingKind kind)
+        {
+            if (swingPatterns == null) return -1;
+            for (int i = 0; i < swingPatterns.Length; i++)
+            {
+                if (swingPatterns[i] != null && swingPatterns[i].kind == kind) return i;
+            }
+            return -1;
+        }
 
         /// <summary>
         /// Which ability score this weapon's damage scales off, decided by the definition's own data:

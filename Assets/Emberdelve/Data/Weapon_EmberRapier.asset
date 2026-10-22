@@ -17,6 +17,7 @@ MonoBehaviour:
   kind: 0
   baseDamage: 19
   damageType: 1
+  finesse: 1
   windupTime: 0.16
   activeWindow: 0.12
   recoveryTime: 0.22
@@ -24,7 +25,9 @@ MonoBehaviour:
   reach: 2.7
   arcAngle: 70
   hitSphereRadius: 0.45
-  finesse: 1
+  swingPatterns:
+  - {fileID: 11400000, guid: 08fe873fcd3983f4cb52b3a9dc84da5b, type: 2}
+  twoHanded: 0
   ammoDisplayName: Ammo
   rangedRange: 42
   projectileSpeed: 36

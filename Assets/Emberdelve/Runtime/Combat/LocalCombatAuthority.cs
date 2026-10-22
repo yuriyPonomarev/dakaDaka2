@@ -17,7 +17,7 @@ namespace Emberdelve.Combat
     /// damage numbers, only AttackIntent + HitCandidate, and the authority re-resolves the target from
     /// CombatRegistry instead of trusting the supplied reference.
     /// </summary>
-    public sealed class LocalCombatAuthority : MonoBehaviour, ICombatAuthority
+    public sealed partial class LocalCombatAuthority : MonoBehaviour, ICombatAuthority
     {
         [Header("Wiring")]
         [SerializeField] private GameConfig config;
@@ -175,6 +175,14 @@ namespace Emberdelve.Combat
             if (intent.WeaponId != weapon.weaponId || (intent.Weapon != null && intent.Weapon != weapon))
             {
                 return Reject(intent, $"claimed weapon '{intent.WeaponId}' is not the equipped weapon '{weapon.weaponId}'", out reason);
+            }
+
+            // D1a: an entity with an authoritative swing pose (the player) hits with a melee weapon only through
+            // the swept swing (TryBeginMeleeSwing). This arc-less path accepted a claimed hit point out to ~4 m
+            // with no arc and no walls. Enemies have no swing pose and keep their committed-wedge claw attack.
+            if (!weapon.IsRanged && instigator is IAimPoseProvider && !AllowLegacyMeleeAttacks)
+            {
+                return Reject(intent, "melee attacks from this instigator must begin a swept swing", out reason);
             }
 
             if (!CombatRegistry.TryGet(hit.TargetCombatId, out ICombatEntity target)) return Reject(intent, "unknown target id", out reason);

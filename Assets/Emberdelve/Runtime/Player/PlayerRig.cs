@@ -20,7 +20,7 @@ namespace Emberdelve.Player
     [RequireComponent(typeof(PlayerMovement))]
     [RequireComponent(typeof(PlayerLook))]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, ISkillCasterState, IAmmoSource
+    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider
     {
         [Header("Components")]
         [SerializeField] private EmberdelveInput input;
@@ -57,6 +57,26 @@ namespace Emberdelve.Player
         public int TeamId => CombatTeams.PlayerTeam;
         public Vector3 CombatCenter => transform.position + Vector3.up * 1.1f;
         public Collider HeadCollider => null;
+
+        private HitVolume[] _hitVolumes;
+
+        /// <summary>
+        /// D1a: the player's hit volumes (head, torso, arms, legs, feet), created once under this rig. They are
+        /// analytic shapes and not colliders, so the CharacterController, loot raycasts and interaction checks are
+        /// unaffected. The sweep of another attacker reads them through <see cref="IHitShapeProvider"/>.
+        /// </summary>
+        public void CollectHitShapes(List<HitShape> shapes)
+        {
+            if (_hitVolumes == null) _hitVolumes = HitVolumeLayout.EnsureHumanoid(gameObject, 0.92f, 1.68f);
+            HitVolumeLayout.Collect(_hitVolumes, shapes);
+        }
+
+        /// <summary>The authoritative aim pose the swept melee is positioned from: the camera the player looks through.</summary>
+        public bool TryGetAimPose(out Vector3 eye, out float yawDegrees, out float pitchDegrees)
+        {
+            eye = AimOrigin;
+            return SwingGeometry.TryAimAngles(AimDirection, out yawDegrees, out pitchDegrees);
+        }
 
         /// <summary>The weapon the loadout actually has in hand; the combat authority resolves attacks against this.</summary>
         public WeaponData ActiveWeapon => loadout != null ? loadout.ActiveWeapon : null;
@@ -158,6 +178,8 @@ namespace Emberdelve.Player
 
             _combatId = CombatRegistry.AllocateId();
             CombatRegistry.Register(_combatId, this);
+
+            _hitVolumes = HitVolumeLayout.EnsureHumanoid(gameObject, 0.92f, 1.68f);
 
             // HealthComponent only knows its own pool; GameEvents is what the HUD listens to. This rig is
             // the local player's composition root, so it is the place that turns local health into the
@@ -555,9 +577,15 @@ namespace Emberdelve.Player
             return true;
         }
 
-        public void PlaySwingVisual(WeaponData weapon)
+        public void PlaySwingVisual(WeaponData weapon, SwingPatternData pattern)
         {
-            if (loadout != null) loadout.PlaySwingVisual(weapon);
+            if (loadout != null) loadout.PlaySwingVisual(weapon, pattern);
+        }
+
+        /// <summary>The authority stopped the swing at level geometry: the visual recoils from where it is.</summary>
+        public void PlaySwingRecoil()
+        {
+            if (loadout != null) loadout.PlaySwingRecoil();
         }
 
         public void SetDrawVisual(float progress)

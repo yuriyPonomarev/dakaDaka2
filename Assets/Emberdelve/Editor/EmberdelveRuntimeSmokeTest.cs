@@ -373,7 +373,7 @@ namespace Emberdelve.EditorTools
                     // Record the command sequence the swing actually claimed, so a rejection can be
                     // attributed to a specific authority rule instead of guessed at.
                     int swingSequence = -1;
-                    System.Action<AttackIntent> swingStarted = intent => swingSequence = intent.Sequence;
+                    System.Action<MeleeSwingIntent> swingStarted = intent => swingSequence = intent.Sequence;
                     melee.AttackStarted += swingStarted;
 
                     melee.BeginSwing();
@@ -388,12 +388,9 @@ namespace Emberdelve.EditorTools
                     Vector3 midOrigin = _rig.AimOrigin;
                     Vector3 midDirection = _rig.AimDirection;
                     Vector3 midToEnemy = enemy.CombatCenter - midOrigin;
-                    System.Collections.Generic.List<HitCandidate> scan = new System.Collections.Generic.List<HitCandidate>(4);
-                    int scanCount = HitScanner.CollectMeleeHits(midOrigin, midDirection, weapon, _rig.CombatId,
-                        _director.Config != null ? _director.Config.hitMask : Physics.AllLayers,
-                        _director.Config != null ? _director.Config.levelMask : Physics.DefaultRaycastLayers,
-                        scan, 4);
-                    Debug.Log($"[Emberdelve][Smoke:{Mode}] melee active diag: origin={midOrigin} enemyCenter={midToEnemy + midOrigin} dist={midToEnemy.magnitude:F2} angle={Vector3.Angle(midDirection, midToEnemy):F1} scanHits={scanCount} swinging={melee.IsSwinging} health={enemy.CurrentHealth:F0}");
+                    int swingHits = -1;
+                    if (_authority != null && _authority.TryGetMeleeSwingStatus(melee.LastSwingId, out MeleeSwingStatus midStatus)) swingHits = midStatus.Hits.Count;
+                    Debug.Log($"[Emberdelve][Smoke:{Mode}] melee active diag: origin={midOrigin} enemyCenter={midToEnemy + midOrigin} dist={midToEnemy.magnitude:F2} angle={Vector3.Angle(midDirection, midToEnemy):F1} swingHits={swingHits} swinging={melee.IsSwinging} health={enemy.CurrentHealth:F0}");
 
                     yield return WaitSeconds(0.9f);
 
@@ -454,6 +451,22 @@ namespace Emberdelve.EditorTools
                 // while the fixture waits on real time; it is re-enabled afterwards if it survives.
                 enemy.enabled = false;
                 yield return WaitForWeaponReady(_rig.CombatId, weapon);
+
+                // D1a: the player's melee goes through BeginMeleeSwing now; the arc-less SubmitAttack melee path is
+                // refused for the player rig by default. This block keeps testing the SubmitAttack claim rules
+                // (hit point, sequence replay, cooldown on the authority clock) with the sword, so it opts in to
+                // the legacy path explicitly, after proving the default refuses it.
+                if (_localAuthority != null)
+                {
+                    int refusedSequence = CombatRegistry.NextSequence(_rig.CombatId);
+                    AttackIntent legacyDefault = new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, weapon, 1f,
+                        _rig.CombatCenter, enemy.CombatCenter - _rig.CombatCenter, weapon.reach, refusedSequence, Time.time);
+                    float legacyHealth = enemy.CurrentHealth;
+                    bool legacyAccepted = _authority.SubmitAttack(legacyDefault, new HitCandidate(enemy.CombatId, enemy.CombatCenter, false));
+                    Check(!legacyAccepted && enemy.CurrentHealth == legacyHealth && _localAuthority.LastAttackRejectReason.Contains("swept swing"),
+                        "D1a: the default authority refuses a player melee SubmitAttack (" + _localAuthority.LastAttackRejectReason + ")");
+                    _localAuthority.AllowLegacyMeleeAttacks = true;
+                }
 
                 // Validation must refuse a hit claimed 40m away with a 2m sword.
                 int tooFarSequence = CombatRegistry.NextSequence(_rig.CombatId);
@@ -540,6 +553,7 @@ namespace Emberdelve.EditorTools
                 }
 
                 if (!enemy.IsDead) enemy.enabled = true;
+                if (_localAuthority != null) _localAuthority.AllowLegacyMeleeAttacks = false;
 
                 Check(everySequenceFresh, "every intended-valid attack claimed a sequence greater than the last one consumed");
                 Check(accepted > 0, $"authority accepted valid attacks ({accepted})");
@@ -1802,7 +1816,7 @@ namespace Emberdelve.EditorTools
                         yield return WaitFrames(2);
 
                         int rapierSequence = -1;
-                        System.Action<AttackIntent> rapierStarted = intent => rapierSequence = intent.Sequence;
+                        System.Action<MeleeSwingIntent> rapierStarted = intent => rapierSequence = intent.Sequence;
                         int rapierRejectedBefore = _localAuthority != null ? _localAuthority.RejectedCount : 0;
 
                         WeaponData rapier = melee.Weapon;
@@ -2032,11 +2046,24 @@ namespace Emberdelve.EditorTools
                 Check(weapon != null && melee.enabled, $"{label}: melee component live with {Name(weapon)}");
                 if (weapon == null || !melee.enabled) yield break;
 
-                float halfArc = weapon.arcAngle * 0.5f;
-                float maxReach = weapon.reach + weapon.hitSphereRadius;
-                float far = Mathf.Max(0.9f, maxReach - 0.4f);   // inside the probe once the eye/centre height gap is counted
+                // D1a fixture rewrite. The old matrix was shaped by the arc scan: offsets were fractions of
+                // weapon.arcAngle and every case was expected to hit. The sword now sweeps a horizontal slash
+                // (the sector its pattern covers, +-75 degrees of blade yaw) and the rapier thrusts along a narrow
+                // LINE, so the expectation is derived from the swing the weapon actually performs (pattern kind
+                // and the target's lateral distance from the aim line), not from an arc angle. Controls keep the
+                // harness able to tell "no hit" from "hit".
+                SwingPatternData primaryPattern = weapon.swingPatterns != null && weapon.swingPatterns.Length > 0 ? weapon.swingPatterns[0] : null;
+                Check(primaryPattern != null, $"{label}: the weapon has a swing pattern");
+                if (primaryPattern == null) yield break;
+                bool thrust = primaryPattern.kind == SwingKind.Thrust;
+
+                float maxReach = primaryPattern.EffectiveReach(weapon);
+                float halfArc = thrust ? 25f : 60f;
+                float far = Mathf.Max(0.9f, maxReach - 0.4f);
                 float[] distances = subset ? new[] { 1.4f, far } : new[] { 0.9f, 1.8f, far };
-                float[] offsets = subset ? new[] { 0f, halfArc * 0.5f } : new[] { 0f, halfArc * 0.35f, halfArc * 0.7f };
+                float[] offsets = thrust
+                    ? (subset ? new[] { 0f, 6f } : new[] { 0f, 6f, 12f, 25f })
+                    : (subset ? new[] { 0f, 30f } : new[] { 0f, 20f, 42f });
 
                 float yaw = FindOpenYaw(far, halfArc * 0.7f, far + 1.5f, out bool found);
                 Check(found, $"{label}: an open fan of floor exists around the player");
@@ -2065,9 +2092,16 @@ namespace Emberdelve.EditorTools
                     // Controls: the harness must be able to tell "no hit" from "hit", or green means nothing.
                     cases.Add(new RealCase { Label = "behind the player (180deg)", Distance = 1.5f, YawOffset = 180f, ExpectHit = false });
                     cases.Add(new RealCase { Label = $"beyond reach ({maxReach + 1.2f:F1}m)", Distance = maxReach + 1.2f, YawOffset = 0f, ExpectHit = false });
+                    if (thrust)
+                    {
+                        // A thrust is not an arc: 25 degrees off the line at 2 m is a metre to the side and must miss.
+                        cases.Add(new RealCase { Label = "off the thrust line (25deg right at 2.0m)", Distance = 2.0f, YawOffset = 25f, ExpectHit = false });
+                        cases.Add(new RealCase { Label = "off the thrust line (20deg left at 2.4m)", Distance = 2.4f, YawOffset = -20f, ExpectHit = false });
+                    }
                 }
 
                 int exercised = 0;
+                int skippedAmbiguous = 0;
                 for (int i = 0; i < cases.Count; i++)
                 {
                     RealCase c = cases[i];
@@ -2101,14 +2135,23 @@ namespace Emberdelve.EditorTools
                     float eyeDist = (enemy.CombatCenter - eye).magnitude;
                     float angle = Vector3.Angle(_rig.AimDirection, enemy.CombatCenter - eye);
 
-                    // The scan's arc is a 3D angle from the eye to the target's chest, so at point blank the
-                    // drop from eye to chest (about 30 degrees at 0.9 m) eats part of a narrow arc. That is the
-                    // documented HitScanner rule, not what this matrix tests: a case whose own measured angle is
-                    // outside the arc is reported and skipped instead of asserted as a hit (P4b.md, finding F4).
-                    if (c.ExpectHit && angle > halfArc - 2f)
+                    // A thrust is a line, so its expectation is derived from the real thrust geometry (review D1a M3c): the
+                    // pattern's own segment is sampled through the enemy's own hit volumes at the placed position, and the
+                    // case is asserted HIT when the deepest penetration is clearly positive and asserted MISS when it is
+                    // clearly negative. Only a case within 4 cm of the edge is genuinely ambiguous: it is skipped and
+                    // counted, and the matrix asserts how many skips are tolerated.
+                    if (thrust)
                     {
-                        Debug.Log($"[Emberdelve][Smoke:{Mode}] {label}: {c.Label} skipped, its measured {angle:F0}deg is outside the {weapon.arcAngle:F0}deg arc");
-                        continue;
+                        float margin = PredictSweepMargin(primaryPattern, weapon, enemy);
+                        if (!c.ExpectHit) Check(margin < 0.04f, $"{label}: control '{c.Label}' is a miss by the real thrust geometry (margin {margin:F3} m)");
+                        if (margin > 0.04f) c.ExpectHit = true;
+                        else if (margin < -0.04f) c.ExpectHit = false;
+                        else
+                        {
+                            skippedAmbiguous++;
+                            Debug.Log($"[Emberdelve][Smoke:{Mode}] {label}: {c.Label} skipped, the thrust's penetration margin {margin:F3} m is inside the +-0.04 m ambiguity band");
+                            continue;
+                        }
                     }
 
                     // THE REAL PATH: one press of the primary button, held for exactly one frame.
@@ -2136,6 +2179,35 @@ namespace Emberdelve.EditorTools
                 }
 
                 Check(exercised >= (subset ? 4 : 10), $"{label}: enough cases were exercised ({exercised})");
+                Debug.Log($"[Emberdelve][Smoke:{Mode}] {label}: {exercised} cases asserted, {skippedAmbiguous} skipped as ambiguous");
+                Check(skippedAmbiguous <= 2, $"{label}: at most 2 cases are ambiguous band edges ({skippedAmbiguous})");
+            }
+
+            /// <summary>
+            /// Largest penetration (metres) of the pattern's weapon segment into any of the target's hit shapes over the
+            /// whole active sweep, from the rig's current aim pose: positive = the sweep reaches the target. Pure
+            /// geometry, no timing and no walls (the matrix places its cases on open floor).
+            /// </summary>
+            private float PredictSweepMargin(SwingPatternData pattern, WeaponData weapon, ICombatEntity enemy)
+            {
+                if (!_rig.TryGetAimPose(out Vector3 eye, out float yaw, out float pitch) || !(enemy is IHitShapeProvider provider)) return -1f;
+
+                List<HitShape> shapes = new List<HitShape>(16);
+                provider.CollectHitShapes(shapes);
+                SwingFrame frame = new SwingFrame(eye, yaw, pitch);
+                float length = pattern.BladeLength(weapon);
+                int samples = SwingGeometry.SampleCount(pattern, weapon);
+                float best = -10f;
+                for (int i = 0; i <= samples; i++)
+                {
+                    SwingGeometry.BladeSegment(frame, pattern.ActivePose(i / (float)samples), length, out Vector3 b, out Vector3 t);
+                    for (int k = 0; k < shapes.Count; k++)
+                    {
+                        float d = SwingGeometry.SegmentDistance(b, t, shapes[k].A, shapes[k].B, out _);
+                        best = Mathf.Max(best, shapes[k].Radius + pattern.sweepRadius - d);
+                    }
+                }
+                return best;
             }
 
             private IEnumerator RealRangedMatrix(string label, EmberdelveInput input, RangedCombat ranged)
@@ -5542,7 +5614,7 @@ namespace Emberdelve.EditorTools
                 return (enemy.CombatCenter - scanOrigin).magnitude;
             }
 
-            private void ClaimMelee(AttackIntent intent) => _claims.Add(new SequenceClaim(intent.InstigatorCombatId, intent.Sequence, "melee"));
+            private void ClaimMelee(MeleeSwingIntent intent) => _claims.Add(new SequenceClaim(intent.InstigatorCombatId, intent.Sequence, "melee"));
             private void ClaimRanged(AttackIntent intent) => _claims.Add(new SequenceClaim(intent.InstigatorCombatId, intent.Sequence, "ranged"));
 
             /// <summary>Records the sequence each real attack component claims for its combat entity.</summary>

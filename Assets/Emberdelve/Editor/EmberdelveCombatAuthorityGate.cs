@@ -209,9 +209,19 @@ namespace Emberdelve.EditorTools
             _target.Head = _head;
             _head.enabled = false;
 
-            // ---- baseline: the legitimate attack, and the number the authority produces for it
+            // ---- D1a: a melee weapon attack from the player rig (an entity with a swing pose) no longer
+            // goes through this arc-less path at all. Default authority: rejected, nothing applied, no
+            // sequence spent. The tests below are about the claim rules of SubmitAttack itself (weapon, range,
+            // hit point, headshot, clock, sequence, hostility), which the sword probes exactly as before, so
+            // they opt in to the legacy path explicitly (internal seam, Editor assembly only).
             PlaceTarget(1.5f);
             Vector3 body = _target.Point;
+            Outcome swingOnly = Submit(_target, sword, sword.reach + sword.hitSphereRadius, body, false, _clock);
+            Check(!swingOnly.Accepted && swingOnly.Damage == 0f && swingOnly.Reason.Contains("swept swing"),
+                "D1a: a melee SubmitAttack from the player rig is refused by default (" + swingOnly.Reason + ")");
+            _authority.AllowLegacyMeleeAttacks = true;
+
+            // ---- baseline: the legitimate attack, and the number the authority produces for it
             Outcome baseline = Submit(_target, sword, sword.reach + sword.hitSphereRadius, body, false, _clock);
             Check(baseline.Accepted, "a legitimate sword attack is accepted (" + baseline.Reason + ")");
             Check(baseline.Damage > 0f && baseline.Info.IsValid, $"the legitimate attack deals authority damage ({baseline.Damage:F2})");

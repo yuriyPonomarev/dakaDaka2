@@ -301,6 +301,11 @@ namespace Emberdelve.EditorTools
                 // authority time deterministically instead of forging a timestamp inside the intent.
                 _clock = Time.time;
                 _authority.SetClock(() => _clock);
+
+                // D1a: this gate probes the range / line-of-sight / rate rules of SubmitAttack with the warrior's
+                // sword. The player's melee goes through the swept swing now, so the arc-less melee path is refused
+                // by default; this fixture opts in explicitly (its expectations are unchanged).
+                _authority.AllowLegacyMeleeAttacks = true;
             }
 
             private void CheckAuthoredData()

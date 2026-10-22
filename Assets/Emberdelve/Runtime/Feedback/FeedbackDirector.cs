@@ -93,7 +93,7 @@ namespace Emberdelve.Feedback
             _melee = player.GetComponent<MeleeCombat>();
             _ranged = player.GetComponent<RangedCombat>();
 
-            if (_melee != null) _melee.AttackStarted += OnAttackStarted;
+            if (_melee != null) _melee.AttackStarted += OnMeleeSwingStarted;
             if (_ranged != null)
             {
                 _ranged.AttackStarted += OnAttackStarted;
@@ -107,7 +107,7 @@ namespace Emberdelve.Feedback
         {
             if (!_subscribedToPlayer) return;
 
-            if (_melee != null) _melee.AttackStarted -= OnAttackStarted;
+            if (_melee != null) _melee.AttackStarted -= OnMeleeSwingStarted;
             if (_ranged != null)
             {
                 _ranged.AttackStarted -= OnAttackStarted;
@@ -116,6 +116,8 @@ namespace Emberdelve.Feedback
 
             _subscribedToPlayer = false;
         }
+
+        private void OnMeleeSwingStarted(MeleeSwingIntent intent) => Play(_swing);
 
         private void OnAttackStarted(AttackIntent intent)
         {

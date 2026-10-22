@@ -124,8 +124,111 @@ namespace Emberdelve.Combat
         }
     }
 
+    /// <summary>
+    /// D1a request to begin a swept melee swing. Plain data, the whole of what a client sends: WHO swings, WITH
+    /// WHICH weapon, WHICH of the weapon's patterns (at which combo step), the aim the client believes it has
+    /// and the command sequence. There is deliberately no hit point, range, timestamp, damage, head flag or
+    /// target: the authority validates the request, then places the weapon segment from its own copy of the
+    /// attacker's pose and the pattern asset and decides every hit itself.
+    /// </summary>
+    public readonly struct MeleeSwingIntent
+    {
+        public readonly int InstigatorCombatId;
+        public readonly string WeaponId;
+        public readonly int PatternIndex;
+        public readonly int ComboStep;
+        public readonly float AimYaw;
+        public readonly float AimPitch;
+        public readonly int Sequence;
+
+        public MeleeSwingIntent(int instigatorCombatId, string weaponId, int patternIndex, int comboStep,
+            float aimYawDegrees, float aimPitchDegrees, int sequence)
+        {
+            InstigatorCombatId = instigatorCombatId;
+            WeaponId = weaponId ?? string.Empty;
+            PatternIndex = patternIndex;
+            ComboStep = comboStep;
+            AimYaw = aimYawDegrees;
+            AimPitch = aimPitchDegrees;
+            Sequence = sequence;
+        }
+    }
+
+    public enum SwingPhase { Windup, Active, Recovery, Finished }
+
+    public enum SwingEndReason { None, Completed, WallStop, InstigatorDied, InstigatorGone, WeaponChanged }
+
+    /// <summary>One damage event of a swing, as the authority recorded it.</summary>
+    public readonly struct MeleeSwingHit
+    {
+        public readonly int TargetCombatId;
+        public readonly HitLocation Location;
+        public readonly float Amount;
+        public readonly bool Blocked;
+        /// <summary>Sample at which the damage was resolved (the end of the target's contact window, or the wall/end sample).</summary>
+        public readonly int Sample;
+
+        /// <summary>Sample at which the weapon segment first touched the target.</summary>
+        public readonly int FirstSample;
+        public readonly Vector3 Point;
+
+        public MeleeSwingHit(int targetCombatId, HitLocation location, float amount, bool blocked, int sample, int firstSample, Vector3 point)
+        {
+            TargetCombatId = targetCombatId;
+            Location = location;
+            Amount = amount;
+            Blocked = blocked;
+            Sample = sample;
+            FirstSample = firstSample;
+            Point = point;
+        }
+    }
+
+    /// <summary>Read-only snapshot of one swing for the client (visual, recoil) and for tools and gates.</summary>
+    public readonly struct MeleeSwingStatus
+    {
+        public readonly int SwingId;
+        public readonly int InstigatorCombatId;
+        public readonly SwingPhase Phase;
+        public readonly SwingEndReason EndReason;
+        public readonly float Elapsed;
+        public readonly int SamplesProcessed;
+        public readonly int SampleCount;
+        public readonly int WallContactSample;
+        public readonly IReadOnlyList<MeleeSwingHit> Hits;
+
+        public MeleeSwingStatus(int swingId, int instigatorCombatId, SwingPhase phase, SwingEndReason endReason,
+            float elapsed, int samplesProcessed, int sampleCount, int wallContactSample, IReadOnlyList<MeleeSwingHit> hits)
+        {
+            SwingId = swingId;
+            InstigatorCombatId = instigatorCombatId;
+            Phase = phase;
+            EndReason = endReason;
+            Elapsed = elapsed;
+            SamplesProcessed = samplesProcessed;
+            SampleCount = sampleCount;
+            WallContactSample = wallContactSample;
+            Hits = hits;
+        }
+
+        public bool Finished => Phase == SwingPhase.Finished;
+        public bool WallStopped => EndReason == SwingEndReason.WallStop;
+    }
+
     public interface ICombatAuthority
     {
+        /// <summary>
+        /// D1a: asks the authority to begin a swept melee swing. The authority validates the request (alive,
+        /// weapon equal to the one the instigator actually holds, the pattern belongs to that weapon at that
+        /// combo step, command sequence, cooldown on its own clock, no swing already running, aim consistent with
+        /// the pose it holds) and, when accepted, steps the swing on its own tick, sweeping the pattern's
+        /// weapon segment through the targets' hit volumes. Returns the swing id on success.
+        /// </summary>
+        bool TryBeginMeleeSwing(in MeleeSwingIntent intent, out int swingId, out string reason);
+
+        /// <summary>State of a running or recently finished swing. False when the id is unknown or has aged out.</summary>
+        bool TryGetMeleeSwingStatus(int swingId, out MeleeSwingStatus status);
+
         /// <summary>Returns true when the authority accepted the intent and applied damage.</summary>
         bool SubmitAttack(AttackIntent intent, HitCandidate hit);
 
