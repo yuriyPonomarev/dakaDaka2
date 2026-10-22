@@ -7,6 +7,7 @@ using Emberdelve.Interaction;
 using Emberdelve.InputLayer;
 using Emberdelve.Items;
 using Emberdelve.Level;
+using Emberdelve.AI;
 using Emberdelve.Player;
 
 namespace Emberdelve.Flow
@@ -18,7 +19,8 @@ namespace Emberdelve.Flow
     /// only host that can receive a chest's already-rolled gear item, as that exact item.
     /// </summary>
     [DisallowMultipleComponent]
-    public sealed class RunDirector : MonoBehaviour, IExtractionSink, ILootHost, ICountedLootHost, IInstanceLootHost
+    public sealed class RunDirector : MonoBehaviour, IExtractionSink, ILootHost, ICountedLootHost, IInstanceLootHost,
+        IEnemyDropHost, IRaidSessionHost
     {
         [Header("Configuration")]
         [SerializeField] private GameConfig config;
@@ -44,6 +46,12 @@ namespace Emberdelve.Flow
         public int LootValue => _inventory != null ? _inventory.RecoveredValue : 0;
         public float Elapsed => Mathf.Max(0f, Time.unscaledTime - _startedAt);
 
+        /// <summary>
+        /// R4/R5: this raid's seed and its one item-identity issuer. Created in Awake, once per run (a retry loads
+        /// the scene again and gets a new session), and shared by chests, enemy drops, the starting kit and pickups.
+        /// </summary>
+        public RaidSession Session { get; private set; }
+
         /// <summary>Containers built from the layout asset, created once per run scene.</summary>
         public ChestSpawner Chests { get; private set; }
 
@@ -52,6 +60,14 @@ namespace Emberdelve.Flow
 
         private void Awake()
         {
+            ulong raidSeed = RunContext.ResolveRaidSeed(out string seedSource);
+            Session = RaidSession.Begin(raidSeed, seedSource);
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            // The raid seed derives every loot outcome of the raid: it is never written to a release log.
+            Debug.Log($"[Emberdelve][Raid] {Session}");
+#endif
+            EnemyAgent.ResetDropKeys();
+
             if (config != null)
             {
                 config.EnsureValid();
@@ -83,6 +99,27 @@ namespace Emberdelve.Flow
                 if (item != null && !catalog.Contains(item)) missing.Add($"{item.name} ({item.itemId}) in {where}");
             }
 
+            void CheckTable(LootTable table, string where)
+            {
+                if (table == null) return;
+                if (table.entries != null)
+                {
+                    for (int k = 0; k < table.entries.Length; k++)
+                        if (table.entries[k] != null) CheckItem(table.entries[k].item, where);
+                }
+                if (table.affixCatalog != null)
+                {
+                    for (int k = 0; k < table.affixCatalog.Length; k++)
+                    {
+                        AffixDefinition a = table.affixCatalog[k];
+                        if (a != null && (!catalog.TryResolveAffix(a.id, out AffixDefinition owned, out _) || owned != a))
+                            missing.Add($"affix {a.id} in {where}");
+                    }
+                }
+                System.Collections.Generic.List<string> problems = table.Validate();
+                for (int k = 0; k < problems.Count; k++) missing.Add("invalid table: " + problems[k]);
+            }
+
             void CheckClass(CharacterClassData data)
             {
                 if (data == null || data.startingItems == null) return;
@@ -96,21 +133,7 @@ namespace Emberdelve.Flow
                     for (int i = 0; i < layout.chestSpawns.Count; i++)
                     {
                         LootTable table = layout.chestSpawns[i] != null ? layout.chestSpawns[i].lootTable : null;
-                        if (table == null) continue;
-                        if (table.entries != null)
-                        {
-                            for (int k = 0; k < table.entries.Length; k++)
-                                if (table.entries[k] != null) CheckItem(table.entries[k].item, "loot table " + table.name);
-                        }
-                        if (table.affixCatalog != null)
-                        {
-                            for (int k = 0; k < table.affixCatalog.Length; k++)
-                            {
-                                AffixDefinition a = table.affixCatalog[k];
-                                if (a != null && (!catalog.TryResolveAffix(a.id, out AffixDefinition owned, out _) || owned != a))
-                                    missing.Add($"affix {a.id} in loot table {table.name}");
-                            }
-                        }
+                        CheckTable(table, "loot table " + (table != null ? table.name : ""));
                     }
                 }
 
@@ -125,8 +148,15 @@ namespace Emberdelve.Flow
                     for (int i = 0; i < layout.enemySpawns.Count; i++)
                     {
                         EnemyData enemy = layout.enemySpawns[i] != null ? layout.enemySpawns[i].enemy : null;
-                        if (enemy == null || enemy.lootTable == null) continue;
-                        for (int k = 0; k < enemy.lootTable.Length; k++) CheckItem(enemy.lootTable[k], "drops of " + enemy.name);
+                        if (enemy == null) continue;
+
+                        // R4: the runtime rolls enemy.dropTable (a real LootTable, validated like a chest table). The
+                        // legacy flat list is still checked so a stale asset cannot hide a non-catalog item.
+                        CheckTable(enemy.dropTable, "enemy drop table of " + enemy.name);
+                        if (enemy.lootTable != null)
+                        {
+                            for (int k = 0; k < enemy.lootTable.Length; k++) CheckItem(enemy.lootTable[k], "legacy drops of " + enemy.name);
+                        }
                     }
                 }
             }
@@ -147,6 +177,10 @@ namespace Emberdelve.Flow
             }
 
             CharacterClassData classData = RunContext.GetSelectedClassOrDefault(fallbackClass);
+
+            // R4: the bag mints its starting kit from the raid's one issuer, not from a private one.
+            if (playerRig.Inventory != null) playerRig.Inventory.SetIssuer(Session.Issuer);
+
             playerRig.ApplyClass(classData, config);
 
             _inventory = playerRig.Inventory;
@@ -372,10 +406,69 @@ namespace Emberdelve.Flow
             return _inventory.TryAddInstance(instance, out reason);
         }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        /// <summary>Test seam: swap the raid session (fixed seed) and re-point the bag at its issuer.</summary>
+        internal void UseSessionForTest(RaidSession session)
+        {
+            if (session == null) return;
+            Session = session;
+            if (_inventory != null) _inventory.SetIssuer(session.Issuer);
+        }
+#endif
+
+        /// <summary>
+        /// R4: rolls the dying enemy's drop table with (raid seed, drop key) and the raid's issuer, then lays the result
+        /// on the ground. Carried goods become definition pickups; gear becomes pickups that hold the concrete instance
+        /// (UID, rarity, rolled affixes), so taking one gives the bag exactly that item. A table that cannot be produced
+        /// drops nothing and logs why.
+        /// </summary>
+        public void DropEnemyLoot(EnemyData enemy, string dropKey, Vector3 position)
+        {
+            if (enemy == null || enemy.dropTable == null || Session == null) return;
+
+            ItemCatalog catalog = config != null ? config.itemCatalog : null;
+            System.Collections.Generic.List<LootDrop> drops = new System.Collections.Generic.List<LootDrop>();
+
+            if (!Session.TryRollEnemyDrops(enemy, dropKey, catalog, drops, out string reason))
+            {
+                Debug.LogError($"[Emberdelve][EnemyDrop] {enemy.name} '{dropKey}': drop table refused, nothing dropped - {reason}", this);
+                return;
+            }
+
+            DeterministicRng scatter = Session.ScatterRng(dropKey);
+            for (int i = 0; i < drops.Count; i++)
+            {
+                // Position only: a deterministic point in a 0.7 m disc, drawn from the drop's own stream.
+                double angle = scatter.NextDouble() * 6.283185307179586;
+                double radius = 0.7 * System.Math.Sqrt(scatter.NextDouble());
+                Vector3 at = position + new Vector3((float)(System.Math.Cos(angle) * radius), 0.35f, (float)(System.Math.Sin(angle) * radius));
+
+                LootDrop drop = drops[i];
+                if (drop.IsRolled) SpawnLootInstance(drop.Instance, at);
+                else SpawnLoot(drop.Item, Mathf.Max(1, drop.Amount), at);
+            }
+        }
+
+        /// <summary>Lays one concrete item on the ground. The pickup holds this very instance until it is taken.</summary>
+        public LootPickup SpawnLootInstance(ItemInstance instance, Vector3 worldPosition)
+        {
+            if (instance == null) return null;
+
+            LootPickup pickup = BuildPickupBody(instance.Definition, worldPosition);
+            if (pickup != null) pickup.Configure(instance, this);
+            return pickup;
+        }
+
         public void SpawnLoot(ItemData item, int amount, Vector3 worldPosition)
         {
             if (item == null) return;
 
+            LootPickup pickup = BuildPickupBody(item, worldPosition);
+            if (pickup != null) pickup.Configure(item, Mathf.Max(1, amount), this);
+        }
+
+        private LootPickup BuildPickupBody(ItemData item, Vector3 worldPosition)
+        {
             GameObject root = GameObject.CreatePrimitive(PrimitiveType.Cube);
             root.name = "Loot_" + item.displayName;
             root.transform.position = worldPosition;
@@ -396,8 +489,7 @@ namespace Emberdelve.Flow
             Renderer renderer = root.GetComponent<Renderer>();
             if (renderer != null && item.worldMaterial != null) renderer.material = item.worldMaterial;
 
-            LootPickup pickup = root.AddComponent<LootPickup>();
-            pickup.Configure(item, Mathf.Max(1, amount), this);
+            return root.AddComponent<LootPickup>();
         }
 
         public void RestartRun()

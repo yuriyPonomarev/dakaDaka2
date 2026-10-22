@@ -56,6 +56,16 @@ namespace Emberdelve.Items
     }
 
     /// <summary>
+    /// R4: a host that owns enemy drops. The enemy reports where and what died (data + stable key); the host rolls the
+    /// drop table with the raid's seed and issuer and spawns the result, gear as concrete instances. The enemy never
+    /// rolls anything itself.
+    /// </summary>
+    public interface IEnemyDropHost : ILootHost
+    {
+        void DropEnemyLoot(EnemyData enemy, string dropKey, Vector3 position);
+    }
+
+    /// <summary>
     /// The one rule a loot source uses to find out how much of what it offered actually arrived, so a
     /// partial collection shrinks the source by exactly that much instead of keeping or discarding the whole
     /// offer.
@@ -161,6 +171,10 @@ namespace Emberdelve.Items
         [SerializeField] private ItemData item;
         [SerializeField] private int amount = 1;
 
+        // R4: a pickup of worn gear carries the concrete instance (UID, rarity, rolled affixes) it was dropped as.
+        // Not serialized: instances only exist at runtime, and a pickup placed in a scene is a plain definition pickup.
+        private ItemInstance _instance;
+
         [Header("Wiring")]
         [Tooltip("Assigned to the RunDirector by the level builder; left empty the pickup searches its parents.")]
         [SerializeField] private MonoBehaviour lootHost;
@@ -174,9 +188,22 @@ namespace Emberdelve.Items
         private Vector3 _home;
         private float _phase;
 
-        public ItemData Item => item;
-        public int Amount => Mathf.Max(1, amount);
-        public string PromptText => amount > 1 ? $"Take {item.displayName} x{amount}" : $"Take {item.displayName}";
+        public ItemData Item => _instance != null ? _instance.Definition : item;
+        public int Amount => _instance != null ? 1 : Mathf.Max(1, amount);
+
+        /// <summary>The concrete item this pickup holds, or null for a definition+amount pickup.</summary>
+        public ItemInstance Instance => _instance;
+
+        public string PromptText
+        {
+            get
+            {
+                ItemData shown = Item;
+                if (shown == null) return "Take item";
+                if (_instance != null) return $"Take {shown.displayName} ({_instance.Rarity})";
+                return amount > 1 ? $"Take {shown.displayName} x{amount}" : $"Take {shown.displayName}";
+            }
+        }
         public bool RequiresHold => false;
         public float HoldDuration => 0f;
 
@@ -185,20 +212,35 @@ namespace Emberdelve.Items
             _host = lootHost as ILootHost;
             if (_host == null) _host = GetComponentInParent<ILootHost>();
             _home = transform.position;
-            _phase = Random.value * Mathf.PI * 2f;
+            // Visual only, and derived from where the pickup lies rather than from a random source.
+            Vector3 p = transform.position;
+            ulong bits = RngMix.Combine(unchecked((ulong)(long)Mathf.RoundToInt(p.x * 64f)),
+                                        unchecked((ulong)(long)Mathf.RoundToInt(p.z * 64f)));
+            _phase = (bits >> 40) / 16777216f * Mathf.PI * 2f;
         }
 
         public void Configure(ItemData newItem, int newAmount, MonoBehaviour newHost)
         {
+            _instance = null;
             item = newItem;
             amount = Mathf.Max(1, newAmount);
             lootHost = newHost;
             _host = newHost as ILootHost;
         }
 
+        /// <summary>Configures this pickup as one concrete item: taking it hands the very same instance to the bag.</summary>
+        public void Configure(ItemInstance instance, MonoBehaviour newHost)
+        {
+            _instance = instance;
+            item = instance != null ? instance.Definition : null;
+            amount = 1;
+            lootHost = newHost;
+            _host = newHost as ILootHost;
+        }
+
         public bool CanInteract(out string reason)
         {
-            if (item == null)
+            if (Item == null)
             {
                 reason = "Empty container";
                 return false;
@@ -219,6 +261,21 @@ namespace Emberdelve.Items
             if (!CanInteract(out string reason))
             {
                 GameEvents.RaiseToast(reason ?? "Cannot take item");
+                return;
+            }
+
+            if (_instance != null)
+            {
+                // One concrete item, offered as itself through the instance path. A refusal (full bag, duplicate
+                // identity, run not running) leaves this pickup and its instance exactly as they were.
+                if (LootCollection.TryCollectInstance(_host, _instance, out string refusal))
+                {
+                    Destroy(gameObject);
+                    return;
+                }
+
+                GameEvents.RaiseToast("Cannot take item");
+                Debug.Log($"[Emberdelve][LootPickup] {name}: kept {_instance.Describe()} on the ground - {refusal}");
                 return;
             }
 

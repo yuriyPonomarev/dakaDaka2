@@ -44,7 +44,9 @@ namespace Emberdelve.Interaction
         [Header("Content")]
         [SerializeField] private ChestVariant variant = ChestVariant.Supply;
         [SerializeField] private LootTable lootTable;
-        [Tooltip("Stable per-chest seed from the layout, so the same chest in the same level always holds the same loot.")]
+        [Tooltip("Authored per-chest SALT from the layout. R5: it no longer decides the loot alone; the effective seed is " +
+                 "derived from the raid seed, this chest's id and this salt (RaidSession.ChestSeed), so the same chest " +
+                 "holds the same loot within one raid seed and different loot in different raids.")]
         [SerializeField] private int seed = 1;
         [SerializeField] private MonoBehaviour lootHost;
 
@@ -66,6 +68,12 @@ namespace Emberdelve.Interaction
         public ChestVariant Variant => variant;
         public LootTable LootTable => lootTable;
         public int Seed => seed;
+
+        /// <summary>
+        /// The chest's stable id for seed derivation: its GameObject name, which the spawner builds from variant, cell
+        /// and layout index. Renaming a chest changes its loot, like changing its salt does.
+        /// </summary>
+        public string ChestId => name;
         public bool Opened => _opened;
         public IReadOnlyList<LootDrop> Remaining => _remaining;
 
@@ -206,9 +214,21 @@ namespace Emberdelve.Interaction
             {
                 // R3: gear is rolled against the run's one item catalog, which the host's bag carries.
                 ItemCatalog catalog = _host != null && _host.Inventory != null ? _host.Inventory.Catalog : null;
-                if (!lootTable.TryRoll(seed, _remaining, catalog, out string rollReason))
+
+                // R4/R5: the roll belongs to the raid. Its seed is derived from the raid seed, and every UID comes from
+                // the raid's one issuer; a host with no raid session cannot roll a chest at all (no local fallback).
+                RaidSession session = (_host as IRaidSessionHost)?.Session;
+                if (session == null)
                 {
-                    Debug.LogError($"[Emberdelve][Chest] {name} variant={variant} seed={seed}: contents refused, " +
+                    Debug.LogError($"[Emberdelve][Chest] {name}: the loot host has no raid session, so the chest " +
+                                   "cannot be rolled (chests roll through RaidSession, never a private seed)", this);
+                    GameEvents.RaiseToast("Chest contents are invalid");
+                    return false;
+                }
+
+                if (!session.TryRollChest(lootTable, ChestId, seed, catalog, _remaining, out string rollReason))
+                {
+                    Debug.LogError($"[Emberdelve][Chest] {name} variant={variant} salt={seed}: contents refused, " +
                                     $"nothing was produced - {rollReason}", this);
                     GameEvents.RaiseToast("Chest contents are invalid");
                     return false;
@@ -283,7 +303,7 @@ namespace Emberdelve.Interaction
 
             _opened = true;
 
-            Debug.Log($"[Emberdelve][Chest] {name} variant={variant} seed={seed} opened: takenUnits={takenUnits} " +
+            Debug.Log($"[Emberdelve][Chest] {name} variant={variant} salt={seed} opened: takenUnits={takenUnits} " +
                       $"value={takenValue} leftUnits={leftUnits} stacks={_remaining.Count} " +
                       $"totalTaken={_takenCount} totalValue={_takenValue}");
             GameEvents.RaiseToast(_remaining.Count > 0

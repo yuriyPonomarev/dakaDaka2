@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Combat;
@@ -47,6 +48,7 @@ namespace Emberdelve.AI
         private AttackTelegraphVisual _telegraph;
         private StatusComponent _status;
         private float _whiffTimer;
+        private string _dropKey;
 
         public EntityKind Kind => EntityKind.Enemy;
         public int CombatId => _combatId;
@@ -93,6 +95,7 @@ namespace Emberdelve.AI
                 return;
             }
 
+            _dropKey = AllocateDropKey(data.enemyId, transform.position);
             _health.Configure(Mathf.Max(1, data.maxHealth), 0f, 0f);
             _health.Died += HandleDeath;
             _health.Damaged += HandleDamaged;
@@ -162,23 +165,50 @@ namespace Emberdelve.AI
             Destroy(gameObject, 6f);
         }
 
+        /// <summary>
+        /// R4: the enemy no longer rolls anything. It tells the loot host which enemy died and where, with a stable
+        /// key, and the host rolls the enemy's drop table with the raid seed and the raid's issuer.
+        /// </summary>
         private void DropLoot()
         {
-            ILootHost host = lootHost as ILootHost;
-            if (host == null || data == null || data.lootTable == null) return;
+            if (data == null || data.dropTable == null) return;
 
-            int rolls = Mathf.Max(0, data.lootRolls);
-            for (int i = 0; i < rolls; i++)
+            IEnemyDropHost host = lootHost as IEnemyDropHost;
+            if (host == null) return;
+
+            host.DropEnemyLoot(data, DropKey, transform.position);
+        }
+
+        /// <summary>
+        /// Stable identity of this spawn for drop seeding: enemy id plus the spawn point in quarter-metre units. The
+        /// same layout gives the same keys in every raid, so (raid seed, key) fixes the drop.
+        /// </summary>
+        public string DropKey
+        {
+            get
             {
-                if (data.lootTable.Length == 0) break;
-                if (UnityEngine.Random.value > data.lootDropChance) continue;
-
-                ItemData item = data.lootTable[UnityEngine.Random.Range(0, data.lootTable.Length)];
-                if (item == null) continue;
-
-                Vector3 offset = UnityEngine.Random.insideUnitCircle * 0.7f;
-                host.SpawnLoot(item, 1, transform.position + new Vector3(offset.x, 0.35f, offset.y));
+                if (_dropKey == null) _dropKey = AllocateDropKey(data != null ? data.enemyId : "enemy", transform.position);
+                return _dropKey;
             }
+        }
+
+        private static readonly Dictionary<string, int> DropKeyCounts = new Dictionary<string, int>();
+
+        /// <summary>Forgets the drop keys handed out so far. Called when a run starts (RunDirector.Awake).</summary>
+        public static void ResetDropKeys() => DropKeyCounts.Clear();
+
+        /// <summary>
+        /// Allocates a drop key unique within the run: enemy id plus the spawn point in quarter-metre units (invariant
+        /// culture), and for the second and later enemy at the same id and cell a "#n" suffix in allocation order. The
+        /// same raid seed and spawn order give the same keys; two enemies can never share a key.
+        /// </summary>
+        public static string AllocateDropKey(string enemyId, Vector3 position)
+        {
+            string baseKey = string.Format(CultureInfo.InvariantCulture, "{0}@{1},{2}", enemyId,
+                Mathf.RoundToInt(position.x * 4f), Mathf.RoundToInt(position.z * 4f));
+            DropKeyCounts.TryGetValue(baseKey, out int used);
+            DropKeyCounts[baseKey] = used + 1;
+            return used == 0 ? baseKey : baseKey + "#" + used.ToString(CultureInfo.InvariantCulture);
         }
 
         private void Update()

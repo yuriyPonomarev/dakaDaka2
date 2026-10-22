@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
+using Emberdelve.Core;
 using Emberdelve.Data;
 
 namespace Emberdelve.Items
 {
     /// <summary>
     /// The seeded weighted affix roller from Docs/Design/ITEM_AFFIXES.md: given a trusted item definition,
-    /// a quantity, a known rarity, the trusted catalog, a caller-supplied <see cref="System.Random"/> and
+    /// a quantity, a known rarity, the trusted catalog, a caller-supplied <see cref="ILootRng"/> (the project's own generator, never System.Random) and
     /// the existing <see cref="ItemIdentityIssuer"/>, it produces the final affix records and then hands
     /// them to the shared validated issuer path to build one <see cref="ItemInstance"/>.
     ///
@@ -48,15 +49,15 @@ namespace Emberdelve.Items
         /// request never leaves a half-built item and never spends an identity.
         /// </summary>
         public static bool TryRoll(ItemData definition, int quantity, AffixRarity rarity,
-            ItemInstanceAuthority authority, System.Random random, ItemIdentityIssuer issuer,
+            ItemInstanceAuthority authority, ILootRng random, ItemIdentityIssuer issuer,
             out ItemInstance instance, out string reason)
         {
             instance = null;
 
             if (random == null)
             {
-                reason = "no caller-supplied System.Random: this roller has no fallback generator and is " +
-                         "never seeded from UnityEngine.Random or from the clock";
+                reason = "no caller-supplied ILootRng: this roller has no fallback generator and is " +
+                         "never seeded from a global generator or from the clock";
                 return false;
             }
 
@@ -113,15 +114,15 @@ namespace Emberdelve.Items
         /// (nothing here is carried) and it never mints.
         /// </summary>
         public static bool TryRollAffixes(ItemData definition, AffixRarity rarity,
-            ItemInstanceAuthority authority, System.Random random,
+            ItemInstanceAuthority authority, ILootRng random,
             out AffixRecord[] records, out string reason)
         {
             records = null;
 
             if (random == null)
             {
-                reason = "no caller-supplied System.Random: this roller has no fallback generator and is " +
-                         "never seeded from UnityEngine.Random or from the clock";
+                reason = "no caller-supplied ILootRng: this roller has no fallback generator and is " +
+                         "never seeded from a global generator or from the clock";
                 return false;
             }
 
@@ -441,7 +442,7 @@ namespace Emberdelve.Items
         /// cannot spin: an exhausted pool is a refusal, not a retry.
         /// </summary>
         private static bool TrySample(List<Candidate> pool, int expected, AffixCategory category,
-            System.Random random, out AffixRecord[] records, out string reason)
+            ILootRng random, out AffixRecord[] records, out string reason)
         {
             records = null;
 
@@ -491,7 +492,7 @@ namespace Emberdelve.Items
         /// same order in both passes, so the running cumulative sum ends exactly where the ticket was drawn
         /// from and a ticket below the total must cross some cumulative sum. Weights are only ever read.
         /// </summary>
-        private static bool TryPickWeighted(List<Candidate> pool, bool[] used, System.Random random,
+        private static bool TryPickWeighted(List<Candidate> pool, bool[] used, ILootRng random,
             out int chosen, out string reason)
         {
             chosen = -1;
@@ -558,7 +559,7 @@ namespace Emberdelve.Items
         /// rather than allowed to produce an out-of-range or fractional index. A band with a single legal
         /// value (min == max) is that value and consumes no draw.
         /// </summary>
-        private static bool TryDrawGridIndex(System.Random random, long gridCount, out long index,
+        private static bool TryDrawGridIndex(ILootRng random, long gridCount, out long index,
             out string reason)
         {
             index = 0;

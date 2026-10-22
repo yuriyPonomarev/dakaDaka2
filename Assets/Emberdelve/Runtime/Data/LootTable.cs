@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Emberdelve.Core;
 using Emberdelve.Items;
 
 namespace Emberdelve.Data
@@ -140,6 +141,15 @@ namespace Emberdelve.Data
         [Min(1)] public int maxRolls = 3;
         [Tooltip("The first entry is always handed out once, so a container can be guaranteed to contain something specific.")]
         public bool guaranteeFirstEntry = false;
+        [Tooltip("R4: weight of an 'empty' pick. Each roll draws from the entry weights plus this one; landing on it " +
+                 "uses up that roll and drops nothing. 0 (the default) means every roll that can drop does. The miss " +
+                 "chance is relative to the weight still available, so once an entry reaches maxCopies the " +
+                 "miss chance rises: this is not a constant per-roll chance.")]
+        [Min(0)] public int nothingWeight = 0;
+
+        /// <summary>Stream ids of the table roll (<see cref="RngMix.Combine"/> of the table seed and the id).</summary>
+        public const ulong ShapeStream = 1UL;
+        public const ulong AffixStream = 2UL;
 
         public int EntryCount => entries != null ? entries.Length : 0;
 
@@ -207,13 +217,24 @@ namespace Emberdelve.Data
         }
 
         /// <summary>
-        /// Rolls the table for one container and says whether the whole roll was actually produced.
-        /// Uses a fresh local trusted issuer for this roll, which is what an offline container does today; a
-        /// run or a future server that wants to count or own the minting passes its own issuer to the overload.
+        /// Rolls the table and says whether the whole roll was actually produced. TOOLING / TEST CONVENIENCE:
+        /// it mints with a throwaway local issuer, so the UIDs belong to no run. Production code (chests, enemy
+        /// drops) never calls it: it rolls through <see cref="TryRollSeeded"/> with the raid's one issuer
+        /// (<see cref="RaidSession.Issuer"/>), which a source-scan gate enforces.
         /// </summary>
         public bool TryRoll(int seed, List<LootDrop> output, ItemCatalog catalog, out string reason)
         {
             return TryRoll(seed, output, catalog, ItemIdentityIssuer.CreateLocalTrusted(), out reason);
+        }
+
+        /// <summary>
+        /// Legacy 32-bit seed entry. The int is zero-extended to the 64-bit seed, so every int seed is a
+        /// distinct, stable table seed.
+        /// </summary>
+        public bool TryRoll(int seed, List<LootDrop> output, ItemCatalog catalog, ItemIdentityIssuer issuer,
+            out string reason)
+        {
+            return TryRollSeeded(unchecked((uint)seed), output, catalog, issuer, out reason);
         }
 
         /// <summary>
@@ -223,11 +244,11 @@ namespace Emberdelve.Data
         ///
         /// Determinism, exactly:
         /// <list type="bullet">
-        /// <item>the item/amount stream is the legacy one, drawn from <c>new System.Random(seed)</c> in the same
-        /// order and consuming the same numbers, so the same seed still selects the same entries and the same
-        /// amounts; what changed is only what a selected gear unit is turned <em>into</em> (one instance per
-        /// unit, at every rarity), never which unit was selected or how many units were selected;</item>
-        /// <item>the affix stream is a second generator derived from the same seed, consumed once per rolled
+        /// <item>the item/amount stream is <c>new DeterministicRng(seed).Fork(ShapeStream)</c> (R4: the project's
+        /// own SplitMix64, replacing the platform generator), drawn in a fixed order, so the same seed selects the
+        /// same entries and the same amounts on every platform; a selected gear unit is turned into one instance
+        /// per unit, at every rarity;</item>
+        /// <item>the affix stream is a second generator, <c>Fork(AffixStream)</c> of the same seed, consumed once per rolled
         /// unit in selection order through the accepted <see cref="LootRoller"/>, so the same seed plus the same
         /// table plus the same catalog gives the same affix ids, order and values. A Common gear unit consumes
         /// nothing from it - zero affixes is zero draws - so adding Common gear to a table cannot shift the
@@ -237,7 +258,7 @@ namespace Emberdelve.Data
         /// boots from one entry that drew amount 2.</item>
         /// </list>
         /// </summary>
-        public bool TryRoll(int seed, List<LootDrop> output, ItemCatalog catalog, ItemIdentityIssuer issuer,
+        public bool TryRollSeeded(ulong seed, List<LootDrop> output, ItemCatalog catalog, ItemIdentityIssuer issuer,
             out string reason)
         {
             reason = null;
@@ -325,13 +346,15 @@ namespace Emberdelve.Data
             // Any worn gear at all needs the run's item catalog (R3), because the accepted roller and issuer only
             // mint for the definition object that catalog owns for that item id. The table never builds a
             // catalog out of its own entries any more: a gear entry that is not a catalog item is a refusal. A
-            // table that only ever drops carried definitions still needs no catalog at all, which is what keeps
-            // every pre-U2B9 table rolling exactly as it did.
+            // table that only ever drops carried definitions still needs no catalog at all. (R4: the streams
+            // changed, so a given int seed no longer produces what it produced before the project RNG.)
             ItemInstanceAuthority authority = null;
             if (requestsGearInstances && !TryDeriveAuthority(catalog, out authority, out reason)) return false;
 
-            // ---- 2. the shape loop, consuming exactly what the legacy loop consumed.
-            System.Random random = new System.Random(seed);
+            // ---- 2. the shape loop, on its own stream (Fork(ShapeStream) of the table seed; R4 re-baselined the
+            // numbers every seed produces, the draw order and the selection rules are the legacy ones).
+            DeterministicRng root = new DeterministicRng(seed);
+            DeterministicRng random = root.Fork(ShapeStream);
             int rolls = Mathf.Max(1, maxRolls);
             int[] copies = new int[entries.Length];
             List<LootDrop> staged = new List<LootDrop>();
@@ -347,6 +370,7 @@ namespace Emberdelve.Data
             for (int roll = 0; roll < rolls; roll++)
             {
                 int index = PickWeighted(random, copies);
+                if (index == NothingPick) continue;
                 if (index < 0) break;
 
                 LootEntry entry = entries[index];
@@ -359,9 +383,9 @@ namespace Emberdelve.Data
             // records that were proven rollable are the records that get built.
             if (pending.Count > 0)
             {
-                int affixSeed = DeriveAffixSeed(seed);
+                DeterministicRng affixRoot = root.Fork(AffixStream);
 
-                System.Random validator = new System.Random(affixSeed);
+                ILootRng validator = affixRoot.Restart();
                 for (int i = 0; i < pending.Count; i++)
                 {
                     PendingUnit unit = pending[i];
@@ -374,7 +398,7 @@ namespace Emberdelve.Data
                     }
                 }
 
-                System.Random roller = new System.Random(affixSeed);
+                ILootRng roller = affixRoot.Restart();
                 for (int i = 0; i < pending.Count; i++)
                 {
                     PendingUnit unit = pending[i];
@@ -481,18 +505,6 @@ namespace Emberdelve.Data
             return true;
         }
 
-        /// <summary>
-        /// The affix stream is a second stream derived from the same table seed, so a table gaining gear cannot
-        /// shift the item/amount stream a legacy table already depends on: the shape loop still consumes exactly
-        /// the numbers it used to, and the affix draws happen on their own generator. Same seed plus same table
-        /// plus same catalog still gives the same affix records. Common gear units draw nothing from this
-        /// generator at all, so they cannot shift the records the Uncommon or Rare units of the same roll get.
-        /// </summary>
-        private static int DeriveAffixSeed(int seed)
-        {
-            return unchecked((seed * -1640531527) ^ 1540483477);
-        }
-
         /// <summary>One rolled unit this table selected: where it sits in the staged drops, and what it must be.</summary>
         private struct PendingUnit
         {
@@ -512,7 +524,10 @@ namespace Emberdelve.Data
             return false;
         }
 
-        private int PickWeighted(System.Random random, int[] copies)
+        /// <summary>PickWeighted result for a roll that landed on <see cref="nothingWeight"/>.</summary>
+        private const int NothingPick = -2;
+
+        private int PickWeighted(ILootRng random, int[] copies)
         {
             int total = 0;
             for (int i = 0; i < entries.Length; i++)
@@ -525,7 +540,8 @@ namespace Emberdelve.Data
 
             if (total <= 0) return -1;
 
-            int ticket = random.Next(total);
+            int empty = Mathf.Max(0, nothingWeight);
+            int ticket = random.Next(total + empty);
             int running = 0;
 
             for (int i = 0; i < entries.Length; i++)
@@ -538,10 +554,10 @@ namespace Emberdelve.Data
                 if (ticket < running) return i;
             }
 
-            return -1;
+            return empty > 0 ? NothingPick : -1;
         }
 
-        private static int RandomInRange(System.Random random, LootEntry entry)
+        private static int RandomInRange(ILootRng random, LootEntry entry)
         {
             int min = entry.EffectiveMin;
             int max = entry.EffectiveMax;
@@ -671,6 +687,7 @@ namespace Emberdelve.Data
         private void OnValidate()
         {
             maxRolls = Mathf.Max(1, maxRolls);
+            nothingWeight = Mathf.Max(0, nothingWeight);
 
             if (entries == null) return;
 

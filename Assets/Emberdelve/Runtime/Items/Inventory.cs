@@ -126,6 +126,19 @@ namespace Emberdelve.Items
         public ItemCatalog Catalog => _catalog;
 
         /// <summary>
+        /// R4: the UID source this bag mints with (starting kit, legacy gear adds). In a run it is the raid session's
+        /// one issuer (<see cref="SetIssuer"/>, called by the run before the class is applied); a bag nobody pointed
+        /// at an issuer (a fixture) lazily makes a private local one on first mint.
+        /// </summary>
+        public ItemIdentityIssuer Issuer => _issuer;
+
+        /// <summary>Points the bag at the raid's issuer. Null is ignored (a bag never loses its issuer).</summary>
+        public void SetIssuer(ItemIdentityIssuer issuer)
+        {
+            if (issuer != null) _issuer = issuer;
+        }
+
+        /// <summary>
         /// Supplies the run's item catalog. Setting the same catalog again is a no-op; passing null clears it
         /// (and a bag with no catalog mints no gear). Production wiring is ClassLoadout.Apply from
         /// GameConfig.itemCatalog; a fixture passes an explicit test catalog (ItemCatalog.CreateForTest).

@@ -228,25 +228,90 @@ namespace Emberdelve.Items
     /// </summary>
     public sealed class ItemIdentityIssuer
     {
+        /// <summary>Attempts at drawing a UID this issuer has not issued before it gives up and mints nothing.</summary>
+        private const int MaxUidAttempts = 8;
+
         private int _minted;
 
-        private ItemIdentityIssuer()
+        // R4: the issuer keeps its own ledger of what it issued, so "unique within a run" is enforced here rather
+        // than hoped for. A candidate already in the ledger is discarded and redrawn.
+        private readonly HashSet<Guid> _issued = new HashSet<Guid>();
+
+        // Null: UIDs come from Guid.NewGuid (unique, not reproducible - the default and the production choice).
+        // Non-null: UIDs come from this stream (reproducible from the raid seed - tests and replays).
+        private readonly Emberdelve.Core.ILootRng _uidStream;
+
+        private ItemIdentityIssuer(Emberdelve.Core.ILootRng uidStream)
         {
+            _uidStream = uidStream;
         }
 
         public static ItemIdentityIssuer CreateLocalTrusted()
         {
-            return new ItemIdentityIssuer();
+            return new ItemIdentityIssuer(null);
         }
+
+        /// <summary>
+        /// An issuer whose UIDs are drawn from <paramref name="uidStream"/> (128 bits per UID, formatted as a
+        /// version-4 UUID). The same stream state gives the same UIDs, so two issuers built from the same seed
+        /// issue the SAME identities: use it for tests and replays, never for two live runs of one profile.
+        /// </summary>
+        public static ItemIdentityIssuer CreateSeeded(Emberdelve.Core.ILootRng uidStream)
+        {
+            if (uidStream == null) throw new ArgumentNullException(nameof(uidStream));
+            return new ItemIdentityIssuer(uidStream);
+        }
+
+        /// <summary>True when UIDs are reproducible from a stream rather than random.</summary>
+        public bool IsSeeded => _uidStream != null;
 
         /// <summary>How many UIDs this issuer has produced. Minting is not free and not invisible.</summary>
         public int MintedCount => _minted;
 
+        /// <summary>True when this issuer minted <paramref name="uid"/>.</summary>
+        public bool HasIssued(Guid uid) => _issued.Contains(uid);
+
         public bool TryMintUid(out Guid uid, out string reason)
         {
-            if (!ItemIdentityRules.TryMintUid(out uid, out reason)) return false;
-            _minted++;
-            return true;
+            for (int attempt = 0; attempt < MaxUidAttempts; attempt++)
+            {
+                if (_uidStream == null)
+                {
+                    if (!ItemIdentityRules.TryMintUid(out uid, out reason)) return false;
+                }
+                else
+                {
+                    uid = DrawSeededUid(_uidStream);
+                }
+
+                if (!_issued.Add(uid)) continue;
+
+                _minted++;
+                reason = null;
+                return true;
+            }
+
+            uid = Guid.Empty;
+            reason = $"identity issuer drew {MaxUidAttempts} uids it had already issued; it mints nothing rather than reuse one";
+            return false;
+        }
+
+        private static Guid DrawSeededUid(Emberdelve.Core.ILootRng stream)
+        {
+            ulong high = stream.NextUInt64();
+            ulong low = stream.NextUInt64();
+
+            byte[] bytes = new byte[16];
+            for (int i = 0; i < 8; i++)
+            {
+                bytes[i] = (byte)(high >> (8 * (7 - i)));
+                bytes[8 + i] = (byte)(low >> (8 * (7 - i)));
+            }
+
+            // Version 4 / variant 1 bits, so the text is a normal UUID; 122 bits remain random.
+            bytes[7] = (byte)((bytes[7] & 0x0F) | 0x40); // Guid(byte[]) reads bytes 6-7 as little-endian Data3: the version is the high nibble of byte 7
+            bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80);
+            return new Guid(bytes);
         }
 
         /// <summary>
@@ -388,7 +453,7 @@ namespace Emberdelve.Items
         /// copies the supplied affix list; the caller's list, array or record objects cannot be reached
         /// through the returned instance.
         /// </summary>
-        public static bool TryCreateNew(ItemData definition, int quantity, AffixRarity rarity,
+        internal static bool TryCreateNew(ItemData definition, int quantity, AffixRarity rarity,
             IReadOnlyList<AffixRecord> affixes, ItemInstanceAuthority authority,
             out ItemInstance instance, out string reason)
         {

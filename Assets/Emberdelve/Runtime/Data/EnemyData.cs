@@ -40,6 +40,11 @@ namespace Emberdelve.Data
         public float investigateTime = 3.5f;
 
         [Header("Loot")]
+        [Tooltip("R4: what this enemy drops when it dies. A normal loot table rolled with the raid's seed and issuer, " +
+                 "so gear drops are concrete item instances. This is the only drop source the runtime reads.")]
+        public LootTable dropTable;
+        [Tooltip("Legacy flat item list and chance (pre-R4). No longer rolled at runtime; kept so authored assets and " +
+                 "tools that read it keep working. The builder derives dropTable from it.")]
         public ItemData[] lootTable;
         [Range(0, 4)] public int lootRolls = 2;
         [Range(0f, 1f)] public float lootDropChance = 0.85f;

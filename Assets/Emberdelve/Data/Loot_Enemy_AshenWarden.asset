@@ -1,0 +1,57 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 928691ac0ef825e4e92dd6b0a559ee49, type: 3}
+  m_Name: Loot_Enemy_AshenWarden
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.LootTable
+  tableId: enemy_ashen_warden
+  entries:
+  - item: {fileID: 11400000, guid: 0c59f5f911e934a4e92752eb0e343e3c, type: 2}
+    minAmount: 1
+    maxAmount: 1
+    weight: 9
+    maxCopies: 1
+    affixRarity: 0
+  - item: {fileID: 11400000, guid: a26d2da41162d874ab729a17979af148, type: 2}
+    minAmount: 1
+    maxAmount: 1
+    weight: 8
+    maxCopies: 2
+    affixRarity: 0
+  - item: {fileID: 11400000, guid: c6fda9df47fce4e4da019554ee948f03, type: 2}
+    minAmount: 1
+    maxAmount: 1
+    weight: 6
+    maxCopies: 2
+    affixRarity: 0
+  - item: {fileID: 11400000, guid: c86df608f6b8d5640ae5efeb4ed45a73, type: 2}
+    minAmount: 1
+    maxAmount: 1
+    weight: 4
+    maxCopies: 1
+    affixRarity: 1
+  affixCatalog:
+  - {fileID: 11400000, guid: bde103bf544903d44ba67efe9563e3b1, type: 2}
+  - {fileID: 11400000, guid: 20de4a56a742eff4d8d71828dbf14903, type: 2}
+  - {fileID: 11400000, guid: 400e33a4016acd64c98aeb933413f419, type: 2}
+  - {fileID: 11400000, guid: c946d82962a80c74d911af2cfa42aa48, type: 2}
+  - {fileID: 11400000, guid: ab3ef276f58a86c42a360b158c9d7957, type: 2}
+  - {fileID: 11400000, guid: 02e580d8de6ded746a68be61ff1b4b8a, type: 2}
+  - {fileID: 11400000, guid: 9f6bd263264c54944aa3321500e7dc67, type: 2}
+  - {fileID: 11400000, guid: 21a0c2402e1d0234da1844f05212ad2a, type: 2}
+  - {fileID: 11400000, guid: 60fb33397c5ba27449280c8440ba62a2, type: 2}
+  - {fileID: 11400000, guid: a0ccef5ae01b8f944881acdb39cc702b, type: 2}
+  - {fileID: 11400000, guid: 31aa064f69c86f341980114c8c9cb52c, type: 2}
+  - {fileID: 11400000, guid: 3579720142dff794ea198e20f860c7af, type: 2}
+  - {fileID: 11400000, guid: 3351b2f852c7b3f44bc5be8c30396cd9, type: 2}
+  maxRolls: 3
+  guaranteeFirstEntry: 0
+  nothingWeight: 3

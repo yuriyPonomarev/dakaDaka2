@@ -21,6 +21,8 @@ MonoBehaviour:
   attackWindup: 0.6
   attackCooldown: 2
   attackTelegraphHeight: 0.5
+  attackTelegraphCone: 120
+  telegraphColor: {r: 1, g: 0.32, b: 0.18, a: 1}
   patrolSpeed: 1.05
   chaseSpeed: 2.7
   patrolRadius: 6
@@ -30,6 +32,7 @@ MonoBehaviour:
   hearingRange: 8
   memoryDuration: 6
   investigateTime: 3.5
+  dropTable: {fileID: 11400000, guid: d91d058dad8c6644dae7051f48c6caaf, type: 2}
   lootTable:
   - {fileID: 11400000, guid: a26d2da41162d874ab729a17979af148, type: 2}
   - {fileID: 11400000, guid: c6fda9df47fce4e4da019554ee948f03, type: 2}

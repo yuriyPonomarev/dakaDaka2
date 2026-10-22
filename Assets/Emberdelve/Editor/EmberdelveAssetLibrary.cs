@@ -85,6 +85,7 @@ namespace Emberdelve.EditorTools
             BuildLootTables();
             ApplyLootRarityProfiles();
             BuildEnemies();
+            ApplyEnemyDropTables();
             BuildLayout();
             ApplyChestSpawns();
             BuildNavGrid();
@@ -1367,6 +1368,72 @@ namespace Emberdelve.EditorTools
                 e.bodyMaterial = EmberdelveMaterials.EliteBody;
                 e.eliteTint = new Color(1f, 0.4f, 0.3f);
             });
+        }
+
+        /// <summary>
+        /// R4: enemies drop through real loot tables (rolled with the raid seed and issuer, gear as concrete instances),
+        /// not through a flat item list and a free-running random. Idempotent: a missing table asset is created, an
+        /// existing one is kept as authored, and the enemy is pointed at it only when it has none.
+        ///
+        /// Re-baseline of the legacy behaviour (documented in Docs/Tasks/R4R5.md): the old rule was "N rolls, each with
+        /// the drop chance, uniform over the item list, with replacement". A table cannot express a per-roll chance, so
+        /// the chance is encoded as an 'empty' weight (<see cref="LootTable.nothingWeight"/>) next to the item weights.
+        /// Hollow Servitor: three items at weight 8 (max 2 copies each) + 6 empty = 80% per roll over 2 rolls, exactly
+        /// equivalent to the old rule (1.6 drops per kill, 0.533 per item).
+        /// Ashen Warden is NOT equivalent (a balance change): 3 rolls over Relic w9 (max 1), Coin w8 (max 2),
+        /// Draught w6 (max 2), Footpad Boots Uncommon w4 (max 1) + 3 empty. 90% is the chance only of the first roll;
+        /// once a capped entry is taken the remaining weight shrinks, so later rolls miss more often. Expected drops
+        /// per kill, old -> new: Relic 0.90 -> 0.68, Draught 0.90 -> 0.68, Coin 0.90 -> 0.90, Footpad Boots 0 -> 0.39
+        /// (total items 2.70 -> 2.65). Relics are the sealed-chest unlock currency, so Wardens give less unlock value.
+        /// The Uncommon boots are the first enemy gear drop (a concrete instance with one rolled affix).
+        /// </summary>
+        private static void ApplyEnemyDropTables()
+        {
+            EnsureEnemyDrops(Servitor, "Loot_Enemy_HollowServitor", t =>
+            {
+                t.tableId = "enemy_hollow_servitor";
+                t.maxRolls = 2;
+                t.guaranteeFirstEntry = false;
+                t.nothingWeight = 6;
+                t.entries = new[]
+                {
+                    new LootEntry { item = Coin, minAmount = 1, maxAmount = 1, weight = 8, maxCopies = 2 },
+                    new LootEntry { item = Draught, minAmount = 1, maxAmount = 1, weight = 8, maxCopies = 2 },
+                    new LootEntry { item = ArrowBundle, minAmount = 1, maxAmount = 1, weight = 8, maxCopies = 2 },
+                };
+            });
+
+            EnsureEnemyDrops(Warden, "Loot_Enemy_AshenWarden", t =>
+            {
+                t.tableId = "enemy_ashen_warden";
+                t.maxRolls = 3;
+                t.guaranteeFirstEntry = false;
+                t.nothingWeight = 3;
+                t.affixCatalog = (AffixDefinition[])Affixes.Clone();
+                t.entries = new[]
+                {
+                    new LootEntry { item = Relic, minAmount = 1, maxAmount = 1, weight = 9, maxCopies = 1 },
+                    new LootEntry { item = Coin, minAmount = 1, maxAmount = 1, weight = 8, maxCopies = 2 },
+                    new LootEntry { item = Draught, minAmount = 1, maxAmount = 1, weight = 6, maxCopies = 2 },
+                    new LootEntry { item = Boots, minAmount = 1, maxAmount = 1, weight = 4, maxCopies = 1, affixRarity = AffixRarity.Uncommon },
+                };
+            });
+
+            AssetDatabase.SaveAssets();
+        }
+
+        private static void EnsureEnemyDrops(EnemyData enemy, string fileName, System.Action<LootTable> configure)
+        {
+            if (enemy == null) return;
+
+            LootTable table = LoadOrCreate<LootTable>(EmberdelvePaths.Data + "/" + fileName + ".asset", configure);
+            if (enemy.dropTable != table)
+            {
+                enemy.dropTable = table;
+                EditorUtility.SetDirty(enemy);
+            }
+
+            LogTableProblems(table);
         }
 
         private static void BuildLayout()

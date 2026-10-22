@@ -250,10 +250,27 @@ namespace Emberdelve.EditorTools
             foreach (string g in AssetDatabase.FindAssets("t:EnemyData", new[] { DataFolder }))
             {
                 EnemyData data = Load<EnemyData>(AssetDatabase.GUIDToAssetPath(g));
-                if (data.lootTable == null) continue;
-                foreach (ItemData item in data.lootTable)
+                if (data.lootTable != null)
                 {
-                    if (item != null && !catalog.Contains(item)) { unknownRefs++; Debug.LogError("[ItemCatalog] " + data.name + " drop " + item.itemId + " is not a catalog item"); }
+                    foreach (ItemData item in data.lootTable)
+                    {
+                        if (item != null && !catalog.Contains(item)) { unknownRefs++; Debug.LogError("[ItemCatalog] " + data.name + " drop " + item.itemId + " is not a catalog item"); }
+                    }
+                }
+                // R4: the table the runtime actually rolls for this enemy.
+                if (data.dropTable != null && data.dropTable.entries != null)
+                {
+                    foreach (LootEntry entry in data.dropTable.entries)
+                    {
+                        if (entry != null && entry.item != null && !catalog.Contains(entry.item)) { unknownRefs++; Debug.LogError("[ItemCatalog] " + data.name + " drop-table item " + entry.item.itemId + " is not a catalog item"); }
+                    }
+                    if (data.dropTable.affixCatalog != null)
+                    {
+                        foreach (AffixDefinition affix in data.dropTable.affixCatalog)
+                        {
+                            if (affix != null && (!catalog.TryResolveAffix(affix.id, out AffixDefinition owned, out _) || owned != affix)) { unknownRefs++; Debug.LogError("[ItemCatalog] " + data.name + " drop-table affix " + affix.id + " is not a catalog affix"); }
+                        }
+                    }
                 }
             }
             Check(unknownRefs == 0, "every loot-table entry, affix, starting item and enemy drop in the data is a catalog entry");
@@ -475,7 +492,7 @@ namespace Emberdelve.EditorTools
             Check(emberGear > 0, "the real ember table rolls gear against the real catalog");
 
             // ---------------------------------------------------------------- snapshots
-            System.Random rng = new System.Random(5);
+            Emberdelve.Core.DeterministicRng rng = Emberdelve.Core.DeterministicRng.FromInt(5); // R4: project RNG (was System.Random)
             Check(LootRoller.TryRoll(shield, 1, AffixRarity.Rare, authority, rng, issuer, out ItemInstance rare, out reason) && rare != null && rare.AffixCount == 2,
                 "a Rare shield rolls against the catalog authority: " + reason);
 
