@@ -48,3 +48,14 @@ Order (one Sonnet worker + one fresh Opus review + commit per item; Unity gates 
 4. R3 runtime item catalog; Inventory stops minting gear for arbitrary ItemData.  R9 versioned container snapshot (persistence).
 5. R2 actor on interactions; R4 single seeded loot pipeline (enemy drops, ground pickups keep instance); R5 per-raid seed + own RNG; R6 stable inventory ids + command layer, split InventoryScreenController; R7 per-player events, team at spawn, PvP; R8 asmdefs + NUnit; R10 one effective-stats snapshot.
 6. Only then P6 networking (U3A).
+
+## Pause checkpoint (2026-10-21, user stop)
+Committed and verified: git hygiene, U2B10, R0, R1a, R1b, U2B11, P4a/P4b, P4c, R3, R9 (HEAD c112e97d, working tree was clean before R4+R5).
+IN PROGRESS, UNVERIFIED, UNCOMMITTED: R4+R5 (seeded loot pipeline, per-raid seed, project RNG, enemy-drop instances, pickup instances). Worker was stopped mid-task; the working tree has partial edits (EnemyAgent, LootTable, LootRoller, LootPickup, RunDirector, RunContext, Inventory, ItemInstance, ChestInteractable, EnemyData, asset library, new Loot_Enemy_* assets, new Editor/EmberdelveLootPipelineGate.cs). Compile state unknown, nothing gated. On resume: resume worker ab035d3cb03137f65 (SendMessage) or review the diff first; do not commit before a full green regression + Opus review.
+Next after that: R2+R7 (actor on interactions, per-player events, teams/PvP), R6, R8, R10, R1 follow-ups (KitEpoch ownership, caster id auth, server dash), then U3 networking spike.
+Unity: GUI editor must stay closed during batch gates. Unity MCP registered for Claude Code (user scope) but only available after a session restart.
+
+## User decisions on Dark and Darker parity (2026-10-22), see Docs/Design/DND_PARITY.md
+Asked and answered: (1) attributes: KEEP six names (STR/DEX/CON/INT/WIS/CHA), move their effects toward DaD's stat roles via curves (CON~Vigor, DEX~Agility+Dexterity, INT~Knowledge, WIS~Will, CHA~Resourcefulness); keep save/affix keys. (2) stamina: REMOVE stamina from block and sprint (guard break instead); mana stays for Warrior/Archer for now (user chose "remove only stamina"). (3) players: parties of up to 3, 6-9 players per match. (4) order: combat rework D1 (swept melee, wall stops, hit locations, 3-hit combos, tip-vs-hilt damage, slow on hit, movement penalties) BEFORE the U3A networking spike.
+Not asked, taking the analyst's recommendation unless the user objects: 4 classes eventually (Rogue-like + caster), closing zone as an optional config flag, economy = stash + 2 merchants + gold + starter kit (no quests/market), rarity ladder Poor..Unique (append integers), new slots append-only.
+Active refactors before D1: finish R4+R5 (review pending), then R2+R7, R6, R8, R10, R1 follow-ups.
