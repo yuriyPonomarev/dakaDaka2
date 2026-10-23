@@ -24,7 +24,13 @@ namespace Emberdelve.Combat
     /// Because the sample grid is fixed by the data, the result does not depend on the tick length: stepping in
     /// 2 ms or 500 ms slices yields the same hits, locations and wall stop.
     /// </summary>
-    public sealed partial class LocalCombatAuthority
+    ///
+    // D1b adds the combat FLOW on top of the sweep, all of it authority state per instigator: the combo chain
+    // (the next step is the authority's expected step, accepted only inside the combo window of the previous step's
+    // recovery), impact zones (the contact parameter along the segment comes from the sweep), hit slow and guard
+    // break (statuses and the stagger come from weapon data, never from an intent) and the move-speed factor of the
+    // swing phase (ICombatFlowState).
+    public sealed partial class LocalCombatAuthority : ICombatFlowState
     {
         [Header("Swept melee (D1a)")]
         [Tooltip("Largest angle (degrees) between the aim a client claims when it begins a swing and the pose the authority holds.")]
@@ -42,6 +48,16 @@ namespace Emberdelve.Combat
             public HitLocation Location;
             public float Depth;
             public Vector3 Point;
+            public float T;
+        }
+
+        /// <summary>The combo chain an instigator is in: authority state, never taken from an intent.</summary>
+        private sealed class ChainState
+        {
+            public WeaponData Weapon;
+            public ICombatEntity Instigator;
+            public int NextStep;
+            public float WindowEnd;
         }
 
         private sealed class SwingRecord
@@ -52,6 +68,9 @@ namespace Emberdelve.Combat
             public IAimPoseProvider Actor;
             public WeaponData Weapon;
             public SwingPatternData Pattern;
+            public SwingTiming Timing;
+            public int ComboStep;
+            public float StepMultiplier = 1f;
             public int Sequence;
             public float StartTime;
             public int SampleCount;
@@ -76,6 +95,11 @@ namespace Emberdelve.Combat
         /// <summary>Per instigator: the stamp of its last accepted swing and that swing's full length (the cooldown floor).</summary>
         private readonly Dictionary<int, KeyValuePair<float, float>> _lastSwingFloor = new Dictionary<int, KeyValuePair<float, float>>();
 
+        private readonly Dictionary<int, ChainState> _chains = new Dictionary<int, ChainState>();
+        private readonly List<int> _chainBuffer = new List<int>(4);
+        private readonly Dictionary<int, float> _guardBrokenUntil = new Dictionary<int, float>();
+        private static CombatFlowTuning _defaultFlow;
+
         private readonly Dictionary<int, SwingRecord> _swingsById = new Dictionary<int, SwingRecord>();
         private readonly Dictionary<int, SwingRecord> _swingByInstigator = new Dictionary<int, SwingRecord>();
         private readonly List<SwingRecord> _activeSwings = new List<SwingRecord>();
@@ -95,6 +119,36 @@ namespace Emberdelve.Combat
         /// damage-formula probe turn it on explicitly. Enemies (no swing pose) are not affected.
         /// </summary>
         internal bool AllowLegacyMeleeAttacks;
+
+        /// <summary>
+        /// When true a weapon with a combo chain also accepts any of its OTHER swing patterns at combo step 0 (the D1a
+        /// rule: no chain multiplier, the pattern's own timing, no chain state). Default false: the chain's first step is
+        /// the only step-0 pattern. Fixtures that probe the sweep geometry with a specific pattern (overhead, slash
+        /// back) opt in.
+        /// </summary>
+        internal bool AllowLegacyPatternSelection;
+
+        /// <summary>
+        /// When false every contact does full damage whatever the impact-zone bands say. Default true. TEST SEAM for
+        /// fixtures whose assertion is about something else (the exact location table, a flat damage formula) and
+        /// whose targets sit at arbitrary distances along the blade; the zones themselves are pinned by the D1b gate.
+        /// </summary>
+        internal bool ImpactZonesEnabled = true;
+
+        /// <summary>Guard breaks the authority has applied (a defender's guard was engaged and its impact resist reached).</summary>
+        public int GuardBreaksApplied { get; private set; }
+
+        /// <summary>Hit-slow statuses the authority has put on a target.</summary>
+        public int HitSlowsApplied { get; private set; }
+
+        private CombatFlowTuning FlowTuning
+        {
+            get
+            {
+                if (config != null && config.flow != null) return config.flow;
+                return _defaultFlow ?? (_defaultFlow = CombatFlowTuning.Default);
+            }
+        }
 
         /// <summary>Swings accepted by TryBeginMeleeSwing.</summary>
         public int SwingsStarted { get; private set; }
@@ -124,7 +178,11 @@ namespace Emberdelve.Combat
             LastAttackRejectReason = string.Empty;
 
             if (!CombatRegistry.TryGet(intent.InstigatorCombatId, out ICombatEntity instigator)) return RejectSwing(intent, "unknown instigator id", out reason);
-            if (instigator.IsDead) return RejectSwing(intent, "instigator is dead", out reason);
+            if (instigator.IsDead)
+            {
+                _chains.Remove(intent.InstigatorCombatId);
+                return RejectSwing(intent, "instigator is dead", out reason);
+            }
 
             if (!(instigator is IActiveWeaponProvider holder)) return RejectSwing(intent, "instigator has no authoritative weapon", out reason);
             WeaponData weapon = holder.ActiveWeapon;
@@ -137,11 +195,35 @@ namespace Emberdelve.Combat
             if (!weapon.UsesSweptMelee) return RejectSwing(intent, "the equipped weapon has no swing patterns", out reason);
             if (!(instigator is IAimPoseProvider actor)) return RejectSwing(intent, "instigator has no authoritative aim pose", out reason);
 
-            if (!weapon.TryResolveSwingPattern(intent.ComboStep, intent.PatternIndex, out SwingPatternData pattern)
-                || !pattern.Validate(out _))
+            // D1b: the step is validated against the weapon's chain AND the authority's own chain state for this
+            // instigator. Nothing the client claims about "where it is in the chain" is believed: a step is accepted
+            // only when it is step 0 (a fresh chain) or exactly the step after the one the authority last accepted,
+            // within the combo window of that step's recovery, for the same weapon.
+            SwingPatternData pattern;
+            ComboStep stepData;
+            string stepReason;
+            bool resolved;
+            bool legacyPick = AllowLegacyPatternSelection && weapon.HasComboChain && intent.ComboStep == 0
+                              && intent.PatternIndex != weapon.comboSteps[0].patternIndex;
+            if (legacyPick)
             {
-                return RejectSwing(intent, $"pattern {intent.PatternIndex} at combo step {intent.ComboStep} is not allowed for the equipped weapon", out reason);
+                resolved = weapon.TryResolveSwingPattern(0, intent.PatternIndex, out pattern);
+                stepData = new ComboStep(intent.PatternIndex, 1f);
+                stepReason = $"pattern {intent.PatternIndex} at combo step 0 is not allowed for the equipped weapon";
             }
+            else
+            {
+                resolved = weapon.TryResolveComboStep(intent.ComboStep, intent.PatternIndex, out stepData, out pattern, out stepReason);
+            }
+
+            if (!resolved || !pattern.Validate(out _)) return RejectSwing(intent, stepReason, out reason);
+
+            if (weapon.HasComboChain && intent.ComboStep > 0 && !ChainAllows(intent.InstigatorCombatId, instigator, weapon, intent.ComboStep, out string chainReason))
+            {
+                return RejectSwing(intent, chainReason, out reason);
+            }
+
+            SwingTiming timing = legacyPick ? pattern.Timing : weapon.ComboTiming(intent.ComboStep, pattern);
 
             if (_lastSequence.TryGetValue(intent.InstigatorCombatId, out int lastSequence) && intent.Sequence <= lastSequence)
             {
@@ -149,6 +231,10 @@ namespace Emberdelve.Combat
             }
             _lastSequence[intent.InstigatorCombatId] = intent.Sequence;
 
+            // Bring a running swing up to this instant first: whether it is over must not depend on when the last fixed step
+            // happened (a client whose cooldown equals the swing length, like the combo finisher, would otherwise be refused
+            // for up to one tick after the swing really ended).
+            if (_swingByInstigator.TryGetValue(intent.InstigatorCombatId, out SwingRecord running)) StepSwing(running, Now);
             if (_swingByInstigator.ContainsKey(intent.InstigatorCombatId)) return RejectSwing(intent, "a swing is already in progress", out reason);
 
             float now = Now;
@@ -184,7 +270,31 @@ namespace Emberdelve.Combat
 
             // Accepted: only an accepted begin spends the cooldown (same clock and stamp as weapon attacks).
             _lastAttackTime[intent.InstigatorCombatId] = now;
-            _lastSwingFloor[intent.InstigatorCombatId] = new KeyValuePair<float, float>(now, pattern.TotalTime);
+            _lastSwingFloor[intent.InstigatorCombatId] = new KeyValuePair<float, float>(now, timing.Total);
+
+            // The chain moves on only for an accepted step: the next step is this one + 1 and its window opens when this
+            // step's recovery begins. The last step resets the chain (the finisher's longer recovery is in the timing).
+            if (weapon.HasComboChain && !legacyPick)
+            {
+                if (intent.ComboStep >= weapon.comboSteps.Length - 1)
+                {
+                    _chains.Remove(intent.InstigatorCombatId);
+                }
+                else
+                {
+                    _chains[intent.InstigatorCombatId] = new ChainState
+                    {
+                        Weapon = weapon,
+                        Instigator = instigator,
+                        NextStep = intent.ComboStep + 1,
+                        WindowEnd = now + timing.ActiveEnd + Mathf.Max(0.05f, weapon.comboWindow)
+                    };
+                }
+            }
+            else
+            {
+                _chains.Remove(intent.InstigatorCombatId);
+            }
 
             SwingRecord record = new SwingRecord
             {
@@ -194,6 +304,9 @@ namespace Emberdelve.Combat
                 Actor = actor,
                 Weapon = weapon,
                 Pattern = pattern,
+                Timing = timing,
+                ComboStep = intent.ComboStep,
+                StepMultiplier = Mathf.Max(0.05f, stepData.damageMultiplier),
                 Sequence = intent.Sequence,
                 StartTime = now,
                 SampleCount = SwingGeometry.SampleCount(pattern, weapon),
@@ -202,7 +315,7 @@ namespace Emberdelve.Combat
                 LastEye = eye,
                 LastYaw = yaw,
                 LastPitch = pitch,
-                Phase = pattern.windupTime > 0f ? SwingPhase.Windup : SwingPhase.Active
+                Phase = timing.Windup > 0f ? SwingPhase.Windup : SwingPhase.Active
             };
 
             _swingsById[record.Id] = record;
@@ -225,9 +338,89 @@ namespace Emberdelve.Combat
             float elapsed = r.Phase == SwingPhase.Finished ? r.EndTs : Now - r.StartTime;
             if (r.HitsView == null) r.HitsView = r.Hits.AsReadOnly();
             status = new MeleeSwingStatus(r.Id, r.InstigatorId, r.Phase, r.EndReason, elapsed,
-                Mathf.Min(r.NextSample, r.SampleCount + 1), r.SampleCount, r.WallSample, r.HitsView);
+                Mathf.Min(r.NextSample, r.SampleCount + 1), r.SampleCount, r.WallSample, r.HitsView,
+                r.ComboStep, r.StepMultiplier, r.Timing);
             return true;
         }
+
+        /// <summary>
+        /// The combo step this authority would accept next from the instigator (0 = start a chain). The chain state is
+        /// the authority's: it forgets the chain when the combo window ran out, the weapon in hand changed, the
+        /// instigator died or went away, a wall stopped the last swing, or the last step was swung.
+        /// </summary>
+        public bool TryGetExpectedComboStep(int instigatorCombatId, out int step)
+        {
+            step = 0;
+            if (!CombatRegistry.TryGet(instigatorCombatId, out ICombatEntity instigator)) return false;
+            if (_chains.TryGetValue(instigatorCombatId, out ChainState chain) && ChainIsLive(chain, instigator)) step = chain.NextStep;
+            return true;
+        }
+
+        private bool ChainIsLive(ChainState chain, ICombatEntity instigator)
+        {
+            if (chain == null || chain.Instigator != instigator || instigator.IsDead) return false;
+            if (!(instigator is IActiveWeaponProvider holder) || holder.ActiveWeapon != chain.Weapon) return false;
+            return Now <= chain.WindowEnd;
+        }
+
+        private bool ChainAllows(int instigatorId, ICombatEntity instigator, WeaponData weapon, int step, out string reason)
+        {
+            reason = string.Empty;
+            if (!_chains.TryGetValue(instigatorId, out ChainState chain) || chain.Weapon != weapon || chain.Instigator != instigator)
+            {
+                reason = $"no running combo chain for the equipped weapon: step {step} needs step {step - 1} first";
+                return false;
+            }
+
+            if (step != chain.NextStep)
+            {
+                reason = $"combo step {step} is not the expected next step {chain.NextStep}";
+                return false;
+            }
+
+            if (Now > chain.WindowEnd)
+            {
+                reason = $"combo window expired ({Now - chain.WindowEnd:F2} s late)";
+                return false;
+            }
+
+            return true;
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // Combat flow state read by movement and the guard (ICombatFlowState)
+        // ------------------------------------------------------------------------------------------------
+
+        public float GetMoveFactor(int combatId)
+        {
+            float factor = 1f;
+            float now = Now;
+
+            if (_swingByInstigator.TryGetValue(combatId, out SwingRecord rec) && rec.Phase != SwingPhase.Finished)
+            {
+                float elapsed = now - rec.StartTime;
+                if (rec.Stopped)
+                {
+                    // the recoil after a wall stop is a recovery; once the recoil time has passed the swing is over
+                    if (elapsed < rec.StopTs + rec.Timing.WallRecoil) factor *= rec.Pattern.recoveryMoveMultiplier;
+                }
+                else
+                {
+                    factor *= CombatFlowRules.SwingPhaseFactor(rec.Pattern, rec.Timing, elapsed, false);
+                }
+            }
+
+            if (IsGuardStaggered(combatId)) factor *= Mathf.Clamp(FlowTuning.guardStaggerMoveMultiplier, 0.1f, 1f);
+            return factor;
+        }
+
+        public bool IsSwingInProgress(int combatId) =>
+            _swingByInstigator.TryGetValue(combatId, out SwingRecord r) && r.Phase != SwingPhase.Finished;
+
+        public bool IsGuardStaggered(int combatId) => GuardStaggerRemaining(combatId) > 0f;
+
+        public float GuardStaggerRemaining(int combatId) =>
+            _guardBrokenUntil.TryGetValue(combatId, out float until) ? Mathf.Max(0f, until - Now) : 0f;
 
         /// <summary>The swing currently running for an instigator, or 0.</summary>
         public int ActiveSwingIdFor(int instigatorCombatId) =>
@@ -253,12 +446,30 @@ namespace Emberdelve.Combat
         /// <summary>Advances every running swing to the authority clock. Idempotent for an unchanged clock.</summary>
         internal void StepSwings()
         {
+            ForgetDeadChains();
             if (_activeSwings.Count == 0) return;
 
             float now = Now;
             _stepBuffer.Clear();
             _stepBuffer.AddRange(_activeSwings);
             for (int i = 0; i < _stepBuffer.Count; i++) StepSwing(_stepBuffer[i], now);
+        }
+
+        /// <summary>Drops the combo chain of an instigator that died, vanished or swapped its weapon (checked on every step).</summary>
+        private void ForgetDeadChains()
+        {
+            if (_chains.Count == 0) return;
+
+            _chainBuffer.Clear();
+            foreach (KeyValuePair<int, ChainState> pair in _chains)
+            {
+                ChainState chain = pair.Value;
+                bool live = CombatRegistry.TryGet(pair.Key, out ICombatEntity current) && current == chain.Instigator && !current.IsDead
+                            && current is IActiveWeaponProvider holder && holder.ActiveWeapon == chain.Weapon;
+                if (!live) _chainBuffer.Add(pair.Key);
+            }
+
+            for (int i = 0; i < _chainBuffer.Count; i++) _chains.Remove(_chainBuffer[i]);
         }
 
         private void StepSwing(SwingRecord rec, float now)
@@ -296,8 +507,8 @@ namespace Emberdelve.Combat
             }
 
             SwingPatternData pattern = rec.Pattern;
-            float windup = pattern.windupTime;
-            float active = pattern.activeTime;
+            float windup = rec.Timing.Windup;
+            float active = rec.Timing.Active;
 
             if (ts > rec.LastTs)
             {
@@ -324,7 +535,7 @@ namespace Emberdelve.Combat
             if (rec.Stopped)
             {
                 rec.Phase = SwingPhase.Recovery;
-                if (ts >= rec.StopTs + pattern.wallRecoilTime) FinishSwing(rec, SwingEndReason.WallStop, rec.StopTs + pattern.wallRecoilTime);
+                if (ts >= rec.StopTs + rec.Timing.WallRecoil) FinishSwing(rec, SwingEndReason.WallStop, rec.StopTs + rec.Timing.WallRecoil);
                 return;
             }
 
@@ -332,7 +543,7 @@ namespace Emberdelve.Combat
             {
                 ResolveAllPending(rec, windup + active);
                 rec.Phase = SwingPhase.Recovery;
-                if (ts >= pattern.TotalTime) FinishSwing(rec, SwingEndReason.Completed, pattern.TotalTime);
+                if (ts >= rec.Timing.Total) FinishSwing(rec, SwingEndReason.Completed, rec.Timing.Total);
                 return;
             }
 
@@ -404,6 +615,7 @@ namespace Emberdelve.Combat
                 float bestDepth = -1f;
                 HitLocation bestLocation = HitLocation.Unspecified;
                 Vector3 bestPoint = default;
+                float bestT = 0f;
                 for (int s = 0; s < _shapeBuffer.Count; s++)
                 {
                     HitShape shape = _shapeBuffer[s];
@@ -416,6 +628,11 @@ namespace Emberdelve.Combat
                         bestDepth = depth;
                         bestLocation = shape.Location;
                         bestPoint = onBlade;
+
+                        // D1b: where on the damage segment the contact is. The closest point of the BLADE to the
+                        // volume, measured from the hilt end along the full (unclipped) segment: the authority's
+                        // own geometry, nothing the client claims.
+                        bestT = length > 1e-5f ? Mathf.Clamp01(Vector3.Distance(bladeBase, onBlade) / length) : 0f;
                     }
                 }
 
@@ -433,7 +650,8 @@ namespace Emberdelve.Combat
                         LastWindowSample = sample + windowSamples,
                         Location = bestLocation,
                         Depth = bestDepth,
-                        Point = bestPoint
+                        Point = bestPoint,
+                        T = bestT
                     });
                 }
                 else if (sample <= contact.LastWindowSample && IsBetterContact(bestDepth, bestLocation, contact.Depth, contact.Location))
@@ -441,6 +659,7 @@ namespace Emberdelve.Combat
                     contact.Depth = bestDepth;
                     contact.Location = bestLocation;
                     contact.Point = bestPoint;
+                    contact.T = bestT;
                 }
             }
 
@@ -464,6 +683,11 @@ namespace Emberdelve.Combat
                 ResolveAllPending(rec, sampleTime, sample, frame.Eye);
                 rec.Stopped = true;
                 rec.StopTs = sampleTime;
+                // A wall stop only cuts the swing short with a recoil: the combo survives, and its window restarts when the recoil ends.
+                if (_chains.TryGetValue(rec.InstigatorId, out ChainState kept) && kept.Weapon == rec.Weapon)
+                {
+                    kept.WindowEnd = rec.StartTime + sampleTime + rec.Timing.WallRecoil + Mathf.Max(0.05f, rec.Weapon.comboWindow);
+                }
                 rec.WallSample = sample;
                 rec.EndReason = SwingEndReason.WallStop;
             }
@@ -532,15 +756,20 @@ namespace Emberdelve.Combat
                 instigator.CombatCenter, direction, rec.Pattern.EffectiveReach(rec.Weapon), rec.Sequence, Now);
             HitCandidate resolvedHit = new HitCandidate(target.CombatId, contact.Point, contact.Location == HitLocation.Head);
 
+            // D1b impact zone: the weapon's bands applied to the contact parameter the sweep measured.
+            float zone = ImpactZonesEnabled ? rec.Weapon.ImpactMultiplier(contact.T) : 1f;
+
             DamageInfo damage = DamageResolver.ResolveSwing(rec.Weapon, rec.Pattern, resolved, resolvedHit,
                 contact.Location, multiplier, target, OutgoingMultiplier(instigator, rec.Weapon),
-                FlatWeaponBonus(instigator, rec.Weapon));
+                FlatWeaponBonus(instigator, rec.Weapon), rec.StepMultiplier, zone, FlowTuning);
             if (!damage.IsValid) return;
 
             rec.Hit.Add(target.CombatId);
             target.ApplyDamage(damage);
             AcceptedCount++;
-            rec.Hits.Add(new MeleeSwingHit(target.CombatId, contact.Location, damage.Amount, damage.Blocked, sample, contact.FirstSample, contact.Point));
+            rec.Hits.Add(new MeleeSwingHit(target.CombatId, contact.Location, damage.Amount, damage.Blocked, sample, contact.FirstSample,
+                contact.Point, contact.T, zone, damage.GuardBroken));
+            ApplyHitEffects(target, damage, rec.Weapon);
 
             HitFeedback feedback = new HitFeedback(contact.Point, damage.Amount, damage.Blocked, damage.Headshot,
                 target.IsDead, target.Kind);
@@ -558,6 +787,9 @@ namespace Emberdelve.Combat
             rec.EndTs = endTs;
             rec.Pending.Clear();
 
+            // A swing that did not complete (the wielder died or left, the weapon was swapped) ends the combo. A wall stop does not.
+            if (reason != SwingEndReason.Completed && reason != SwingEndReason.WallStop) _chains.Remove(rec.InstigatorId);
+
             _activeSwings.Remove(rec);
             if (_swingByInstigator.TryGetValue(rec.InstigatorId, out SwingRecord current) && current == rec)
             {
@@ -566,6 +798,31 @@ namespace Emberdelve.Combat
 
             _finishedSwingIds.Enqueue(rec.Id);
             while (_finishedSwingIds.Count > FinishedSwingMemory) _swingsById.Remove(_finishedSwingIds.Dequeue());
+        }
+
+        /// <summary>
+        /// Effects of an accepted weapon hit on its target, decided here from weapon data and the resolved hit (D1b):
+        /// a BROKEN guard staggers the defender (it cannot raise the guard for the tuning's stagger time, on this
+        /// authority's clock), and the weapon's hit slow is put on the target through the ordinary status path
+        /// (StatusComponent refreshes the same status and the strongest slow wins, so repeated hits never stack). A
+        /// hit the guard fully blocked applies no slow; a broken guard does.
+        /// </summary>
+        private void ApplyHitEffects(ICombatEntity target, in DamageInfo damage, WeaponData weapon)
+        {
+            if (target == null || target.IsDead) return;
+
+            if (damage.GuardBroken)
+            {
+                _guardBrokenUntil[target.CombatId] = Now + Mathf.Max(0f, FlowTuning.guardStaggerSeconds);
+                GuardBreaksApplied++;
+            }
+
+            StatusSpec slow = weapon != null ? weapon.HitSlowSpec : StatusSpec.None;
+            if (!slow.IsNone && (!damage.Blocked || damage.GuardBroken) && target is IStatusTarget statusTarget)
+            {
+                statusTarget.ApplyStatus(slow, damage.SourceCombatId);
+                HitSlowsApplied++;
+            }
         }
 
         private static bool IsFinite(Vector3 v) =>

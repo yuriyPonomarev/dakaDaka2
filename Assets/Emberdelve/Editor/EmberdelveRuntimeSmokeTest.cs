@@ -1910,6 +1910,7 @@ namespace Emberdelve.EditorTools
 
                 yield return MovePlayerForReal(1.6f);
                 yield return RealMeleeMatrix("warrior sword after moving", input, melee, true);
+                yield return RealComboChain("warrior sword combo", input, melee);
 
                 Check(loadout.SwitchWeapon() && ranged.enabled && !melee.enabled, "warrior switched to the crossbow");
                 yield return RealRangedMatrix("warrior crossbow", input, ranged);
@@ -1936,9 +1937,129 @@ namespace Emberdelve.EditorTools
                 yield return RealMeleeMatrix("archer rapier standing", input, melee, false);
                 yield return MovePlayerForReal(1.6f);
                 yield return RealMeleeMatrix("archer rapier after moving", input, melee, true);
+                yield return RealComboChain("archer rapier combo", input, melee);
 
                 loadout.SwitchToSlot(0);
                 CleanupRealCombat(input);
+            }
+
+            /// <summary>The combo step the authority would accept next from the player (0 when no chain is running).</summary>
+            private int ExpectedComboStep() =>
+                _localAuthority != null && _localAuthority.TryGetExpectedComboStep(_rig.CombatId, out int step) ? step : 0;
+
+            /// <summary>
+            /// D1b: the combo chain through the real input path. One press of the primary button per swing (the same override
+            /// seam as the matrix); everything else is the shipped path: MeleeCombat asks the authority for the next step,
+            /// the authority validates the chain and sweeps, the damage resolves with the step multiplier. Asserted from
+            /// the swing status the authority recorded: step numbers and patterns, the step multiplier, the exact damage
+            /// (base x outgoing x step x location x zone), the finisher's longer recovery, window expiry in real time, and a
+            /// press during the recovery being buffered into the next step.
+            /// </summary>
+            private IEnumerator RealComboChain(string label, EmberdelveInput input, MeleeCombat melee)
+            {
+                WeaponData weapon = melee.Weapon;
+                Check(weapon != null && melee.enabled && weapon.HasComboChain, $"{label}: the weapon in hand has a combo chain");
+                if (weapon == null || !melee.enabled || !weapon.HasComboChain) yield break;
+
+                float yaw = FindOpenYaw(2.2f, 0f, 3f, out bool found, true);
+                Check(found, $"{label}: an open lane exists for the combo");
+                if (!found) yield break;
+
+                _rig.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+                Physics.SyncTransforms();
+
+                EnemyAgent enemy = PickAliveEnemy();
+                Check(enemy != null, $"{label}: an enemy is available for the combo");
+                if (enemy == null) yield break;
+
+                Vector3 spot = RealCasePoint(yaw, 1.8f, 0f);
+                enemy.Health.Heal(10000f);
+                enemy.transform.position = new Vector3(spot.x, enemy.transform.position.y, spot.z);
+                Physics.SyncTransforms();
+
+                bool Ready() => !melee.IsSwinging && melee.CooldownRemaining <= 0f
+                                && _localAuthority.WeaponCooldownRemaining(_rig.CombatId, weapon) <= 0f;
+
+                // ---- 1. a fresh chain: three presses, three steps, the chain's patterns and multipliers
+                yield return WaitUntil(() => Ready() && ExpectedComboStep() == 0, weapon.cooldown + 4f);
+                Check(ExpectedComboStep() == 0, $"{label}: the authority expects step 1 (a fresh chain)");
+                float outgoing = _rig.GetOutgoingDamageMultiplier(weapon);
+
+                for (int step = 0; step < weapon.comboSteps.Length; step++)
+                {
+                    yield return WaitUntil(Ready, weapon.cooldown + 2f);
+                    enemy.Health.Heal(10000f);
+                    int swingBefore = melee.LastSwingId;
+
+                    input.PrimaryPressedOverride = true;
+                    yield return null;
+                    input.PrimaryPressedOverride = null;
+                    yield return WaitFrames(2);
+
+                    Check(melee.LastSwingId != swingBefore && melee.ComboStep == step,
+                        $"{label}: press {step + 1} began combo step {step + 1} (melee step {melee.ComboStep})");
+                    SwingPatternData expectedPattern = weapon.swingPatterns[weapon.comboSteps[step].patternIndex];
+                    Check(melee.ActivePattern == expectedPattern, $"{label}: step {step + 1} plays the chain's pattern ({expectedPattern.patternId})");
+
+                    int swingId = melee.LastSwingId;
+                    yield return WaitUntil(() => !melee.IsSwinging, 3f);
+                    yield return WaitFrames(3);
+
+                    Check(_localAuthority.TryGetMeleeSwingStatus(swingId, out MeleeSwingStatus st) && st.ComboStep == step, $"{label}: the authority recorded step {step + 1}");
+                    Check(Mathf.Abs(st.StepMultiplier - weapon.comboSteps[step].damageMultiplier) < 1e-5f, $"{label}: step {step + 1} multiplier x{st.StepMultiplier:F2}");
+                    MeleeSwingHit hit = default;
+                    bool landed = false;
+                    for (int h = 0; h < st.Hits.Count; h++) if (st.Hits[h].TargetCombatId == enemy.CombatId) { hit = st.Hits[h]; landed = true; }
+                    Check(landed, $"{label}: step {step + 1} hit the enemy");
+                    if (landed)
+                    {
+                        float expected = weapon.baseDamage * outgoing * weapon.comboSteps[step].damageMultiplier * HitLocationTable.Default.Multiplier(hit.Location) * hit.ZoneMultiplier;
+                        Check(Mathf.Abs(hit.Amount - expected) < 0.05f,
+                            $"{label}: step {step + 1} damage {hit.Amount:F2} = base {weapon.baseDamage:F0} x outgoing {outgoing:F3} x step {weapon.comboSteps[step].damageMultiplier:F2} x {hit.Location} x zone {hit.ZoneMultiplier:F2} ({expected:F2})");
+                    }
+                }
+
+                Check(ExpectedComboStep() == 0, $"{label}: after the last step the chain is complete");
+                SwingPatternData lastPattern = weapon.swingPatterns[weapon.comboSteps[weapon.comboSteps.Length - 1].patternIndex];
+                float lastScale = weapon.comboSteps[weapon.comboSteps.Length - 1].recoveryScale;
+                Check(Mathf.Abs(melee.ActiveTiming.Recovery - (lastPattern.recoveryTime * lastScale + weapon.comboFinisherRecovery)) < 1e-4f,
+                    $"{label}: the finisher recovers {weapon.comboFinisherRecovery:F2} s longer ({melee.ActiveTiming.Recovery:F2} s)");
+
+                // ---- 2. the combo window runs out in real time: the next press is step 1 again
+                yield return WaitUntil(Ready, weapon.cooldown + 3f);
+                input.PrimaryPressedOverride = true;
+                yield return null;
+                input.PrimaryPressedOverride = null;
+                yield return WaitFrames(2);
+                Check(melee.ComboStep == 0, $"{label}: a fresh press starts at step 1");
+                yield return WaitUntil(() => !melee.IsSwinging, 3f);
+                Check(ExpectedComboStep() == 1, $"{label}: inside the window the authority expects step 2");
+                yield return WaitSeconds(weapon.comboWindow + 0.25f);
+                Check(ExpectedComboStep() == 0, $"{label}: after the combo window ({weapon.comboWindow:F2} s) the chain has reset");
+                yield return WaitUntil(Ready, weapon.cooldown + 2f);
+                int beforeExpiry = melee.LastSwingId;
+                input.PrimaryPressedOverride = true;
+                yield return null;
+                input.PrimaryPressedOverride = null;
+                yield return WaitFrames(2);
+                Check(melee.LastSwingId != beforeExpiry && melee.ComboStep == 0, $"{label}: a press after the window is step 1 again, not step 2");
+                yield return WaitUntil(() => !melee.IsSwinging, 3f);
+
+                // ---- 3. a press during the recovery is buffered and becomes step 2 the moment the swing is over
+                yield return WaitUntil(() => Ready() && ExpectedComboStep() == 0, weapon.cooldown + 4f);
+                enemy.Health.Heal(10000f);
+                int firstId = melee.LastSwingId;
+                input.PrimaryPressedOverride = true;
+                yield return null;
+                input.PrimaryPressedOverride = null;
+                yield return WaitSeconds(melee.ActiveTiming.ActiveEnd + 0.12f);        // inside the recovery
+                input.PrimaryPressedOverride = true;
+                yield return null;
+                input.PrimaryPressedOverride = null;                                  // the only extra press: nothing else is pressed
+                yield return WaitSeconds(melee.ActiveTiming.Recovery + 0.9f);
+                Check(melee.LastSwingId != firstId && melee.ComboStep == 1,
+                    $"{label}: the press during the recovery was buffered and became combo step 2 (step {melee.ComboStep + 1}, swing {melee.LastSwingId} after {firstId})");
+                yield return WaitUntil(() => !melee.IsSwinging, 3f);
             }
 
             private bool PrepareRealCombat(out EmberdelveInput input)
@@ -2124,8 +2245,14 @@ namespace Emberdelve.EditorTools
                     Physics.SyncTransforms();
 
                     // Ready: the swing machine idle and past its cooldown, and the authority's own cooldown over.
+                    // D1b fixture migration: the swings are now the weapon's combo chain, and the sword's third step is the
+                    // overhead, a different sweep than the horizontal slashes this matrix pins (D1a: both slashes alternate,
+                    // which is still true: step 1 is the left-to-right slash and step 2 the right-to-left one). So a press that
+                    // would be step 3 waits for the combo window to run out (the authority then restarts the chain at step 1).
+                    // The rapier's three steps are all the same thrust, so it never waits. Nothing is skipped or loosened.
                     yield return WaitUntil(() => !melee.IsSwinging && melee.CooldownRemaining <= 0f
-                        && _localAuthority.WeaponCooldownRemaining(_rig.CombatId, weapon) <= 0f, weapon.cooldown + 2f);
+                        && _localAuthority.WeaponCooldownRemaining(_rig.CombatId, weapon) <= 0f
+                        && (thrust || ExpectedComboStep() != 2), weapon.cooldown + 3f);
                     yield return WaitFrames(2);
 
                     float healthBefore = enemy.CurrentHealth;
@@ -2181,6 +2308,47 @@ namespace Emberdelve.EditorTools
                 Check(exercised >= (subset ? 4 : 10), $"{label}: enough cases were exercised ({exercised})");
                 Debug.Log($"[Emberdelve][Smoke:{Mode}] {label}: {exercised} cases asserted, {skippedAmbiguous} skipped as ambiguous");
                 Check(skippedAmbiguous <= 2, $"{label}: at most 2 cases are ambiguous band edges ({skippedAmbiguous})");
+            }
+
+            /// <summary>
+            /// The test's own prediction of where a pattern's first contact with a target lands: the same published geometry helpers
+            /// (blade segment, segment distance) sampled over the active phase from the rig's aim pose against the target's hit volumes.
+            /// The first sample that touches opens the contact; the deepest volume within the pattern's contact window decides the
+            /// location (ties: lower location number) and the closest blade point decides the contact parameter t.
+            /// </summary>
+            private void PredictSwingContact(SwingPatternData pattern, WeaponData weapon, ICombatEntity enemy, out HitLocation location, out float t)
+            {
+                location = HitLocation.Body;
+                t = 1f;
+                if (!_rig.TryGetAimPose(out Vector3 eye, out float yaw, out float pitch) || !(enemy is IHitShapeProvider provider)) return;
+
+                List<HitShape> shapes = new List<HitShape>(16);
+                provider.CollectHitShapes(shapes);
+                SwingFrame frame = new SwingFrame(eye, yaw, pitch);
+                float length = pattern.BladeLength(weapon);
+                int samples = SwingGeometry.SampleCount(pattern, weapon);
+                int window = Mathf.CeilToInt(pattern.contactWindow / Mathf.Max(1e-5f, pattern.activeTime / samples));
+                int first = -1;
+                float bestDepth = -1f;
+                for (int i = 0; i <= samples; i++)
+                {
+                    if (first >= 0 && i > first + window) break;
+                    SwingGeometry.BladeSegment(frame, pattern.ActivePose(i / (float)samples), length, out Vector3 b, out Vector3 tip);
+                    for (int k = 0; k < shapes.Count; k++)
+                    {
+                        float d = SwingGeometry.SegmentDistance(b, tip, shapes[k].A, shapes[k].B, out Vector3 onBlade);
+                        float depth = shapes[k].Radius + pattern.sweepRadius - d;
+                        if (depth < 0f) continue;
+                        if (first < 0) first = i;
+                        bool better = bestDepth < 0f || depth > bestDepth + 1e-4f || (Mathf.Abs(depth - bestDepth) <= 1e-4f && (int)shapes[k].Location < (int)location);
+                        if (better)
+                        {
+                            bestDepth = depth;
+                            location = shapes[k].Location;
+                            t = length > 1e-5f ? Mathf.Clamp01(Vector3.Distance(b, onBlade) / length) : 0f;
+                        }
+                    }
+                }
             }
 
             /// <summary>
@@ -4352,6 +4520,11 @@ namespace Emberdelve.EditorTools
                     System.Action<DamageInfo> onDamaged = damage => captured = damage;
                     if (mightTarget.Health != null) mightTarget.Health.Damaged += onDamaged;
 
+                    // D1b: the expected contact (location and zone) is predicted HERE, before the swing, from the rig's aim pose, the
+                    // frozen target's own hit volumes and the sword's pattern data, with this test's own sampler (not the authority's record).
+                    PredictSwingContact(melee.Weapon.swingPatterns[0], melee.Weapon, mightTarget, out HitLocation predictedLocation, out float predictedT);
+                    float predictedZone = melee.Weapon.ImpactMultiplier(predictedT);
+
                     melee.BeginSwing();
                     yield return WaitSeconds(1.1f);
 
@@ -4362,11 +4535,20 @@ namespace Emberdelve.EditorTools
                     Check(damaged, $"Ashen Might swing damaged the enemy through the authority ({healthBefore:F0} -> {mightTarget.CurrentHealth:F0})");
                     if (damaged)
                     {
-                        float expected = sword.baseDamage * (captured.Headshot ? DamageResolver.HeadshotMultiplier : 1f) * outgoingMelee;
+                        // D1b fixture migration. Old assumption: a swing lands on the target's body at full blade (damage = base x
+                        // passive, x1.8 for a head flag). The swept melee decides the hit location (D1a) and, since D1b, the impact zone
+                        // along the blade. The frozen target's placement is known before the swing, so the expected contact was predicted
+                        // above by this test's own sampler of the pattern against the target's hit volumes (nothing read back from the
+                        // authority): damage = weapon base x passive x location x zone (first combo step, x1.00). In the failing run the
+                        // old formula gave 34.9 and the swing delivered 19.6, a factor of 0.56.
+                        float locationMultiplier = HitLocationTable.Default.Multiplier(predictedLocation);
+                        float zoneMultiplier = predictedZone;
+                        float expected = sword.baseDamage * outgoingMelee * locationMultiplier * zoneMultiplier;
+                        Debug.Log($"[Emberdelve][Smoke:{Mode}] predicted contact {predictedLocation} at t={predictedT:F2} (zone x{zoneMultiplier:F2}), delivered {captured.Amount:F2}, expected {expected:F2}");
                         Check(Mathf.Abs(captured.Amount - expected) < 0.8f,
-                            $"melee damage is weapon base x passive ({captured.Amount:F1} vs expected {expected:F1}, headshot={captured.Headshot})");
-                        Check(captured.Amount > sword.baseDamage + 1f,
-                            $"the passive made the swing hit harder than the weapon alone ({captured.Amount:F1} > {sword.baseDamage:F1})");
+                            $"melee damage is weapon base x passive x predicted location x predicted zone ({captured.Amount:F1} vs expected {expected:F1}, {predictedLocation} x{locationMultiplier:F2}, zone x{zoneMultiplier:F2})");
+                        Check(captured.Amount > sword.baseDamage * locationMultiplier * zoneMultiplier + 1f,
+                            $"the passive made the swing hit harder than the weapon alone at the same contact ({captured.Amount:F1} > {sword.baseDamage * locationMultiplier * zoneMultiplier:F1})");
                         Check(captured.SourceCombatId == _rig.CombatId && captured.SourceKind == EntityKind.LocalPlayer,
                             "the authority attributes the damage to the local player");
                         Check(_localAuthority != null && _localAuthority.AcceptedCount > acceptedBefore, "authority accepted the passive swing");

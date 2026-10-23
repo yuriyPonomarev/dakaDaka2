@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Stats;
@@ -5,6 +6,49 @@ using Emberdelve.Stats;
 namespace Emberdelve.Data
 {
     public enum WeaponKind { Melee, Ranged }
+
+    /// <summary>
+    /// One step of a weapon's combo chain (D1b). The chain is DATA on the weapon: step k swings
+    /// <see cref="WeaponData.swingPatterns"/>[patternIndex] with this step's damage multiplier and optional timing
+    /// tweaks. The authority, not the client, decides which step comes next.
+    /// </summary>
+    [Serializable]
+    public struct ComboStep
+    {
+        [Tooltip("Index into WeaponData.swingPatterns that this step swings.")]
+        public int patternIndex;
+        [Tooltip("Damage multiplier of this step (reference shape: 1.00 / 1.05 / 1.10).")]
+        [Range(0.1f, 3f)] public float damageMultiplier;
+        [Tooltip("Scales the pattern's windup for this step (1 = as authored, below 1 = a quicker follow-up).")]
+        [Range(0.2f, 2f)] public float windupScale;
+        [Tooltip("Scales the pattern's recovery for this step.")]
+        [Range(0.2f, 2f)] public float recoveryScale;
+
+        public ComboStep(int patternIndex, float damageMultiplier, float windupScale = 1f, float recoveryScale = 1f)
+        {
+            this.patternIndex = patternIndex;
+            this.damageMultiplier = damageMultiplier;
+            this.windupScale = windupScale;
+            this.recoveryScale = recoveryScale;
+        }
+    }
+
+    /// <summary>
+    /// Impact-zone band (D1b): from <see cref="from"/> (0 = the hilt end of the damage segment, 1 = the tip) up to the
+    /// next band, a hit does <see cref="multiplier"/> of its damage.
+    /// </summary>
+    [Serializable]
+    public struct ImpactZone
+    {
+        [Range(0f, 1f)] public float from;
+        [Range(0.1f, 1.5f)] public float multiplier;
+
+        public ImpactZone(float from, float multiplier)
+        {
+            this.from = from;
+            this.multiplier = multiplier;
+        }
+    }
 
     /// <summary>
     /// All numbers that define how a weapon behaves. Combat components read this asset; they never
@@ -40,6 +84,32 @@ namespace Emberdelve.Data
         [Header("Swept melee (D1a)")]
         [Tooltip("The swing patterns of this weapon at combo step 0 (D1b adds chained steps as more data). Empty = the legacy arc/overlap melee, which only enemies still use.")]
         public SwingPatternData[] swingPatterns = new SwingPatternData[0];
+
+        [Header("Combo chain (D1b)")]
+        [Tooltip("Ordered chain steps. Empty = a single-pattern weapon (step 0 only). The authority accepts step k only when step k-1 of this chain ended within the combo window.")]
+        public ComboStep[] comboSteps = new ComboStep[0];
+        [Tooltip("Seconds after the RECOVERY of a step begins within which the next primary press continues the chain; later it starts again at step 0.")]
+        [Range(0.1f, 3f)] public float comboWindow = 0.70f;
+        [Tooltip("Extra recovery (seconds) added after the LAST step of the chain, which then resets.")]
+        [Range(0f, 2f)] public float comboFinisherRecovery = 0.35f;
+
+        [Header("Impact zones (D1b)")]
+        [Tooltip("Damage by where on the damage segment the contact happens (parameter 0 = hilt end, 1 = tip). Bands ascend by From; empty = every contact does full damage.")]
+        public ImpactZone[] impactZones = new ImpactZone[0];
+
+        [Header("Hit slow (D1b)")]
+        [Tooltip("Move-speed multiplier a hit puts on its target (1 = none, 0.9 = -10 percent). The status uses the existing authority-owned Slow rules (refresh, strongest wins).")]
+        [Range(0.1f, 1f)] public float hitSlowMultiplier = 1f;
+        [Tooltip("Seconds the hit slow lasts (0 = none).")]
+        [Range(0f, 5f)] public float hitSlowDuration = 0f;
+
+        [Header("Move penalty and impact (D1b)")]
+        [Tooltip("Held-weapon move-speed penalty in reference points on a 300 base (10 = -3.3 percent of the final ground speed). Applied by PlayerMovement.ResolveGroundSpeed while the weapon is held (an off-hand shield adds its own).")]
+        [Range(0f, 100f)] public float heldMoveSpeedPenalty = 0f;
+        [Tooltip("Impact power of this weapon's hits. A hit whose power (x the pattern scale) reaches the defender's impact resist breaks the guard.")]
+        [Range(0f, 100f)] public float impactPower = 10f;
+        [Tooltip("Impact resist of this item when it blocks: a hit with power >= this breaks the block (reduced mitigation and a guard stagger).")]
+        [Range(0f, 100f)] public float impactResist = 15f;
 
         [Header("Hands")]
         [Tooltip("A two-handed weapon occupies both hands, so an off-hand shield cannot contribute its block while it is held.")]
@@ -94,6 +164,94 @@ namespace Emberdelve.Data
             pattern = swingPatterns[patternIndex];
             return pattern != null;
         }
+
+        /// <summary>True when this weapon has an authored combo chain (D1b).</summary>
+        public bool HasComboChain => UsesSweptMelee && comboSteps != null && comboSteps.Length > 0;
+
+        public int ComboLength => HasComboChain ? comboSteps.Length : 1;
+
+        /// <summary>
+        /// Resolves chain step <paramref name="step"/> to its data and pattern. False (with the reason) when the weapon has
+        /// no such step or the claimed pattern index is not the one the chain assigns to it. A weapon without a chain
+        /// only has step 0 (the D1a rule).
+        /// </summary>
+        public bool TryResolveComboStep(int step, int patternIndex, out ComboStep data, out SwingPatternData pattern, out string reason)
+        {
+            data = new ComboStep(patternIndex, 1f);
+            pattern = null;
+            reason = string.Empty;
+
+            if (!HasComboChain)
+            {
+                if (!TryResolveSwingPattern(step, patternIndex, out pattern))
+                {
+                    reason = $"pattern {patternIndex} at combo step {step} is not allowed for the equipped weapon";
+                    return false;
+                }
+                return true;
+            }
+
+            if (step < 0 || step >= comboSteps.Length)
+            {
+                reason = $"combo step {step} does not exist in the weapon's {comboSteps.Length}-step chain";
+                return false;
+            }
+
+            data = comboSteps[step];
+            if (patternIndex != data.patternIndex)
+            {
+                reason = $"pattern {patternIndex} is not the chain's pattern {data.patternIndex} for combo step {step}";
+                return false;
+            }
+
+            if (data.patternIndex < 0 || swingPatterns == null || data.patternIndex >= swingPatterns.Length || swingPatterns[data.patternIndex] == null)
+            {
+                reason = $"combo step {step} names a missing swing pattern";
+                return false;
+            }
+
+            pattern = swingPatterns[data.patternIndex];
+            return true;
+        }
+
+        /// <summary>Timing of combo step <paramref name="step"/>: the pattern's, scaled by the step, plus the finisher's extra recovery on the last step.</summary>
+        public SwingTiming ComboTiming(int step, SwingPatternData pattern)
+        {
+            if (pattern == null) return default;
+            if (!HasComboChain || step < 0 || step >= comboSteps.Length) return pattern.Timing;
+
+            ComboStep data = comboSteps[step];
+            float extra = step == comboSteps.Length - 1 ? comboFinisherRecovery : 0f;
+            return pattern.TimingFor(data.windupScale <= 0f ? 1f : data.windupScale, data.recoveryScale <= 0f ? 1f : data.recoveryScale, extra);
+        }
+
+        /// <summary>
+        /// Damage multiplier of a contact <paramref name="t"/> along the damage segment (0 = hilt end, 1 = tip): the band
+        /// with the greatest <c>from</c> not above t. With no bands every contact is full damage.
+        /// </summary>
+        public float ImpactMultiplier(float t)
+        {
+            if (impactZones == null || impactZones.Length == 0) return 1f;
+            t = float.IsNaN(t) ? 0f : Mathf.Clamp01(t);
+
+            float result = impactZones[0].multiplier;
+            float bestFrom = float.NegativeInfinity;
+            for (int i = 0; i < impactZones.Length; i++)
+            {
+                if (impactZones[i].from <= t + 1e-6f && impactZones[i].from >= bestFrom)
+                {
+                    bestFrom = impactZones[i].from;
+                    result = impactZones[i].multiplier;
+                }
+            }
+
+            return Mathf.Max(0.05f, result);
+        }
+
+        /// <summary>The status a hit with this weapon puts on its target (none when the weapon has no hit slow).</summary>
+        public StatusSpec HitSlowSpec => hitSlowDuration > 0f && hitSlowMultiplier < 1f
+            ? new StatusSpec(StatusKind.Slow, hitSlowDuration, hitSlowMultiplier)
+            : StatusSpec.None;
 
         /// <summary>First pattern of a kind at combo step 0, or -1.</summary>
         public int FindSwingPattern(SwingKind kind)

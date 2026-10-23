@@ -85,6 +85,13 @@ namespace Emberdelve.UI
         private const float ManaBarHeight = 14f;
         private const float SkillRejectFlash = 1.6f;
 
+        /// <summary>
+        /// DEPRECATED (D1b, user decision): stamina no longer gates or drains block or sprint, so its bar is not built.
+        /// The pool, its derived stats and the bar code below stay (dormant) so existing data and gates keep their
+        /// meaning; set this true only to bring the bar back.
+        /// </summary>
+        public const bool ShowStaminaBar = false;
+
         // The stamina bar is the mana bar's shape in the free band to the right of the mana readout, so the
         // three pools read as one stack of bars. Measured in the same 1280x720 image coordinates the hotbar
         // comment below uses: mana bar x 24..364 y 695..709, mana label x 378..598 y 695..715, hotbar chips
@@ -288,20 +295,23 @@ namespace Emberdelve.UI
             // the left, and a current / maximum line beside it. The colour is the one the kit already reads
             // as "endurance" - a green against the red health bar and the blue mana bar - and the numbers
             // come from the live pool, not from a ceiling the HUD invented.
-            UiFactory.CreateImage(_root, "StaminaBack", new Color(0.06f, 0.085f, 0.07f, 0.85f),
-                new Vector2(StaminaBarWidth, ManaBarHeight), new Vector2(StaminaBarLeft + StaminaBarWidth * 0.5f, 18f),
-                new Vector2(0f, 0f), new Vector2(0f, 0f));
+            if (ShowStaminaBar)
+            {
+                UiFactory.CreateImage(_root, "StaminaBack", new Color(0.06f, 0.085f, 0.07f, 0.85f),
+                    new Vector2(StaminaBarWidth, ManaBarHeight), new Vector2(StaminaBarLeft + StaminaBarWidth * 0.5f, 18f),
+                    new Vector2(0f, 0f), new Vector2(0f, 0f));
 
-            _staminaFill = UiFactory.CreateImage(_root, "StaminaFill", new Color(0.34f, 0.62f, 0.36f, 1f),
-                new Vector2(StaminaBarWidth, ManaBarHeight), new Vector2(StaminaBarLeft, 18f),
-                new Vector2(0f, 0f), new Vector2(0f, 0f));
-            _staminaFill.rectTransform.pivot = new Vector2(0f, 0.5f);
-            _staminaFillRect = _staminaFill.rectTransform;
+                _staminaFill = UiFactory.CreateImage(_root, "StaminaFill", new Color(0.34f, 0.62f, 0.36f, 1f),
+                    new Vector2(StaminaBarWidth, ManaBarHeight), new Vector2(StaminaBarLeft, 18f),
+                    new Vector2(0f, 0f), new Vector2(0f, 0f));
+                _staminaFill.rectTransform.pivot = new Vector2(0f, 0.5f);
+                _staminaFillRect = _staminaFill.rectTransform;
 
-            _staminaLabel = UiFactory.CreateText(_root, "StaminaLabel", "", 14, dim, TextAnchor.MiddleLeft);
-            UiFactory.SetRect(_staminaLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
-                new Vector2(StaminaLabelWidth, 20f), new Vector2(StaminaBarLeft + StaminaBarWidth + 14f, 15f),
-                new Vector2(0f, 0.5f));
+                _staminaLabel = UiFactory.CreateText(_root, "StaminaLabel", "", 14, dim, TextAnchor.MiddleLeft);
+                UiFactory.SetRect(_staminaLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                    new Vector2(StaminaLabelWidth, 20f), new Vector2(StaminaBarLeft + StaminaBarWidth + 14f, 15f),
+                    new Vector2(0f, 0.5f));
+            }
 
             BuildSkillBar(ink, dim);
             BuildPassiveReadout(dim);
@@ -613,7 +623,8 @@ namespace Emberdelve.UI
         {
             _vignetteTimer = VignetteDuration;
 
-            string label = info.Blocked ? "Blocked" : "Hit";
+            // D1b: a broken guard says so (the block was engaged but the hit's impact power reached its resist).
+            string label = info.GuardBroken ? "GUARD BROKEN" : info.Blocked ? "Blocked" : "Hit";
             GameEvents.RaiseToast($"{label}  -{Mathf.RoundToInt(info.Amount)} HP");
         }
 

@@ -412,6 +412,15 @@ namespace Emberdelve.EditorTools
             _authority.SetClock(() => _clock);
             _authority.AutoStepSwings = false;   // the gate steps by hand: no wall clock anywhere in this gate
 
+            // D1b fixture opt-ins (explained in Docs/Tasks/D1b.md, "Rewritten fixtures"): this gate pins the SWEEP
+            // (reach, locations, cleave, walls, tick independence) with a specific pattern per case, including the
+            // overhead and the back slash that the sword's combo chain now only reaches as steps 2 and 1, and with
+            // exact damage numbers that must not depend on where along the blade the target happens to sit. So it
+            // accepts those patterns at step 0 (AllowLegacyPatternSelection) and leaves the impact-zone bands off
+            // (ImpactZonesEnabled = false). The chain itself and the zones are pinned by EmberdelveCombatFlowGate.
+            _authority.AllowLegacyPatternSelection = true;
+            _authority.ImpactZonesEnabled = false;
+
             // ---- pattern data
             Check(_sword.UsesSweptMelee && _sword.swingPatterns.Length == 3, "the sword has three swing patterns");
             Check(_rapier.UsesSweptMelee && _rapier.swingPatterns.Length == 1, "the rapier has one swing pattern");
@@ -425,7 +434,10 @@ namespace Emberdelve.EditorTools
                 foreach (SwingPatternData p in w.swingPatterns)
                 {
                     Check(p.Validate(out string problem), $"{p.patternId}: pattern data validates ({problem})");
-                    Check(Mathf.Approximately(p.moveSpeedMultiplier, 1f), $"{p.patternId}: the move-speed hook is left at 1 (D1b)");
+                    // D1a left a move-speed hook at 1; D1b consumes it as three phase multipliers (windup / hit / recovery).
+                    Check(Mathf.Approximately(p.windupMoveMultiplier, 0.85f) && Mathf.Approximately(p.activeMoveMultiplier, 0.70f) && Mathf.Approximately(p.recoveryMoveMultiplier, 0.85f),
+                        $"{p.patternId}: the D1b phase move multipliers are authored (0.85 / 0.70 / 0.85)");
+                    Check(Mathf.Approximately(p.damageMultiplier, 1f), $"{p.patternId}: the pattern shape is damage x1 (the per-step multiplier lives in the weapon chain)");
                     Check(p.windupTime > 0f && p.activeTime > 0f && p.recoveryTime > 0f, $"{p.patternId}: windup, active and recovery durations are authored");
                     Check(SwingGeometry.SampleCount(p, w) == SwingGeometry.SampleCount(p, w) && SwingGeometry.SampleCount(p, w) >= SwingGeometry.MinSamples,
                         $"{p.patternId}: the sample count is a stable function of the data ({SwingGeometry.SampleCount(p, w)})");
@@ -1145,7 +1157,7 @@ namespace Emberdelve.EditorTools
                 if (slash.Hits.Count == 1 && over.Hits.Count == 1)
                 {
                     float ratio = over.Hits[0].Amount / slash.Hits[0].Amount;
-                    Near(1.5f * _sword.swingPatterns[2].damageMultiplier, ratio, 1e-3f, "overhead head hit / slash body hit = head 1.5 x the overhead's 1.1");
+                    Near(1.5f * _sword.swingPatterns[2].damageMultiplier, ratio, 1e-3f, "overhead head hit / slash body hit = head 1.5 x the overhead pattern's own multiplier (data)");
                 }
                 Cooldown(2f);
                 s.Dispose();
@@ -1211,8 +1223,10 @@ namespace Emberdelve.EditorTools
             Check(!Try(Intent(who, 0, weaponId: "hollow_claw"), out r) && r.Contains("not the equipped weapon"), "an enemy weapon id is rejected");
             Check(!Try(Intent(who, 7), out r) && r.Contains("not allowed"), "a pattern index the weapon does not have is rejected (" + r + ")");
             Check(!Try(Intent(who, -1), out r) && r.Contains("not allowed"), "a negative pattern index is rejected");
-            Check(!Try(Intent(who, 0, combo: 1), out r) && r.Contains("not allowed"), "combo step 1 does not exist yet (D1b adds data) and is rejected");
-            Check(!Try(Intent(who, 0, combo: -3), out r) && r.Contains("not allowed"), "a negative combo step is rejected");
+            // D1b: combo steps exist now. A step 1 request without a running chain is refused by the authority's own chain state
+            // (the old "does not exist yet" wording no longer applies); the full forged-step matrix is in EmberdelveCombatFlowGate.
+            Check(!Try(Intent(who, 1, combo: 1), out r) && r.Contains("no running combo chain"), "combo step 1 with no running chain is rejected (" + r + ")");
+            Check(!Try(Intent(who, 0, combo: -3), out r) && r.Contains("does not exist"), "a negative combo step is rejected");
             Check(!Try(Intent(who, 0, yaw: 140f), out r) && r.Contains("aim snapshot"), "an aim snapshot 140 degrees from the authoritative pose is rejected (" + r + ")");
             Check(!Try(Intent(who, 0, pitch: 80f), out r) && r.Contains("aim snapshot"), "an aim snapshot 80 degrees off in pitch is rejected");
             Check(!Try(Intent(who, 0, yaw: float.NaN), out r) && r.Contains("aim snapshot"), "a NaN aim snapshot is rejected");
@@ -1540,12 +1554,12 @@ namespace Emberdelve.EditorTools
             Check(_authority.TryGetMeleeSwingStatus(melee.LastSwingId, out MeleeSwingStatus done) && done.Finished && done.EndReason == SwingEndReason.Completed,
                 "the finished swing is reported as completed");
             Check(!visual.IsSwinging, "the visual returned to rest");
-            yield return new WaitForSeconds(0.6f);
-
-            // second swing: alternates to the right-to-left slash
-            Check(melee.ChoosePatternIndex(false) == 1, "the next press picks the right-to-left slash");
-            Check(melee.ChoosePatternIndex(true) == 2, "a sprinting press picks the overhead");
-            Check(melee.TryBeginSwing(melee.ChoosePatternIndex(false)) && melee.ActivePattern.kind == SwingKind.HorizontalRightToLeft, "the alternate slash is accepted");
+            // D1b: this used to wait 0.6 s and expect the alternating slash from ChoosePatternIndex (and the overhead for a
+            // sprinting press). The pattern order is now the weapon's combo chain, owned by the authority: a second press
+            // INSIDE the combo window continues it at step 1 (the right-to-left slash). The sprint-overhead placeholder is gone.
+            yield return new WaitForSeconds(0.1f);
+            Check(_authority.TryGetExpectedComboStep(rig.CombatId, out int expectedStep) && expectedStep == 1, "the authority expects combo step 1 next");
+            Check(melee.TryBeginSwing() && melee.ComboStep == 1 && melee.ActivePattern.kind == SwingKind.HorizontalRightToLeft, "the next press is combo step 1, the right-to-left slash");
             guard = 0f;
             while (melee.IsSwinging && guard < 3f) { guard += Time.deltaTime; yield return null; }
             Check(target.Received.Count == 2, "the reverse slash hits the same target again (a new swing)");
@@ -1558,7 +1572,9 @@ namespace Emberdelve.EditorTools
                 Check(melee.TryBeginSwing(0), "swap test: a swing begins");
                 int swapSwing = melee.LastSwingId;
                 yield return null;
-                Check(rig.Loadout.SwitchToSlot(1) && rig.ActiveWeapon == _crossbow, "the loadout swaps to the crossbow during the windup");
+                // D1b: a PLAYER swap during a swing is now refused (EmberdelveCombatFlowGate pins that). This case keeps the
+                // authority's defence in depth covered with a FORCED change (class apply / respawn path), which is not a player swap.
+                Check(rig.Loadout.ForceSwitchToSlot(1) && rig.ActiveWeapon == _crossbow, "the loadout is forced to the crossbow during the windup");
                 yield return new WaitForSeconds(1.0f);
                 Check(target.Received.Count == hitsBeforeSwap, "no invisible swing lands after the swap");
                 Check(_authority.TryGetMeleeSwingStatus(swapSwing, out MeleeSwingStatus swapStatus) && swapStatus.Finished && swapStatus.EndReason == SwingEndReason.WeaponChanged,

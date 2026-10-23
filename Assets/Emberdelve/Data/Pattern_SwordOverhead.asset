@@ -18,8 +18,11 @@ MonoBehaviour:
   activeTime: 0.32
   recoveryTime: 0.38
   wallRecoilTime: 0.35
-  damageMultiplier: 1.1
-  moveSpeedMultiplier: 1
+  damageMultiplier: 1
+  impactPowerScale: 1.2
+  windupMoveMultiplier: 0.85
+  activeMoveMultiplier: 0.7
+  recoveryMoveMultiplier: 0.85
   maxTargets: 2
   reachScale: 0.79
   reachInset: 0.94

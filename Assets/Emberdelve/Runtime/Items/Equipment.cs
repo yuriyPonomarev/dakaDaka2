@@ -296,6 +296,14 @@ namespace Emberdelve.Items
                 return false;
             }
 
+            // D1b: the main-hand weapon cannot change while its wielder is mid-attack (same lock as the swap input).
+            if (item.GrantsWeapon && item.equipSlot != EquipmentSlot.OffHand && _rig.Loadout != null && _rig.Loadout.IsActionLocked)
+            {
+                reason = "cannot change weapons during an attack";
+                GameEvents.RaiseToast("Cannot swap weapons during an attack");
+                return false;
+            }
+
             // One identity, one place: the same item cannot be worn in another slot while it is also being
             // picked up out of the bag.
             if (HoldsUid(incoming.Uid))
@@ -659,6 +667,14 @@ namespace Emberdelve.Items
             if (_rig.IsDead)
             {
                 reason = "dead players cannot change gear";
+                return false;
+            }
+
+            // D1b: the main-hand weapon cannot change while its wielder is mid-attack (same lock as the swap input).
+            if (item.GrantsWeapon && item.equipSlot != EquipmentSlot.OffHand && _rig.Loadout != null && _rig.Loadout.IsActionLocked)
+            {
+                reason = "cannot change weapons during an attack";
+                GameEvents.RaiseToast("Cannot swap weapons during an attack");
                 return false;
             }
 

@@ -235,7 +235,7 @@ namespace Emberdelve.Combat
             // Both instigator factors are read from the authority's own validated entity, never from the
             // intent: the multiplier channel and the separate flat weapon-base channel.
             DamageInfo damage = DamageResolver.Resolve(weapon, resolved, resolvedHit, target,
-                OutgoingMultiplier(instigator, weapon), FlatWeaponBonus(instigator, weapon));
+                OutgoingMultiplier(instigator, weapon), FlatWeaponBonus(instigator, weapon), FlowTuning);
             if (!damage.IsValid) return Reject(intent, "resolver produced no damage", out reason);
 
             if (ammo != null && !ammo.TryConsumeAmmo(1)) return Reject(intent, "no ammunition in the magazine", out reason);
@@ -246,6 +246,7 @@ namespace Emberdelve.Combat
             target.ApplyDamage(damage);
 
             AcceptedCount++;
+            ApplyHitEffects(target, damage, weapon);
 
             HitFeedback feedback = new HitFeedback(authoritativePoint, damage.Amount, damage.Blocked, damage.Headshot,
                 target.IsDead, target.Kind);

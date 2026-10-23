@@ -1,0 +1,1752 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using System.Text.RegularExpressions;
+using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine;
+using UnityEngine.InputSystem;
+using Emberdelve.InputLayer;
+using Emberdelve.AI;
+using Emberdelve.Core;
+using Emberdelve.Data;
+using Emberdelve.Items;
+using Emberdelve.Player;
+using Emberdelve.Combat;
+using Emberdelve.UI;
+
+namespace Emberdelve.EditorTools
+{
+    /// <summary>
+    /// D1b gate: the combat FLOW on top of the D1a swept melee. Everything authority-side runs on a real
+    /// LocalCombatAuthority with an INJECTED clock stepped by hand (no wall-clock sleeps), against plain fake entities
+    /// and, where the real thing matters (guard, movement speed, stamina, HUD), the real PlayerRig in the Level01 scene.
+    /// Only the hit-slow walking distance and the stamina measurement run in real time, because they measure real
+    /// frames of the real PlayerMovement / StatusComponent.
+    ///
+    /// Run: Unity -batchmode -nographics -projectPath . -logFile Logs/d1b_combatflow.log
+    ///      -executeMethod Emberdelve.EditorTools.EmberdelveCombatFlowGate.Run
+    /// </summary>
+    [InitializeOnLoad]
+    public static class EmberdelveCombatFlowGate
+    {
+        private const string Pending = "Emberdelve.CombatFlowGate.Pending";
+
+        static EmberdelveCombatFlowGate()
+        {
+            EditorApplication.playModeStateChanged += state =>
+            {
+                if (state == PlayModeStateChange.EnteredPlayMode && SessionState.GetBool(Pending, false))
+                {
+                    SessionState.SetBool(Pending, false);
+                    new GameObject("CombatFlow_Gate").AddComponent<CombatFlowHarness>();
+                }
+            };
+        }
+
+        public static void Run()
+        {
+            SessionState.SetBool(Pending, true);
+            EditorSceneManager.OpenScene("Assets/Emberdelve/Scenes/Emberdelve_Level01.unity");
+            EditorApplication.EnterPlaymode();
+        }
+    }
+
+    public sealed class CombatFlowHarness : MonoBehaviour
+    {
+        private const string Tag = "[CombatFlowGate]";
+
+        private int _checks;
+        private int _failures;
+        private readonly List<UnityEngine.Object> _cleanup = new List<UnityEngine.Object>();
+        private readonly List<IDisposable> _scenarioCleanup = new List<IDisposable>();
+
+        private LocalCombatAuthority _authority;
+        private GameConfig _config;
+        private float _clock = 5000f;
+
+        private static readonly Vector3 Origin = new Vector3(3000f, 0f, 3000f);
+
+        // Walking is measured here, near the world origin: at 3000 m a float position cannot resolve the first
+        // millimetres of a 1000 fps acceleration ramp (the step is below the float spacing), so the rig sticks.
+        private static readonly Vector3 WalkOrigin = new Vector3(-400f, 0f, -400f);
+
+        private WeaponData _sword;
+        private WeaponData _rapier;
+        private WeaponData _shield;
+        private WeaponData _crossbow;
+        private WeaponData _bow;
+        private WeaponData _claw;
+        private WeaponData _maul;
+        private HitLocationTable _table;
+
+        // ------------------------------------------------------------------------------------------------
+        // Fakes
+        // ------------------------------------------------------------------------------------------------
+
+        private sealed class Swinger : ICombatEntity, IActiveWeaponProvider, IAimPoseProvider
+        {
+            public int CombatId { get; set; }
+            public EntityKind Kind { get; set; } = EntityKind.LocalPlayer;
+            public int TeamId { get; set; } = CombatTeams.PlayerTeam;
+            public Vector3 Eye = new Vector3(0f, 1.8f, 0f);
+            public float Yaw;
+            public float Pitch;
+            public WeaponData Weapon;
+            public bool Dead;
+            public float Taken;
+
+            public Vector3 CombatCenter => Eye + Vector3.down * 0.7f;
+            public Collider HeadCollider => null;
+            public WeaponData ActiveWeapon => Weapon;
+            public bool IsDead => Dead;
+            public float CurrentHealth => 1000f - Taken;
+            public float MaxHealth => 1000f;
+            public void ApplyDamage(DamageInfo damage) { Taken += damage.Amount; }
+
+            public bool TryGetAimPose(out Vector3 eye, out float yawDegrees, out float pitchDegrees)
+            {
+                eye = Eye;
+                yawDegrees = Yaw;
+                pitchDegrees = Pitch;
+                return true;
+            }
+        }
+
+        private sealed class PoselessAttacker : ICombatEntity, IActiveWeaponProvider
+        {
+            public int CombatId { get; set; }
+            public EntityKind Kind => EntityKind.Enemy;
+            public int TeamId => CombatTeams.MonsterTeam;
+            public Vector3 Point;
+            public WeaponData Weapon;
+            public Vector3 CombatCenter => Point;
+            public Collider HeadCollider => null;
+            public WeaponData ActiveWeapon => Weapon;
+            public bool IsDead => false;
+            public float CurrentHealth => 100f;
+            public float MaxHealth => 100f;
+            public void ApplyDamage(DamageInfo damage) { }
+        }
+
+        /// <summary>A hostile target with analytic hit shapes, optional armour, optional plain guard and an optional status host.</summary>
+        private sealed class Dummy : ICombatEntity, IHitShapeProvider, IArmorRatingProvider, IDefenseProvider, IStatusTarget
+        {
+            public int CombatId { get; set; }
+            public EntityKind Kind => EntityKind.Enemy;
+            public int TeamId { get; set; } = CombatTeams.MonsterTeam;
+            public readonly List<HitShape> Shapes = new List<HitShape>();
+            public Vector3 Center = new Vector3(0f, 1.5f, 2f);
+            public bool Dead;
+            public float Armor;
+            public float GuardReduction;
+            public StatusComponent Status;
+            public readonly List<DamageInfo> Received = new List<DamageInfo>();
+
+            public Vector3 CombatCenter => Center;
+            public Collider HeadCollider => null;
+            public bool IsDead => Dead;
+            public float CurrentHealth => 100000f;
+            public float MaxHealth => 100000f;
+
+            public void ApplyDamage(DamageInfo damage) { Received.Add(damage); }
+            public void CollectHitShapes(List<HitShape> shapes) { shapes.AddRange(Shapes); }
+            public float GetArmorRating() => Armor;
+
+            public bool TryGetGuardReduction(in DamageInfo incoming, out float reduction)
+            {
+                reduction = GuardReduction;
+                return GuardReduction > 0f;
+            }
+
+            public void ApplyStatus(StatusSpec spec, int sourceCombatId) { if (Status != null) Status.ApplyStatus(spec, sourceCombatId); }
+            public void ClearStatuses() { if (Status != null) Status.ClearStatuses(); }
+            public bool HasStatus(StatusKind kind) => Status != null && Status.HasStatus(kind);
+        }
+
+        private sealed class Scenario : IDisposable
+        {
+            public Swinger Who;
+            public readonly List<Dummy> Targets = new List<Dummy>();
+            public readonly List<GameObject> Props = new List<GameObject>();
+            public readonly List<ICombatEntity> Registered = new List<ICombatEntity>();
+
+            public void Dispose()
+            {
+                foreach (ICombatEntity e in Registered) CombatRegistry.Unregister(e.CombatId, e);
+                foreach (GameObject go in Props) if (go != null) UnityEngine.Object.DestroyImmediate(go);
+                Registered.Clear();
+                Props.Clear();
+            }
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // Plumbing
+        // ------------------------------------------------------------------------------------------------
+
+        private void Check(bool ok, string label)
+        {
+            _checks++;
+            if (!ok)
+            {
+                _failures++;
+                Debug.LogError($"{Tag} FAIL {label}");
+            }
+        }
+
+        private void Near(float expected, float actual, float tolerance, string label)
+        {
+            Check(Mathf.Abs(expected - actual) <= tolerance, $"{label} (expected {expected:F4}, got {actual:F4})");
+        }
+
+        private Scenario NewScenario(WeaponData weapon, Vector3? eye = null, float yaw = 0f, float pitch = 0f)
+        {
+            Scenario s = new Scenario();
+            s.Who = new Swinger { CombatId = CombatRegistry.AllocateId(), Weapon = weapon, Yaw = yaw, Pitch = pitch };
+            s.Who.Eye = Origin + (eye ?? new Vector3(0f, 1.8f, 0f));
+            CombatRegistry.Register(s.Who.CombatId, s.Who);
+            s.Registered.Add(s.Who);
+            _scenarioCleanup.Add(s);
+            return s;
+        }
+
+        private Dummy AddBody(Scenario s, Vector3 center, float radius = 0.3f, HitLocation location = HitLocation.Body)
+        {
+            center += Origin;
+            Dummy d = new Dummy { CombatId = CombatRegistry.AllocateId(), Center = center };
+            d.Shapes.Add(new HitShape(location, center, center, radius));
+            CombatRegistry.Register(d.CombatId, d);
+            s.Targets.Add(d);
+            s.Registered.Add(d);
+            return d;
+        }
+
+        private GameObject AddWall(Scenario s, Vector3 center, Vector3 size)
+        {
+            GameObject wall = new GameObject("FlowGate_Wall");
+            wall.transform.position = center + Origin;
+            BoxCollider box = wall.AddComponent<BoxCollider>();
+            box.size = size;
+            int level = LayerMask.NameToLayer(GameConfig.LevelLayerName);
+            if (level >= 0) wall.layer = level;
+            s.Props.Add(wall);
+            Physics.SyncTransforms();
+            return wall;
+        }
+
+        private MeleeSwingIntent Intent(Swinger who, int step, int pattern, string weaponId = null, int? instigator = null)
+        {
+            int id = instigator ?? who.CombatId;
+            return new MeleeSwingIntent(id, weaponId ?? (who.Weapon != null ? who.Weapon.weaponId : string.Empty), pattern, step,
+                who.Yaw, who.Pitch, CombatRegistry.NextSequence(id));
+        }
+
+        /// <summary>The chain's own pattern for a step of the weapon the swinger holds.</summary>
+        private static int ChainPattern(WeaponData weapon, int step) =>
+            weapon.HasComboChain && step >= 0 && step < weapon.comboSteps.Length ? weapon.comboSteps[step].patternIndex : 0;
+
+        private bool Begin(Scenario s, int step, out int id, out string reason) =>
+            _authority.TryBeginMeleeSwing(Intent(s.Who, step, ChainPattern(s.Who.Weapon, step)), out id, out reason);
+
+        private bool BeginForged(Swinger who, int step, int pattern, out string reason, string weaponId = null) =>
+            _authority.TryBeginMeleeSwing(Intent(who, step, pattern, weaponId), out _, out reason);
+
+        /// <summary>Steps the authority clock until the swing is finished (or 4 s). Returns the final status.</summary>
+        private MeleeSwingStatus Finish(int id, float dt = 0.005f)
+        {
+            float simulated = 0f;
+            MeleeSwingStatus status = default;
+            while (simulated < 4f)
+            {
+                _clock += dt;
+                simulated += dt;
+                _authority.StepSwings();
+                if (_authority.TryGetMeleeSwingStatus(id, out status) && status.Finished) break;
+            }
+
+            _authority.TryGetMeleeSwingStatus(id, out status);
+            return status;
+        }
+
+        /// <summary>Begin + run to the end of one chain step. Returns the status (default when refused).</summary>
+        private MeleeSwingStatus SwingStep(Scenario s, int step, out bool accepted, out string reason)
+        {
+            accepted = Begin(s, step, out int id, out reason);
+            return accepted ? Finish(id) : default;
+        }
+
+        private void Advance(float seconds)
+        {
+            _clock += seconds;
+            _authority.StepSwings();
+        }
+
+        private static MeleeSwingHit HitOn(MeleeSwingStatus status, Dummy d)
+        {
+            for (int i = 0; i < status.Hits.Count; i++) if (status.Hits[i].TargetCombatId == d.CombatId) return status.Hits[i];
+            return default;
+        }
+
+        private static bool WasHit(MeleeSwingStatus status, Dummy d)
+        {
+            for (int i = 0; i < status.Hits.Count; i++) if (status.Hits[i].TargetCombatId == d.CombatId) return true;
+            return false;
+        }
+
+        private void ZonesOff() { _authority.ImpactZonesEnabled = false; }
+        private void ZonesOn() { _authority.ImpactZonesEnabled = true; }
+
+        // ------------------------------------------------------------------------------------------------
+        // Run
+        // ------------------------------------------------------------------------------------------------
+
+        private IEnumerator Start()
+        {
+            yield return null;
+            yield return null;
+
+            Section("setup and data", SetupAndData);
+            Section("combo chain: multipliers, window, finisher", ComboChain);
+            Section("swing end without a tick", NoTickNeeded);
+            Section("combo chain: forged steps", ForgedSteps);
+            Section("combo chain: resets", ChainResets);
+            Section("rapier thrust chain", RapierChain);
+            Section("impact zones", ImpactZones);
+            Section("hit slow (authority rules)", HitSlowRules);
+
+            foreach (IEnumerator part in new[] { RigSections() })
+            {
+                IEnumerator e = part;
+                while (true)
+                {
+                    bool more = false;
+                    try { more = e.MoveNext(); }
+                    catch (Exception ex) { _failures++; Debug.LogException(ex); }
+                    if (!more) break;
+                    yield return e.Current;
+                }
+            }
+
+            foreach (IDisposable d in _scenarioCleanup) d.Dispose();
+            foreach (UnityEngine.Object o in _cleanup) if (o != null) Destroy(o);
+
+            Debug.Log($"{Tag} {(_failures == 0 ? "PASS" : "FAIL")} checks={_checks} failures={_failures}");
+            EditorApplication.Exit(_failures == 0 ? 0 : 1);
+        }
+
+        private void Section(string name, Action body)
+        {
+            int checksBefore = _checks;
+            int failuresBefore = _failures;
+            try { body(); }
+            catch (Exception e)
+            {
+                _failures++;
+                Debug.LogError($"{Tag} FAIL section '{name}' threw");
+                Debug.LogException(e);
+            }
+            Debug.Log($"{Tag} section '{name}': {_checks - checksBefore} checks, {_failures - failuresBefore} failures");
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // 1. setup and data
+        // ------------------------------------------------------------------------------------------------
+
+        private void SetupAndData()
+        {
+            _sword = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_AshenShortSword.asset");
+            _rapier = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberRapier.asset");
+            _shield = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberbulwarkShield.asset");
+            _crossbow = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberCrossbow.asset");
+            _bow = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_HollowBow.asset");
+            _claw = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_HollowClaw.asset");
+            _maul = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_WardenMaul.asset");
+            Check(_sword != null && _rapier != null && _shield != null && _crossbow != null && _bow != null && _claw != null && _maul != null, "weapon assets are available");
+            if (_sword == null || _rapier == null || _shield == null || _crossbow == null || _bow == null || _claw == null || _maul == null) throw new InvalidOperationException("weapon assets missing");
+
+            GameConfig sceneConfig = AssetDatabase.LoadAssetAtPath<GameConfig>(EmberdelvePaths.Data + "/EmberdelveGameConfig.asset");
+            _table = sceneConfig != null && sceneConfig.hitLocations != null ? sceneConfig.hitLocations : HitLocationTable.Default;
+            Check(sceneConfig != null && sceneConfig.flow != null, "the game config carries the D1b flow tunables");
+            if (sceneConfig != null && sceneConfig.flow != null)
+            {
+                Near(0.30f, sceneConfig.flow.guardBreakReductionScale, 1e-6f, "tunable: a broken guard keeps 30 percent of its mitigation");
+                Near(0.80f, sceneConfig.flow.guardStaggerSeconds, 1e-6f, "tunable: guard stagger 0.8 s");
+                Near(0.60f, sceneConfig.flow.guardStaggerMoveMultiplier, 1e-6f, "tunable: guard stagger move x0.6");
+            }
+
+            _config = ScriptableObject.CreateInstance<GameConfig>();
+            _cleanup.Add(_config);
+            _config.levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
+            _config.hitLocations = null;
+
+            GameObject go = new GameObject("CombatFlowGate_Authority");
+            _cleanup.Add(go);
+            _authority = go.AddComponent<LocalCombatAuthority>();
+            typeof(LocalCombatAuthority).GetField("config", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(_authority, _config);
+            _authority.SetClock(() => _clock);
+            _authority.AutoStepSwings = false;
+            _authority.ImpactZonesEnabled = false;      // each section says when it turns the zones on
+
+            // ---- sword chain data: slash, slash, overhead at 1.00 / 1.05 / 1.10
+            Check(_sword.HasComboChain && _sword.comboSteps.Length == 3, "the sword has a three-step combo chain");
+            Check(_sword.comboSteps[0].patternIndex == 0 && _sword.comboSteps[1].patternIndex == 1 && _sword.comboSteps[2].patternIndex == 2,
+                "sword chain patterns: slash L->R, slash R->L, overhead");
+            Near(1.00f, _sword.comboSteps[0].damageMultiplier, 1e-6f, "sword step 1 multiplier 1.00");
+            Near(1.05f, _sword.comboSteps[1].damageMultiplier, 1e-6f, "sword step 2 multiplier 1.05");
+            Near(1.10f, _sword.comboSteps[2].damageMultiplier, 1e-6f, "sword step 3 multiplier 1.10");
+            Near(0.70f, _sword.comboWindow, 1e-6f, "sword combo window 0.70 s after the recovery begins");
+            Near(0.35f, _sword.comboFinisherRecovery, 1e-6f, "sword finisher recovery +0.35 s");
+            Check(_sword.swingPatterns[0].kind == SwingKind.HorizontalLeftToRight && _sword.swingPatterns[1].kind == SwingKind.HorizontalRightToLeft
+                  && _sword.swingPatterns[2].kind == SwingKind.Overhead, "the chain's patterns are the slash, the back slash and the overhead");
+            foreach (SwingPatternData p in _sword.swingPatterns)
+            {
+                Near(1f, p.damageMultiplier, 1e-6f, p.patternId + ": the pattern shape is x1 (the multiplier is the chain's)");
+                Near(0.85f, p.windupMoveMultiplier, 1e-6f, p.patternId + ": windup move x0.85");
+                Near(0.70f, p.activeMoveMultiplier, 1e-6f, p.patternId + ": hit-phase move x0.70");
+                Near(0.85f, p.recoveryMoveMultiplier, 1e-6f, p.patternId + ": recovery move x0.85");
+            }
+
+            Check(_rapier.HasComboChain && _rapier.comboSteps.Length == 3 && _rapier.comboSteps[0].patternIndex == 0 && _rapier.comboSteps[1].patternIndex == 0
+                  && _rapier.comboSteps[2].patternIndex == 0, "the rapier chain is three thrusts");
+            Near(1.00f, _rapier.comboSteps[0].damageMultiplier, 1e-6f, "rapier step 1 multiplier 1.00");
+            Near(1.05f, _rapier.comboSteps[1].damageMultiplier, 1e-6f, "rapier step 2 multiplier 1.05");
+            Near(1.10f, _rapier.comboSteps[2].damageMultiplier, 1e-6f, "rapier step 3 multiplier 1.10");
+
+            // ---- the other D1b data
+            Near(0.7f, _sword.ImpactMultiplier(0f), 1e-6f, "sword zone: hilt end 0.7");
+            Near(0.7f, _sword.ImpactMultiplier(0.34f), 1e-6f, "sword zone: still 0.7 just below 0.35");
+            Near(0.9f, _sword.ImpactMultiplier(0.35f), 1e-6f, "sword zone: 0.9 from 0.35");
+            Near(0.9f, _sword.ImpactMultiplier(0.69f), 1e-6f, "sword zone: 0.9 up to 0.7");
+            Near(1.0f, _sword.ImpactMultiplier(0.70f), 1e-6f, "sword zone: the tip band is full damage from 0.7");
+            Near(1.0f, _sword.ImpactMultiplier(1f), 1e-6f, "sword zone: tip");
+            Near(0.7f, _sword.ImpactMultiplier(float.NaN), 1e-6f, "a NaN contact parameter falls back to the first band");
+            Near(1.0f, _crossbow.ImpactMultiplier(0.1f), 1e-6f, "a weapon without bands does full damage everywhere");
+            Near(0.9f, _sword.hitSlowMultiplier, 1e-6f, "sword hit slow x0.9");
+            Near(0.6f, _sword.hitSlowDuration, 1e-6f, "sword hit slow 0.6 s");
+            Near(0.75f, _maul.hitSlowMultiplier, 1e-6f, "maul hit slow x0.75");
+            Near(1.5f, _maul.hitSlowDuration, 1e-6f, "maul hit slow 1.5 s");
+            Near(10f, _sword.heldMoveSpeedPenalty, 1e-6f, "sword held penalty 10 points");
+            Near(5f, _rapier.heldMoveSpeedPenalty, 1e-6f, "rapier held penalty 5 points");
+            Near(8f, _shield.heldMoveSpeedPenalty, 1e-6f, "shield held penalty 8 points");
+            Near(0f, _bow.heldMoveSpeedPenalty + _crossbow.heldMoveSpeedPenalty, 1e-6f, "ranged weapons carry no held penalty yet");
+            Near(10f, _sword.impactPower, 1e-6f, "sword impact power 10");
+            Near(20f, _shield.impactResist, 1e-6f, "heater shield impact resist 20");
+            Near(30f, _maul.impactPower, 1e-6f, "maul impact power 30");
+            Check(!_shield.CanParry && !_shield.EffectiveCapabilities.HasFlag(DefenseCapability.Parry), "the shield cannot parry (data)");
+            Near(0.65f, AssetDatabase.LoadAssetAtPath<CharacterClassData>(EmberdelvePaths.Data + "/Class_Warrior.asset").guardSpeedMultiplier, 1e-6f, "warrior blocking move multiplier is 0.65");
+
+            // pure rules
+            Check(CombatFlowRules.IsGuardBroken(30f, 20f) && CombatFlowRules.IsGuardBroken(20f, 20f) && !CombatFlowRules.IsGuardBroken(19.99f, 20f),
+                "guard break rule: power >= resist breaks, below does not");
+            Check(!CombatFlowRules.IsGuardBroken(0f, 0f) && !CombatFlowRules.IsGuardBroken(0f, 20f), "a source with no impact power (a skill) never breaks a guard");
+            Near(1f - 18f / 300f, CombatFlowRules.HeldFactor(_sword, _shield, true), 1e-6f, "held factor sword + shield = 1 - 18/300");
+            Near(1f - 10f / 300f, CombatFlowRules.HeldFactor(_sword, _shield, false), 1e-6f, "a shield that does not contribute adds no penalty");
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // 2. combo chain
+        // ------------------------------------------------------------------------------------------------
+
+        private void ComboChain()
+        {
+            ZonesOff();
+            float baseDamage = _sword.baseDamage;
+            float[] steps = { 1.00f, 1.05f, 1.10f };
+
+            // full chain on one body target, zero armour: damage = base x step multiplier, exactly, through the real damage path
+            {
+                Scenario s = NewScenario(_sword);
+                Dummy d = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                for (int step = 0; step < 3; step++)
+                {
+                    float started = _clock;
+                    MeleeSwingStatus st = SwingStep(s, step, out bool ok, out string why);
+                    Check(ok, $"chain step {step + 1} is accepted ({why})");
+                    Check(st.ComboStep == step, $"the status reports combo step {step}");
+                    Check(st.Hits.Count == 1, $"step {step + 1} hits the target once ({st.Hits.Count})");
+                    if (st.Hits.Count == 1)
+                    {
+                        Near(baseDamage * steps[step], st.Hits[0].Amount, 1e-3f, $"step {step + 1} damage = base {baseDamage} x {steps[step]:F2} (zero armour)");
+                        Near(steps[step], st.StepMultiplier, 1e-6f, $"step {step + 1} reports its multiplier");
+                    }
+
+                    if (step < 2)
+                    {
+                        Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int next) && next == step + 1, $"after step {step + 1} the authority expects step {step + 2} (it said {next})");
+                    }
+                    else
+                    {
+                        Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int after) && after == 0, "after the last step the chain is complete (expected step 0)");
+                    }
+                }
+
+                Check(d.Received.Count == 3, "three hits arrived at the target");
+                Cooldown(3f);
+                s.Dispose();
+            }
+
+            // with armour: the step multiplier is applied before the armour rule, so the number is exact
+            foreach (float armour in new[] { 50f, 100f })
+            {
+                Scenario s = NewScenario(_sword);
+                Dummy d = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                d.Armor = armour;
+                SwingStep(s, 0, out _, out _);
+                SwingStep(s, 1, out _, out _);
+                MeleeSwingStatus third = SwingStep(s, 2, out bool ok, out string why);
+                Check(ok && third.Hits.Count == 1, $"armour {armour}: step 3 accepted and hits ({why})");
+                if (third.Hits.Count == 1)
+                {
+                    float expected = baseDamage * 1.10f * 100f / (100f + armour);
+                    Near(expected, third.Hits[0].Amount, 1e-3f, $"step 3 with armour {armour}: base x 1.10 x 100/(100+{armour})");
+                }
+                Cooldown(3f);
+                s.Dispose();
+            }
+
+            // timing: step 2's windup is 0.85 of the pattern's, the finisher has +0.35 s recovery
+            {
+                Scenario s = NewScenario(_sword);
+                AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                MeleeSwingStatus a = SwingStep(s, 0, out _, out _);
+                MeleeSwingStatus b = SwingStep(s, 1, out _, out _);
+                float startOfThird = _clock;
+                Check(Begin(s, 2, out int thirdId, out _), "timing: step 3 accepted");
+                _authority.TryGetMeleeSwingStatus(thirdId, out MeleeSwingStatus third);
+                SwingPatternData p0 = _sword.swingPatterns[0], p1 = _sword.swingPatterns[1], p2 = _sword.swingPatterns[2];
+                Near(p0.windupTime, a.Timing.Windup, 1e-5f, "step 1 uses the pattern's own windup");
+                Near(p1.windupTime * 0.85f, b.Timing.Windup, 1e-5f, "step 2 winds up at x0.85 (data tweak)");
+                Near(p1.recoveryTime, b.Timing.Recovery, 1e-5f, "step 2 recovery as authored");
+                Near(p2.recoveryTime + _sword.comboFinisherRecovery, third.Timing.Recovery, 1e-5f, "step 3 (the finisher) recovers +0.35 s longer");
+                Near(p2.TotalTime + _sword.comboFinisherRecovery, third.Timing.Total, 1e-5f, "the finisher's whole swing is longer by exactly the finisher recovery");
+
+                // the authority holds the next swing back for the finisher's full length
+                Finish(thirdId);
+                float finisherEnd = startOfThird + third.Timing.Total;
+                _clock = startOfThird + p2.TotalTime + 0.05f;
+                Check(!BeginForged(s.Who, 0, 0, out string tooSoon) && tooSoon.Contains("cooldown"), $"a new chain cannot start before the finisher's recovery ends ({tooSoon})");
+                _clock = finisherEnd + 0.01f;
+                Check(Begin(s, 0, out int again, out string okReason), $"after the finisher's recovery a fresh chain starts ({okReason})");
+                Finish(again);
+                Cooldown(3f);
+                s.Dispose();
+            }
+
+            // the combo window opens when the RECOVERY begins and lasts comboWindow
+            {
+                Scenario s = NewScenario(_sword);
+                AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                float t0 = _clock;
+                Check(Begin(s, 0, out int id, out _), "window: step 1 accepted");
+                MeleeSwingStatus st = Finish(id);
+                float recoveryStart = t0 + st.Timing.ActiveEnd;
+                float windowEnd = recoveryStart + _sword.comboWindow;
+
+                _clock = windowEnd - 0.02f;
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int inside) && inside == 1, "window: 20 ms before the window ends the authority still expects step 2");
+                _clock = windowEnd + 0.05f;
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int outside) && outside == 0, "window: 50 ms after it ends the chain has reset to step 0");
+                Check(!Begin(s, 1, out _, out string late) && late.Contains("combo window expired"), $"window: step 2 after the window is refused ({late})");
+                float tFresh = _clock;
+                Check(Begin(s, 0, out int fresh, out string freshWhy), $"window: step 1 after the window starts a fresh chain ({freshWhy})");
+                Finish(fresh);
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int restarted) && restarted == 1, "window: the fresh chain expects step 2 again");
+
+                // continuing inside the window works, even right at the end of it
+                _authority.TryGetMeleeSwingStatus(fresh, out MeleeSwingStatus freshStatus);
+                float lastMoment = tFresh + freshStatus.Timing.ActiveEnd + _sword.comboWindow - 0.01f;
+                _clock = lastMoment;
+                Check(Begin(s, 1, out int late2, out string lateWhy), $"window: step 2 accepted 10 ms before the window closes ({lateWhy})");
+                Finish(late2);
+                Cooldown(3f);
+                s.Dispose();
+            }
+
+            // a hit taken does NOT reset the chain (documented rule); another entity's chain is independent
+            {
+                Scenario s = NewScenario(_sword);
+                AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                Scenario other = NewScenario(_sword, new Vector3(40f, 1.8f, 0f));
+                SwingStep(s, 0, out _, out _);
+                s.Who.ApplyDamage(new DamageInfo(30f, Vector3.zero, Vector3.forward, Vector3.zero, 999, EntityKind.Enemy, DamageType.Physical, false, false, 0f));
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int still) && still == 1, "taking a hit does not reset the chain (it still expects step 2)");
+                Check(!Begin(other, 1, out _, out string otherWhy) && otherWhy.Contains("no running combo chain"), $"another entity cannot ride on this chain ({otherWhy})");
+                MeleeSwingStatus second = SwingStep(s, 1, out bool ok, out string why);
+                Check(ok, $"step 2 is accepted after taking a hit ({why})");
+                Cooldown(3f);
+                s.Dispose();
+                other.Dispose();
+            }
+        }
+
+        private void Cooldown(float seconds) => _clock += seconds;
+
+        private void NoTickNeeded()
+        {
+            // a swing whose time is over is not "in progress" even if no tick ran since (found in the real-time smoke: the
+            // finisher's length equals the client cooldown, so a press one frame after it was refused until the next fixed step)
+            ZonesOff();
+            Scenario s = NewScenario(_sword);
+            AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+            Check(Begin(s, 0, out int id, out _), "no tick: step 1 begins");
+            _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus st);
+            Cooldown(st.Timing.Total + 0.001f);
+            Check(Begin(s, 1, out int next, out string why), $"no tick: step 2 is accepted right after step 1's last instant without any step in between ({why})");
+            Cooldown(0.2f);
+            Check(!Begin(s, 2, out _, out why) && why.Contains("in progress"), $"no tick: a swing really still running is still refused ({why})");
+            Cooldown(3f);
+            _authority.StepSwings();
+            s.Dispose();
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // 3. forged combo steps
+        // ------------------------------------------------------------------------------------------------
+
+        private void ForgedSteps()
+        {
+            ZonesOff();
+            Scenario s = NewScenario(_sword);
+            Dummy d = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+            Swinger who = s.Who;
+
+            // no chain yet: every step above 0 is refused with the authority's own reason
+            Check(!BeginForged(who, 1, 1, out string r) && r.Contains("no running combo chain"), $"step 2 as the first swing is refused ({r})");
+            Check(!BeginForged(who, 2, 2, out r) && r.Contains("no running combo chain"), $"step 3 as the first swing is refused ({r})");
+            Check(!BeginForged(who, 3, 0, out r) && r.Contains("does not exist"), $"step 4 does not exist ({r})");
+            Check(!BeginForged(who, -1, 0, out r) && r.Contains("does not exist"), $"a negative step does not exist ({r})");
+            Check(!BeginForged(who, 0, 1, out r) && r.Contains("not the chain's pattern"), $"step 1 with the second step's pattern is refused ({r})");
+            Check(!BeginForged(who, 0, 2, out r) && r.Contains("not the chain's pattern"), $"step 1 with the overhead is refused: the overhead is only reachable as step 3 ({r})");
+            Check(!BeginForged(who, 0, 9, out r) && r.Contains("not the chain's pattern"), $"step 1 with an unknown pattern is refused ({r})");
+            Check(_authority.ActiveSwingCount == 0 && d.Received.Count == 0, "none of the forged first requests started a swing or dealt damage");
+
+            // a legitimate step 1, then every kind of forged continuation
+            MeleeSwingStatus first = SwingStep(s, 0, out bool ok, out string why);
+            Check(ok, $"step 1 accepted ({why})");
+            Check(_authority.TryGetExpectedComboStep(who.CombatId, out int expected) && expected == 1, "the authority expects step 2");
+            int hitsAfterFirst = d.Received.Count;
+
+            Check(!BeginForged(who, 2, 2, out r) && r.Contains("not the expected next step 1"), $"skipping ahead to step 3 is refused ({r})");
+            Check(!BeginForged(who, 3, 0, out r) && r.Contains("does not exist"), $"skipping to a step that does not exist is refused ({r})");
+            Check(!BeginForged(who, 1, 2, out r) && r.Contains("not the chain's pattern"), $"step 2 with the overhead pattern (wrong chain slot) is refused ({r})");
+            Check(!BeginForged(who, 1, 0, out r) && r.Contains("not the chain's pattern"), $"step 2 with the first pattern is refused ({r})");
+            Check(!BeginForged(who, 1, 1, out r, "ember_rapier") && r.Contains("not the equipped weapon"), $"the rapier's chain cannot be claimed with the sword in hand ({r})");
+            Check(_authority.TryGetExpectedComboStep(who.CombatId, out expected) && expected == 1, "refused forgeries left the authority's chain state unchanged");
+
+            // the legitimate step 2 is still accepted afterwards (no cooldown or sequence was spent by the refusals)
+            MeleeSwingStatus second = SwingStep(s, 1, out ok, out why);
+            Check(ok, $"step 2 is accepted after the forged attempts ({why})");
+
+            // repeat: step 2 again is refused, the chain now expects step 3
+            Check(_authority.TryGetExpectedComboStep(who.CombatId, out expected) && expected == 2, "the authority now expects step 3");
+            Check(!BeginForged(who, 1, 1, out r) && r.Contains("not the expected next step 2"), $"repeating step 2 is refused ({r})");
+
+            // step 3 is accepted; claiming it again afterwards (replay) is refused because the chain is complete
+            MeleeSwingStatus third = SwingStep(s, 2, out ok, out why);
+            Check(ok, $"step 3 accepted ({why})");
+            Check(!BeginForged(who, 2, 2, out r) && r.Contains("no running combo chain"), $"repeating step 3 after the finisher is refused ({r})");
+            Check(d.Received.Count == hitsAfterFirst + 2, "exactly the two legitimate follow-up hits landed");
+
+            // a stale sequence number cannot ride the chain either
+            Cooldown(3f);
+            SwingStep(s, 0, out ok, out why);
+            int lastSequence = _authority.LastSequenceFor(who.CombatId);
+            MeleeSwingIntent replay = new MeleeSwingIntent(who.CombatId, _sword.weaponId, 1, 1, who.Yaw, who.Pitch, lastSequence);
+            Check(!_authority.TryBeginMeleeSwing(replay, out _, out r) && r.Contains("stale"), $"a replayed command sequence is refused on a chain step ({r})");
+            Cooldown(3f);
+
+            // the rapier's chain forgeries (wrong chain)
+            {
+                Scenario rs = NewScenario(_rapier);
+                AddBody(rs, new Vector3(0f, 1.6f, 1.8f), 0.33f);
+                Check(!BeginForged(rs.Who, 1, 0, out r) && r.Contains("no running combo chain"), $"rapier step 2 without step 1 is refused ({r})");
+                Check(!BeginForged(rs.Who, 0, 2, out r), $"a sword pattern index on the rapier is refused ({r})");
+                Check(!BeginForged(rs.Who, 0, 0, out r, "ashen_short_sword") && r.Contains("not the equipped weapon"), $"the sword's id on the rapier is refused ({r})");
+                rs.Dispose();
+            }
+
+            s.Dispose();
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // 4. resets: weapon swap, death, wall stop
+        // ------------------------------------------------------------------------------------------------
+
+        private void ChainResets()
+        {
+            ZonesOff();
+
+            // weapon swap between swings
+            {
+                Scenario s = NewScenario(_sword);
+                AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                SwingStep(s, 0, out _, out _);
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int e) && e == 1, "swap: step 2 expected before the swap");
+                s.Who.Weapon = _rapier;
+                _authority.StepSwings();
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out e) && e == 0, "swap: with another weapon in hand the expected step is 0");
+                s.Who.Weapon = _sword;
+                _authority.StepSwings();
+                Check(!BeginForged(s.Who, 1, 1, out string r) && r.Contains("no running combo chain"), $"swap: swapping back does not restore the chain ({r})");
+                Check(Begin(s, 0, out int id, out _), "swap: step 1 starts a fresh chain");
+                Finish(id);
+                Cooldown(3f);
+                s.Dispose();
+            }
+
+            // weapon swap in the middle of a swing
+            {
+                Scenario s = NewScenario(_sword);
+                AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                Check(Begin(s, 0, out int id, out _), "mid-swing swap: step 1 begins");
+                Advance(0.1f);
+                s.Who.Weapon = _rapier;
+                Advance(0.05f);
+                _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus st);
+                Check(st.Finished && st.EndReason == SwingEndReason.WeaponChanged, "mid-swing swap: the swing ended as WeaponChanged");
+                s.Who.Weapon = _sword;
+                _authority.StepSwings();
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int e) && e == 0, "mid-swing swap: no chain survives");
+                Cooldown(3f);
+                s.Dispose();
+            }
+
+            // death between swings and during a swing
+            {
+                Scenario s = NewScenario(_sword);
+                AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                SwingStep(s, 0, out _, out _);
+                s.Who.Dead = true;
+                _authority.StepSwings();
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int e) && e == 0, "death: a dead instigator has no chain");
+                Check(!BeginForged(s.Who, 1, 1, out string r) && r.Contains("dead"), $"death: a dead instigator cannot swing ({r})");
+                s.Who.Dead = false;
+                Check(!BeginForged(s.Who, 1, 1, out r) && r.Contains("no running combo chain"), $"death: after respawn step 2 is refused ({r})");
+                Check(Begin(s, 0, out int id, out _), "death: a fresh chain starts after respawn");
+                Advance(0.1f);
+                s.Who.Dead = true;
+                Advance(0.05f);
+                s.Who.Dead = false;
+                _authority.StepSwings();
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out e) && e == 0, "death mid-swing: no chain survives");
+                Cooldown(3f);
+                s.Dispose();
+            }
+
+            // review D1b: a swing stopped by a wall does NOT break the combo; its window restarts when the recoil ends
+            {
+                Scenario s = NewScenario(_sword);
+                AddBody(s, new Vector3(0f, 1.5f, 3.0f), 0.33f);
+                SwingStep(s, 0, out _, out _);
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int e) && e == 1, "wall: control, the chain continues after a free swing");
+                AddWall(s, new Vector3(0f, 1.8f, 1.6f), new Vector3(8f, 4f, 0.3f));
+                float t0 = _clock;
+                Check(Begin(s, 1, out int id, out _), "wall: step 2 begins towards a wall");
+                MeleeSwingStatus st = Finish(id);
+                Check(st.WallStopped, $"wall: the swing was stopped by the wall ({st.EndReason})");
+                float stopTime = st.Timing.Windup + st.Timing.Active * st.WallContactSample / Mathf.Max(1, st.SampleCount);
+                float recoilEnd = t0 + stopTime + st.Timing.WallRecoil;
+                float windowEnd = recoilEnd + _sword.comboWindow;
+                _clock = windowEnd - 0.02f;
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out e) && e == 2, "wall: the combo survived the wall stop; 20 ms before the window (measured from the recoil end) closes step 3 is still expected");
+                _clock = windowEnd + 0.05f;
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out e) && e == 0, "wall: 50 ms after the window (from the recoil end) the chain has reset");
+                _clock = windowEnd - 0.02f;
+                Check(Begin(s, 2, out int third, out string thirdWhy), $"wall: step 3 is accepted inside the window after a wall stop ({thirdWhy})");
+                Finish(third);
+                Cooldown(3f);
+                s.Dispose();
+            }
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // 5. rapier chain
+        // ------------------------------------------------------------------------------------------------
+
+        private void RapierChain()
+        {
+            ZonesOff();
+            float[] steps = { 1.00f, 1.05f, 1.10f };
+            Scenario s = NewScenario(_rapier);
+            AddBody(s, new Vector3(0f, 1.6f, 1.8f), 0.33f);
+            for (int step = 0; step < 3; step++)
+            {
+                MeleeSwingStatus st = SwingStep(s, step, out bool ok, out string why);
+                Check(ok && st.Hits.Count == 1, $"rapier step {step + 1} accepted and hits ({why})");
+                if (st.Hits.Count == 1) Near(_rapier.baseDamage * steps[step], st.Hits[0].Amount, 1e-3f, $"rapier thrust {step + 1} damage = base x {steps[step]:F2}");
+                float expectedWindup = _rapier.swingPatterns[0].windupTime * _rapier.comboSteps[step].windupScale;
+                Near(expectedWindup, st.Timing.Windup, 1e-4f, $"rapier step {step + 1} windup follows the chain data (x{_rapier.comboSteps[step].windupScale:F2})");
+                Advance(0.1f);
+            }
+            Cooldown(3f);
+            s.Dispose();
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // 6. impact zones
+        // ------------------------------------------------------------------------------------------------
+
+        private void ImpactZones()
+        {
+            ZonesOn();
+
+            // a straight, stationary 1.0 m blade along the aim: the contact parameter is exactly the target's position
+            // along it. Runtime pattern + runtime weapon clone, no assets are written.
+            SwingPatternData straight = ScriptableObject.CreateInstance<SwingPatternData>();
+            _cleanup.Add(straight);
+            straight.patternId = "flow_gate_straight";
+            straight.kind = SwingKind.Thrust;
+            straight.windupTime = 0.1f;
+            straight.activeTime = 0.1f;
+            straight.recoveryTime = 0.1f;
+            straight.sweepRadius = 0.1f;
+            straight.reachScale = 1f;
+            straight.reachInset = 0.2f;
+            straight.maxTargets = 4;
+            straight.contactWindow = 0f;
+            straight.keys = new[]
+            {
+                new SwingKey(0f, new Vector3(0f, 0f, 0.30f), 0f, 0f),
+                new SwingKey(1f, new Vector3(0f, 0f, 0.30f), 0f, 0f)
+            };
+            WeaponData blade = UnityEngine.Object.Instantiate(_sword);
+            _cleanup.Add(blade);
+            blade.weaponId = "flow_gate_blade";
+            blade.comboSteps = new ComboStep[0];
+            blade.swingPatterns = new[] { straight };
+            blade.reach = 1.0f;
+            blade.hitSphereRadius = 0.5f;           // effective reach 1.5, blade = 1.5 - 0.1 - 0.2 = 1.2 m
+            float bladeLength = straight.BladeLength(blade);
+            Near(1.2f, bladeLength, 1e-4f, "the test blade is 1.2 m");
+            Near(0.7f, blade.ImpactMultiplier(0.1f), 1e-6f, "the test blade inherits the sword's bands");
+
+            // target spheres beside the blade at known positions along it (0.15 m lateral keeps them touching: r 0.1 + sweep 0.1)
+            (float t, float zone)[] cases = { (0.05f, 0.7f), (0.30f, 0.7f), (0.45f, 0.9f), (0.65f, 0.9f), (0.80f, 1.0f), (0.97f, 1.0f) };
+            foreach ((float t, float zone) c in cases)
+            {
+                Scenario s = NewScenario(blade);
+                float z = 0.30f + c.t * bladeLength;
+                Dummy d = AddBody(s, new Vector3(0.15f, 1.8f, z), 0.1f);
+                Check(Begin(s, 0, out int id, out string why), $"zone t={c.t:F2}: swing accepted ({why})");
+                MeleeSwingStatus st = Finish(id);
+                Check(st.Hits.Count == 1, $"zone t={c.t:F2}: the target is hit");
+                if (st.Hits.Count == 1)
+                {
+                    MeleeSwingHit h = st.Hits[0];
+                    Near(c.t, h.ContactT, 0.01f, $"the authority measured the contact at {c.t:F2} along the blade");
+                    Near(c.zone, h.ZoneMultiplier, 1e-6f, $"zone multiplier at t={c.t:F2} is {c.zone}");
+                    Near(blade.baseDamage * c.zone, h.Amount, 1e-3f, $"damage at t={c.t:F2} = base x {c.zone} (tip full damage, lower on the blade less)");
+                }
+                Cooldown(3f);
+                s.Dispose();
+            }
+
+            // the sword's own slash: a target near the hilt end is hit weaker than one at the tip, by the reported contact
+            {
+                Scenario near = NewScenario(_sword);
+                Dummy dn = AddBody(near, new Vector3(0f, 1.5f, 1.0f), 0.3f);
+                MeleeSwingStatus sn = SwingStep(near, 0, out _, out _);
+                Cooldown(3f);
+                near.Dispose();
+
+                Scenario far = NewScenario(_sword);
+                Dummy df = AddBody(far, new Vector3(0f, 1.5f, 2.0f), 0.3f);
+                MeleeSwingStatus sf = SwingStep(far, 0, out _, out _);
+                Cooldown(3f);
+                far.Dispose();
+
+                Check(sn.Hits.Count == 1 && sf.Hits.Count == 1, "sword slash: both the near and the far target are hit");
+                if (sn.Hits.Count == 1 && sf.Hits.Count == 1)
+                {
+                    Debug.Log($"{Tag} sword slash contact near T={sn.Hits[0].ContactT:F3} zone={sn.Hits[0].ZoneMultiplier:F2} amount={sn.Hits[0].Amount:F3}; far T={sf.Hits[0].ContactT:F3} zone={sf.Hits[0].ZoneMultiplier:F2} amount={sf.Hits[0].Amount:F3}");
+                    Check(sn.Hits[0].ContactT < sf.Hits[0].ContactT, "sword slash: the near target is struck lower on the blade than the far one");
+                    Near(_sword.ImpactMultiplier(sn.Hits[0].ContactT), sn.Hits[0].ZoneMultiplier, 1e-6f, "sword slash near: zone = the sword's band at the reported contact");
+                    Near(_sword.ImpactMultiplier(sf.Hits[0].ContactT), sf.Hits[0].ZoneMultiplier, 1e-6f, "sword slash far: zone = the sword's band at the reported contact");
+                    Near(_sword.baseDamage * sn.Hits[0].ZoneMultiplier, sn.Hits[0].Amount, 1e-3f, "sword slash near: damage = base x zone");
+                    Near(_sword.baseDamage * sf.Hits[0].ZoneMultiplier, sf.Hits[0].Amount, 1e-3f, "sword slash far: damage = base x zone");
+                    Check(sn.Hits[0].ZoneMultiplier < sf.Hits[0].ZoneMultiplier, "sword slash: a hit lower on the blade does less damage than a hit near the tip");
+                }
+            }
+
+            // zones multiply with the chain step and the hit location (head 1.5 at the hilt end with step 3)
+            {
+                Scenario s = NewScenario(blade);
+                float z = 0.30f + 0.10f * bladeLength;
+                Dummy d = AddBody(s, new Vector3(0.15f, 1.8f, z), 0.1f, HitLocation.Head);
+                Check(Begin(s, 0, out int id, out _), "zone x location: swing begins");
+                MeleeSwingStatus st = Finish(id);
+                Check(st.Hits.Count == 1, "zone x location: hit");
+                if (st.Hits.Count == 1) Near(blade.baseDamage * 0.7f * 1.5f, st.Hits[0].Amount, 1e-3f, "zone 0.7 x head 1.5 multiply");
+                Cooldown(3f);
+                s.Dispose();
+            }
+
+            // zone x chain step 3 on armour 0: tip contact keeps the full 1.10 (the same number the chain test pinned with zones off)
+            {
+                WeaponData tipSword = UnityEngine.Object.Instantiate(_sword);
+                _cleanup.Add(tipSword);
+                tipSword.swingPatterns = new[] { straight, straight, straight };
+                tipSword.reach = 1.0f;
+                tipSword.hitSphereRadius = 0.5f;
+                tipSword.comboSteps = new[] { new ComboStep(0, 1.00f), new ComboStep(1, 1.05f), new ComboStep(2, 1.10f) };
+                Scenario s = NewScenario(tipSword);
+                Dummy d = AddBody(s, new Vector3(0.15f, 1.8f, 0.30f + 0.9f * bladeLength), 0.1f);
+                MeleeSwingStatus last = default;
+                for (int step = 0; step < 3; step++)
+                {
+                    last = SwingStep(s, step, out bool stepOk, out string stepWhy);
+                    Check(stepOk, $"tip chain: step {step + 1} accepted ({stepWhy})");
+                    Advance(0.5f);
+                }
+                Check(last.Hits.Count == 1, "tip chain: step 3 hits");
+                if (last.Hits.Count == 1)
+                {
+                    Near(1.0f, last.Hits[0].ZoneMultiplier, 1e-6f, "tip chain: the tip contact is full damage");
+                    Near(tipSword.baseDamage * 1.10f, last.Hits[0].Amount, 1e-3f, "tip chain: step 3 at the tip = base x 1.10 exactly, with the zones ON");
+                }
+                Cooldown(3f);
+                s.Dispose();
+            }
+
+            ZonesOff();
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // 7. hit slow rules
+        // ------------------------------------------------------------------------------------------------
+
+        private Dummy AddSlowable(Scenario s, Vector3 center, float radius = 0.33f)
+        {
+            Dummy d = AddBody(s, center, radius);
+            GameObject host = new GameObject("FlowGate_StatusHost");
+            s.Props.Add(host);
+            d.Status = host.AddComponent<StatusComponent>();
+            return d;
+        }
+
+        private void HitSlowRules()
+        {
+            ZonesOff();
+
+            // one hit: slow x0.9 for 0.6 s, applied once
+            {
+                Scenario s = NewScenario(_sword);
+                Dummy d = AddSlowable(s, new Vector3(0f, 1.5f, 1.8f));
+                int appliedBefore = _authority.HitSlowsApplied;
+                SwingStep(s, 0, out _, out _);
+                Check(d.Status.HasStatus(StatusKind.Slow), "hit slow: the target is slowed by the hit");
+                Near(0.9f, d.Status.SpeedMultiplier, 1e-5f, "hit slow: -10 percent move speed");
+                Near(0.6f, d.Status.RemainingOf(StatusKind.Slow), 1e-4f, "hit slow: 0.6 s");
+                Check(_authority.HitSlowsApplied == appliedBefore + 1, "hit slow: applied exactly once for one hit");
+                Check(d.Status.ActiveCount == 1, "hit slow: a single status entry");
+
+                // a second hit refreshes: still 0.6 s and still x0.9 (no stacking to 0.81, no 1.2 s)
+                Cooldown(0.1f);
+                SwingStep(s, 1, out _, out _);
+                Near(0.9f, d.Status.SpeedMultiplier, 1e-5f, "hit slow: a second hit does not stack (still x0.9, not x0.81)");
+                Near(0.6f, d.Status.RemainingOf(StatusKind.Slow), 1e-4f, "hit slow: a second hit refreshes the duration, it does not add to it");
+                Check(d.Status.ActiveCount == 1 && _authority.HitSlowsApplied == appliedBefore + 2, "hit slow: still one status entry, two applications counted");
+
+                // the strongest slow wins: a skill-strength 0.55 stays, a weaker rapier slow does not replace it
+                d.Status.ApplyStatus(new StatusSpec(StatusKind.Slow, 3f, 0.55f), 1);
+                Cooldown(3f);
+                SwingStep(s, 0, out _, out _);
+                Near(0.55f, d.Status.SpeedMultiplier, 1e-5f, "hit slow: the strongest slow wins (a sword hit does not weaken a x0.55 slow)");
+                Cooldown(3f);
+                s.Dispose();
+
+                Scenario rs = NewScenario(_rapier);
+                Dummy rd = AddSlowable(rs, new Vector3(0f, 1.6f, 1.8f));
+                SwingStep(rs, 0, out _, out _);
+                Near(0.95f, rd.Status.SpeedMultiplier, 1e-5f, "rapier hit slow is x0.95 (lighter weapon, lighter slow)");
+                Near(0.5f, rd.Status.RemainingOf(StatusKind.Slow), 1e-4f, "rapier hit slow lasts 0.5 s");
+                Cooldown(3f);
+                rs.Dispose();
+            }
+
+            // cleave: every struck target is slowed once; the data comes from the weapon, not from the intent
+            {
+                Scenario s = NewScenario(_sword);
+                Dummy a = AddSlowable(s, new Vector3(-0.6f, 1.5f, 1.7f), 0.3f);
+                Dummy b = AddSlowable(s, new Vector3(0.6f, 1.5f, 1.7f), 0.3f);
+                int before = _authority.HitSlowsApplied;
+                MeleeSwingStatus st = SwingStep(s, 0, out _, out _);
+                Check(st.Hits.Count == 2, $"cleave: both targets are hit ({st.Hits.Count})");
+                Check(a.Status.HasStatus(StatusKind.Slow) && b.Status.HasStatus(StatusKind.Slow), "cleave: both targets are slowed");
+                Check(_authority.HitSlowsApplied == before + 2, "cleave: one application per hit target");
+                string[] intentFields = Array.ConvertAll(typeof(MeleeSwingIntent).GetFields(BindingFlags.Instance | BindingFlags.Public), x => x.Name);
+                Check(Array.IndexOf(intentFields, "Slow") < 0 && Array.TrueForAll(intentFields, x => !x.ToLowerInvariant().Contains("status") && !x.ToLowerInvariant().Contains("slow")),
+                    "the swing intent has no status or slow field (statuses come from weapon data only)");
+                Cooldown(3f);
+                s.Dispose();
+            }
+
+            // a hit fully blocked by a plain guard does not slow
+            {
+                Scenario s = NewScenario(_sword);
+                Dummy d = AddSlowable(s, new Vector3(0f, 1.5f, 1.8f));
+                d.GuardReduction = 0.5f;
+                MeleeSwingStatus st = SwingStep(s, 0, out _, out _);
+                Check(st.Hits.Count == 1 && st.Hits[0].Blocked && !st.Hits[0].GuardBroken, "blocked hit: reported as blocked, not broken");
+                Check(!d.Status.HasStatus(StatusKind.Slow), "blocked hit: a blocked (not broken) hit applies no slow");
+                Cooldown(3f);
+                s.Dispose();
+            }
+
+            // the maul's heavier slow (data) on a target
+            {
+                WeaponData maul = UnityEngine.Object.Instantiate(_sword);
+                _cleanup.Add(maul);
+                maul.hitSlowMultiplier = _maul.hitSlowMultiplier;
+                maul.hitSlowDuration = _maul.hitSlowDuration;
+                Scenario s = NewScenario(maul);
+                Dummy d = AddSlowable(s, new Vector3(0f, 1.5f, 1.8f));
+                SwingStep(s, 0, out _, out _);
+                Near(0.75f, d.Status.SpeedMultiplier, 1e-5f, "a heavy weapon slows more (x0.75, data)");
+                Near(1.5f, d.Status.RemainingOf(StatusKind.Slow), 1e-4f, "a heavy weapon slows longer (1.5 s, data)");
+                Cooldown(3f);
+                s.Dispose();
+            }
+
+            // a weapon with no hit slow slows nobody
+            {
+                WeaponData plain = UnityEngine.Object.Instantiate(_sword);
+                _cleanup.Add(plain);
+                plain.hitSlowDuration = 0f;
+                plain.hitSlowMultiplier = 1f;
+                Scenario s = NewScenario(plain);
+                Dummy d = AddSlowable(s, new Vector3(0f, 1.5f, 1.8f));
+                SwingStep(s, 0, out _, out _);
+                Check(!d.Status.HasStatus(StatusKind.Slow), "a weapon with no hit slow data slows nobody");
+                Cooldown(3f);
+                s.Dispose();
+            }
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // 8. real rig: movement phases, guard, hit slow on players, stamina, HUD
+        // ------------------------------------------------------------------------------------------------
+
+        private PlayerRig _rig;
+        private readonly List<DamageInfo> _playerHits = new List<DamageInfo>();
+        private readonly List<string> _toasts = new List<string>();
+
+        private void OnPlayerDamaged(DamageInfo info) { _playerHits.Add(info); }
+        private void OnToast(string message) { _toasts.Add(message); }
+
+        private IEnumerator RigSections()
+        {
+            _rig = FindFirstObjectByType<PlayerRig>();
+            Check(_rig != null && !_rig.IsDead, "a living player rig is available");
+            if (_rig == null) yield break;
+
+            // park every enemy and take the rig to an empty spot; keep the rig's own movement ENABLED (walking is measured)
+            foreach (EnemyAgent a in FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None)) a.enabled = false;
+
+            GameObject floor = new GameObject("FlowGate_Floor");
+            floor.transform.position = Origin + new Vector3(0f, -0.5f, 0f);
+            BoxCollider floorBox = floor.AddComponent<BoxCollider>();
+            floorBox.size = new Vector3(80f, 1f, 80f);
+            int level = LayerMask.NameToLayer(GameConfig.LevelLayerName);
+            if (level >= 0) floor.layer = level;
+            _cleanup.Add(floor);
+            GameObject walkFloor = new GameObject("FlowGate_WalkFloor");
+            walkFloor.transform.position = WalkOrigin + new Vector3(0f, -0.5f, 0f);
+            walkFloor.AddComponent<BoxCollider>().size = new Vector3(80f, 1f, 80f);
+            if (level >= 0) walkFloor.layer = level;
+            _cleanup.Add(walkFloor);
+            Physics.SyncTransforms();
+
+            Teleport(Origin);
+            yield return null;
+            yield return null;
+
+            GameEvents.PlayerDamaged += OnPlayerDamaged;
+            GameEvents.ToastRaised += OnToast;
+
+            {
+                MovePhases();
+                GuardBreak();
+                EnemyClawAgainstTheRig();
+                StaminaSource();
+                HudSection();
+            }
+
+            yield return SwapLock();
+            yield return ReviewFollowups();
+
+            // real time: hit slow on the player, measured distance
+            yield return HitSlowDistance();
+            yield return StaminaMeasured();
+
+            GameEvents.PlayerDamaged -= OnPlayerDamaged;
+            GameEvents.ToastRaised -= OnToast;
+            foreach (EnemyAgent a in FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None)) a.enabled = true;
+        }
+
+        private void Teleport(Vector3 position)
+        {
+            CharacterController controller = _rig.GetComponent<CharacterController>();
+            if (controller != null) controller.enabled = false;
+            _rig.transform.SetPositionAndRotation(position + new Vector3(0f, 0.15f, 0f), Quaternion.identity);
+            if (controller != null) controller.enabled = true;
+            Physics.SyncTransforms();
+        }
+
+        // ---- move penalties --------------------------------------------------------------------------
+
+        private void MovePhases()
+        {
+            Check(_rig.ActiveWeapon == _sword, "move phases: the rig holds the sword");
+            _rig.SetGuardHeld(false);
+            _rig.Health.Heal(1000f);
+
+            float walk = _rig.Movement.ResolveWalkSpeed();
+            float held = 1f - (_sword.heldMoveSpeedPenalty + _shield.heldMoveSpeedPenalty) / 300f;
+            float idleWalk = _rig.Movement.ResolveGroundSpeed(false, false);
+            float idleSprint = _rig.Movement.ResolveGroundSpeed(true, false);
+            Near(walk * held, idleWalk, 1e-4f, $"held weapon: walk = {walk:F3} x (1 - (10 + 8)/300) = x{held:F3}");
+            Check(idleSprint > idleWalk + 0.1f, "held weapon: sprint is still faster than walk");
+
+            // the rig swings step 1 then step 2, the authority clock decides the phase
+            ZonesOff();
+            _authority.SetClock(() => _clock);
+            _rig.TryGetAimPose(out _, out float yaw, out float pitch);
+            float t0 = _clock;
+            MeleeSwingIntent intent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+            Check(_authority.TryBeginMeleeSwing(intent, out int swingId, out string why), $"move phases: the rig's swing is accepted ({why})");
+
+            SwingPatternData slash = _sword.swingPatterns[0];
+            float w = slash.windupTime, a = slash.activeTime, r = slash.recoveryTime;
+
+            _clock = t0 + w * 0.5f;
+            Near(idleWalk * 0.85f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "windup: walk x0.85");
+            Near(idleSprint * 0.85f, _rig.Movement.ResolveGroundSpeed(true, false), 1e-4f, "windup: sprint x0.85 too");
+            _clock = t0 + w + a * 0.5f;
+            Near(idleWalk * 0.70f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "hit phase: walk x0.70");
+            Near(idleSprint * 0.70f, _rig.Movement.ResolveGroundSpeed(true, false), 1e-4f, "hit phase: sprint x0.70");
+            _clock = t0 + w + a + r * 0.5f;
+            Near(idleWalk * 0.85f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "recovery: walk x0.85");
+            _clock = t0 + w + a + r + 0.02f;
+            _authority.StepSwings();
+            Near(idleWalk, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "after the swing: walk back to the held-weapon speed");
+
+            // chain step 2 winds up 15 percent quicker, so 0.22 s in it is already the hit phase (x0.70); step 1 would still be winding up
+            float t1 = _clock;
+            MeleeSwingIntent second = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 1, 1, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+            Check(_authority.TryBeginMeleeSwing(second, out int secondId, out why), $"move phases: step 2 accepted ({why})");
+            _clock = t1 + 0.22f;
+            Check(0.22f > slash.windupTime * 0.85f && 0.22f < slash.windupTime, "move phases: 0.22 s is inside step 1's windup but past step 2's");
+            Near(idleWalk * 0.70f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "step 2: the shorter windup also moves the hit-phase slowdown earlier");
+            _clock = t1 + 2f;
+            _authority.StepSwings();
+            Near(idleWalk, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "step 2 over: speed restored");
+
+            // blocking: the class multiplier x0.65 replaces the old x0.45, with the held penalty
+            Near(0.65f, _rig.Class.guardSpeedMultiplier, 1e-6f, "blocking multiplier is 0.65");
+            _rig.SetGuardHeld(true);
+            Check(_rig.IsGuarding, "move phases: the guard is up");
+            Near(walk * held * 0.65f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "blocking: walk x0.65 (and the held penalty)");
+            _rig.SetGuardHeld(false);
+
+            // the crossbow: ranged weapons carry no penalty, a two-handed weapon leaves the shield out
+            Check(_rig.Loadout.SwitchToSlot(1) && _rig.ActiveWeapon == _crossbow, "move phases: swapped to the crossbow");
+            Near(_rig.Movement.ResolveWalkSpeed(), _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "crossbow: no held penalty and the shield adds none");
+            Check(_rig.Loadout.SwitchToSlot(0) && _rig.ActiveWeapon == _sword, "move phases: back to the sword");
+            _authority.StepSwings();
+            Cooldown(3f);
+        }
+
+        // ---- guard break -----------------------------------------------------------------------------
+
+        private DamageInfo? SwingAtRig(WeaponData weapon, bool front, int pattern = 0, bool legacyPattern = false)
+        {
+            Scenario s = NewScenario(weapon);
+            s.Who.Kind = EntityKind.Enemy;
+            s.Who.TeamId = CombatTeams.MonsterTeam;
+            Vector3 p = _rig.transform.position;
+            s.Who.Eye = p + new Vector3(0f, 1.65f, front ? 1.5f : -1.5f);
+            s.Who.Yaw = front ? 180f : 0f;
+            _rig.Health.Heal(1000f);
+            _playerHits.Clear();
+            _authority.AllowLegacyPatternSelection = legacyPattern;
+            bool ok = _authority.TryBeginMeleeSwing(Intent(s.Who, 0, pattern), out int id, out string why);
+            _authority.AllowLegacyPatternSelection = false;
+            if (!ok)
+            {
+                Debug.LogError($"{Tag} attacker swing refused: {why}");
+                s.Dispose();
+                return null;
+            }
+
+            Finish(id);
+            s.Dispose();
+            return _playerHits.Count > 0 ? _playerHits[0] : (DamageInfo?)null;
+        }
+
+        private void GuardBreak()
+        {
+            ZonesOff();
+            _rig.SetGuardHeld(false);
+            Check(_rig.Defense.CanBlock && !_rig.CanParry, "guard: the warrior blocks and cannot parry");
+            Near(20f, _rig.Defense.ImpactResist, 1e-4f, "guard: the kit's impact resist is the heater shield's 20");
+            float reduction = _rig.Defense.BlockReduction;
+
+            WeaponData heavy = UnityEngine.Object.Instantiate(_sword);
+            _cleanup.Add(heavy);
+            heavy.impactPower = 30f;
+            WeaponData edge = UnityEngine.Object.Instantiate(_sword);
+            _cleanup.Add(edge);
+            edge.impactPower = 20f;
+            WeaponData justUnder = UnityEngine.Object.Instantiate(_sword);
+            _cleanup.Add(justUnder);
+            justUnder.impactPower = 19.9f;
+            WeaponData buckler = UnityEngine.Object.Instantiate(_shield);
+            _cleanup.Add(buckler);
+            buckler.impactResist = 12f;
+
+            // control: no guard raised
+            DamageInfo? control = SwingAtRig(_sword, true);
+            Check(control.HasValue && !control.Value.Blocked && !control.Value.GuardBroken, "guard control: with the guard down the hit is neither blocked nor broken");
+            float unguarded = control.HasValue ? control.Value.Amount : 0f;
+            Cooldown(3f);
+
+            // 1. sword (10) against the heater shield (20): blocked normally
+            _rig.SetGuardHeld(true);
+            DamageInfo? light = SwingAtRig(_sword, true);
+            Check(light.HasValue && light.Value.Blocked && !light.Value.GuardBroken, "sword vs heater shield: blocked, not broken");
+            if (light.HasValue)
+            {
+                Near(reduction, light.Value.BlockReduction, 1e-4f, "sword vs heater: the normal block reduction applies");
+                Near(unguarded * (1f - reduction), light.Value.Amount, 0.01f, "sword vs heater: damage = unguarded x (1 - reduction)");
+                Near(10f, light.Value.ImpactPower, 1e-4f, "the hit carries the sword's impact power");
+            }
+            Check(!_authority.IsGuardStaggered(_rig.CombatId) && _rig.IsGuarding, "sword vs heater: no stagger, the guard stays up");
+            Cooldown(3f);
+
+            // 2. exactly at the resist breaks (>=), just under does not
+            DamageInfo? atEdge = SwingAtRig(edge, true);
+            Check(atEdge.HasValue && atEdge.Value.GuardBroken, "impact power equal to the resist breaks the guard (>=)");
+            Cooldown(3f);
+            _rig.SetGuardHeld(true);
+            DamageInfo? under = SwingAtRig(justUnder, true);
+            Check(under.HasValue && under.Value.Blocked && !under.Value.GuardBroken, "impact power 19.9 against resist 20 is a normal block");
+            Cooldown(3f);
+
+            // 3. heavy (30) against the heater: broken, reduced mitigation, stagger
+            _rig.SetGuardHeld(true);
+            _toasts.Clear();
+            int breaksBefore = _authority.GuardBreaksApplied;
+            DamageInfo? heavyHit = SwingAtRig(heavy, true);
+            Check(heavyHit.HasValue && heavyHit.Value.Blocked && heavyHit.Value.GuardBroken, "heavy vs heater: the block is engaged and BROKEN (Blocked + GuardBroken flags)");
+            if (heavyHit.HasValue)
+            {
+                Near(reduction * 0.3f, heavyHit.Value.BlockReduction, 1e-4f, "broken guard: only 30 percent of the normal reduction remains");
+                Near(unguarded * (1f - reduction * 0.3f), heavyHit.Value.Amount, 0.01f, "broken guard: damage = unguarded x (1 - 0.3 x reduction)");
+                Check(heavyHit.Value.Amount > unguarded * (1f - reduction) + 1f, "broken guard: takes clearly more damage than a normal block");
+                Near(30f, heavyHit.Value.ImpactPower, 1e-4f, "the hit carries the heavy weapon's impact power");
+            }
+            Check(_authority.GuardBreaksApplied == breaksBefore + 1, "the authority counted one guard break");
+            Check(_toasts.Exists(t => t.Contains("GUARD BROKEN")), $"HUD feedback: a GUARD BROKEN toast was raised ({string.Join(" | ", _toasts)})");
+            Check(_authority.IsGuardStaggered(_rig.CombatId), "stagger: the guard is staggered after the break");
+            float remaining = _authority.GuardStaggerRemaining(_rig.CombatId);
+            Check(remaining > 0.1f && remaining <= 0.8f + 1e-4f, $"stagger: part of the 0.8 s remains after the swing ({remaining:F2})");
+            _rig.SetGuardHeld(true);
+            Check(!_rig.IsGuarding, "stagger: holding the guard button does not raise the guard");
+            float walk = _rig.Movement.ResolveWalkSpeed();
+            float held = 1f - 18f / 300f;
+            Near(walk * held * 0.6f * 0.9f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "stagger: brief move slow x0.6 (and the heavy hit's own x0.9 hit slow: a broken guard is not blocked)");
+
+            // a hit during the stagger finds no guard to resolve
+            DamageInfo duringStagger = new DamageInfo(20f, _rig.CombatCenter, Vector3.back, _rig.transform.position + Vector3.forward * 2f, 999, EntityKind.Enemy, DamageType.Physical, false, false, 0f, HitLocation.Body, 10f);
+            Check(!_rig.TryResolveGuard(duringStagger, CombatFlowTuning.Default, out _), "stagger: a hit during the stagger finds no guard (it is not blocked)");
+
+            // the guard can be raised again once the stagger has passed (authority clock)
+            _clock += remaining + 0.05f;
+            Check(!_authority.IsGuardStaggered(_rig.CombatId), "stagger: over after its length");
+            _rig.SetGuardHeld(true);
+            Check(_rig.IsGuarding, "stagger: the guard can be raised again afterwards");
+            _rig.SetGuardHeld(false);
+            Cooldown(3f);
+
+            // 4. the pattern's impact scale (overhead x1.2) can break what the slash only blocks
+            WeaponData borderline = UnityEngine.Object.Instantiate(_sword);
+            _cleanup.Add(borderline);
+            borderline.impactPower = 17f;       // slash 17 < 20, overhead 17 x 1.2 = 20.4 >= 20
+            _rig.SetGuardHeld(true);
+            DamageInfo? slash17 = SwingAtRig(borderline, true);
+            Check(slash17.HasValue && slash17.Value.Blocked && !slash17.Value.GuardBroken, "impact 17 slash: normal block");
+            Cooldown(3f);
+            _rig.SetGuardHeld(true);
+            DamageInfo? over17 = SwingAtRig(borderline, true, pattern: 2, legacyPattern: true);
+            Check(over17.HasValue && over17.Value.GuardBroken, "impact 17 overhead (x1.2 = 20.4): breaks the same guard");
+            Cooldown(3f);
+            _clock += 2f;
+
+            // 5. buckler (resist 12): sword (10) blocks, heavy (30) breaks
+            _rig.SetOffhandWeapon(buckler);
+            Near(12f, _rig.Defense.ImpactResist, 1e-4f, "buckler: the kit's impact resist is 12");
+            _rig.SetGuardHeld(true);
+            DamageInfo? swordVsBuckler = SwingAtRig(_sword, true);
+            Check(swordVsBuckler.HasValue && swordVsBuckler.Value.Blocked && !swordVsBuckler.Value.GuardBroken, "sword (10) vs buckler (12): blocked");
+            Cooldown(3f);
+            _rig.SetGuardHeld(true);
+            DamageInfo? heavyVsBuckler = SwingAtRig(heavy, true);
+            Check(heavyVsBuckler.HasValue && heavyVsBuckler.Value.GuardBroken, "heavy (30) vs buckler (12): broken");
+            Cooldown(3f);
+            _clock += 2f;
+            _rig.SetOffhandWeapon(null);
+            Near(20f, _rig.Defense.ImpactResist, 1e-4f, "the heater shield is back in hand");
+
+            // 6. a hit from behind is never blocked, whatever its impact power, and breaks nothing
+            _rig.SetGuardHeld(true);
+            int breaksBeforeBack = _authority.GuardBreaksApplied;
+            DamageInfo? behind = SwingAtRig(heavy, false);
+            Check(behind.HasValue && !behind.Value.Blocked && !behind.Value.GuardBroken, "a heavy hit from behind is not blocked and does not break the guard");
+            Check(_authority.GuardBreaksApplied == breaksBeforeBack && !_authority.IsGuardStaggered(_rig.CombatId), "a hit from behind causes no stagger");
+            Cooldown(3f);
+
+            // 7. skills carry no impact power and never break a guard; the guard answers per hit
+            DamageInfo skillLike = new DamageInfo(20f, _rig.CombatCenter, Vector3.back, _rig.transform.position + Vector3.forward * 2f, 999, EntityKind.Enemy, DamageType.Holy, false, false, 0f, HitLocation.Unspecified, 0f);
+            Check(_rig.TryResolveGuard(skillLike, CombatFlowTuning.Default, out GuardResult gr) && !gr.Broken && Mathf.Abs(gr.Reduction - reduction) < 1e-4f,
+                "a hit with no impact power (a skill's flat damage) is blocked normally and never breaks the guard");
+            DamageInfo heavyLike = skillLike.WithImpactPower(99f);
+            Check(_rig.TryResolveGuard(heavyLike, CombatFlowTuning.Default, out gr) && gr.Broken && Mathf.Abs(gr.Reduction - reduction * 0.3f) < 1e-4f, "an impact power of 99 breaks it");
+            _rig.SetGuardHeld(false);
+            Check(!_rig.TryResolveGuard(heavyLike, CombatFlowTuning.Default, out _), "with the guard down there is nothing to break");
+
+            // 8. shields never parry
+            WeaponData parryShield = UnityEngine.Object.Instantiate(_shield);
+            _cleanup.Add(parryShield);
+            parryShield.capabilities = DefenseCapability.Block | DefenseCapability.Parry;
+            Check(!parryShield.CanParry && (parryShield.EffectiveCapabilities & DefenseCapability.Parry) == 0, "a shield ticked with Parry still cannot parry (sanitised)");
+            _rig.SetOffhandWeapon(parryShield);
+            Check(!_rig.CanParry && !_rig.Defense.CanParry, "a rig carrying that shield cannot parry");
+            _rig.SetOffhandWeapon(null);
+            Check(!_rig.CanParry, "the default kit cannot parry");
+            string[] damageFields = Array.ConvertAll(typeof(DamageInfo).GetFields(BindingFlags.Instance | BindingFlags.Public), x => x.Name.ToLowerInvariant());
+            Check(Array.TrueForAll(damageFields, x => !x.Contains("parry")), "DamageInfo has no parry state: guard break did not introduce one");
+
+            _clock += 2f;
+        }
+
+        // ---- weapon swap is blocked during an attack -----------------------------------------------------
+
+        private IEnumerator SwapLock()
+        {
+            ZonesOff();
+            _authority.SetClock(() => _clock);
+            _toasts.Clear();
+            ClassLoadout loadout = _rig.Loadout;
+            RangedCombat ranged = _rig.GetComponent<RangedCombat>();
+            _rig.SetGuardHeld(false);
+            Check(loadout.SwitchToSlot(0) || _rig.ActiveWeapon == _sword, "swap lock: the sword is in hand");
+            _clock += 3f;
+            _authority.StepSwings();
+
+            _rig.TryGetAimPose(out _, out float yaw, out float pitch);
+            float t0 = _clock;
+            MeleeSwingIntent intent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+            Check(_authority.TryBeginMeleeSwing(intent, out int swingId, out string why), $"swap lock: a swing begins ({why})");
+            SwingPatternData p = _sword.swingPatterns[0];
+            _authority.TryGetExpectedComboStep(_rig.CombatId, out int comboBefore);
+            int acceptedBefore = _authority.AcceptedCount;
+
+            foreach ((string phase, float at) c in new[] { ("windup", p.windupTime * 0.5f), ("active", p.windupTime + p.activeTime * 0.5f), ("recovery", p.windupTime + p.activeTime + p.recoveryTime * 0.5f) })
+            {
+                _clock = t0 + c.at;
+                _toasts.Clear();
+                Check(_authority.IsSwingInProgress(_rig.CombatId), $"swap lock ({c.phase}): the authority reports the swing in progress");
+                Check(loadout.IsActionLocked, $"swap lock ({c.phase}): the loadout is action-locked");
+                Check(!loadout.SwitchToSlot(1), $"swap lock ({c.phase}): the swap is refused");
+                Check(!loadout.SwitchWeapon(), $"swap lock ({c.phase}): SwitchWeapon is refused too");
+                Check(_rig.ActiveWeapon == _sword && !loadout.UsingSecondary, $"swap lock ({c.phase}): the weapon in hand did not change");
+                Check(_toasts.Exists(t => t.Contains("Cannot swap")), $"swap lock ({c.phase}): the player is told why");
+                Check(_authority.TryGetExpectedComboStep(_rig.CombatId, out int comboNow) && comboNow == comboBefore, $"swap lock ({c.phase}): combo state unchanged");
+                Check(_authority.IsSwingInProgress(_rig.CombatId) && _authority.AcceptedCount == acceptedBefore, $"swap lock ({c.phase}): the swing was not disturbed");
+            }
+
+            // the swing ends, nothing was queued, then the swap works again
+            _clock = t0 + p.TotalTime + 0.05f;
+            _authority.StepSwings();
+            Check(!_authority.IsSwingInProgress(_rig.CombatId), "swap lock: the swing is over");
+            yield return null;
+            yield return null;
+            Check(_rig.ActiveWeapon == _sword, "swap lock: the refused swap input was not queued (the sword is still in hand after the swing)");
+            Check(loadout.SwitchToSlot(1) && _rig.ActiveWeapon == _crossbow, "swap lock: the swap works right after the swing ends");
+
+            // ranged: a draw in progress blocks the swap
+            if (ranged != null && ranged.enabled)
+            {
+                int magazine = ranged.Magazine;
+                _rig.Input.PrimaryPressedOverride = true;
+                yield return null;
+                _rig.Input.PrimaryPressedOverride = null;
+                yield return null;
+                Check(ranged.IsDrawing, "swap lock: the crossbow is drawing");
+                Check(!loadout.SwitchToSlot(0) && _rig.ActiveWeapon == _crossbow && ranged.Magazine == magazine, "swap lock (draw): refused, crossbow still in hand, magazine unchanged");
+                _rig.Input.PrimaryReleasedOverride = true;
+                yield return null;
+                _rig.Input.PrimaryReleasedOverride = null;
+                yield return null;
+                Check(!ranged.IsDrawing, "swap lock: the draw ended");
+            }
+            else
+            {
+                Check(false, "swap lock: the ranged component is live with the crossbow");
+            }
+
+            Check(loadout.SwitchToSlot(0) && _rig.ActiveWeapon == _sword, "swap lock: back to the sword once the draw is over");
+
+            // forced change (respawn / class apply path) still ends a swing as WeaponChanged
+            _clock += 3f;
+            _authority.StepSwings();
+            _rig.TryGetAimPose(out _, out yaw, out pitch);
+            MeleeSwingIntent again = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+            Check(_authority.TryBeginMeleeSwing(again, out int forcedId, out why), $"swap lock: another swing begins ({why})");
+            _clock += 0.1f;
+            Check(loadout.ForceSwitchToSlot(1) && _rig.ActiveWeapon == _crossbow, "swap lock: a forced change goes through");
+            _clock += 0.05f;
+            _authority.StepSwings();
+            Check(_authority.TryGetMeleeSwingStatus(forcedId, out MeleeSwingStatus st) && st.Finished && st.EndReason == SwingEndReason.WeaponChanged, $"swap lock: the forced change ended the swing as WeaponChanged ({st.EndReason})");
+            Check(loadout.SwitchToSlot(0) && _rig.ActiveWeapon == _sword, "swap lock: swap works after the forced path");
+            _clock += 3f;
+            _authority.StepSwings();
+        }
+
+        // ---- review follow-ups: replace-in-hand lock, buffered press, ranged impact ------------------------
+
+        private ItemCatalog _testCatalog;
+
+        private IEnumerator ReviewFollowups()
+        {
+            ZonesOff();
+            _authority.SetClock(() => _clock);
+            ClassLoadout loadout = _rig.Loadout;
+            _rig.SetGuardHeld(false);
+            _clock += 3f;
+            _authority.StepSwings();
+            Check(_rig.ActiveWeapon == _sword, "follow-ups: the sword is in hand");
+
+            // 1. replacing the weapon in hand (the inventory equip path) is locked during a swing
+            ItemData blade = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_EmberFangBlade.asset");
+            Check(blade != null && blade.GrantsWeapon && blade.equipSlot != EquipmentSlot.OffHand, "follow-ups: a main-hand weapon item exists");
+            if (blade == null) yield break;
+            Check(EmberdelveTestCatalog.Adopt(ref _testCatalog, _rig.Inventory, blade, out string adoptReason), "follow-ups: the blade is registered (" + adoptReason + ")");
+            Check(_rig.Inventory.TryAdd(blade, 1), "follow-ups: the blade is in the bag");
+            WeaponData other = UnityEngine.Object.Instantiate(_sword);
+            _cleanup.Add(other);
+
+            _rig.TryGetAimPose(out _, out float yaw, out float pitch);
+            float t0 = _clock;
+            MeleeSwingIntent intent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+            Check(_authority.TryBeginMeleeSwing(intent, out int swingId, out string why), $"follow-ups: a swing begins ({why})");
+            foreach (float at in new[] { 0.1f, 0.4f, 0.7f })
+            {
+                _clock = t0 + at;
+                Check(loadout.TryReplaceWeaponSlot(0, other) == null && _rig.ActiveWeapon == _sword, $"follow-ups ({at:F1} s into the swing): replacing the weapon in hand is refused, the sword stays");
+                bool equipped = _rig.Equipment.TryEquipItem(blade, out string equipWhy);
+                Check(!equipped && equipWhy.Contains("during an attack") && _rig.Equipment.FilledCount == 0 && _rig.ActiveWeapon == _sword,
+                    $"follow-ups ({at:F1} s): equipping a weapon item is refused with nothing changed ({equipWhy})");
+            }
+            Check(_rig.Inventory.TotalUnits >= 1, "follow-ups: the blade is still in the bag");
+
+            _clock = t0 + _sword.swingPatterns[0].TotalTime + 0.05f;
+            _authority.StepSwings();
+            bool equippedAfter = _rig.Equipment.TryEquipItem(blade, out string afterWhy);
+            Check(equippedAfter && _rig.ActiveWeapon == blade.grantedWeapon, $"follow-ups: after the swing the weapon item equips ({afterWhy})");
+            Check(_rig.Equipment.TryUnequip(blade.equipSlot, out string unWhy) && _rig.ActiveWeapon == _sword, $"follow-ups: and comes off again, the class sword returns ({unWhy})");
+            _rig.Inventory.Clear();
+            _clock += 3f;
+            _authority.StepSwings();
+
+            // 2. a buffered press survives a refused begin. The authority clock is frozen while real time runs, so the client
+            // believes it is ready but the authority still says "a swing is in progress"; the press is spent only when accepted.
+            MeleeCombat melee = _rig.GetComponent<MeleeCombat>();
+            Check(melee != null && melee.enabled, "follow-ups: the melee client is live");
+            if (melee != null && melee.enabled)
+            {
+                yield return new WaitForSeconds(1.0f);
+                Check(melee.TryBeginSwing(), "follow-ups: a swing begins through the client");
+                float s0 = Time.realtimeSinceStartup;
+                int firstSwing = melee.LastSwingId;
+                while (Time.realtimeSinceStartup - s0 < 0.62f) yield return null;
+                _rig.Input.PrimaryPressedOverride = true;          // during the client's recovery: buffered
+                yield return null;
+                _rig.Input.PrimaryPressedOverride = null;
+                Check(melee.BufferedPressRemaining > 0.3f, $"follow-ups: the press during the recovery is buffered ({melee.BufferedPressRemaining:F2} s)");
+                while (Time.realtimeSinceStartup - s0 < 0.97f) yield return null;
+                Check(melee.LastSwingId == firstSwing, "follow-ups: the authority (frozen clock) has refused the buffered begin so far");
+                Check(melee.BufferedPressRemaining > 0f, $"follow-ups: the refusal did not spend the buffered press ({melee.BufferedPressRemaining:F2} s left)");
+                _clock += 5f;                                       // the authority clock catches up inside the buffer window
+                yield return new WaitForSeconds(0.08f);
+                Check(melee.LastSwingId != firstSwing && melee.BufferedPressRemaining <= 0f, "follow-ups: once the authority accepts, the buffered press became the next swing and is spent");
+                _clock += 5f;
+                _authority.StepSwings();
+            }
+
+            // 3. ranged weapons carry no impact power: arrows never break a guard (the guard cases below also fire them)
+            Near(0f, _bow.impactPower, 1e-6f, "follow-ups: the bow's impact power is 0");
+            Near(0f, _crossbow.impactPower, 1e-6f, "follow-ups: the crossbow's impact power is 0");
+        }
+
+        // ---- the enemy claw / maul through the legacy SubmitAttack path ---------------------------------
+
+        private void EnemyClawAgainstTheRig()
+        {
+            ZonesOff();
+            _clock += 3f;
+            _rig.Health.Heal(1000f);
+            _rig.Status.ClearStatuses();
+
+            foreach ((WeaponData weapon, bool expectBreak, string label) c in new[] { (_claw, false, "claw (12)"), (_maul, true, "maul (30)"), (_bow, false, "arrow (0)"), (_crossbow, false, "bolt (0)") })
+            {
+                _rig.SetGuardHeld(true);
+                _playerHits.Clear();
+                Vector3 p = _rig.transform.position + new Vector3(0f, 1.15f, 1.8f);
+                PoselessAttacker attacker = new PoselessAttacker { CombatId = CombatRegistry.AllocateId(), Point = p, Weapon = c.weapon };
+                CombatRegistry.Register(attacker.CombatId, attacker);
+                AttackIntent intent = new AttackIntent(attacker.CombatId, EntityKind.Enemy, c.weapon, 1f, p, (_rig.CombatCenter - p).normalized,
+                    c.weapon.reach + c.weapon.hitSphereRadius, CombatRegistry.NextSequence(attacker.CombatId), 0f);
+                bool accepted = _authority.SubmitAttack(intent, new HitCandidate(_rig.CombatId, _rig.CombatCenter, false), out string why);
+                CombatRegistry.Unregister(attacker.CombatId, attacker);
+
+                Check(accepted && _playerHits.Count == 1, $"{c.label}: the enemy attack is accepted through the authority ({why})");
+                if (_playerHits.Count == 1)
+                {
+                    DamageInfo info = _playerHits[0];
+                    Check(info.Blocked && info.GuardBroken == c.expectBreak, $"{c.label}: blocked, guard broken = {c.expectBreak} (impact {info.ImpactPower})");
+                }
+
+                if (c.expectBreak)
+                {
+                    Check(_rig.Status.HasStatus(StatusKind.Slow), "maul: the player is slowed by the hit (hit slow works on players)");
+                    Near(0.75f, _rig.Status.SpeedMultiplier, 1e-4f, "maul: player slow x0.75");
+                    Near(1.5f, _rig.Status.RemainingOf(StatusKind.Slow), 0.05f, "maul: player slow 1.5 s");
+                    Check(_authority.IsGuardStaggered(_rig.CombatId), "maul: the player's guard is staggered");
+                }
+                else
+                {
+                    Check(!_rig.Status.HasStatus(StatusKind.Slow), "claw: a blocked claw hit applies no slow");
+                }
+
+                _rig.SetGuardHeld(false);
+                _rig.Status.ClearStatuses();
+                _clock += 4f;
+                _rig.Health.Heal(1000f);
+            }
+        }
+
+        // ---- stamina: no drain anywhere, source scan ----------------------------------------------------
+
+        private void StaminaSource()
+        {
+            string runtime = Path.Combine(Application.dataPath, "Emberdelve", "Runtime");
+            int offenders = 0;
+            string offenderList = string.Empty;
+            Regex spend = new Regex(@"[Ss]tamina\w*\s*(\?\.|\.)\s*(TrySpend|Spend|Drain)\b", RegexOptions.Compiled);
+            foreach (string file in Directory.GetFiles(runtime, "*.cs", SearchOption.AllDirectories))
+            {
+                if (Path.GetFileName(file) == "StaminaComponent.cs") continue;
+                string[] lines = File.ReadAllLines(file);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    string line = lines[i];
+                    if (line.TrimStart().StartsWith("//")) continue;
+                    if (spend.IsMatch(line)) { offenders++; offenderList += $"{Path.GetFileName(file)}:{i + 1} "; }
+                }
+            }
+
+            Check(offenders == 0, $"no runtime code spends or drains stamina ({offenderList})");
+            Check(typeof(PlayerRig).GetField("StaminaRegenDelay", BindingFlags.Public | BindingFlags.Static) != null, "the deprecated stamina data is still there (nothing deleted)");
+        }
+
+        // ---- HUD ----------------------------------------------------------------------------------------
+
+        private void HudSection()
+        {
+            FieldInfo flag = typeof(HudController).GetField("ShowStaminaBar", BindingFlags.Public | BindingFlags.Static);
+            Check(flag != null && flag.IsLiteral && (bool)flag.GetRawConstantValue() == false, "HudController.ShowStaminaBar is a constant false (deprecated)");
+
+            HudController hud = FindFirstObjectByType<HudController>();
+            Check(hud != null, "a HudController is live in the scene");
+
+            int staminaObjects = 0;
+            foreach (Transform t in Resources.FindObjectsOfTypeAll<Transform>())
+            {
+                if (t == null || !t.gameObject.scene.IsValid()) continue;
+                if (t.name.StartsWith("Stamina", StringComparison.Ordinal)) staminaObjects++;
+            }
+            Check(staminaObjects == 0, $"the HUD has no stamina bar objects in the scene ({staminaObjects})");
+
+            // sanity: the health and mana bars are still built, so the absence is about stamina and not an empty HUD
+            bool manaBar = false;
+            foreach (Transform t in Resources.FindObjectsOfTypeAll<Transform>())
+            {
+                if (t != null && t.gameObject.scene.IsValid() && t.name == "ManaLabel") manaBar = true;
+            }
+            Check(manaBar, "the mana readout is still on the HUD (mana stays)");
+        }
+
+        // ---- real time: hit slow distance ----------------------------------------------------------------
+
+        private EmberdelveInput RigInput => _rig.Input;
+
+        private IEnumerator Hold(float seconds, Key[] keys, bool rightMouse, Action<float> sample = null)
+        {
+            // Headless batch mode has no focused keyboard or mouse, so the gate uses the input layer's override seams
+            // (move / sprint / guard), exactly like the primary-button seam the combat smokes use. The real PlayerMovement
+            // and MeleeCombat Update paths run from them.
+            bool sprint = Array.IndexOf(keys, Key.LeftShift) >= 0;
+            RigInput.MoveOverride = Array.IndexOf(keys, Key.W) >= 0 ? Vector2.up : Vector2.zero;
+            RigInput.SprintHeldOverride = sprint;
+            RigInput.SecondaryHeldOverride = rightMouse;
+
+            float start = Time.realtimeSinceStartup;
+            while (Time.realtimeSinceStartup - start < seconds)
+            {
+                yield return null;
+                sample?.Invoke(Time.realtimeSinceStartup - start);
+            }
+
+            RigInput.MoveOverride = null;
+            RigInput.SprintHeldOverride = null;
+            RigInput.SecondaryHeldOverride = null;
+            yield return null;
+        }
+
+        /// <summary>
+        /// Walks forward for <paramref name="seconds"/> and returns the CRUISE speed between <paramref name="from"/> and the end
+        /// (distance over time), so the acceleration ramp of a particular frame rate does not enter the number.
+        /// <paramref name="hitAt"/> (when >= 0) runs <paramref name="onHit"/> once at that time of the walk.
+        /// </summary>
+        private IEnumerator Cruise(float seconds, float from, Action<float> result, float hitAt = -1f, Action onHit = null)
+        {
+            bool hit = false;
+            bool haveStart = false;
+            Vector3 p1 = default;
+            float t1 = 0f, t2 = 0f;
+            Vector3 p2 = default;
+            yield return Hold(seconds, new[] { Key.W }, false, t =>
+            {
+                if (!hit && hitAt >= 0f && t >= hitAt) { hit = true; onHit?.Invoke(); }
+                if (!haveStart && t >= from) { haveStart = true; p1 = _rig.transform.position; t1 = t; }
+                if (haveStart) { p2 = _rig.transform.position; t2 = t; }
+            });
+            Vector3 d = p2 - p1;
+            d.y = 0f;
+            result(t2 > t1 ? d.magnitude / (t2 - t1) : 0f);
+        }
+
+        private IEnumerator HitSlowDistance()
+        {
+            _rig.Status.ClearStatuses();
+            _rig.SetGuardHeld(false);
+            _rig.Health.Heal(1000f);
+
+            // baseline cruise speed
+            float baseline = 0f;
+            Teleport(WalkOrigin);
+            yield return new WaitForSeconds(0.3f);
+            yield return Cruise(1.0f, 0.6f, v => baseline = v);
+            yield return new WaitForSeconds(0.5f);
+
+            // cruising, an enemy sword hit lands (the authority puts the sword's hit slow on the player); the speed is read
+            // 0.25 s later, still inside the 0.6 s slow
+            Teleport(WalkOrigin);
+            yield return new WaitForSeconds(0.3f);
+            DamageInfo? hit = null;
+            float slowed = 0f, slowAtHit = 1f;
+            yield return Cruise(0.9f, 0.55f, v => slowed = v, 0.3f, () => { hit = SwingAtRig(_sword, true); slowAtHit = _rig.Status.SpeedMultiplier; });
+            Check(hit.HasValue, "hit slow walk: the enemy sword hit the player");
+            Near(0.9f, slowAtHit, 1e-4f, "hit slow walk: x0.9 on the player right after the hit");
+            Near(_rig.Movement.ResolveWalkSpeed() * (1f - 18f / 300f) * 0.9f, slowed, 0.35f, "hit slow walk: the cruise speed is about the held-weapon walk speed x0.9");
+            float ratio = baseline > 0f ? slowed / baseline : 0f;
+            Debug.Log($"{Tag} cruise speed baseline {baseline:F3} m/s, slowed {slowed:F3} m/s, ratio {ratio:F3}");
+            Check(baseline > 2f, $"hit slow walk: the baseline walk really moved the rig ({baseline:F2} m/s)");
+            Check(ratio > 0.84f && ratio < 0.97f, $"hit slow walk: the slowed cruise speed is about 90 percent of the baseline (ratio {ratio:F3})");
+
+            // after its 0.6 s the slow is gone and the cruise speed is back to the baseline
+            yield return new WaitForSeconds(0.9f);
+            Check(!_rig.Status.HasStatus(StatusKind.Slow), "hit slow walk: the slow expired after its 0.6 s");
+            Teleport(WalkOrigin);
+            yield return new WaitForSeconds(0.3f);
+            float recovered = 0f;
+            yield return Cruise(1.0f, 0.6f, v => recovered = v);
+            float ratio2 = baseline > 0f ? recovered / baseline : 0f;
+            Check(ratio2 > 0.94f && ratio2 < 1.06f, $"hit slow walk: after the slow the cruise speed is back to the baseline (ratio {ratio2:F3})");
+
+            // an enemy agent honours the slow in its chase speed
+            EnemyAgent agent = FindFirstObjectByType<EnemyAgent>(FindObjectsInactive.Include);
+            if (agent != null && agent.Status != null)
+            {
+                agent.transform.position = Origin + new Vector3(0f, 0f, 20f);
+                Physics.SyncTransforms();
+                Scenario s = NewScenario(_sword);
+                s.Who.Eye = agent.transform.position + new Vector3(0f, 1.65f, -1.6f);
+                Check(agent.GetComponentInChildren<HitVolume>(true) != null, "chase: the enemy has hit volumes");
+                float chase = agent.EffectiveChaseSpeed;
+                _clock += 3f;
+                int id;
+                bool ok = _authority.TryBeginMeleeSwing(Intent(s.Who, 0, 0), out id, out string why);
+                Check(ok, $"chase: swing accepted ({why})");
+                if (ok) Finish(id);
+                Near(chase * 0.9f, agent.EffectiveChaseSpeed, 1e-4f, "chase: the enemy's chase speed is x0.9 after a sword hit (hit slow works on enemies)");
+                agent.Status.ClearStatuses();
+                s.Dispose();
+            }
+            else
+            {
+                Check(false, "chase: an enemy agent with a status component exists in the scene");
+            }
+        }
+
+        // ---- real time: stamina ----------------------------------------------------------------------------
+
+        private IEnumerator StaminaMeasured()
+        {
+            _rig.Status.ClearStatuses();
+            Teleport(WalkOrigin);
+            yield return new WaitForSeconds(0.3f);
+
+            StaminaComponent stamina = _rig.Stamina;
+            Check(stamina != null, "stamina: the deprecated pool still exists on the rig");
+            if (stamina == null) yield break;
+
+            stamina.RefillToMax();
+            stamina.SetRegenerationActive(false);
+            Check(stamina.TrySpend(30), "stamina: the pool is set to 70 by hand (data still works)");
+            float before = stamina.CurrentStamina;
+            float walkSpeed = _rig.Movement.ResolveWalkSpeed();
+
+            // sprint for 0.6 s: it really moves faster than walking (not a vacuous test) and drains nothing
+            float fastest = 0f;
+            yield return Hold(0.6f, new[] { Key.W, Key.LeftShift }, false, _ => fastest = Mathf.Max(fastest, new Vector3(_rig.Movement.Velocity.x, 0f, _rig.Movement.Velocity.z).magnitude));
+            Debug.Log($"{Tag} sprint measured: fastest {fastest:F2} m/s against walk {walkSpeed:F2}");
+            Check(fastest > walkSpeed * 1.05f, $"stamina: the sprint was real ({fastest:F2} m/s above the walk speed {walkSpeed:F2})");
+            Near(before, stamina.CurrentStamina, 1e-5f, "stamina: sprinting drained nothing");
+            yield return new WaitForSeconds(0.4f);
+
+            // block for 0.6 s: the guard is really up and drains nothing
+            bool guardSeen = false;
+            yield return Hold(0.6f, new Key[0], true, _ => guardSeen |= _rig.IsGuarding);
+            Check(guardSeen, "stamina: the guard really went up while the button was held");
+            Near(before, stamina.CurrentStamina, 1e-5f, "stamina: blocking drained nothing");
+
+            // being hit while blocking drains nothing either (guard break replaces stamina-gated defense)
+            _rig.SetGuardHeld(true);
+            WeaponData heavy = UnityEngine.Object.Instantiate(_sword);
+            _cleanup.Add(heavy);
+            heavy.impactPower = 30f;
+            SwingAtRig(heavy, true);
+            _rig.SetGuardHeld(false);
+            Near(before, stamina.CurrentStamina, 1e-5f, "stamina: a guard break drained nothing");
+
+            stamina.SetRegenerationActive(true);
+            stamina.RefillToMax();
+
+        }
+    }
+}

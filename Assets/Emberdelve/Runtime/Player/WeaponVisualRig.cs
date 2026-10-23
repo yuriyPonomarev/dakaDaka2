@@ -26,6 +26,7 @@ namespace Emberdelve.Player
         private Transform _aimFrame;
         private Transform _edge;
         private SwingPatternData _pattern;
+        private SwingTiming _timing;
         private float _bladeLength;
         private float _swingStart;
         private bool _swinging;
@@ -75,11 +76,16 @@ namespace Emberdelve.Player
         }
 
         /// <summary>Starts presenting a swing: from now the rig is posed by the pattern curve, clock = Time.time.</summary>
-        public void PlaySwing(WeaponData weapon, SwingPatternData pattern)
+        public void PlaySwing(WeaponData weapon, SwingPatternData pattern) =>
+            PlaySwing(weapon, pattern, pattern != null ? pattern.Timing : default);
+
+        /// <summary>Same, with the resolved timing of this swing (a combo step may stretch its windup or recovery).</summary>
+        public void PlaySwing(WeaponData weapon, SwingPatternData pattern, in SwingTiming timing)
         {
             if (_isRanged || pattern == null || weapon == null) return;
 
             _pattern = pattern;
+            _timing = timing;
             _bladeLength = pattern.BladeLength(weapon);
             _swingStart = Time.time;
             _swinging = true;
@@ -102,7 +108,7 @@ namespace Emberdelve.Player
         {
             if (!_swinging || _pattern == null) return;
 
-            _recoilFrom = _pattern.Evaluate(Time.time - _swingStart);
+            _recoilFrom = _pattern.Evaluate(Time.time - _swingStart, _timing);
             _recoilStart = Time.time;
             _recoiling = true;
             _swinging = false;
@@ -117,8 +123,8 @@ namespace Emberdelve.Player
         public void ApplySwingTime(float swingTime)
         {
             if (_pattern == null) return;
-            bool active = swingTime >= _pattern.windupTime && swingTime <= _pattern.windupTime + _pattern.activeTime;
-            ApplyPose(_pattern.Evaluate(swingTime), active);
+            bool active = swingTime >= _timing.Windup && swingTime <= _timing.ActiveEnd;
+            ApplyPose(_pattern.Evaluate(swingTime, _timing), active);
         }
 
         private void ApplyPose(in SwingPose pose, bool active)
@@ -143,15 +149,15 @@ namespace Emberdelve.Player
             if (_swinging)
             {
                 float t = Time.time - _swingStart;
-                if (t >= _pattern.TotalTime)
+                if (t >= _timing.Total)
                 {
                     EndSwing();
                     return;
                 }
 
                 ApplySwingTime(t);
-                float activeEnd = _pattern.windupTime + _pattern.activeTime;
-                if (t >= _pattern.windupTime && t <= activeEnd)
+                float activeEnd = _timing.ActiveEnd;
+                if (t >= _timing.Windup && t <= activeEnd)
                 {
                     // The ribbon is drawn along the outer third of the segment (the striking edge): the whole blade
                     // fan seen edge-on from the eye would fill the lower screen.
@@ -164,7 +170,7 @@ namespace Emberdelve.Player
             }
             else if (_recoiling)
             {
-                float duration = Mathf.Max(0.05f, _pattern.wallRecoilTime);
+                float duration = Mathf.Max(0.05f, _timing.WallRecoil);
                 float k = (Time.time - _recoilStart) / duration;
                 if (k >= 1f)
                 {

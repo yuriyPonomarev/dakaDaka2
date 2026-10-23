@@ -31,7 +31,7 @@ namespace Emberdelve.UI
     {
         public const int SectionCount = 4;
         public const int AttributeRowCount = AttributeRules.AttributeCount;
-        public const int VitalRowCount = 3;
+        public const int VitalRowCount = 2;   // D1b: Health and Mana (the deprecated Stamina row was removed)
         public const int GuardRowCount = 2;
         public const int SpeedRowCount = 3;
         public const int LineCount = SectionCount + AttributeRowCount + VitalRowCount + GuardRowCount + SpeedRowCount;
@@ -152,7 +152,7 @@ namespace Emberdelve.UI
             Section("VITALS   current / maximum");
             Row("Health", ready ? Pool(_rig.Health) : "-");
             Row("Mana", ready ? Pool(_rig.Mana) : "-");
-            Row("Stamina", ready ? Pool(_rig.Stamina) : "-");
+            // D1b: the Stamina row is gone (stamina no longer gates or drains anything; the pool stays as deprecated data).
 
             Section("GUARD");
             Row("Guard", ready ? DescribeGuard(_rig.Defense) : "nothing held");

@@ -77,6 +77,7 @@ namespace Emberdelve.EditorTools
             BuildClasses();
             ApplyDefenseKit();
             ApplySwingPatterns();
+            ApplyCombatFlow();
             ApplySkillKit();
             ApplyAttributeDefinitions();
             ApplyAttributeVitalBases();
@@ -1273,7 +1274,7 @@ namespace Emberdelve.EditorTools
                 c.maxReserveAmmo = 0;
                 c.blockReduction = 0.7f;
                 c.blockArc = 140f;
-                c.guardSpeedMultiplier = 0.45f;
+                c.guardSpeedMultiplier = 0.65f;
             });
 
             Archer = LoadOrCreate<CharacterClassData>(EmberdelvePaths.Data + "/Class_Archer.asset", c =>
@@ -1555,7 +1556,7 @@ namespace Emberdelve.EditorTools
 
             // Overhead: slower and heavier, the hand comes down from above the head through the line of fire.
             SwordOverhead = AuthorPattern("Pattern_SwordOverhead", "sword_overhead", SwingKind.Overhead, Sword,
-                0.79f, 0.94f, 0.15f, 0.016f, 2, 1.1f,
+                0.79f, 0.94f, 0.15f, 0.016f, 2, 1f,
                 new SwingKey(0f, new Vector3(0.15f, 0.55f, 0.35f), 2f, -80f),
                 new SwingKey(0.5f, new Vector3(0.15f, 0.15f, 0.80f), 2f, -25f),
                 new SwingKey(1f, new Vector3(0.15f, -0.25f, 0.90f), 2f, 35f));
@@ -1586,6 +1587,86 @@ namespace Emberdelve.EditorTools
                 HitLocations.legs = HitLocationTable.DefaultLegs;
                 HitLocations.feet = HitLocationTable.DefaultFeet;
                 EditorUtility.SetDirty(HitLocations);
+            }
+
+            AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>
+        /// D1b combat-flow data, code-authoritative and idempotent like ApplySwingPatterns: the combo chains, the impact
+        /// zones, hit slow, held-weapon move penalties, impact power / resist and the warrior's guard walk speed. Every
+        /// number is our own tunable (Docs/Tasks/D1b.md has the table).
+        /// </summary>
+        private static void ApplyCombatFlow()
+        {
+            if (Sword != null)
+            {
+                // slash / slash / overhead at 1.00 / 1.05 / 1.10; the follow-up slash winds up a little quicker
+                Sword.comboSteps = new[]
+                {
+                    new ComboStep(0, 1.00f, 1f, 1f),
+                    new ComboStep(1, 1.05f, 0.85f, 1f),
+                    new ComboStep(2, 1.10f, 1f, 1f)
+                };
+                Sword.comboWindow = 0.70f;
+                Sword.comboFinisherRecovery = 0.35f;
+                Sword.impactZones = new[] { new ImpactZone(0f, 0.7f), new ImpactZone(0.35f, 0.9f), new ImpactZone(0.70f, 1f) };
+                Sword.hitSlowMultiplier = 0.9f;
+                Sword.hitSlowDuration = 0.6f;
+                Sword.heldMoveSpeedPenalty = 10f;
+                Sword.impactPower = 10f;
+                Sword.impactResist = 8f;
+                EditorUtility.SetDirty(Sword);
+            }
+
+            if (Rapier != null)
+            {
+                // thrust x3, the pattern repeated; the follow-ups are a touch quicker
+                Rapier.comboSteps = new[]
+                {
+                    new ComboStep(0, 1.00f, 1f, 1f),
+                    new ComboStep(0, 1.05f, 0.9f, 0.9f),
+                    new ComboStep(0, 1.10f, 0.9f, 1f)
+                };
+                Rapier.comboWindow = 0.60f;
+                Rapier.comboFinisherRecovery = 0.30f;
+                Rapier.impactZones = new[] { new ImpactZone(0f, 0.7f), new ImpactZone(0.40f, 0.9f), new ImpactZone(0.65f, 1f) };
+                Rapier.hitSlowMultiplier = 0.95f;
+                Rapier.hitSlowDuration = 0.5f;
+                Rapier.heldMoveSpeedPenalty = 5f;
+                Rapier.impactPower = 6f;
+                Rapier.impactResist = 5f;
+                EditorUtility.SetDirty(Rapier);
+            }
+
+            if (Shield != null)
+            {
+                Shield.heldMoveSpeedPenalty = 8f;
+                Shield.impactResist = 20f;
+                Shield.impactPower = 8f;
+                EditorUtility.SetDirty(Shield);
+            }
+
+            // Enemy weapons: the claw is a light hit, the elite's maul is heavy (breaks the heater shield, slows more).
+            if (Claw != null) { Claw.impactPower = 12f; EditorUtility.SetDirty(Claw); }
+            if (ClawElite != null)
+            {
+                ClawElite.impactPower = 30f;
+                ClawElite.hitSlowMultiplier = 0.75f;
+                ClawElite.hitSlowDuration = 1.5f;
+                EditorUtility.SetDirty(ClawElite);
+            }
+
+            // Ranged kit: no held penalty yet (D3), so the archer's movement numbers keep their baselines.
+            // Arrows and bolts carry no impact power: they never break a guard.
+            if (Bow != null) { Bow.heldMoveSpeedPenalty = 0f; Bow.impactPower = 0f; EditorUtility.SetDirty(Bow); }
+            if (Crossbow != null) { Crossbow.heldMoveSpeedPenalty = 0f; Crossbow.impactPower = 0f; EditorUtility.SetDirty(Crossbow); }
+
+            // Blocking walks at x0.65 (was 0.45); it is class data, applied by PlayerMovement.ResolveGroundSpeed.
+            if (Warrior != null && !Mathf.Approximately(Warrior.guardSpeedMultiplier, 0.65f))
+            {
+                Warrior.guardSpeedMultiplier = 0.65f;
+                EditorUtility.SetDirty(Warrior);
             }
 
             AssetDatabase.SaveAssets();
@@ -1623,7 +1704,12 @@ namespace Emberdelve.EditorTools
             p.recoveryTime = weapon.recoveryTime;
             p.wallRecoilTime = 0.35f;
             p.damageMultiplier = damageMultiplier;
-            p.moveSpeedMultiplier = 1f;
+            // D1b: the per-step combo multiplier lives in the weapon's chain; the pattern shape is x1. Phase move
+            // multipliers: windup and recovery x0.85, the hit (active) phase x0.70 (our own tunables).
+            p.impactPowerScale = kind == SwingKind.Overhead ? 1.2f : 1f;
+            p.windupMoveMultiplier = 0.85f;
+            p.activeMoveMultiplier = 0.70f;
+            p.recoveryMoveMultiplier = 0.85f;
             p.maxTargets = maxTargets;
             p.reachScale = reachScale;
             p.reachInset = reachInset;

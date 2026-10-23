@@ -58,6 +58,31 @@ namespace Emberdelve.Data
     }
 
     /// <summary>
+    /// The resolved timing of ONE swing (authority clock, seconds): the pattern's own phase durations after a combo
+    /// step's windup/recovery scales and the finisher's extra recovery were applied (D1b). The authority, the thin
+    /// client and the weapon visual all take their phase boundaries from this one value, so a chain step that is
+    /// faster or has a longer recovery changes the sweep, the animation and the cooldown floor together.
+    /// </summary>
+    public readonly struct SwingTiming
+    {
+        public readonly float Windup;
+        public readonly float Active;
+        public readonly float Recovery;
+        public readonly float WallRecoil;
+
+        public SwingTiming(float windup, float active, float recovery, float wallRecoil)
+        {
+            Windup = Mathf.Max(0f, windup);
+            Active = Mathf.Max(0.02f, active);
+            Recovery = Mathf.Max(0f, recovery);
+            WallRecoil = Mathf.Max(0f, wallRecoil);
+        }
+
+        public float ActiveEnd => Windup + Active;
+        public float Total => Windup + Active + Recovery;
+    }
+
+    /// <summary>
     /// D1a swing pattern: the full, data-defined weapon motion of one melee attack. It is the ONE source for
     /// three consumers - the authority's continuous damage sweep (only the ACTIVE phase deals damage), the
     /// first-person weapon visual (windup, active and recovery all animate from <see cref="Evaluate"/>) and
@@ -80,10 +105,18 @@ namespace Emberdelve.Data
         [Range(0f, 2f)] public float wallRecoilTime = 0.35f;
 
         [Header("Damage")]
-        [Tooltip("Multiplies the weapon's damage for this pattern (D1b combo steps will author this).")]
+        [Tooltip("Multiplies the weapon's damage for this pattern's SHAPE (1 for every authored pattern). The per-step combo multiplier (1.00 / 1.05 / 1.10) is chain data on the weapon, not here.")]
         [Range(0.1f, 3f)] public float damageMultiplier = 1f;
-        [Tooltip("HOOK for D1b (weapon move penalty while swinging). Not read by movement yet; leave at 1.")]
-        [Range(0.1f, 1f)] public float moveSpeedMultiplier = 1f;
+        [Tooltip("Scales the weapon's impact power for this pattern (a heavier overhead can break a guard a slash only blocks). Guard break compares weapon.impactPower x this against the defender's impact resist.")]
+        [Range(0.5f, 3f)] public float impactPowerScale = 1f;
+
+        [Header("Move speed while swinging (D1b, authority clock phases)")]
+        [Tooltip("Move-speed multiplier during the windup. Our own tunable.")]
+        [Range(0.1f, 1f)] public float windupMoveMultiplier = 0.85f;
+        [Tooltip("Move-speed multiplier during the active (hit) phase. Our own tunable.")]
+        [Range(0.1f, 1f)] public float activeMoveMultiplier = 0.70f;
+        [Tooltip("Move-speed multiplier during the recovery (and the wall recoil).")]
+        [Range(0.1f, 1f)] public float recoveryMoveMultiplier = 0.85f;
         [Tooltip("Most distinct targets one swing can hit (cleave). Each target is still hit at most once.")]
         [Range(1, 8)] public int maxTargets = 4;
 
@@ -109,6 +142,14 @@ namespace Emberdelve.Data
 
         [Header("Active path")]
         public SwingKey[] keys = new SwingKey[0];
+
+        /// <summary>The pattern's own timing (combo step 0 without scales or finisher extra).</summary>
+        public SwingTiming Timing => new SwingTiming(windupTime, activeTime, recoveryTime, wallRecoilTime);
+
+        /// <summary>Timing after a chain step's scales and the finisher's extra recovery (seconds added to the recovery).</summary>
+        public SwingTiming TimingFor(float windupScale, float recoveryScale, float extraRecovery = 0f) =>
+            new SwingTiming(windupTime * Mathf.Max(0.05f, windupScale), activeTime,
+                recoveryTime * Mathf.Max(0.05f, recoveryScale) + Mathf.Max(0f, extraRecovery), wallRecoilTime);
 
         public float ActiveStart => windupTime;
         public float ActiveEnd => windupTime + activeTime;
@@ -152,20 +193,27 @@ namespace Emberdelve.Data
         /// the windup, the keyed path during the active phase, eased back to rest during the recovery. Damage is
         /// only ever dealt by the active part; the other two parts are what the player sees.
         /// </summary>
-        public SwingPose Evaluate(float swingTime)
+        public SwingPose Evaluate(float swingTime) => Evaluate(swingTime, Timing);
+
+        /// <summary>Same as <see cref="Evaluate(float)"/> with the phase durations of one resolved swing (a chain step may stretch them).</summary>
+        public SwingPose Evaluate(float swingTime, in SwingTiming timing)
         {
             float t = Mathf.Max(0f, swingTime);
-            if (t < windupTime)
+            float windup = timing.Windup;
+            float active = timing.Active;
+            float recovery = timing.Recovery;
+
+            if (t < windup)
             {
-                float k = windupTime <= 1e-5f ? 1f : Smooth(t / windupTime);
+                float k = windup <= 1e-5f ? 1f : Smooth(t / windup);
                 return SwingPose.Lerp(RestPose, ActivePose(0f), k);
             }
 
-            if (t <= windupTime + activeTime) return ActivePose((t - windupTime) / Mathf.Max(1e-5f, activeTime));
+            if (t <= windup + active) return ActivePose((t - windup) / Mathf.Max(1e-5f, active));
 
-            float r = t - windupTime - activeTime;
-            if (recoveryTime <= 1e-5f || r >= recoveryTime) return RestPose;
-            return SwingPose.Lerp(ActivePose(1f), RestPose, Smooth(r / recoveryTime));
+            float r = t - windup - active;
+            if (recovery <= 1e-5f || r >= recovery) return RestPose;
+            return SwingPose.Lerp(ActivePose(1f), RestPose, Smooth(r / recovery));
         }
 
         /// <summary>Authoring check. Returns false with a reason when the data cannot be swept safely.</summary>

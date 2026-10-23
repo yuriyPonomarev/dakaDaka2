@@ -172,8 +172,21 @@ namespace Emberdelve.Combat
         public readonly int FirstSample;
         public readonly Vector3 Point;
 
-        public MeleeSwingHit(int targetCombatId, HitLocation location, float amount, bool blocked, int sample, int firstSample, Vector3 point)
+        /// <summary>D1b: where on the damage segment the contact was (0 = hilt end, 1 = tip), computed by the authority from the sweep.</summary>
+        public readonly float ContactT;
+
+        /// <summary>D1b: the impact-zone multiplier the weapon's bands gave that contact.</summary>
+        public readonly float ZoneMultiplier;
+
+        /// <summary>D1b: the target's guard was engaged and broken by this hit.</summary>
+        public readonly bool GuardBroken;
+
+        public MeleeSwingHit(int targetCombatId, HitLocation location, float amount, bool blocked, int sample, int firstSample, Vector3 point,
+            float contactT = 0f, float zoneMultiplier = 1f, bool guardBroken = false)
         {
+            ContactT = contactT;
+            ZoneMultiplier = zoneMultiplier;
+            GuardBroken = guardBroken;
             TargetCombatId = targetCombatId;
             Location = location;
             Amount = amount;
@@ -197,9 +210,20 @@ namespace Emberdelve.Combat
         public readonly int WallContactSample;
         public readonly IReadOnlyList<MeleeSwingHit> Hits;
 
+        /// <summary>D1b: which step of the weapon's combo chain this swing is, and the damage multiplier the chain gave it.</summary>
+        public readonly int ComboStep;
+        public readonly float StepMultiplier;
+
+        /// <summary>D1b: the resolved timing of this swing (chain step scales and the finisher's extra recovery applied).</summary>
+        public readonly Emberdelve.Data.SwingTiming Timing;
+
         public MeleeSwingStatus(int swingId, int instigatorCombatId, SwingPhase phase, SwingEndReason endReason,
-            float elapsed, int samplesProcessed, int sampleCount, int wallContactSample, IReadOnlyList<MeleeSwingHit> hits)
+            float elapsed, int samplesProcessed, int sampleCount, int wallContactSample, IReadOnlyList<MeleeSwingHit> hits,
+            int comboStep = 0, float stepMultiplier = 1f, Emberdelve.Data.SwingTiming timing = default)
         {
+            ComboStep = comboStep;
+            StepMultiplier = stepMultiplier;
+            Timing = timing;
             SwingId = swingId;
             InstigatorCombatId = instigatorCombatId;
             Phase = phase;
@@ -228,6 +252,13 @@ namespace Emberdelve.Combat
 
         /// <summary>State of a running or recently finished swing. False when the id is unknown or has aged out.</summary>
         bool TryGetMeleeSwingStatus(int swingId, out MeleeSwingStatus status);
+
+        /// <summary>
+        /// D1b: the combo step the authority would accept next for this instigator. 0 when it has no running chain, the
+        /// combo window ran out, the weapon changed, it died, or the chain is complete. This is the authority's own state,
+        /// so a client asks it instead of counting steps itself.
+        /// </summary>
+        bool TryGetExpectedComboStep(int instigatorCombatId, out int step);
 
         /// <summary>Returns true when the authority accepted the intent and applied damage.</summary>
         bool SubmitAttack(AttackIntent intent, HitCandidate hit);

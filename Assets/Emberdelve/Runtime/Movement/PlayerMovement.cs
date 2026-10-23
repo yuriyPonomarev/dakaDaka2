@@ -42,6 +42,7 @@ namespace Emberdelve.Movement
         private bool _crouched;
         private bool _guardActive;
         private float _speedPenalty = 1f;
+        private IMoveFlowSource _flow;
         private float _jumpCooldown;
 
         // Dash state. The dash is a movement mode, not a teleport: it goes through the same
@@ -154,6 +155,9 @@ namespace Emberdelve.Movement
             speed *= _speedPenalty;
             speed *= StatusSpeedMultiplier();
 
+            // D1b: fighting penalties (held weapon, swing phase, guard stagger) - authority-side state, no stamina.
+            if (_flow != null) speed *= Mathf.Clamp(_flow.GetMoveFlowFactor(), 0.05f, 1f);
+
             return Mathf.Max(0f, speed);
         }
 
@@ -239,6 +243,9 @@ namespace Emberdelve.Movement
         }
 
         public void SetGuardActive(bool active) => _guardActive = active;
+
+        /// <summary>D1b: where the combat-flow factor (held-weapon penalty, swing phase, guard stagger) comes from. Null = none.</summary>
+        public void SetFlowSource(IMoveFlowSource source) => _flow = source;
 
         /// <summary>Slows locomotion while a class is aiming, drawing or otherwise committed.</summary>
         public void SetSpeedPenalty(float multiplier) => _speedPenalty = Mathf.Clamp(multiplier, 0.1f, 1f);

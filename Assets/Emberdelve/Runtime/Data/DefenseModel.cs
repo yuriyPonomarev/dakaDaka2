@@ -39,8 +39,12 @@ namespace Emberdelve.Data
         public readonly bool CanBlock;
         public readonly bool CanParry;
 
-        public DefenseProfile(DefenseCapability capabilities, float reduction, float arc, bool hasShield)
+        /// <summary>D1b: impact resist of what is blocking (the better of a contributing shield and the held weapon). A hit with impact power at or above it breaks the guard.</summary>
+        public readonly float ImpactResist;
+
+        public DefenseProfile(DefenseCapability capabilities, float reduction, float arc, bool hasShield, float impactResist = 0f)
         {
+            ImpactResist = Mathf.Max(0f, impactResist);
             Capabilities = Sanitize(capabilities, hasShield);
             BlockReduction = Mathf.Clamp01(reduction);
             BlockArcDegrees = Mathf.Clamp(arc, 30f, 360f);
@@ -83,14 +87,20 @@ namespace Emberdelve.Data
             // numbers or shield numbers, instead of being tied to one of them.
             reduction += Mathf.Max(0f, passiveBlockBonus);
 
-            return new DefenseProfile(capabilities, reduction, arc, hasShield);
+            // Impact resist comes from the item that actually blocks: a weapon that can block brings its own, a
+            // contributing shield brings its own, and the better one holds the guard.
+            float impactResist = 0f;
+            if (primary != null && primary.CanBlock) impactResist = Mathf.Max(impactResist, primary.impactResist);
+            if (shieldContributes && shield.CanBlock) impactResist = Mathf.Max(impactResist, shield.impactResist);
+
+            return new DefenseProfile(capabilities, reduction, arc, hasShield, impactResist);
         }
 
         public static DefenseProfile Empty => new DefenseProfile(DefenseCapability.None, 0f, 0f, false);
 
         public override string ToString()
         {
-            return $"block={CanBlock} parry={CanParry} shield={HasShield} reduction={BlockReduction:F2} arc={BlockArcDegrees:F0}";
+            return $"block={CanBlock} parry={CanParry} shield={HasShield} reduction={BlockReduction:F2} arc={BlockArcDegrees:F0} resist={ImpactResist:F0}";
         }
     }
 }

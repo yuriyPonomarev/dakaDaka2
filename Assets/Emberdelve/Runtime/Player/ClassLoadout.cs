@@ -116,12 +116,39 @@ namespace Emberdelve.Player
             return SwitchToSlot(_activeSlot == 0 ? 1 : 0);
         }
 
+        /// <summary>
+        /// D1b: true while the wielder is in the action phase of an attack: a melee swing running on the authority
+        /// (windup, active, recovery) or a ranged draw. A player swap is refused during it.
+        /// </summary>
+        public bool IsActionLocked =>
+            (_rig != null && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
+                && authority is ICombatFlowState flow && flow.IsSwingInProgress(_rig.CombatId))
+            || (rangedCombat != null && rangedCombat.enabled && rangedCombat.IsDrawing);
+
         public bool SwitchToSlot(int slot)
         {
             if (slot < 0 || slot >= SlotCapacity) return false;
             if (slot == _activeSlot) return false;
             if (_slots[slot] == null) return false;
 
+            if (IsActionLocked)
+            {
+                // Refused with no state change and nothing queued: the swap input is only read on the frame it is pressed.
+                GameEvents.RaiseToast("Cannot swap weapons during an attack");
+                return false;
+            }
+
+            Equip(slot);
+            return true;
+        }
+
+        /// <summary>
+        /// Forced change (class apply, respawn, tools): not a player swap, so the attack lock does not apply. The
+        /// authority still ends a running swing as WeaponChanged (defence in depth).
+        /// </summary>
+        public bool ForceSwitchToSlot(int slot)
+        {
+            if (slot < 0 || slot >= SlotCapacity || slot == _activeSlot || _slots[slot] == null) return false;
             Equip(slot);
             return true;
         }
@@ -139,6 +166,14 @@ namespace Emberdelve.Player
 
             WeaponData previous = _slots[slot];
             if (previous == weapon) return null;
+
+            // D1b: replacing the weapon IN HAND is a swap too (Equipment refuses earlier in the equip transaction; this is the
+            // last line): refused mid-attack with no state change.
+            if (slot == _activeSlot && IsActionLocked)
+            {
+                GameEvents.RaiseToast("Cannot swap weapons during an attack");
+                return null;
+            }
 
             if (previous != null && previous.IsRanged
                 && rangedCombat != null && rangedCombat.enabled
@@ -265,6 +300,11 @@ namespace Emberdelve.Player
         public void PlaySwingVisual(WeaponData weapon, SwingPatternData pattern)
         {
             if (_visual != null) _visual.PlaySwing(weapon, pattern);
+        }
+
+        public void PlaySwingVisual(WeaponData weapon, SwingPatternData pattern, in SwingTiming timing)
+        {
+            if (_visual != null) _visual.PlaySwing(weapon, pattern, timing);
         }
 
         public void PlaySwingRecoil()

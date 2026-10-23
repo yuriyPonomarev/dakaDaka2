@@ -174,6 +174,7 @@ namespace Emberdelve.EditorTools
             private CharacterClassData _warrior;
             private CharacterClassData _archer;
             private WeaponData _sword;
+            private WeaponData _shieldWeapon;
             private WeaponData _bow;
             private WeaponData _crossbow;
             private WeaponData _rapier;
@@ -266,6 +267,7 @@ namespace Emberdelve.EditorTools
                 _warrior = LoadAsset<CharacterClassData>(EmberdelvePaths.Data + "/Class_Warrior.asset", "Class_Warrior");
                 _archer = LoadAsset<CharacterClassData>(EmberdelvePaths.Data + "/Class_Archer.asset", "Class_Archer");
                 _sword = LoadAsset<WeaponData>(EmberdelvePaths.Data + "/Weapon_AshenShortSword.asset", "Weapon_AshenShortSword");
+                _shieldWeapon = LoadAsset<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberbulwarkShield.asset", "Weapon_EmberbulwarkShield");
                 _bow = LoadAsset<WeaponData>(EmberdelvePaths.Data + "/Weapon_HollowBow.asset", "Weapon_HollowBow");
                 _crossbow = LoadAsset<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberCrossbow.asset", "Weapon_EmberCrossbow");
                 _rapier = LoadAsset<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberRapier.asset", "Weapon_EmberRapier");
@@ -351,9 +353,9 @@ namespace Emberdelve.EditorTools
 
                 // 1. Bare walking: authored 4.3, DEX modifier 0, no MoveSpeed passive on this class.
                 CheckClose("warrior attribute move term 4.3 (DEX modifier 0)", 4.3f, rig.AttributeStats.MoveSpeed, "before any passive or gear");
-                CheckWalk("warrior bare", rig, 4.3f);
-                CheckClose("warrior sprint keeps its authored 5.2 (DEX modifier 0)", 5.2f, rig.Movement.ResolveGroundSpeed(true, false), "no invented sprint ratio");
-                CheckClose("warrior crouch keeps its authored 1.7", 1.7f, rig.Movement.ResolveGroundSpeed(false, true), "the 2..8 clamp belongs to walking, not to crouch");
+                CheckWalk("warrior bare", rig, 4.3f, WarriorHeld);
+                CheckClose("warrior sprint keeps its authored 5.2 (DEX modifier 0)", 5.2f * WarriorHeld, rig.Movement.ResolveGroundSpeed(true, false), "no invented sprint ratio");
+                CheckClose("warrior crouch keeps its authored 1.7", 1.7f * WarriorHeld, rig.Movement.ResolveGroundSpeed(false, true), "the 2..8 clamp belongs to walking, not to crouch");
 
                 CheckClose("warrior sword query 26 * 1.12 (STR modifier 3)", 29.12f, rig.AttributeStats.GetWeaponDamage(_sword), "melee scales off STR");
                 CheckClose("warrior crossbow query 24 * 1.0 (DEX modifier 0)", 24f, rig.AttributeStats.GetWeaponDamage(_crossbow), "a ranged weapon never reads STR");
@@ -362,27 +364,27 @@ namespace Emberdelve.EditorTools
                 // 2. The existing guard / aim / status multipliers still fold in on top of the new rule.
                 rig.SetGuardHeld(true);
                 Check(rig.IsGuarding, "warrior can guard with the shield the class asset carries");
-                CheckClose("warrior guarded walk 4.3 * 0.45", 1.935f, rig.Movement.ResolveGroundSpeed(false, false), "authored guardSpeedMultiplier retained");
+                CheckClose("warrior guarded walk 4.3 * 0.65 (D1b: blocking x0.65, was 0.45)", 2.795f * WarriorHeld, rig.Movement.ResolveGroundSpeed(false, false), "authored guardSpeedMultiplier retained");
                 rig.SetGuardHeld(false);
-                CheckClose("warrior walk back to 4.3 when the guard is lowered", 4.3f, rig.Movement.ResolveGroundSpeed(false, false), "guard is not baked into the rule");
+                CheckClose("warrior walk back to 4.3 when the guard is lowered", 4.3f * WarriorHeld, rig.Movement.ResolveGroundSpeed(false, false), "guard is not baked into the rule");
 
                 rig.SetAimingPenalty(0.5f);
-                CheckClose("warrior aim-penalised walk 4.3 * 0.5", 2.15f, rig.Movement.ResolveGroundSpeed(false, false), "aim penalty retained");
+                CheckClose("warrior aim-penalised walk 4.3 * 0.5", 2.15f * WarriorHeld, rig.Movement.ResolveGroundSpeed(false, false), "aim penalty retained");
                 rig.SetAimingPenalty(1f);
 
                 rig.ApplyStatus(new StatusSpec(StatusKind.Slow, 4f, 0.55f), 0);
-                CheckClose("warrior slowed walk 4.3 * 0.55", 2.365f, rig.Movement.ResolveGroundSpeed(false, false), "status slow retained on top of the attribute rule");
+                CheckClose("warrior slowed walk 4.3 * 0.55", 2.365f * WarriorHeld, rig.Movement.ResolveGroundSpeed(false, false), "status slow retained on top of the attribute rule");
                 rig.ClearStatuses();
-                CheckClose("warrior walk back to 4.3 once the slow is cleared", 4.3f, rig.Movement.ResolveGroundSpeed(false, false), "a status is not a permanent modifier");
+                CheckClose("warrior walk back to 4.3 once the slow is cleared", 4.3f * WarriorHeld, rig.Movement.ResolveGroundSpeed(false, false), "a status is not a permanent modifier");
 
                 // 3. Real authored gear: Footpad Boots (MoveSpeed x1.18, SprintSpeed x1.12, DEX +1).
                 CarryItem(rig, _boots);
                 Equip(rig, _boots);
                 CheckInt("boots raise effective DEX to 11, still modifier 0", 11, rig.AttributeStats.GetAttribute(SixAttribute.Dexterity), "floor((11-10)/2) = 0");
-                CheckWalk("warrior with the authored boots", rig, 5.074f);
-                CheckClose("warrior sprint with boots 5.2 * 1.12", 5.824f, rig.Movement.ResolveGroundSpeed(true, false), "the boots' own sprint term");
+                CheckWalk("warrior with the authored boots", rig, 5.074f, WarriorHeld);
+                CheckClose("warrior sprint with boots 5.2 * 1.12", 5.824f * WarriorHeld, rig.Movement.ResolveGroundSpeed(true, false), "the boots' own sprint term");
                 Unequip(rig, EquipmentSlot.Legs);
-                CheckWalk("warrior bare again after unequipping the boots", rig, 4.3f);
+                CheckWalk("warrior bare again after unequipping the boots", rig, 4.3f, WarriorHeld);
 
                 // 4. Gear DEX threshold crossing: modifier 0 -> 1, and its exact removal.
                 ItemData dexCharm = MakeModifierItem("u2a4_dex_charm", "U2A4 DEX+2 Charm", EquipmentSlot.Head,
@@ -392,12 +394,12 @@ namespace Emberdelve.EditorTools
                 CheckInt("DEX+2 crosses the threshold: effective DEX 12", 12, rig.AttributeStats.GetAttribute(SixAttribute.Dexterity), "modifier becomes 1");
                 CheckInt("warrior DEX modifier after the crossing", 1, rig.AttributeStats.GetModifier(SixAttribute.Dexterity), "floor((12-10)/2) = 1");
                 CheckClose("warrior attribute move term after the crossing 4.3 * 1.025", 4.4075f, rig.AttributeStats.MoveSpeed, "the crossing is live in the query");
-                CheckWalk("warrior with the DEX charm", rig, 4.4075f);
-                CheckClose("warrior sprint after the crossing 5.2 * 1.025", 5.33f, rig.Movement.ResolveGroundSpeed(true, false), "the same factor on the authored sprint base");
-                CheckClose("warrior crouch after the crossing 1.7 * 1.025", 1.7425f, rig.Movement.ResolveGroundSpeed(false, true), "the same factor on the authored crouch base");
+                CheckWalk("warrior with the DEX charm", rig, 4.4075f, WarriorHeld);
+                CheckClose("warrior sprint after the crossing 5.2 * 1.025", 5.33f * WarriorHeld, rig.Movement.ResolveGroundSpeed(true, false), "the same factor on the authored sprint base");
+                CheckClose("warrior crouch after the crossing 1.7 * 1.025", 1.7425f * WarriorHeld, rig.Movement.ResolveGroundSpeed(false, true), "the same factor on the authored crouch base");
                 Unequip(rig, EquipmentSlot.Head);
                 CheckInt("DEX back to 10 when the charm comes off", 10, rig.AttributeStats.GetAttribute(SixAttribute.Dexterity), "recomputed from the pristine base");
-                CheckWalk("warrior walk back to 4.3 after the crossing test", rig, 4.3f);
+                CheckWalk("warrior walk back to 4.3 after the crossing test", rig, 4.3f, WarriorHeld);
 
                 // 5. The amendment's order, with an explicit multiplier AND flat on the same gear.
                 ItemData orderCharm = MakeModifierItem("u2a4_order_charm", "U2A4 Long Stride", EquipmentSlot.Head,
@@ -405,28 +407,28 @@ namespace Emberdelve.EditorTools
                                new StatModifier(SkillStat.MoveSpeed, SkillModifierMode.Flat, 1f) });
                 CarryItem(rig, orderCharm);
                 Equip(rig, orderCharm);
-                CheckWalk("warrior with DEX+2, x1.2 and +1.0 flat", rig, 6.289f);
+                CheckWalk("warrior with DEX+2, x1.2 and +1.0 flat", rig, 6.289f, WarriorHeld);
                 float wrongOrder = (4.4075f + 1f) * 1.2f;
                 Check(Mathf.Abs(rig.Movement.ResolveGroundSpeed(false, false) - wrongOrder) > 0.15f,
                     $"the resolver is NOT CharacterStatStack.Get's (flat + base) * multiplier order ({wrongOrder:F3} would have been wrong)");
                 Unequip(rig, EquipmentSlot.Head);
-                CheckWalk("warrior walk back to 4.3 after the order test", rig, 4.3f);
+                CheckWalk("warrior walk back to 4.3 after the order test", rig, 4.3f, WarriorHeld);
 
                 // 6. The 2..8 clamp of the walking rule.
                 ItemData fastCharm = MakeModifierItem("u2a4_fast_charm", "U2A4 Overlong Stride", EquipmentSlot.Head,
                     2, new[] { new StatModifier(SkillStat.MoveSpeed, SkillModifierMode.Multiplier, 3f) });
                 CarryItem(rig, fastCharm);
                 Equip(rig, fastCharm);
-                CheckWalk("warrior walking clamps at the 8 ceiling", rig, 8f);
+                CheckWalk("warrior walking clamps at the 8 ceiling", rig, 8f, WarriorHeld);
                 Unequip(rig, EquipmentSlot.Head);
 
                 ItemData slowCharm = MakeModifierItem("u2a4_slow_charm", "U2A4 Weighted Stride", EquipmentSlot.Head,
                     2, new[] { new StatModifier(SkillStat.MoveSpeed, SkillModifierMode.Multiplier, 0.2f) });
                 CarryItem(rig, slowCharm);
                 Equip(rig, slowCharm);
-                CheckWalk("warrior walking clamps at the 2 floor", rig, 2f);
+                CheckWalk("warrior walking clamps at the 2 floor", rig, 2f, WarriorHeld);
                 Unequip(rig, EquipmentSlot.Head);
-                CheckWalk("warrior walking is 4.3 again with nothing worn", rig, 4.3f);
+                CheckWalk("warrior walking is 4.3 again with nothing worn", rig, 4.3f, WarriorHeld);
 
                 // 7. Real authority damage: STR sword.
                 SubmitAttack("warrior sword at 2.4m", rig, _sword, 2.4f, 1f, _sword.reach + _sword.hitSphereRadius,
@@ -768,7 +770,15 @@ namespace Emberdelve.EditorTools
                           $"authority(accepted={_authority.AcceptedCount}, rejected={_authority.RejectedCount})");
             }
 
-            private void CheckWalk(string label, PlayerRig rig, float expected)
+            /// <summary>
+            /// D1b fixture migration. The warrior holds the sword and carries the shield, and since D1b the resolved ground speed
+            /// includes the held-weapon penalty (sword 10 + shield 8 points on a 300 base, Docs/Tasks/D1b.md). Every number in this
+            /// gate is the ATTRIBUTE rule's number (authored base x DEX factor x passives + flat, clamped), which is unchanged, so the
+            /// warrior's resolved speeds are asserted as that rule number x this held factor. The archer holds the bow: no penalty.
+            /// </summary>
+            private float WarriorHeld => 1f - (_sword.heldMoveSpeedPenalty + _shieldWeapon.heldMoveSpeedPenalty) / 300f;
+
+            private void CheckWalk(string label, PlayerRig rig, float expected, float held = 1f)
             {
                 float resolver = rig.Movement.ResolveGroundSpeed(false, false);
 
@@ -777,10 +787,10 @@ namespace Emberdelve.EditorTools
                 float flat = stack != null ? stack.Flat(SkillStat.MoveSpeed) : 0f;
                 float query = rig.AttributeStats.ResolveMoveSpeed(multiplier, flat);
 
-                CheckClose($"{label} resolved walk speed", expected, resolver,
-                    "clamp(authored * max(0.5, 1 + 0.025*DEX modifier) * stack multiplier + stack flat, 2, 8)");
-                CheckClose($"{label} walking query equals the movement resolver", resolver, query,
-                    $"same source (multiplier {multiplier:F4}, flat {flat:F4}), DEX applied exactly once");
+                CheckClose($"{label} resolved walk speed", expected * held, resolver,
+                    "clamp(authored * max(0.5, 1 + 0.025*DEX modifier) * stack multiplier + stack flat, 2, 8), x the held-weapon factor");
+                CheckClose($"{label} walking query equals the movement resolver", resolver, query * held,
+                    $"same source (multiplier {multiplier:F4}, flat {flat:F4}), DEX applied exactly once, x the held-weapon factor");
             }
 
             private GameObject BuildLevelWall(PlayerRig rig, float distance)

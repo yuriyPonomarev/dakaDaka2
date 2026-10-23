@@ -40,10 +40,17 @@ namespace Emberdelve.InputLayer
         private InputAction _pauseSystem;
         private readonly InputAction[] _slots = new InputAction[4];
 
-        public Vector2 Move => _move != null ? _move.ReadValue<Vector2>() : Vector2.zero;
+        /// <summary>Test seams (D1b, same idea as the primary overrides): replace the real move / sprint / guard readings while the player map is live. Never set in game code.</summary>
+        public Vector2? MoveOverride { get; set; }
+        public bool? SprintHeldOverride { get; set; }
+        public bool? SecondaryHeldOverride { get; set; }
+
+        public Vector2 Move => MoveOverride.HasValue ? (_playerMap != null && _playerMap.enabled ? MoveOverride.Value : Vector2.zero)
+            : _move != null ? _move.ReadValue<Vector2>() : Vector2.zero;
         public Vector2 Look => _look != null ? _look.ReadValue<Vector2>() : Vector2.zero;
         public bool JumpPressed => _jump != null && _jump.WasPressedThisFrame();
-        public bool SprintHeld => _sprint != null && _sprint.IsPressed();
+        public bool SprintHeld => SprintHeldOverride.HasValue ? SprintHeldOverride.Value && _playerMap != null && _playerMap.enabled
+            : _sprint != null && _sprint.IsPressed();
         public bool CrouchPressed => _crouch != null && _crouch.WasPressedThisFrame();
         /// <summary>
         /// Test seam for batch-mode harnesses that have no pointer device (the same idea as
@@ -68,7 +75,8 @@ namespace Emberdelve.InputLayer
         public bool PrimaryReleased => PrimaryReleasedOverride.HasValue
             ? PrimaryReleasedOverride.Value && OverrideLive
             : _primary != null && _primary.WasReleasedThisFrame();
-        public bool SecondaryHeld => _secondary != null && _secondary.IsPressed();
+        public bool SecondaryHeld => SecondaryHeldOverride.HasValue ? SecondaryHeldOverride.Value && _playerMap != null && _playerMap.enabled
+            : _secondary != null && _secondary.IsPressed();
         public bool SecondaryPressed => _secondary != null && _secondary.WasPressedThisFrame();
         public bool InteractPressed => _interact != null && _interact.WasPressedThisFrame();
         /// <summary>

@@ -297,8 +297,8 @@ namespace Emberdelve.EditorTools
                 // authors DEX 10 -> floor((10-10)/2) = 0 -> factor 1. The class declares no MoveSpeed passive,
                 // so walk = 4.3 * 1 * 1 + 0 = 4.3 and the query is the same term with no passive folded in.
                 // Sprint keeps its authored 5.2 base with that same factor (5.2 * 1 = 5.2).
-                CheckClose("warrior walk speed resolves the migrated authored 4.3", 4.3f, rig.Movement.ResolveGroundSpeed(false, false), "authored moveSpeed 4.3, DEX modifier 0, no MoveSpeed passive");
-                CheckClose("warrior sprint speed still authored 5.2", 5.2f, rig.Movement.ResolveGroundSpeed(true, false), "sprintSpeed base retained, DEX modifier 0");
+                CheckClose("warrior walk speed resolves the migrated authored 4.3", 4.3f * (1f - 18f / 300f), rig.Movement.ResolveGroundSpeed(false, false), "authored moveSpeed 4.3 x the D1b held factor (sword 10 + shield 8 points of 300), DEX modifier 0, no MoveSpeed passive");
+                CheckClose("warrior sprint speed still authored 5.2", 5.2f * (1f - 18f / 300f), rig.Movement.ResolveGroundSpeed(true, false), "sprintSpeed base retained x the held factor, DEX modifier 0");
                 CheckClose("warrior attribute move-speed query 4.3", 4.3f, rig.AttributeStats.MoveSpeed, "DEX modifier 0, query only");
 
                 // 5. Damage and spend, so every later no-refill check has a pool below its ceiling.

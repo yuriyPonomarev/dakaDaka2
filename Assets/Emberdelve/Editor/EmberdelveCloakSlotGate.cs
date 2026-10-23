@@ -664,7 +664,7 @@ namespace Emberdelve.EditorTools
                 "WISDOM row shows the effective score " + expectedWis + " with worn +3: " + (wisRow ?? "missing"));
             Check(after.TryGetValue("Armour", out string armorRow) && armorRow.StartsWith("6"), "Armour row shows 6 with the cloak: " + (armorRow ?? "missing"));
             Check(after["STRENGTH"] == before["STRENGTH"] && after["CHARISMA"] == before["CHARISMA"], "scores the cloak does not touch are unchanged");
-            Check(view.RowCount == 6 + 3 + 2 + 3, "the pane has one row per number and did not grow on refresh (" + view.RowCount + ")");
+            Check(view.RowCount == 6 + 2 + 2 + 3, "the pane has one row per number (D1b: the deprecated Stamina row is gone, 3 -> 2 vitals) and did not grow on refresh (" + view.RowCount + ")");
 
             gear.TryUnequip(EquipmentSlot.Back, out _);
             view.Refresh();

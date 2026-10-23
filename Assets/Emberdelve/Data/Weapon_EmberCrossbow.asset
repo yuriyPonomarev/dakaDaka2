@@ -17,6 +17,7 @@ MonoBehaviour:
   kind: 1
   baseDamage: 24
   damageType: 1
+  finesse: 0
   windupTime: 0.05
   activeWindow: 0.08
   recoveryTime: 0.2
@@ -24,6 +25,16 @@ MonoBehaviour:
   reach: 1.2
   arcAngle: 60
   hitSphereRadius: 0.2
+  swingPatterns: []
+  comboSteps: []
+  comboWindow: 0.7
+  comboFinisherRecovery: 0.35
+  impactZones: []
+  hitSlowMultiplier: 1
+  hitSlowDuration: 0
+  heldMoveSpeedPenalty: 0
+  impactPower: 0
+  impactResist: 15
   twoHanded: 1
   ammoDisplayName: Bolts
   rangedRange: 34

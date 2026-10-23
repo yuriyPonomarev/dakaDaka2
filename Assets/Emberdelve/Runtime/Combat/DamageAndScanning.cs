@@ -20,7 +20,8 @@ namespace Emberdelve.Combat
         /// affix - resolves bit-for-bit to the previous number.
         /// </summary>
         public static DamageInfo Resolve(WeaponData weapon, in AttackIntent intent, in HitCandidate hit,
-            ICombatEntity target, float instigatorMultiplier = 1f, float weaponBaseDamageBonus = 0f)
+            ICombatEntity target, float instigatorMultiplier = 1f, float weaponBaseDamageBonus = 0f,
+            CombatFlowTuning tuning = null)
         {
             float distance = Vector3.Distance(intent.Origin, hit.HitPoint);
             float amount = weapon.DamageAtRange(distance, weaponBaseDamageBonus);
@@ -35,7 +36,8 @@ namespace Emberdelve.Combat
             if (hit.Headshot) amount *= HeadshotMultiplier;
 
             return Finalize(amount, weapon, intent.Direction, intent.Origin, intent.InstigatorCombatId,
-                intent.InstigatorKind, hit, target);
+                intent.InstigatorKind, hit, target, null, HitLocation.Unspecified,
+                weapon != null ? weapon.impactPower : 0f, tuning);
         }
 
         /// <summary>
@@ -47,15 +49,19 @@ namespace Emberdelve.Combat
         /// </summary>
         public static DamageInfo ResolveSwing(WeaponData weapon, SwingPatternData pattern, in AttackIntent intent,
             in HitCandidate hit, HitLocation location, float locationMultiplier, ICombatEntity target,
-            float instigatorMultiplier = 1f, float weaponBaseDamageBonus = 0f)
+            float instigatorMultiplier = 1f, float weaponBaseDamageBonus = 0f,
+            float stepMultiplier = 1f, float zoneMultiplier = 1f, CombatFlowTuning tuning = null)
         {
             float amount = weapon.DamageAtRange(0f, weaponBaseDamageBonus);
             amount *= pattern != null ? Mathf.Max(0.05f, pattern.damageMultiplier) : 1f;
+            amount *= Mathf.Max(0.05f, stepMultiplier);
             amount *= Mathf.Max(0f, instigatorMultiplier);
             amount *= Mathf.Max(0f, locationMultiplier);
+            amount *= Mathf.Max(0f, zoneMultiplier);
 
+            float impact = weapon.impactPower * (pattern != null ? Mathf.Max(0.01f, pattern.impactPowerScale) : 1f);
             return Finalize(amount, weapon, intent.Direction, intent.Origin, intent.InstigatorCombatId,
-                intent.InstigatorKind, hit, target, null, location);
+                intent.InstigatorKind, hit, target, null, location, impact, tuning);
         }
 
         /// <summary>
@@ -125,14 +131,24 @@ namespace Emberdelve.Combat
 
         private static DamageInfo Finalize(float amount, WeaponData source, Vector3 direction, Vector3 origin,
             int instigatorCombatId, EntityKind instigatorKind, in HitCandidate hit, ICombatEntity target,
-            DamageType? overrideType = null, HitLocation location = HitLocation.Unspecified)
+            DamageType? overrideType = null, HitLocation location = HitLocation.Unspecified,
+            float impactPower = 0f, CombatFlowTuning tuning = null)
         {
             DamageType type = overrideType ?? (source != null ? source.damageType : DamageType.Physical);
 
             DamageInfo info = new DamageInfo(Mathf.Max(1f, amount), hit.HitPoint, direction, origin,
-                instigatorCombatId, instigatorKind, type, false, hit.Headshot, 0f, location);
+                instigatorCombatId, instigatorKind, type, false, hit.Headshot, 0f, location, impactPower);
 
-            if (target is IDefenseProvider defender && defender.TryGetGuardReduction(info, out float reduction))
+            // D1b: a defender whose guard can break answers with the reduction AND whether the hit's impact power
+            // reached its impact resist (reduced mitigation). Other defenders keep the plain directional guard.
+            if (target is IGuardBreakDefender breakable)
+            {
+                if (breakable.TryResolveGuard(info, tuning ?? CombatFlowTuning.Default, out GuardResult guard))
+                {
+                    info = info.WithReduction(guard.Reduction, out _, guard.Broken);
+                }
+            }
+            else if (target is IDefenseProvider defender && defender.TryGetGuardReduction(info, out float reduction))
             {
                 info = info.WithReduction(reduction, out _);
             }
@@ -189,7 +205,8 @@ namespace Emberdelve.Combat
             if (float.IsNaN(final) || float.IsInfinity(final)) final = 1f;
 
             return new DamageInfo(final, info.Point, info.Direction, info.SourcePosition, info.SourceCombatId,
-                info.SourceKind, info.Type, info.Blocked, info.Headshot, info.BlockReduction, info.Location);
+                info.SourceKind, info.Type, info.Blocked, info.Headshot, info.BlockReduction, info.Location,
+                info.ImpactPower, info.GuardBroken);
         }
     }
 

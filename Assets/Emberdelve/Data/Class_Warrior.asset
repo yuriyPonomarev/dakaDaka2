@@ -56,4 +56,4 @@ MonoBehaviour:
   secondaryMaxReserveAmmo: 16
   blockReduction: 0.7
   blockArc: 140
-  guardSpeedMultiplier: 0.45
+  guardSpeedMultiplier: 0.65

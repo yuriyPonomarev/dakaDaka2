@@ -37,10 +37,18 @@ namespace Emberdelve.Core
         /// <summary>D1a: the hit volume the swept melee touched (Unspecified for every other damage source).</summary>
         public readonly HitLocation Location;
 
+        /// <summary>D1b: the attacker weapon's impact power for this hit (weapon x pattern), set by the authority from data. 0 = the source has none (skills with a flat number) and can never break a guard.</summary>
+        public readonly float ImpactPower;
+
+        /// <summary>D1b: the defender's guard was engaged but the hit's impact power reached its impact resist: reduced mitigation and a guard stagger. Always accompanied by <see cref="Blocked"/>.</summary>
+        public readonly bool GuardBroken;
+
         public DamageInfo(float amount, Vector3 point, Vector3 direction, Vector3 sourcePosition,
             int sourceCombatId, EntityKind sourceKind, DamageType type, bool blocked, bool headshot, float blockReduction,
-            HitLocation location = HitLocation.Unspecified)
+            HitLocation location = HitLocation.Unspecified, float impactPower = 0f, bool guardBroken = false)
         {
+            ImpactPower = impactPower;
+            GuardBroken = guardBroken;
             Location = location;
             Amount = amount;
             Point = point;
@@ -60,12 +68,18 @@ namespace Emberdelve.Core
 
         public bool IsValid => Amount > 0f && SourceCombatId >= 0;
 
-        public DamageInfo WithReduction(float reduction, out bool blocked)
+        public DamageInfo WithReduction(float reduction, out bool blocked, bool guardBroken = false)
         {
             blocked = reduction > 0f;
             return new DamageInfo(Mathf.Max(1f, Amount * (1f - Mathf.Clamp01(reduction))), Point, Direction,
-                SourcePosition, SourceCombatId, SourceKind, Type, blocked, Headshot, Mathf.Clamp01(reduction), Location);
+                SourcePosition, SourceCombatId, SourceKind, Type, blocked, Headshot, Mathf.Clamp01(reduction), Location,
+                ImpactPower, guardBroken && blocked);
         }
+
+        /// <summary>The same hit carrying the attacker's impact power (the resolver sets it before the defender's guard is asked).</summary>
+        public DamageInfo WithImpactPower(float impactPower) =>
+            new DamageInfo(Amount, Point, Direction, SourcePosition, SourceCombatId, SourceKind, Type, Blocked, Headshot,
+                BlockReduction, Location, impactPower, GuardBroken);
     }
 
     public readonly struct HitFeedback
@@ -219,6 +233,30 @@ namespace Emberdelve.Core
     public interface IDefenseProvider
     {
         bool TryGetGuardReduction(in DamageInfo incoming, out float reduction);
+    }
+
+    /// <summary>What a defender's guard did to one hit (D1b).</summary>
+    public readonly struct GuardResult
+    {
+        public readonly float Reduction;
+        public readonly bool Broken;
+
+        public GuardResult(float reduction, bool broken)
+        {
+            Reduction = reduction;
+            Broken = broken;
+        }
+    }
+
+    /// <summary>
+    /// A defender whose guard can be BROKEN (D1b). The resolver hands it the hit (which carries the attacker's impact
+    /// power) and the authority's tuning, and the defender answers with the reduction it applies and whether its impact
+    /// resist was reached. The directional rule (frontal arc, never from behind) stays the defender's own. A defender
+    /// that only implements IDefenseProvider keeps the old behaviour (no break).
+    /// </summary>
+    public interface IGuardBreakDefender
+    {
+        bool TryResolveGuard(in DamageInfo incoming, Emberdelve.Data.CombatFlowTuning tuning, out GuardResult result);
     }
 
     /// <summary>

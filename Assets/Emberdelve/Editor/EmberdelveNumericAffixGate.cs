@@ -43,8 +43,8 @@ ItemInstance motion;Check(ItemInstance.TryCreateNew(boots,1,AffixRarity.Rare,new
 Check(bag.TryAddInstance(motion,out reason)&&gear.TryEquipFromInventory(bag.IndexOfInstance(motion.Uid),out reason),"equip motion gear");
 Check(Mathf.Abs(rig.Movement.ResolveWalkSpeed()-5.174f)<.0001f,"fixed boots multiplier then flat speed");
 Check(Mathf.Abs(rig.Mana.RegenPerSecond-3.2f)<.0001f,"WIS-derived regen plus flat");
-Check(Mathf.Abs(rig.Movement.ResolveGroundSpeed(true,false)-5.824f)<.0001f,"walk flat does not alter sprint");
-Check(Mathf.Abs(rig.Movement.ResolveGroundSpeed(false,true)-1.7f)<.0001f,"walk flat does not alter crouch");
+Check(Mathf.Abs(rig.Movement.ResolveGroundSpeed(true,false)-5.824f*(1f-18f/300f))<.0001f,"walk flat does not alter sprint (x the D1b held factor: sword 10 + shield 8 points of 300)");
+Check(Mathf.Abs(rig.Movement.ResolveGroundSpeed(false,true)-1.7f*(1f-18f/300f))<.0001f,"walk flat does not alter crouch (x the D1b held factor)");
 Check(rig.AttributeStats.GetAttribute(Emberdelve.Stats.SixAttribute.Dexterity)==11,"fixed DEX remains once");
 Check(gear.TryUnequip(EquipmentSlot.Legs,out reason),"remove motion gear");
 ItemInstance combined;Check(ItemInstance.TryCreateNew(boots,1,AffixRarity.Rare,new[]{new AffixRecord("numeric_4",AffixStatKey.Constitution,3),new AffixRecord("numeric_0",AffixStatKey.MaxHealth,10)},auth,out combined,out reason),"CON plus HP gear");

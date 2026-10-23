@@ -20,7 +20,7 @@ namespace Emberdelve.Player
     [RequireComponent(typeof(PlayerMovement))]
     [RequireComponent(typeof(PlayerLook))]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider
+    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IMoveFlowSource
     {
         [Header("Components")]
         [SerializeField] private EmberdelveInput input;
@@ -46,9 +46,9 @@ namespace Emberdelve.Player
         private StatsComponent _attributeStats;
 
         /// <summary>
-        /// No stamina regen delay is authored yet because nothing spends stamina in this slice; drain and
-        /// its delay are U3. Kept as one named constant so the pool is configured explicitly rather than
-        /// by an undocumented default.
+        /// DEPRECATED (D1b): stamina no longer gates or drains anything in combat or movement (user decision:
+        /// guard break replaces stamina-gated defense; sprint is free). The pool, its derived stats and this
+        /// constant stay as data for existing gates and a possible later use; nothing spends it.
         /// </summary>
         public const float StaminaRegenDelay = 0f;
 
@@ -105,7 +105,14 @@ namespace Emberdelve.Player
         public bool IsDead => health != null && health.IsDead;
         public float CurrentHealth => health != null ? health.CurrentHealth : 0f;
         public float MaxHealth => health != null ? health.MaxHealth : 0f;
-        public bool IsGuarding => _guardHeld && _defense.CanBlock && !IsDead;
+        public bool IsGuarding => _guardHeld && _defense.CanBlock && !IsDead && !IsGuardStaggered;
+
+        /// <summary>
+        /// D1b: true while a broken guard keeps this player from raising the guard. The stagger is the combat
+        /// authority's state (its clock), so a client cannot shorten it by holding the button.
+        /// </summary>
+        public bool IsGuardStaggered =>
+            GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) && authority is ICombatFlowState flow && flow.IsGuardStaggered(_combatId);
         public bool CanGuard => _defense.CanBlock;
         public bool CanParry => _defense.CanParry;
         public DefenseProfile Defense => _defense;
@@ -158,6 +165,7 @@ namespace Emberdelve.Player
             if (health == null) health = GetComponent<HealthComponent>();
             if (inventory == null) inventory = GetComponent<Inventory>();
             if (loadout == null) loadout = GetComponent<ClassLoadout>();
+            if (movement != null) movement.SetFlowSource(this);
 
             // Mana, stamina, status state and the skill kit are created here rather than required in the
             // scene, so a rig built before this milestone still gets them, and a rebuilt scene simply has
@@ -561,6 +569,35 @@ namespace Emberdelve.Player
 
         public bool TryGetGuardReduction(in DamageInfo incoming, out float reduction)
         {
+            if (TryResolveGuard(incoming, CombatFlowTuning.Default, out GuardResult result))
+            {
+                reduction = result.Reduction;
+                return true;
+            }
+
+            reduction = 0f;
+            return false;
+        }
+
+        /// <summary>
+        /// D1b guard: the same frontal-arc rule as before (a hit from behind is never blocked, shields never parry),
+        /// then the impact check. A hit whose impact power reaches the kit's impact resist BREAKS the guard: only
+        /// <c>guardBreakReductionScale</c> of the normal mitigation applies and the authority staggers the guard. No
+        /// stamina is read or spent anywhere in this path.
+        /// </summary>
+        public bool TryResolveGuard(in DamageInfo incoming, CombatFlowTuning tuning, out GuardResult result)
+        {
+            result = default;
+            if (!TryGetArcReduction(incoming, out float reduction)) return false;
+
+            bool broken = CombatFlowRules.IsGuardBroken(incoming.ImpactPower, _defense.ImpactResist);
+            float scale = tuning != null ? tuning.guardBreakReductionScale : CombatFlowTuning.DefaultGuardBreakReductionScale;
+            result = new GuardResult(broken ? reduction * Mathf.Clamp01(scale) : reduction, broken);
+            return true;
+        }
+
+        private bool TryGetArcReduction(in DamageInfo incoming, out float reduction)
+        {
             reduction = 0f;
             if (!IsGuarding || !_defense.CanBlock) return false;
 
@@ -579,7 +616,32 @@ namespace Emberdelve.Player
 
         public void PlaySwingVisual(WeaponData weapon, SwingPatternData pattern)
         {
-            if (loadout != null) loadout.PlaySwingVisual(weapon, pattern);
+            if (loadout != null) loadout.PlaySwingVisual(weapon, pattern, pattern != null ? pattern.Timing : default);
+        }
+
+        public void PlaySwingVisual(WeaponData weapon, SwingPatternData pattern, in SwingTiming timing)
+        {
+            if (loadout != null) loadout.PlaySwingVisual(weapon, pattern, timing);
+        }
+
+        /// <summary>
+        /// D1b combat-flow move factor: the held weapon (and a contributing shield) penalty times what the combat
+        /// authority says about this player's swing phase and guard stagger. PlayerMovement.ResolveGroundSpeed applies
+        /// it, so the speed a server would validate already contains the fighting penalties.
+        /// </summary>
+        public float GetMoveFlowFactor()
+        {
+            WeaponData main = ActiveWeapon != null ? ActiveWeapon : _mainHand;
+            WeaponData off = OffhandWeapon;
+            bool offContributes = off != null && off.IsShield && !(main != null && main.twoHanded);
+            float factor = CombatFlowRules.HeldFactor(main, off, offContributes);
+
+            if (GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) && authority is ICombatFlowState flow)
+            {
+                factor *= flow.GetMoveFactor(_combatId);
+            }
+
+            return factor;
         }
 
         /// <summary>The authority stopped the swing at level geometry: the visual recoils from where it is.</summary>

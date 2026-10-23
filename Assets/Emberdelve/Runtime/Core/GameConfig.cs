@@ -45,6 +45,8 @@ namespace Emberdelve.Core
         [Header("Combat")]
         [Tooltip("D1a hit-location damage multipliers. Empty = the code defaults (head 1.5, body 1, arms 0.8, hands 0.7, legs 0.6, feet 0.5).")]
         public Emberdelve.Data.HitLocationTable hitLocations;
+        [Tooltip("D1b combat-flow tunables (guard break reduction scale, guard stagger length and its move slow). A config saved before D1b reads these defaults.")]
+        public Emberdelve.Data.CombatFlowTuning flow = new Emberdelve.Data.CombatFlowTuning();
 
         [Header("Layers (must match ProjectSettings/TagManager)")]
         public LayerMask levelMask;

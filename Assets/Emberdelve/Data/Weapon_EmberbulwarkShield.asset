@@ -26,6 +26,15 @@ MonoBehaviour:
   arcAngle: 90
   hitSphereRadius: 0.45
   swingPatterns: []
+  comboSteps: []
+  comboWindow: 0.7
+  comboFinisherRecovery: 0.35
+  impactZones: []
+  hitSlowMultiplier: 1
+  hitSlowDuration: 0
+  heldMoveSpeedPenalty: 8
+  impactPower: 8
+  impactResist: 20
   twoHanded: 0
   ammoDisplayName: Ammo
   rangedRange: 42

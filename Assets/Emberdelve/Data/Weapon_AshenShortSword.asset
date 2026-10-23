@@ -29,6 +29,33 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 8fbc6866b582f2c49b352eb2f0940258, type: 2}
   - {fileID: 11400000, guid: f92bd604f752381419b12cc34e62da40, type: 2}
   - {fileID: 11400000, guid: b4dfd12693cf8af43813a792e31eb4f7, type: 2}
+  comboSteps:
+  - patternIndex: 0
+    damageMultiplier: 1
+    windupScale: 1
+    recoveryScale: 1
+  - patternIndex: 1
+    damageMultiplier: 1.05
+    windupScale: 0.85
+    recoveryScale: 1
+  - patternIndex: 2
+    damageMultiplier: 1.1
+    windupScale: 1
+    recoveryScale: 1
+  comboWindow: 0.7
+  comboFinisherRecovery: 0.35
+  impactZones:
+  - from: 0
+    multiplier: 0.7
+  - from: 0.35
+    multiplier: 0.9
+  - from: 0.7
+    multiplier: 1
+  hitSlowMultiplier: 0.9
+  hitSlowDuration: 0.6
+  heldMoveSpeedPenalty: 10
+  impactPower: 10
+  impactResist: 8
   twoHanded: 0
   ammoDisplayName: Ammo
   rangedRange: 42
