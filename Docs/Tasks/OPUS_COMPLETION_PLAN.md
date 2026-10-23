@@ -1,0 +1,55 @@
+# Opus completion plan — 23 October 2026
+
+Codex orchestrates, reviews, runs Unity and commits. Luna implements game changes. This execution continues the user request to finish Opus work. Original design and the latest recorded user decisions take precedence over old proposal tables.
+
+## Preserved decisions
+
+- Continue the existing Unity 6000.2.5f1 project; preserve namespaces, scenes and assets.
+- Keep six attributes and mana for Warrior/Archer. Stamina no longer gates sprint or defense.
+- Parties up to three; target 6–9 players. Dedicated server plus two real clients is the first network proof.
+- Shields never parry. Weapon parry is a separate later capability.
+- Preserve exact item UIDs and rolls, atomic transfers and no free healing on equipment changes.
+
+## Current evidence
+
+HEAD at start: cfba6d92. R0/R1a/R1b, item catalog, versioned container snapshots, seeded loot, D1a swept melee and D1b combat flow are committed. R2/R7 actor interactions, scoped events and local multiple-player sessions were left dirty by Opus. Projectile blade interception was completed in the preceding session but overlaps those dirty files.
+
+Saved all 57 initial modified/untracked paths at C:/Users/yrapa/.pi/agent/projects/unity-emberdelve/checkpoints/pre-opus-completion-20261023.
+
+Prior final projectile evidence: focused 50/0; SweptMelee 638/0; CombatFlow 376/0; AttributeSkill 925/0; CombatAuthority 49/0; SkillAuthority 161/0; Archer smoke 120/0. Real Editor diagnostic advanced 39 frames with guard active and matching visible/authority blade poses. See PROJECTILE_WEAPON_BLOCK.md.
+
+Fresh MultiPlayer baseline: 123 checks / 2 failures, both ranged assertions still using the old immediate-damage path (Logs/opus_finish_20261023_01_MultiPlayer.log). Independent review also identified ID-only interaction actor lookup and missing finite-coordinate rejection. These were corrected; the fresh 38-gate batch confirms MultiPlayer134/0. Five legacy fixture groups still require migration to time-of-flight and the authored rapier guard baseline before the integration commit. Raw evidence: Logs/opus_finish_20261023_04_integration; clean runner/authority rerun: Logs/opus_finish_20261023_05_runner.
+
+## Ordered milestones
+
+| Slice | Work | Acceptance before commit |
+|---|---|---|
+| C0 | Finish/review R2+R7 and integrate projectile work | MultiPlayer negative/positive cases; broad affected combat, inventory, extraction/result gates; honest integration commit |
+| R6a | Stable non-reused runtime inventory stack IDs | Move/list compaction/merge/consume/clear/restore identity; gear UIDs and snapshot JSON unchanged |
+| R6b | Owner-bound sequenced inventory commands; authority owns consumable effects | Replay/order/stale revision/ID/owner refusal, atomic transfer and exact effects |
+| R6c | Stable hotbar bindings and inventory view/selection split | No direct UI mutation calls; real input and inventory UI regressions |
+| R10a DONE | Immutable effective-stat capture over existing authoritative inputs | Commit4127e494; EffectiveStats17/0, independent literals/nonempty affixes and immutable old captures. Runtime integration remains R10b. |
+| R10b | Integrate one effective-stat read path and invalidation | Existing stat/movement/skill/armor gates; no doubled bonuses or free refill |
+| R8 | Rules/runtime/presentation/review/editor assembly boundaries and readable NUnit tests | Compile, EditMode tests, runtime has no presentation dependency; old gates retained |
+| D1 follow-ups | Turn-rate cap with matching visuals, enemy sweeps, ranged hit locations; close confirmed combat review findings | Geometry/authority/input tests and live rendered review |
+| R1 follow-ups | Kit epoch and sender ownership, authoritative movement ability execution | Forged/replayed/other-player commands refused, normal skills still work |
+| U3A | Compatible official networking stack; dedicated process and two clients, walking/ownership/late join, offline retained | Real independent process connection/input/cleanup evidence |
+| D2 | Complete simulated projectiles: authored gravity, deterministic stepping and flight-time tuning | Drop/falloff/wall/body/blade/location and tick-size checks |
+| D3 | Stable rarity extension, equipment slots, weapon sets, utility belt, item movement penalties and gear score | Migration and atomic inventory/equipment checks, usable UI |
+| D4 | Accepted six-attribute role remap via authored curves and derived stats | Literal curve points, gameplay effects, save keys preserved; mana remains |
+| U3B | Server combat, skills and state replication | Real PvP/PvE, owner/cadence/stats validation and client visual agreement |
+| D5/U4B | Configurable raid timer/portals, corpse and interrupted extraction | Exact-once result, death/disconnect cannot bank, exact item ownership |
+| U4A | Authoritative contested containers/inventory | Two clients race for one UID: exactly one owner; range/LOS/replay negatives |
+| U4C | Versioned atomic server profile/stash persistence and next loadout | Exact UIDs/rolls survive restart; invalid saves refused atomically |
+| D6 | Approved small lobby economy and starter kit | Server validates transfers/prices; gold conservation and zero-gold recovery |
+| D7 | Approved kit pools and additional archetypes, split by class/system | Real abilities/perks and resource/status behavior |
+| D8 | Seeded module dungeon, doors/traps, PvE additions and floor links | Reachable deterministic maps, valid portals, collision/LOS and fight checks |
+| D9 | Party/spectate/revive and six-client scale check | Team rules and interrupted revive over the network |
+| U5 | Licensed reusable art, animation, audio and readable dungeon-synth presentation | Provenance, inspected live frames, audible playback and measured performance |
+| U6 | Windows release candidate and launch/readme tools | Dedicated plus clients complete raid/death/extraction/stash-restart loop |
+
+Large slices are split again before dispatch. No network, content, persistence or release acceptance is inferred from local harnesses. The October 19 roadmap and October 22 pause paragraphs remain historical, not current task state.
+
+## Service limitation observed
+
+Two read-only audit agents stopped with the service usage-limit error before writing their assigned files. R10a was independently verified and committed as4127e494. Continue useful checks and review with available execution; do not label blocked work complete.
