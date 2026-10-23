@@ -25,6 +25,8 @@ namespace Emberdelve.Items
         public readonly Vector2Int Origin;
         public readonly Vector2Int Size;
         public readonly int Index;
+        /// <summary>Runtime identity of this exact inventory stack; zero means a detached/legacy view.</summary>
+        public readonly ulong StackId;
 
         public InventorySlot(ItemData item, int count)
         {
@@ -34,6 +36,7 @@ namespace Emberdelve.Items
             Origin = Vector2Int.zero;
             Size = Vector2Int.one;
             Index = -1;
+            StackId = 0;
         }
 
         public InventorySlot(ItemData item, int count, Vector2Int origin, Vector2Int size, int index)
@@ -44,10 +47,17 @@ namespace Emberdelve.Items
             Origin = origin;
             Size = size;
             Index = index;
+            StackId = 0;
         }
 
         public InventorySlot(ItemData item, ItemInstance instance, int count, Vector2Int origin,
             Vector2Int size, int index)
+            : this(item, instance, count, origin, size, index, 0)
+        {
+        }
+
+        public InventorySlot(ItemData item, ItemInstance instance, int count, Vector2Int origin,
+            Vector2Int size, int index, ulong stackId)
         {
             Item = item;
             Instance = instance;
@@ -55,6 +65,7 @@ namespace Emberdelve.Items
             Origin = origin;
             Size = size;
             Index = index;
+            StackId = stackId;
         }
 
         /// <summary>True when this stack is an actual item instance rather than a definition-only carried stack.</summary>
@@ -99,6 +110,7 @@ namespace Emberdelve.Items
         /// </summary>
         private sealed class Stack
         {
+            public ulong StackId;
             public ItemData Item;
             public ItemInstance Instance;
             public int Count;
@@ -110,6 +122,8 @@ namespace Emberdelve.Items
         private readonly List<Stack> _stacks = new List<Stack>();
         private readonly List<InventorySlot> _views = new List<InventorySlot>();
         private int[] _cells = new int[40];
+        [NonSerialized] private ulong _nextStackId = 1;
+        [NonSerialized] private bool _stackIdsExhausted;
 
         private PlayerRig _rig;
         private RangedCombat _rangedCombat;
@@ -237,7 +251,7 @@ namespace Emberdelve.Items
                     continue;
                 }
 
-                AddStack(definition, stack.Instance, stack.Count, origin);
+                AddStack(definition, stack.Instance, stack.Count, origin, stack.StackId);
             }
 
             Recompute();
@@ -325,6 +339,27 @@ namespace Emberdelve.Items
 
             int remaining = amount;
             int stackLimit = item.StackLimitForFootprint;
+
+            // Prove the call can allocate every new stack ID before it fills any existing stack or mints a
+            // gear UID. At the terminal ID boundary this fails closed instead of leaving a partial add behind.
+            int unitsAfterExistingStacks = amount;
+            for (int i = 0; i < _stacks.Count && unitsAfterExistingStacks > 0; i++)
+            {
+                Stack stack = _stacks[i];
+                if (stack.Definition != item || stack.Instance != null) continue;
+                int space = Mathf.Max(0, stackLimit - stack.Count);
+                unitsAfterExistingStacks -= Mathf.Min(space, unitsAfterExistingStacks);
+            }
+
+            int requiredNewStackIds = item.IsEquippable
+                ? unitsAfterExistingStacks
+                : (int)(((long)unitsAfterExistingStacks + stackLimit - 1) / stackLimit);
+            if (!CanAllocateStackIds(requiredNewStackIds))
+            {
+                reason = "this bag has exhausted its nonzero runtime stack identity space";
+                GameEvents.RaiseToast(OwnerId, reason);
+                return false;
+            }
 
             for (int i = 0; i < _stacks.Count && remaining > 0; i++)
             {
@@ -429,6 +464,17 @@ namespace Emberdelve.Items
             }
 
             int stackLimit = item.StackLimitForFootprint;
+            // This exact placement begins in an empty footprint. Validate the maximum number of stacks it can
+            // create before adding any of them, so exhaustion cannot strand a partial placement.
+            int requiredNewStackIds = item.IsEquippable || !item.CanStack
+                ? 1
+                : (int)(((long)amount + stackLimit - 1) / stackLimit);
+            if (!CanAllocateStackIds(requiredNewStackIds))
+            {
+                reason = "this bag has exhausted its nonzero runtime stack identity space";
+                return false;
+            }
+
             int placed = 0;
 
             if (item.CanStack)
@@ -527,6 +573,29 @@ namespace Emberdelve.Items
                 if (instance != null && instance.Uid == uid) return i;
             }
             return -1;
+        }
+
+        /// <summary>Current compacted index for a live stack identity, or -1 for zero/unknown/retired IDs.</summary>
+        public int IndexOfStack(ulong stackId)
+        {
+            if (stackId == 0) return -1;
+            for (int i = 0; i < _stacks.Count; i++)
+                if (_stacks[i] != null && _stacks[i].StackId == stackId) return i;
+            return -1;
+        }
+
+        /// <summary>Reads a live stack by identity. Zero, unknown, and retired IDs return false and a default view.</summary>
+        public bool TryGetStack(ulong stackId, out InventorySlot slot)
+        {
+            int index = IndexOfStack(stackId);
+            if (index < 0 || index >= _views.Count)
+            {
+                slot = default;
+                return false;
+            }
+
+            slot = _views[index];
+            return slot.StackId == stackId;
         }
 
         /// <summary>True when one of this bag's stacks already carries this identity.</summary>
@@ -816,6 +885,13 @@ namespace Emberdelve.Items
                 return false;
             }
 
+            if (!CanAllocateStackIds(validated.Entries.Count))
+            {
+                reason = "this bag has exhausted its nonzero runtime stack identity space";
+                validated = null;
+                return false;
+            }
+
             if (checkPartner)
             {
                 Equipment partner = EquipmentPartner();
@@ -850,7 +926,14 @@ namespace Emberdelve.Items
             for (int i = 0; i < validated.Entries.Count; i++)
             {
                 ValidatedEntry entry = validated.Entries[i];
-                _stacks.Add(new Stack { Item = entry.Definition, Instance = entry.Instance, Count = entry.Quantity, Origin = entry.Origin });
+                _stacks.Add(new Stack
+                {
+                    StackId = AllocateStackId(),
+                    Item = entry.Definition,
+                    Instance = entry.Instance,
+                    Count = entry.Quantity,
+                    Origin = entry.Origin
+                });
                 units += entry.Quantity;
                 value += entry.Definition.value * entry.Quantity;
             }
@@ -1226,11 +1309,18 @@ namespace Emberdelve.Items
                 }
             }
 
-            // Planned. Commit both moves together; the notification waits for the equipment side to commit.
+            // Planned. Allocate any returned item's new stack identity before touching the incoming stack, so
+            // even identity-space exhaustion cannot leave half of this transfer committed.
+            ulong outgoingStackId = outgoing != null ? AllocateStackId() : 0;
+
+            // Commit both moves together; the notification waits for the equipment side to commit.
             if (opensHole)
             {
                 if (outgoing != null)
                 {
+                    // The Stack object is reused for the outgoing gear, but it is a different exact item.
+                    // Retire the incoming stack identity and give the outgoing gear its newly allocated one.
+                    taken.StackId = outgoingStackId;
                     taken.Item = outgoingDefinition;
                     taken.Instance = outgoing;
                     taken.Origin = outgoingOrigin;
@@ -1243,7 +1333,7 @@ namespace Emberdelve.Items
             else
             {
                 taken.Count -= 1;
-                if (outgoing != null) AddStack(outgoingDefinition, outgoing, 1, outgoingOrigin);
+                if (outgoing != null) AddStack(outgoingDefinition, outgoing, 1, outgoingOrigin, outgoingStackId);
             }
 
             Recompute();
@@ -1438,8 +1528,33 @@ namespace Emberdelve.Items
 
         private void AddStack(ItemData item, ItemInstance instance, int count, Vector2Int origin)
         {
-            _stacks.Add(new Stack { Item = item, Instance = instance, Count = count, Origin = origin });
+            AddStack(item, instance, count, origin, AllocateStackId());
+        }
+
+        /// <summary>Recreates a stack at a new grid position while preserving its live identity.</summary>
+        private void AddStack(ItemData item, ItemInstance instance, int count, Vector2Int origin, ulong stackId)
+        {
+            if (stackId == 0) throw new ArgumentOutOfRangeException(nameof(stackId), "Live inventory stacks require a nonzero identity.");
+            _stacks.Add(new Stack { StackId = stackId, Item = item, Instance = instance, Count = count, Origin = origin });
             Recompute();
+        }
+
+        private ulong AllocateStackId()
+        {
+            if (_stackIdsExhausted || _nextStackId == 0)
+                throw new InvalidOperationException("This Inventory exhausted its nonzero stack identity space.");
+
+            ulong id = _nextStackId;
+            if (id == ulong.MaxValue) _stackIdsExhausted = true;
+            else _nextStackId = id + 1;
+            return id;
+        }
+
+        private bool CanAllocateStackIds(int count)
+        {
+            if (count <= 0) return true;
+            if (_stackIdsExhausted || _nextStackId == 0) return false;
+            return (ulong)(count - 1) <= ulong.MaxValue - _nextStackId;
         }
 
         /// <summary>How one stack is named in a refusal: its definition and, when it has one, its identity.</summary>
@@ -1478,7 +1593,8 @@ namespace Emberdelve.Items
                 if (stack == null || stack.Definition == null) continue;
 
                 Vector2Int size = stack.Definition.EffectiveFootprint;
-                _views.Add(new InventorySlot(stack.Definition, stack.Instance, stack.Count, stack.Origin, size, i));
+                _views.Add(new InventorySlot(stack.Definition, stack.Instance, stack.Count, stack.Origin, size, i,
+                    stack.StackId));
 
                 for (int y = stack.Origin.y; y < stack.Origin.y + size.y; y++)
                 {
