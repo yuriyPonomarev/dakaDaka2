@@ -78,6 +78,7 @@ namespace Emberdelve.EditorTools
         private int _failures;
         private readonly List<UnityEngine.Object> _cleanup = new List<UnityEngine.Object>();
         private readonly List<ICombatEntity> _registered = new List<ICombatEntity>();
+        private readonly Dictionary<int, int> _projectileSlots = new Dictionary<int, int>();
 
         private LocalCombatAuthority _auth;
         private float _clock = 1000f;
@@ -113,12 +114,13 @@ namespace Emberdelve.EditorTools
         /// A skill caster the authority reads through its interfaces only: kit, weapon, mana, ammo, scale and
         /// epoch are all entity state that the test (the "server side") owns and the intents cannot touch.
         /// </summary>
-        private sealed class Caster : ICombatEntity, IActiveWeaponProvider, ISkillCasterState, IStatusTarget, IAmmoSource
+        private sealed class Caster : ICombatEntity, IActiveWeaponProvider, IAimPoseProvider, ISkillCasterState, IStatusTarget, IAmmoSource
         {
             public int CombatId { get; set; }
             public EntityKind Kind => EntityKind.LocalPlayer;
             public int TeamId => CombatTeams.PlayerTeam;
             public Vector3 Point = new Vector3(0f, 1.1f, 0f);
+            public Vector3 AimDirection = Vector3.forward;
             public bool Dead;
             public WeaponData Weapon;
             public List<SkillData> Kit = new List<SkillData>();
@@ -143,6 +145,11 @@ namespace Emberdelve.EditorTools
             public void ApplyStatus(StatusSpec spec, int sourceCombatId) => Applied.Add(spec);
             public void ClearStatuses() => Applied.Clear();
             public bool HasStatus(StatusKind kind) => Applied.Exists(s => s.Kind == kind);
+            public bool TryGetAimPose(out Vector3 eye, out float yawDegrees, out float pitchDegrees)
+            {
+                eye = Point;
+                return SwingGeometry.TryAimAngles(AimDirection, out yawDegrees, out pitchDegrees);
+            }
             public bool HasAmmo(int count) => Magazine >= count;
             public bool TryConsumeAmmo(int count) { if (Magazine < count) return false; Magazine -= count; Spent += count; return true; }
         }
@@ -218,6 +225,27 @@ namespace Emberdelve.EditorTools
             _registered.Add(entity);
         }
 
+        private void ParkRegisteredExcept(params ICombatEntity[] keep)
+        {
+            HashSet<int> keepIds = new HashSet<int>();
+            if (keep != null) foreach (ICombatEntity entity in keep) if (entity != null) keepIds.Add(entity.CombatId);
+            int parked = 0;
+            foreach (ICombatEntity entity in _registered)
+            {
+                if (entity == null || keepIds.Contains(entity.CombatId)) continue;
+                Vector3 position = new Vector3(10000f + parked * 10f, 1000f, 10000f);
+                if (entity is Caster caster) caster.Point = position;
+                else if (entity is Component component) component.transform.position = position;
+                else if (entity is Target target)
+                {
+                    target.Point = position;
+                    if (target.Head != null) target.Head.transform.position = position + Vector3.up * 0.6f;
+                }
+                parked++;
+            }
+            Physics.SyncTransforms();
+        }
+
         private bool Begin(Caster c, string skillId, out int activation, out string reason)
         {
             return _auth.TryBeginSkillCast(c.CombatId, skillId, out activation, out reason);
@@ -238,12 +266,35 @@ namespace Emberdelve.EditorTools
         {
             int id = casterId ?? c.CombatId;
             int seq = sequence ?? CombatRegistry.NextSequence(id);
-            SkillIntent intent = new SkillIntent(id, EntityKind.LocalPlayer, claimedSkill, claimedWeapon, c.Point,
-                point - c.Point, maxRange, seq, timestamp, status, activation, scale);
-
             float before = t.Taken;
             t.Last = DamageInfo.Invalid;
-            bool ok = _auth.SubmitSkill(intent, new HitCandidate(t.CombatId, point, headFlag), out string reason);
+            bool ok;
+            string reason;
+            if (claimedSkill != null && claimedSkill.IsProjectileSkill)
+            {
+                int slot = _projectileSlots.TryGetValue(activation, out int nextSlot) ? nextSlot : 0;
+                int count = Mathf.Max(1, claimedSkill.ProjectilesPerCast);
+                if (count == 1) c.AimDirection = point - c.Point;
+                Vector3 baseDirection = c.AimDirection.normalized;
+                float lane = count <= 1 ? 0f : (slot / (count - 1f) - 0.5f) * claimedSkill.spreadDegrees;
+                Vector3 slotDirection = Quaternion.AngleAxis(lane, Vector3.up) * baseDirection;
+                SkillIntent intent = new SkillIntent(id, EntityKind.LocalPlayer, claimedSkill, claimedWeapon, c.Point,
+                    slotDirection, maxRange, seq, timestamp, status, activation, scale);
+                ok = _auth.LaunchSkillProjectile(intent, slot);
+                reason = _auth.LastSkillRejectReason;
+                if (ok)
+                {
+                    _projectileSlots[activation] = slot + 1;
+                    float travelSeconds = Mathf.Max(0.01f, maxRange / Mathf.Max(2f, claimedWeapon.projectileSpeed) + 0.01f);
+                    _auth.AdvanceProjectiles(travelSeconds);
+                }
+            }
+            else
+            {
+                SkillIntent intent = new SkillIntent(id, EntityKind.LocalPlayer, claimedSkill, claimedWeapon, c.Point,
+                    point - c.Point, maxRange, seq, timestamp, status, activation, scale);
+                ok = _auth.SubmitSkill(intent, new HitCandidate(t.CombatId, point, headFlag), out reason);
+            }
             return new Outcome { Accepted = ok, Reason = reason ?? string.Empty, Damage = t.Taken - before, Info = t.Last };
         }
 
@@ -271,8 +322,11 @@ namespace Emberdelve.EditorTools
             Check(rig != null && !rig.IsDead, "a living player rig is available");
             if (rig == null) return;
 
-            // Enemies of the scene must not act on the injected clock or hit the rig while the gate runs.
             foreach (EnemyAgent enemy in FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None)) enemy.gameObject.SetActive(false);
+            rig.transform.position = new Vector3(3000f, 0f, 3000f);
+            Physics.SyncTransforms();
+
+
 
             _dash = Load<SkillData>("Skill_WarriorDash.asset");
             _cry = Load<SkillData>("Skill_WarriorBattleCry.asset");
@@ -293,6 +347,7 @@ namespace Emberdelve.EditorTools
             GameConfig cfg = ScriptableObject.CreateInstance<GameConfig>();
             _cleanup.Add(cfg);
             cfg.levelMask = 0;
+            cfg.hitMask = LayerMask.GetMask(GameConfig.EnemyLayerName);
             GameObject go = new GameObject("SkillAuthorityGate_Authority");
             _cleanup.Add(go);
             _auth = go.AddComponent<LocalCombatAuthority>();
@@ -421,7 +476,15 @@ namespace Emberdelve.EditorTools
             Caster archer = NewCaster(_bow, 100, 10, _multi, _pierce);
             Check(Begin(archer, _multi.skillId, out int multiAct, out reason), "Multi-shot cast accepted (" + reason + ")");
             Check(archer.Magazine == 7 && archer.Spent == 3, "Multi-shot spent exactly 3 rounds");
-            Target[] arrowTargets = { NewTarget(archer.Point + new Vector3(-1f, 0f, 15f)), NewTarget(archer.Point + new Vector3(0f, 0f, 15f)), NewTarget(archer.Point + new Vector3(1f, 0f, 15f)) };
+            float sideOffset = 15f * Mathf.Tan(_multi.spreadDegrees * 0.5f * Mathf.Deg2Rad);
+            Target[] arrowTargets = { NewTarget(archer.Point + new Vector3(-sideOffset, 0f, 15f)), NewTarget(archer.Point + new Vector3(0f, 0f, 15f)), NewTarget(archer.Point + new Vector3(sideOffset, 0f, 15f)) };
+            ParkRegisteredExcept(new ICombatEntity[] { archer, arrowTargets[0], arrowTargets[1], arrowTargets[2] });
+            SkillIntent hitOnlyMulti = new SkillIntent(archer.CombatId, archer.Kind, _multi, _bow,
+                archer.Point, Vector3.forward, _bow.rangedRange, CombatRegistry.NextSequence(archer.CombatId),
+                _clock, default, multiAct, archer.Scale);
+            Check(!_auth.SubmitSkill(hitOnlyMulti, new HitCandidate(arrowTargets[0].CombatId, arrowTargets[0].Point, false), out string hitOnlyReason)
+                  && Has(hitOnlyReason, "projectile skills must launch") && arrowTargets[0].Taken == 0f,
+                "a client-selected projectile skill hit cannot bypass the authority flight queue");
             for (int i = 0; i < 3; i++)
             {
                 Outcome o = Hit(archer, multiAct, _multi, _bow, arrowTargets[i], arrowTargets[i].Point, _bow.rangedRange);
@@ -435,10 +498,18 @@ namespace Emberdelve.EditorTools
             Check(Begin(archer, _pierce.skillId, out int pierceAct, out reason), "Piercing Shot cast accepted (" + reason + ")");
             Check(archer.Magazine == 6 && archer.Spent == 4, "Piercing Shot spent exactly one round");
             Target pA = NewTarget(archer.Point + new Vector3(0f, 0f, 12f)), pB = NewTarget(archer.Point + new Vector3(0f, 0f, 18f)), pC = NewTarget(archer.Point + new Vector3(0f, 0f, 24f));
+            ParkRegisteredExcept(new ICombatEntity[] { archer, pA, pB, pC });
+            float pABefore = pA.Taken;
+            float pBBefore = pB.Taken;
             Outcome pierceA = HonestPierceHit(archer, pierceAct, pA);
             Outcome pierceB = HonestPierceHit(archer, pierceAct, pB);
-            Check(pierceA.Accepted && pierceB.Accepted, "the piercing arrow resolves its 2 legitimate bodies (" + pierceA.Reason + " / " + pierceB.Reason + ")");
+            Check(pierceA.Accepted && pA.Taken > pABefore && pB.Taken > pBBefore,
+                "one authority-owned piercing flight resolves both aligned bodies (" + pierceA.Reason + ")");
             Check(Mathf.Abs(pierceA.Damage - ExpectedWeaponSkill(archer, _pierce, pierceA.Info, false)) < 0.01f, "the first body takes weapon falloff x 1.35");
+            Check(Mathf.Abs((pB.Taken - pBBefore) - ExpectedWeaponSkill(archer, _pierce, pB.Last, false)) < 0.01f,
+                "the same flight resolves the second body using its own impact distance");
+            Check(!pierceB.Accepted && Has(pierceB.Reason, "hit budget"),
+                "a client cannot submit another target hit after the piercing flight exhausted its impact budget");
             Outcome pierceC = HonestPierceHit(archer, pierceAct, pC);
             Check(!pierceC.Accepted && Has(pierceC.Reason, "hit budget") && pierceC.Damage == 0f, "a third body is past the piercing budget of 2 (" + pierceC.Reason + ")");
 
@@ -471,16 +542,19 @@ namespace Emberdelve.EditorTools
 
             // Another entity's id / a different skill's id.
             Caster other = NewCaster(_bow, 100, 10, _multi, _pierce);
+            ParkRegisteredExcept(new ICombatEntity[] { other, fresh });
             Check(Begin(other, _pierce.skillId, out int otherAct, out reason), "a second archer opens its own cast");
             Outcome stolen = Hit(archer, otherAct, _pierce, _bow, fresh, fresh.Point, _bow.rangedRange);
             Check(!stolen.Accepted && Has(stolen.Reason, "belongs to another entity") && stolen.Damage == 0f, "an activation id of another entity is rejected (" + stolen.Reason + ")");
             Outcome wrongSkill = Hit(other, otherAct, _multi, _bow, fresh, fresh.Point, _bow.rangedRange);
-            Check(!wrongSkill.Accepted && Has(wrongSkill.Reason, "not the skill"), "an activation opened for Piercing Shot cannot carry a Multi-shot hit (" + wrongSkill.Reason + ")");
+            Check(!wrongSkill.Accepted && Has(wrongSkill.Reason, "skill differs"), "an activation opened for Piercing Shot cannot carry a Multi-shot hit (" + wrongSkill.Reason + ")");
             Outcome nullSkill = Hit(other, otherAct, null, _bow, fresh, fresh.Point, _bow.rangedRange);
             Check(!nullSkill.Accepted && Has(nullSkill.Reason, "not the skill"), "a hit with no skill is rejected (" + nullSkill.Reason + ")");
             Outcome sameTarget = HonestPierceHit(other, otherAct, fresh);
             Outcome sameTargetAgain = HonestPierceHit(other, otherAct, fresh);
-            Check(sameTarget.Accepted && !sameTargetAgain.Accepted && Has(sameTargetAgain.Reason, "already hit"), "one activation cannot hit the same body twice (" + sameTargetAgain.Reason + ")");
+            Check(sameTarget.Accepted && !sameTargetAgain.Accepted
+                  && (Has(sameTargetAgain.Reason, "hit budget") || Has(sameTargetAgain.Reason, "spread slot") || Has(sameTargetAgain.Reason, "projectile index")),
+                "one projectile activation cannot submit a second client-selected hit (" + sameTargetAgain.Reason + ")");
 
             // ================= 8. forged timestamps cannot touch the cooldown or the window =================
             Caster timed = NewCaster(_sword, 100, 0, _dash, _cry);
@@ -525,6 +599,7 @@ namespace Emberdelve.EditorTools
             // ================= 10. forged effect scale / status / geometry on skill hits =================
             Caster scaled = NewCaster(_bow, 1000, 100, _pierce);
             Target scaleTarget = NewTarget(scaled.Point + new Vector3(0f, 0f, 15f));
+            ParkRegisteredExcept(new ICombatEntity[] { scaled, scaleTarget });
             Check(Begin(scaled, _pierce.skillId, out int scaleAct1, out reason), "scale cast 1 opens");
             Outcome honest = HonestPierceHit(scaled, scaleAct1, scaleTarget);
             AdvanceClock(_pierce.cooldownSeconds + 1f);
@@ -571,10 +646,12 @@ namespace Emberdelve.EditorTools
             // Geometry on skill hits (R1a rules, reused through the shared helper).
             Caster geo = NewCaster(_bow, 100000, 1000, _pierce);
             Target gt = NewTarget(geo.Point + new Vector3(0f, 0f, 20f));
+            ParkRegisteredExcept(new ICombatEntity[] { geo, gt });
             GameObject headGo = new GameObject("SkillGate_Head");
             _cleanup.Add(headGo);
             SphereCollider head = headGo.AddComponent<SphereCollider>();
             head.radius = 0.15f;
+            head.gameObject.layer = LayerMask.NameToLayer(GameConfig.EnemyLayerName);
             head.enabled = false;
             gt.Head = head;
 
@@ -590,37 +667,40 @@ namespace Emberdelve.EditorTools
 
             int g1 = OpenGeo();
             Outcome atMuzzle = Hit(geo, g1, _pierce, _bow, gt, geo.Point, _bow.rangedRange);
-            Check(!atMuzzle.Accepted && Has(atMuzzle.Reason, "not on the target") && atMuzzle.Damage == 0f, "a hit point at the shooter is not on the target (" + atMuzzle.Reason + ")");
+            Check(!atMuzzle.Accepted && Has(atMuzzle.Reason, "aim pose") && atMuzzle.Damage == 0f,
+                "a zero-direction shooter claim cannot create a projectile (" + atMuzzle.Reason + ")");
             Outcome nan = Hit(geo, g1, _pierce, _bow, gt, new Vector3(float.NaN, 0f, 0f), _bow.rangedRange);
-            Check(!nan.Accepted && Has(nan.Reason, "not on the target"), "a NaN hit point is rejected (" + nan.Reason + ")");
+            Check(!nan.Accepted && Has(nan.Reason, "aim pose"), "a NaN direction cannot create an authoritative projectile aim (" + nan.Reason + ")");
             Outcome range1000 = Hit(geo, g1, _pierce, _bow, gt, gt.Point, 1000f);
             Check(!range1000.Accepted && Has(range1000.Reason, "claimed range"), "a claimed MaxRange of 1000 is rejected (" + range1000.Reason + ")");
             Outcome weaponForged = Hit(geo, g1, _pierce, _rapier, gt, gt.Point, _bow.rangedRange);
-            Check(!weaponForged.Accepted && Has(weaponForged.Reason, "not the equipped weapon"), "a forged weapon on a skill hit is rejected (" + weaponForged.Reason + ")");
+            Check(!weaponForged.Accepted && Has(weaponForged.Reason, "equipped ranged weapon"), "a forged weapon on a skill launch is rejected (" + weaponForged.Reason + ")");
             Outcome weaponNull = Hit(geo, g1, _pierce, null, gt, gt.Point, _bow.rangedRange);
-            Check(!weaponNull.Accepted && Has(weaponNull.Reason, "not the equipped weapon"), "a null weapon on a weapon skill hit is rejected (" + weaponNull.Reason + ")");
+            Check(!weaponNull.Accepted && Has(weaponNull.Reason, "equipped ranged weapon"), "a null weapon on a weapon skill launch is rejected (" + weaponNull.Reason + ")");
             gt.Point = geo.Point + new Vector3(0f, 0f, 60f);
             Outcome beyond = Hit(geo, g1, _pierce, _bow, gt, gt.Point, _bow.rangedRange);
-            Check(!beyond.Accepted && Has(beyond.Reason, "skill reaches") && beyond.Damage == 0f, "a target beyond the skill's reach is rejected on the authority's own distance (" + beyond.Reason + ")");
+            Check(beyond.Accepted && beyond.Damage == 0f,
+                "a launched arrow stops at the skill range and cannot damage a farther target (" + beyond.Reason + ")");
             gt.Point = geo.Point + new Vector3(0f, 0f, 20f);
             head.transform.position = gt.Point + Vector3.up * 0.6f;
             Physics.SyncTransforms();
-            Outcome bodyHeadFlag = Hit(geo, g1, _pierce, _bow, gt, gt.Point, _bow.rangedRange, headFlag: true);
-            Check(bodyHeadFlag.Accepted && !bodyHeadFlag.Info.Headshot && Mathf.Abs(bodyHeadFlag.Damage - ExpectedWeaponSkill(geo, _pierce, bodyHeadFlag.Info, false)) < 0.01f,
-                "a forged headshot flag on a body hit is body damage (" + bodyHeadFlag.Reason + ")");
-
             int g2 = OpenGeo();
+            Outcome bodyHeadFlag = Hit(geo, g2, _pierce, _bow, gt, gt.Point, _bow.rangedRange, headFlag: true);
+            Check(bodyHeadFlag.Accepted && !bodyHeadFlag.Info.Headshot && Mathf.Abs(bodyHeadFlag.Damage - ExpectedWeaponSkill(geo, _pierce, bodyHeadFlag.Info, false)) < 0.01f,
+                "a forged headshot flag cannot alter the body's physical impact (" + bodyHeadFlag.Reason + ")");
+
+            int g3 = OpenGeo();
             head.enabled = true;
             Physics.SyncTransforms();
-            Outcome realHead = Hit(geo, g2, _pierce, _bow, gt, head.transform.position, _bow.rangedRange, headFlag: false);
+            Outcome realHead = Hit(geo, g3, _pierce, _bow, gt, head.transform.position, _bow.rangedRange, headFlag: false);
             Check(realHead.Accepted && realHead.Info.Headshot && Mathf.Abs(realHead.Damage - ExpectedWeaponSkill(geo, _pierce, realHead.Info, true)) < 0.01f,
                 "a real head-collider hit with the flag cleared is a headshot x1.8 (" + realHead.Reason + ")");
             head.enabled = false;
 
-            int g3 = OpenGeo();
+            int g4 = OpenGeo();
             Vector3 shortened = gt.Point - Vector3.forward * 1.2f;
-            Outcome shortClaim = Hit(geo, g3, _pierce, _bow, gt, shortened, _bow.rangedRange);
-            Check(shortClaim.Accepted && Vector3.Distance(shortClaim.Info.Point, gt.Point) <= LocalCombatAuthority.TargetBodyRadius + 0.001f,
+            Outcome shortClaim = Hit(geo, g4, _pierce, _bow, gt, shortened, _bow.rangedRange);
+            Check(shortClaim.Accepted && Vector3.Distance(shortClaim.Info.Point, gt.Point) <= LocalCombatAuthority.TargetBodyRadius + Mathf.Max(0.01f, _bow.projectileRadius * 0.5f) + 0.001f,
                 "a hit point claimed in front of the target is pulled inside its body sphere");
 
             // Area skills never headshot, even with an enabled head collider and a point on it.
@@ -697,33 +777,49 @@ namespace Emberdelve.EditorTools
 
             body.Taken = 0f;
             body.transform.position = rig.transform.position + rig.transform.forward * 12f;
+            ParkRegisteredExcept(new ICombatEntity[] { rig, body });
             Physics.SyncTransforms();
-            AttackIntent bowIntent(Vector3 point) => new AttackIntent(rig.CombatId, rig.Kind, realBow, 1f, rig.CombatCenter, point - rig.CombatCenter, realBow.rangedRange, CombatRegistry.NextSequence(rig.CombatId), 0f);
+            Quaternion originalAim = rig.Look.AimTransform.rotation;
+            Vector3 muzzle = rig.GetMuzzlePosition();
+            Vector3 direction = body.CombatCenter - muzzle;
+            rig.Look.AimTransform.rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+            AttackIntent bowIntent(Vector3 point) => new AttackIntent(rig.CombatId, rig.Kind, realBow, 1f, muzzle,
+                point - muzzle, realBow.rangedRange, CombatRegistry.NextSequence(rig.CombatId), 0f);
 
             int magazine = ranged.Magazine;
             Check(magazine > 1, $"the archer starts with a magazine ({magazine})");
             AdvanceClock(10f);
-            bool shot = _auth.SubmitAttack(bowIntent(body.CombatCenter), new HitCandidate(body.CombatId, body.CombatCenter, false), out string shotReason);
-            Check(shot && ranged.Magazine == magazine - 1, $"an accepted bow attack spent exactly one round, by the authority ({magazine} -> {ranged.Magazine}; {shotReason})");
+            float beforeLaunch = body.Taken;
+            AttackIntent firstIntent = bowIntent(body.CombatCenter);
+            bool shot = _auth.LaunchProjectile(firstIntent);
+            string shotReason = _auth.LastAttackRejectReason;
+            Check(shot && ranged.Magazine == magazine - 1 && Mathf.Abs(body.Taken - beforeLaunch) < 0.001f,
+                $"an accepted bow launch spends one round and delays damage until flight impact ({magazine} -> {ranged.Magazine}; {shotReason})");
+            if (shot) _auth.AdvanceProjectiles(realBow.rangedRange / Mathf.Max(2f, realBow.projectileSpeed) + 0.02f);
+            Check(body.Taken > beforeLaunch, $"the authority-stepped bow flight reaches the real body ({beforeLaunch:F1} -> {body.Taken:F1})");
 
             Check(ranged.TryConsumeAmmo(ranged.Magazine) && ranged.Magazine == 0, "magazine emptied");
             AdvanceClock(10f);
             float before = body.Taken;
-            shot = _auth.SubmitAttack(bowIntent(body.CombatCenter), new HitCandidate(body.CombatId, body.CombatCenter, false), out shotReason);
-            Check(!shot && Has(shotReason, "ammunition") && body.Taken == before && ranged.Magazine == 0, "a ranged attack with an empty magazine is rejected, deals no damage and spends nothing (" + shotReason + ")");
+            shot = _auth.LaunchProjectile(bowIntent(body.CombatCenter));
+            shotReason = _auth.LastAttackRejectReason;
+            Check(!shot && Has(shotReason, "ammunition") && body.Taken == before && ranged.Magazine == 0,
+                "a projectile launch with an empty magazine is rejected, deals no damage and spends nothing (" + shotReason + ")");
 
             ranged.RefundAmmo(4);
             int beforeFire = ranged.Magazine;
-            // A real body on the aim ray, so the shot is one the authority accepts.
             body.Taken = 0f;
-            body.transform.position = rig.GetMuzzlePosition() + rig.AimDirection * 10f - Vector3.up * 1.1f;
+            body.transform.position = muzzle + direction.normalized * 10f - Vector3.up * 1.1f;
             Physics.SyncTransforms();
             int acceptedBeforeFire = _auth.AcceptedCount;
             AdvanceClock(10f);
             ranged.Fire(1f);
-            Check(_auth.AcceptedCount == acceptedBeforeFire + 1 && body.Taken > 0f,
-                $"RangedCombat.Fire hit the body and the authority accepted the shot ({acceptedBeforeFire} -> {_auth.AcceptedCount}, damage {body.Taken:F1})");
-            Check(ranged.Magazine == beforeFire - 1, $"an accepted Fire costs exactly one round, spent by the authority, not twice ({beforeFire} -> {ranged.Magazine})");
+            Check(_auth.AcceptedCount == acceptedBeforeFire + 1 && ranged.Magazine == beforeFire - 1,
+                $"RangedCombat.Fire launched one authority-owned arrow ({acceptedBeforeFire} -> {_auth.AcceptedCount}, ammo {beforeFire} -> {ranged.Magazine})");
+            Check(Mathf.Abs(body.Taken) < 0.001f, "RangedCombat.Fire has no hit-only immediate damage path");
+            _auth.AdvanceProjectiles(realBow.rangedRange / Mathf.Max(2f, realBow.projectileSpeed) + 0.02f);
+            Check(body.Taken > 0f, $"RangedCombat.Fire flight damages the body on impact ({body.Taken:F1})");
+            rig.Look.AimTransform.rotation = originalAim;
         }
     }
 }

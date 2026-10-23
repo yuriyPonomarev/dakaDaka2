@@ -39,6 +39,7 @@ namespace Emberdelve.InputLayer
         private InputAction _inventorySystem;
         private InputAction _pauseSystem;
         private readonly InputAction[] _slots = new InputAction[4];
+        private bool _ownsActions;
 
         /// <summary>Test seams (D1b, same idea as the primary overrides): replace the real move / sprint / guard readings while the player map is live. Never set in game code.</summary>
         public Vector2? MoveOverride { get; set; }
@@ -130,6 +131,14 @@ namespace Emberdelve.InputLayer
                 Debug.LogWarning("[EmberdelveInput] No InputActionAsset assigned; using built-in fallback bindings.", this);
                 actions = EmberdelveInputFallback.Build();
             }
+            else
+            {
+                // R7: an InputActionAsset holds its action maps, and Enable/Disable act on the ASSET, so every rig that shared the
+                // project asset shared one enabled state: one player turning its gameplay input off would have switched every
+                // other player's off. Each rig now owns its own instance (the fallback above is already a fresh one).
+                actions = Instantiate(actions);
+                _ownsActions = true;
+            }
 
             _playerMap = actions.FindActionMap(playerMapName);
             if (_playerMap == null)
@@ -177,6 +186,7 @@ namespace Emberdelve.InputLayer
         private void OnDestroy()
         {
             if (actions != null) actions.Disable();
+            if (_ownsActions && actions != null) Destroy(actions);
         }
 
         public void SetGameplayInputEnabled(bool enabled)

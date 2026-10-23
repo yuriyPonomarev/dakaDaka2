@@ -50,6 +50,12 @@ namespace Emberdelve.AI
         private float _whiffTimer;
         private string _dropKey;
 
+        private const float AggressorMemorySeconds = 4f;
+        private const float TargetSwitchFactor = 0.75f;
+        private int _lastAggressorId;
+        private float _aggressorUntil;
+        private int _currentTargetId;
+
         public EntityKind Kind => EntityKind.Enemy;
         public int CombatId => _combatId;
         public int TeamId => CombatTeams.MonsterTeam;
@@ -75,6 +81,9 @@ namespace Emberdelve.AI
         public float CurrentHealth => _health != null ? _health.CurrentHealth : 0f;
         public float MaxHealth => _health != null ? _health.MaxHealth : 0f;
         public EnemyData Data => data;
+
+        /// <summary>R7: combat id of the player this monster is currently targeting (0 = none). Read-only, for tools and tests.</summary>
+        public int CurrentTargetCombatId => _currentTargetId;
         public EnemyBrain Brain => _brain;
         public HealthComponent Health => _health;
 
@@ -158,6 +167,13 @@ namespace Emberdelve.AI
         {
             _brain?.NotifyDamaged(damage);
             _timeSinceDamage = 0f;
+
+            // R7: remember who hurt us last (a player), so aggro can switch to the attacker.
+            if (CombatRegistry.TryGet(damage.SourceCombatId, out ICombatEntity source) && EntityKinds.IsPlayer(source.Kind))
+            {
+                _lastAggressorId = damage.SourceCombatId;
+                _aggressorUntil = Time.time + AggressorMemorySeconds;
+            }
         }
 
         private void HandleDeath()
@@ -173,7 +189,10 @@ namespace Emberdelve.AI
                 bodyTransform.localPosition += Vector3.up * -0.25f;
             }
 
-            GameEvents.RaiseToast($"{(data != null ? data.displayName : "Enemy")} slain");
+            // The kill is announced to the player who landed the last hit; with no known killer it is for everybody.
+            int killer = GameEvents.NoPlayer;
+            if (_lastAggressorId != 0 && CombatRegistry.TryGet(_lastAggressorId, out ICombatEntity last) && last is IPlayerOwned owner) killer = owner.PlayerId;
+            GameEvents.RaiseToast(killer, $"{(data != null ? data.displayName : "Enemy")} slain");
 
             DropLoot();
             Destroy(gameObject, 6f);
@@ -236,7 +255,12 @@ namespace Emberdelve.AI
             _timeSinceDamage += dt;
 
             float perceptionRadius = Mathf.Max(data.sightRange, data.hearingRange) + 6f;
-            CombatRegistry.TryGetNearest(transform.position, EntityKind.LocalPlayer, perceptionRadius, out ICombatEntity target);
+            // R7: the nearest living, in-play player this monster is hostile to (any party, any controller). The current
+            // target keeps the choice unless a rival is clearly closer, and whoever hurt us last within the memory window
+            // is preferred, so aggro switches sensibly instead of flickering between equidistant players.
+            int preferred = Time.time < _aggressorUntil ? _lastAggressorId : _currentTargetId;
+            CombatRegistry.TryGetNearestHostilePlayer(this, transform.position, perceptionRadius, preferred, TargetSwitchFactor, out ICombatEntity target);
+            _currentTargetId = target != null ? target.CombatId : 0;
 
             BrainOrder order = _brain.Tick(dt, Time.time, transform.position, transform.forward, target);
 

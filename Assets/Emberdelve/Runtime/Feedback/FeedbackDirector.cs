@@ -132,8 +132,9 @@ namespace Emberdelve.Feedback
             Play(_bowRelease);
         }
 
-        private void OnDamageDealt(HitFeedback feedback)
+        private void OnDamageDealt(int playerId, HitFeedback feedback)
         {
+            if (!PlayerView.Shows(playerId)) return;
             if (feedback.Blocked)
             {
                 Play(_block);
@@ -149,24 +150,28 @@ namespace Emberdelve.Feedback
             }
         }
 
-        private void OnPlayerDamaged(DamageInfo info)
+        private void OnPlayerDamaged(int playerId, DamageInfo info)
         {
-            Play(_hurt);
+            // The flash is a world effect anyone can see (a hit on a teammate or a rival); the grunt is the local player's own.
+            if (PlayerView.Shows(playerId)) Play(_hurt);
             ImpactFlash.Spawn(info.Point, new Color(1f, 0.3f, 0.25f), info.Blocked ? blockFlashSize : hitFlashSize);
         }
 
-        private void OnItemCollected(ItemData item, int totalCollected)
+        private void OnItemCollected(int playerId, ItemData item, int totalCollected)
         {
+            if (!PlayerView.Shows(playerId)) return;
             Play(_pickup);
         }
 
-        private void OnAmmoChanged(int current, int reserve)
+        private void OnAmmoChanged(int playerId, int current, int reserve)
         {
+            if (!PlayerView.Shows(playerId)) return;
             if (current == 0) Play(_dry);
         }
 
-        private void OnRunEnded(RunResult result)
+        private void OnRunEnded(int playerId, RunResult result)
         {
+            if (!PlayerView.Shows(playerId)) return;
             if (result.Outcome == RunState.Extracted) Play(_extract);
             else Play(_death);
         }

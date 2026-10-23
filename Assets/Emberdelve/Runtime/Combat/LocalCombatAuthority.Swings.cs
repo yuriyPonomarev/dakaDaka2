@@ -774,8 +774,7 @@ namespace Emberdelve.Combat
             HitFeedback feedback = new HitFeedback(contact.Point, damage.Amount, damage.Blocked, damage.Headshot,
                 target.IsDead, target.Kind);
 
-            if (instigator.Kind == EntityKind.LocalPlayer) GameEvents.RaiseDamageDealt(feedback);
-            if (target.Kind == EntityKind.LocalPlayer) GameEvents.RaisePlayerDamaged(damage);
+            PublishCombatFeedback(instigator, target, feedback, damage);
         }
 
         private void FinishSwing(SwingRecord rec, SwingEndReason reason, float endTs)

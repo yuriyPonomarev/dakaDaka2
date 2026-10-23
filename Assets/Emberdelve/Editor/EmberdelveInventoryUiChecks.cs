@@ -70,8 +70,8 @@ namespace Emberdelve.EditorTools
             public int CollectedEvents;
             public int InventoryEvents;
 
-            public void OnItemCollected(ItemData item, int totalCollected) { CollectedEvents++; }
-            public void OnInventoryChanged() { InventoryEvents++; }
+            public void OnItemCollected(int playerId, ItemData item, int totalCollected) { CollectedEvents++; }
+            public void OnInventoryChanged(int playerId) { InventoryEvents++; }
         }
 
         public static IEnumerator Run(PlayerRig rig, RunDirector director, System.Action<bool, string> check)
@@ -1024,12 +1024,12 @@ namespace Emberdelve.EditorTools
             GameObject probe = new GameObject("P4c_PromptProbe");
             PromptProbe stub = probe.AddComponent<PromptProbe>();
             stub.Text = "Hold to open chest"; stub.Hold = true;
-            string holdPrompt = Emberdelve.Interaction.Interactor.PromptFor(stub);
+            string holdPrompt = Emberdelve.Interaction.Interactor.PromptFor(f.Rig, stub);
             f.Check(holdPrompt == "Hold to open chest", "a prompt that already says Hold is not suffixed: " + holdPrompt);
             stub.Text = "Open the gate"; stub.Hold = true;
-            f.Check(Emberdelve.Interaction.Interactor.PromptFor(stub) == "Open the gate  (hold)", "a plain label on a hold target gets one (hold)");
+            f.Check(Emberdelve.Interaction.Interactor.PromptFor(f.Rig, stub) == "Open the gate  (hold)", "a plain label on a hold target gets one (hold)");
             stub.Text = "Open chest"; stub.Hold = false;
-            f.Check(Emberdelve.Interaction.Interactor.PromptFor(stub) == "Open chest", "an instant target gets no suffix");
+            f.Check(Emberdelve.Interaction.Interactor.PromptFor(f.Rig, stub) == "Open chest", "an instant target gets no suffix");
             UnityEngine.Object.Destroy(probe);
 
             ResetBag(f);
@@ -1043,9 +1043,9 @@ namespace Emberdelve.EditorTools
             public string PromptText => Text;
             public bool RequiresHold => Hold;
             public float HoldDuration => 1f;
-            public bool CanInteract(out string blockedReason) { blockedReason = null; return true; }
-            public void OnHoldComplete() { }
-            public void OnInteractInstant() { }
+            public bool CanInteract(IInteractionActor actor, out string blockedReason) { blockedReason = null; return true; }
+            public void OnHoldComplete(IInteractionActor actor) { }
+            public void OnInteractInstant(IInteractionActor actor) { }
         }
 
         // ------------------------------------------------------------------ click plumbing

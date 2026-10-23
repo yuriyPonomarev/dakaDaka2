@@ -38,7 +38,7 @@ namespace Emberdelve.Skills
             for (int i = 0; i < shots; i++)
             {
                 Vector3 direction = RangedSkillUtility.SpreadDirection(aim, i, shots, skill.spreadDegrees);
-                RangedSkillUtility.FireOne(context, origin, direction);
+                RangedSkillUtility.FireOne(context, origin, direction, i);
             }
 
             return true;

@@ -358,7 +358,7 @@ namespace Emberdelve.EditorTools
 
             string snapshotRare = rareAshen.ToSnapshot().ToJson();
             int collected = 0;
-            Action<ItemData, int> onCollected = (d, t) => collected++;
+            Action<int, ItemData, int> onCollected = (p, d, t) => collected++;
             GameEvents.ItemCollected += onCollected;
             int minted, recovered, lifetime;
             try
@@ -473,7 +473,7 @@ namespace Emberdelve.EditorTools
             recovered = bag.RecoveredValue;
             minted = bag.MintedInstanceCount;
             int notifications = 0;
-            Action onChanged = () => notifications++;
+            Action<int> onChanged = p => notifications++;
             GameEvents.InventoryChanged += onChanged;
             try
             {

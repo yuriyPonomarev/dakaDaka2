@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Data;
+using Emberdelve.Player;
 
 [assembly: InternalsVisibleTo("Assembly-CSharp-Editor")]
 
@@ -17,6 +18,7 @@ namespace Emberdelve.Combat
     /// damage numbers, only AttackIntent + HitCandidate, and the authority re-resolves the target from
     /// CombatRegistry instead of trusting the supplied reference.
     /// </summary>
+    [DefaultExecutionOrder(1000)]
     public sealed partial class LocalCombatAuthority : MonoBehaviour, ICombatAuthority
     {
         [Header("Wiring")]
@@ -143,10 +145,9 @@ namespace Emberdelve.Combat
             GameServices.Register<ICombatAuthority>(this);
         }
 
-        private void OnDestroy()
-        {
-            GameServices.Unregister<ICombatAuthority>(this);
-        }
+        // PlayerLook updates the camera in LateUpdate. Sample the same live aim/guard pose the user sees,
+        // after the default-order look and weapon visual components have applied this frame's input.
+        private void LateUpdate() => AdvanceProjectiles(Time.deltaTime);
 
         public bool SubmitAttack(AttackIntent intent, HitCandidate hit) => SubmitAttack(intent, hit, out _);
 
@@ -176,6 +177,7 @@ namespace Emberdelve.Combat
             {
                 return Reject(intent, $"claimed weapon '{intent.WeaponId}' is not the equipped weapon '{weapon.weaponId}'", out reason);
             }
+            if (weapon.IsRanged) return Reject(intent, "ranged attacks must launch an authority-stepped projectile", out reason);
 
             // D1a: an entity with an authoritative swing pose (the player) hits with a melee weapon only through
             // the swept swing (TryBeginMeleeSwing). This arc-less path accepted a claimed hit point out to ~4 m
@@ -251,8 +253,7 @@ namespace Emberdelve.Combat
             HitFeedback feedback = new HitFeedback(authoritativePoint, damage.Amount, damage.Blocked, damage.Headshot,
                 target.IsDead, target.Kind);
 
-            if (instigator.Kind == EntityKind.LocalPlayer) GameEvents.RaiseDamageDealt(feedback);
-            if (target.Kind == EntityKind.LocalPlayer) GameEvents.RaisePlayerDamaged(damage);
+            PublishCombatFeedback(instigator, target, feedback, damage);
 
             return true;
         }
@@ -517,6 +518,8 @@ namespace Emberdelve.Combat
             }
 
             SkillData skill = activation.Skill;
+            if (skill.IsProjectileSkill)
+                return RejectSkill(intent, "projectile skills must launch an authority-stepped projectile", out reason);
             float reach = skill.IsProjectileSkill ? Mathf.Max(1f, weapon.rangedRange) : skill.radius;
 
             if (!TryResolveHit(instigator, target, reach, true, intent.MaxRange, intent.Origin, hit.HitPoint,
@@ -558,8 +561,7 @@ namespace Emberdelve.Combat
             HitFeedback feedback = new HitFeedback(authoritativePoint, damage.Amount, damage.Blocked, damage.Headshot,
                 target.IsDead, target.Kind);
 
-            if (instigator.Kind == EntityKind.LocalPlayer) GameEvents.RaiseDamageDealt(feedback);
-            if (target.Kind == EntityKind.LocalPlayer) GameEvents.RaisePlayerDamaged(damage);
+            PublishCombatFeedback(instigator, target, feedback, damage);
 
             return true;
         }
@@ -657,6 +659,17 @@ namespace Emberdelve.Combat
                 Debug.Log($"[CombatAuthority] Rejected skill '{intent.SkillId}' from #{intent.InstigatorCombatId}: {reason}", this);
             }
             return false;
+        }
+
+        /// <summary>
+        /// R7: hands the resolved result to the entities involved. A player entity raises its own events under its own
+        /// player id (<see cref="IPlayerCombatFeedback"/>); the authority raises no HUD event itself and never asks who the
+        /// "local" player is, so any number of players, and a server with none, resolve identically.
+        /// </summary>
+        private static void PublishCombatFeedback(ICombatEntity instigator, ICombatEntity target, in HitFeedback feedback, in DamageInfo damage)
+        {
+            if (instigator is IPlayerCombatFeedback dealer) dealer.OnHitDealt(feedback);
+            if (target is IPlayerCombatFeedback taker) taker.OnDamageTaken(damage);
         }
 
         private bool Reject(AttackIntent intent, string reason, out string reasonOut)

@@ -40,7 +40,7 @@ Check(!bag.TryMergeStacks(bag.IndexOfInstance(a.Uid),bag.IndexOfInstance(b.Uid),
 Check(bag.TryMove(bag.IndexOfInstance(a.Uid),new Vector2Int(0,2),out reason)&&ReferenceEquals(bag.InstanceAt(bag.IndexOfInstance(a.Uid)),a),"move preserves exact instance");
 Check(bag.TrySwap(bag.IndexOfInstance(a.Uid),bag.IndexOfInstance(b.Uid),out reason),"swap equal footprints");
 int minted=bag.MintedInstanceCount,recovered=bag.RecoveredValue,lifetime=bag.LifetimeCollected,collected=0,changes=0;
-Action<ItemData,int> onCollected=(d,total)=>collected++;Action onChanged=()=>changes++;
+Action<int,ItemData,int> onCollected=(p,d,total)=>collected++;Action<int> onChanged=p=>changes++;
 GameEvents.ItemCollected+=onCollected;GameEvents.InventoryChanged+=onChanged;
 try{
 float hp=rig.CurrentHealth;

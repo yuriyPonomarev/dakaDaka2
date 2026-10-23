@@ -11,14 +11,18 @@ namespace Emberdelve.Combat
     {
         private Vector3 _target;
         private float _speed;
+        private float _visualLength;
         private float _stuckFor;
+        private bool _authorityDriven;
 
-        public static void SpawnArrow(Vector3 start, Vector3 end, WeaponData weapon)
+        public Vector3 TipPosition => transform.position + transform.forward * (_visualLength * 0.5f);
+
+        public static ProjectileVisual SpawnArrow(Vector3 start, Vector3 end, WeaponData weapon, bool authorityDriven = false)
         {
-            if (weapon == null) return;
+            if (weapon == null) return null;
 
             Vector3 delta = end - start;
-            if (delta.sqrMagnitude < 0.0001f) return;
+            if (delta.sqrMagnitude < 0.0001f) return null;
 
             GameObject arrow = GameObject.CreatePrimitive(PrimitiveType.Cube);
             arrow.name = "Arrow_Visual";
@@ -37,20 +41,40 @@ namespace Emberdelve.Combat
             if (renderer != null && weapon.shaftMaterial != null) renderer.material = weapon.shaftMaterial;
 
             ProjectileVisual visual = arrow.AddComponent<ProjectileVisual>();
-            visual.Configure(start, delta.normalized, end, Mathf.Max(2f, weapon.projectileSpeed));
+            visual.Configure(start, delta.normalized, end, Mathf.Max(2f, weapon.projectileSpeed), length);
+            visual._authorityDriven = authorityDriven;
+            return visual;
         }
 
-        private void Configure(Vector3 start, Vector3 direction, Vector3 end, float speed)
+        public void MoveAuthoritative(Vector3 position, Vector3 direction)
         {
-            transform.position = start;
-            transform.rotation = Quaternion.LookRotation(direction);
+            SetTipPose(position, direction);
+        }
+
+        public void FinishAuthoritative(Vector3 position)
+        {
+            SetTipPose(position, transform.forward);
+            Destroy(gameObject);
+        }
+
+        private void Configure(Vector3 start, Vector3 direction, Vector3 end, float speed, float visualLength)
+        {
+            _visualLength = visualLength;
+            SetTipPose(start, direction);
             _target = end;
             _speed = speed;
         }
 
+        private void SetTipPose(Vector3 tip, Vector3 direction)
+        {
+            if (direction.sqrMagnitude > 0.0001f) transform.rotation = Quaternion.LookRotation(direction);
+            transform.position = tip - transform.forward * (_visualLength * 0.5f);
+        }
+
         private void Update()
         {
-            Vector3 current = transform.position;
+            if (_authorityDriven) return;
+            Vector3 current = TipPosition;
             Vector3 delta = _target - current;
 
             if (delta.sqrMagnitude <= 0.0001f)
@@ -62,8 +86,7 @@ namespace Emberdelve.Combat
 
             float step = Mathf.Min(delta.magnitude, _speed * Time.deltaTime);
             Vector3 next = current + delta.normalized * step;
-            transform.position = next;
-            transform.rotation = Quaternion.LookRotation(delta.normalized);
+            SetTipPose(next, delta.normalized);
         }
     }
 }

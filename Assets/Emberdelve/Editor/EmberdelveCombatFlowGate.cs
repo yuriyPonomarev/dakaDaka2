@@ -131,6 +131,28 @@ namespace Emberdelve.EditorTools
             public void ApplyDamage(DamageInfo damage) { }
         }
 
+        private sealed class ProjectileAttacker : ICombatEntity, IActiveWeaponProvider, IAimPoseProvider
+        {
+            public int CombatId { get; set; }
+            public Vector3 Point;
+            public Vector3 AimDirection;
+            public WeaponData Weapon;
+            public EntityKind Kind => EntityKind.Enemy;
+            public int TeamId => CombatTeams.MonsterTeam;
+            public Vector3 CombatCenter => Point;
+            public Collider HeadCollider => null;
+            public WeaponData ActiveWeapon => Weapon;
+            public bool IsDead => false;
+            public float CurrentHealth => 100f;
+            public float MaxHealth => 100f;
+            public void ApplyDamage(DamageInfo damage) { }
+            public bool TryGetAimPose(out Vector3 eye, out float yawDegrees, out float pitchDegrees)
+            {
+                eye = Point;
+                return SwingGeometry.TryAimAngles(AimDirection, out yawDegrees, out pitchDegrees);
+            }
+        }
+
         /// <summary>A hostile target with analytic hit shapes, optional armour, optional plain guard and an optional status host.</summary>
         private sealed class Dummy : ICombatEntity, IHitShapeProvider, IArmorRatingProvider, IDefenseProvider, IStatusTarget
         {
@@ -1033,8 +1055,8 @@ namespace Emberdelve.EditorTools
         private readonly List<DamageInfo> _playerHits = new List<DamageInfo>();
         private readonly List<string> _toasts = new List<string>();
 
-        private void OnPlayerDamaged(DamageInfo info) { _playerHits.Add(info); }
-        private void OnToast(string message) { _toasts.Add(message); }
+        private void OnPlayerDamaged(int playerId, DamageInfo info) { _playerHits.Add(info); }
+        private void OnToast(int playerId, string message) { _toasts.Add(message); }
 
         private IEnumerator RigSections()
         {
@@ -1506,12 +1528,37 @@ namespace Emberdelve.EditorTools
                 _rig.SetGuardHeld(true);
                 _playerHits.Clear();
                 Vector3 p = _rig.transform.position + new Vector3(0f, 1.15f, 1.8f);
-                PoselessAttacker attacker = new PoselessAttacker { CombatId = CombatRegistry.AllocateId(), Point = p, Weapon = c.weapon };
-                CombatRegistry.Register(attacker.CombatId, attacker);
-                AttackIntent intent = new AttackIntent(attacker.CombatId, EntityKind.Enemy, c.weapon, 1f, p, (_rig.CombatCenter - p).normalized,
-                    c.weapon.reach + c.weapon.hitSphereRadius, CombatRegistry.NextSequence(attacker.CombatId), 0f);
-                bool accepted = _authority.SubmitAttack(intent, new HitCandidate(_rig.CombatId, _rig.CombatCenter, false), out string why);
-                CombatRegistry.Unregister(attacker.CombatId, attacker);
+                Vector3 towardRig = (_rig.CombatCenter - p).normalized;
+                int attackerId = CombatRegistry.AllocateId();
+                ICombatEntity attacker;
+                AttackIntent intent;
+                bool accepted;
+                string why;
+                if (c.weapon.IsRanged)
+                {
+                    ProjectileAttacker rangedAttacker = new ProjectileAttacker
+                    {
+                        CombatId = attackerId, Point = p, Weapon = c.weapon, AimDirection = towardRig
+                    };
+                    attacker = rangedAttacker;
+                    CombatRegistry.Register(attackerId, rangedAttacker);
+                    intent = new AttackIntent(attackerId, EntityKind.Enemy, c.weapon, 1f, p, towardRig,
+                        c.weapon.rangedRange, CombatRegistry.NextSequence(attackerId), 0f);
+                    accepted = _authority.LaunchProjectile(intent);
+                    why = _authority.LastAttackRejectReason;
+                    if (accepted) _authority.AdvanceProjectiles(1f);
+                }
+                else
+                {
+                    PoselessAttacker meleeAttacker = new PoselessAttacker
+                    { CombatId = attackerId, Point = p, Weapon = c.weapon };
+                    attacker = meleeAttacker;
+                    CombatRegistry.Register(attackerId, meleeAttacker);
+                    intent = new AttackIntent(attackerId, EntityKind.Enemy, c.weapon, 1f, p, towardRig,
+                        c.weapon.reach + c.weapon.hitSphereRadius, CombatRegistry.NextSequence(attackerId), 0f);
+                    accepted = _authority.SubmitAttack(intent, new HitCandidate(_rig.CombatId, _rig.CombatCenter, false), out why);
+                }
+                CombatRegistry.Unregister(attackerId, attacker);
 
                 Check(accepted && _playerHits.Count == 1, $"{c.label}: the enemy attack is accepted through the authority ({why})");
                 if (_playerHits.Count == 1)

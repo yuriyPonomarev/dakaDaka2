@@ -10,8 +10,9 @@ namespace Emberdelve.Interaction
     /// </summary>
     public interface IExtractionSink
     {
-        bool ExtractionAllowed(out string reason);
-        bool BeginExtraction(out string reason);
+        /// <summary>R2: the rule is evaluated for THIS actor (their state, their carried value).</summary>
+        bool ExtractionAllowed(IInteractionActor actor, out string reason);
+        bool BeginExtraction(IInteractionActor actor, out string reason);
     }
 
     /// <summary>
@@ -48,7 +49,7 @@ namespace Emberdelve.Interaction
             if (portalRenderer == null) portalRenderer = GetComponentInChildren<Renderer>();
         }
 
-        public bool CanInteract(out string reason)
+        public bool CanInteract(IInteractionActor actor, out string reason)
         {
             if (_sink == null)
             {
@@ -56,24 +57,26 @@ namespace Emberdelve.Interaction
                 return false;
             }
 
-            return _sink.ExtractionAllowed(out reason);
+            if (!InteractionRules.Validate(actor, this, InteractionRules.ReachOf(_sink), _sink, out reason)) return false;
+
+            return _sink.ExtractionAllowed(actor, out reason);
         }
 
-        public void OnHoldComplete()
+        public void OnHoldComplete(IInteractionActor actor)
         {
             if (_sink == null) return;
-            if (!CanInteract(out string reason))
+            if (!CanInteract(actor, out string reason))
             {
-                GameEvents.RaiseToast(reason ?? "Cannot escape yet");
+                GameEvents.RaiseToast(actor != null ? actor.PlayerId : GameEvents.NoPlayer, reason ?? "Cannot escape yet");
                 return;
             }
 
-            _sink.BeginExtraction(out _);
+            _sink.BeginExtraction(actor, out _);
         }
 
-        public void OnInteractInstant()
+        public void OnInteractInstant(IInteractionActor actor)
         {
-            if (CanInteract(out string reason)) GameEvents.RaiseToast(reason ?? "Hold to escape");
+            if (CanInteract(actor, out string reason)) GameEvents.RaiseToast(actor.PlayerId, reason ?? "Hold to escape");
         }
 
         private void Update()

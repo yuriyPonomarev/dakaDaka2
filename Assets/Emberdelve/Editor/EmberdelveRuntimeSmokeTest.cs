@@ -1167,7 +1167,7 @@ namespace Emberdelve.EditorTools
                 Check(inProbe, "dropped loot sits inside the interaction probe volume");
 
                 int collectedBefore = _director.ItemsCollected;
-                dropped.OnInteractInstant();
+                dropped.OnInteractInstant(_rig);
                 Check(_director.ItemsCollected > collectedBefore, "dropped loot can be collected");
             }
 
@@ -1205,7 +1205,7 @@ namespace Emberdelve.EditorTools
                 int collectedBefore = _director.ItemsCollected;
                 int unitsBefore = _director.Inventory != null ? _director.Inventory.TotalUnits : 0;
 
-                loot.OnInteractInstant();
+                loot.OnInteractInstant(_rig);
 
                 Check(_director.ItemsCollected > collectedBefore, $"loot collected ({collectedBefore} -> {_director.ItemsCollected})");
                 Check(_director.Inventory != null && _director.Inventory.TotalUnits > unitsBefore,
@@ -1396,7 +1396,7 @@ namespace Emberdelve.EditorTools
 
                     Check(gate.RequiresHold && gate.HoldDuration > 0f, $"gate requires a {gate.HoldDuration:F1}s hold");
 
-                    Check(!gate.CanInteract(out string emptyReason) && !string.IsNullOrEmpty(emptyReason),
+                    Check(!gate.CanInteract(_rig, out string emptyReason) && !string.IsNullOrEmpty(emptyReason),
                         $"gate refuses interaction with no loot ({emptyReason ?? "no reason"})");
 
                     if (interactor != null && _rig.Input != null)
@@ -1405,8 +1405,8 @@ namespace Emberdelve.EditorTools
                         float fullHold = gate.HoldDuration + 1.0f;
                         int endedCount = 0;
                         string lastToast = null;
-                        System.Action<RunResult> onEnded = _ => endedCount++;
-                        System.Action<string> onToast = message => lastToast = message;
+                        System.Action<int, RunResult> onEnded = (p, _) => endedCount++;
+                        System.Action<int, string> onToast = (p, message) => lastToast = message;
 
                         // Live enemies would damage the player and legitimately interrupt the holds below, so the
                         // fixture parks them; damage is injected deliberately in step (3).
@@ -1418,7 +1418,7 @@ namespace Emberdelve.EditorTools
                         try
                         {
                             // (4) the authority itself refuses a direct call with zero loot.
-                            bool directAccepted = _director.BeginExtraction(out string directReason);
+                            bool directAccepted = _director.BeginExtraction(_rig, out string directReason);
                             Check(!directAccepted && !string.IsNullOrEmpty(directReason),
                                 $"RunDirector.BeginExtraction refuses zero loot ({directReason ?? "no reason"})");
                             Check(_director.State == RunState.Running && endedCount == 0,
@@ -1442,10 +1442,21 @@ namespace Emberdelve.EditorTools
                                 $"hold progress drained to zero after release ({interactor.HoldProgress:F3})");
 
                             // Give the player loot, as the original flow did.
+                            // R2 fixture: taking loot now needs the ACTOR within reach (the old call took it from across the level),
+                            // so the player walks to the pickup, takes it, and walks back to the gate before the hold steps resume.
                             LootPickup loot = FindFirstObjectByType<LootPickup>();
-                            if (loot != null) loot.OnInteractInstant();
+                            Vector3 gatePose = _rig.transform.position;
+                            if (loot != null)
+                            {
+                                _rig.transform.position = new Vector3(loot.transform.position.x, gatePose.y, loot.transform.position.z);
+                                Physics.SyncTransforms();
+                                loot.OnInteractInstant(_rig);
+                                _rig.transform.position = gatePose;
+                                Physics.SyncTransforms();
+                                yield return WaitFrames(3);
+                            }
                             Check(_director.LootValue > 0, "loot requirement satisfied before extraction");
-                            Check(gate.CanInteract(out string reason), $"gate accepts interaction ({reason ?? "ok"})");
+                            Check(gate.CanInteract(_rig, out string reason), $"gate accepts interaction ({reason ?? "ok"})");
 
                             // Disabled gameplay input blocks the hold even while the override says "held".
                             input.SetGameplayInputEnabled(false);
@@ -1479,8 +1490,8 @@ namespace Emberdelve.EditorTools
                             Check(_director.State == RunState.Extracted, $"state is Extracted after the hold (got {_director.State})");
 
                             // A second attempt through every layer must not extract again.
-                            gate.OnHoldComplete();
-                            bool again = _director.BeginExtraction(out string againReason);
+                            gate.OnHoldComplete(_rig);
+                            bool again = _director.BeginExtraction(_rig, out string againReason);
                             Check(!again && !string.IsNullOrEmpty(againReason), $"second BeginExtraction refused ({againReason ?? "no reason"})");
                             yield return WaitFrames(2);
                             Check(endedCount == 1, $"extraction fired exactly once even after repeat attempts (RunEnded x{endedCount})");
@@ -1736,6 +1747,8 @@ namespace Emberdelve.EditorTools
                 Debug.Log($"[Emberdelve][Smoke:archer] enemy root={target.transform.position} colliders: [{colliderInfo}]");
 
                 ranged.Fire(1f);
+                ProjectileVisual[] projectiles = FindObjectsByType<ProjectileVisual>(FindObjectsSortMode.None);
+                Check(projectiles != null && projectiles.Length > 0, "projectile visual spawned in the world while the arrow is in flight");
                 yield return WaitSeconds(0.8f);
 
                 Check(ranged.Magazine < magazineBefore, $"firing consumed an arrow ({magazineBefore} -> {ranged.Magazine})");
@@ -1743,9 +1756,6 @@ namespace Emberdelve.EditorTools
                     $"arrow damaged the enemy ({enemyHealthBefore:F0} -> {target.CurrentHealth:F0})");
                 Check(_localAuthority != null && _localAuthority.AcceptedCount > acceptedBefore,
                     "authority accepted the ranged attack");
-
-                ProjectileVisual[] projectiles = FindObjectsByType<ProjectileVisual>(FindObjectsSortMode.None);
-                Check(projectiles != null && projectiles.Length > 0, "projectile visual spawned in the world");
 
                 yield return ArcherLoadoutFlow();
                 yield return ArcherSkillFlow();
@@ -1790,8 +1800,8 @@ namespace Emberdelve.EditorTools
 
                 Check(loadout.Secondary.CanParry, "rapier weapon data declares a parry capability");
                 Check(_rig.CanParry && _rig.Defense.CanParry, $"rapier main hand reports that capability on the rig ({_rig.Defense})");
-                Check(!_rig.CanGuard && !_rig.Defense.CanBlock,
-                    $"rapier still cannot block for the archer, whose class reduction is zero ({_rig.Defense})");
+                Check(_rig.CanGuard && _rig.Defense.CanBlock && Mathf.Abs(_rig.Defense.BlockReduction - 0.7f) < 0.001f,
+                    $"the rapier's authored 0.7 block override works for the Archer without granting the bow a guard ({_rig.Defense})");
 
                 EnemyAgent target = PickAliveEnemy();
                 Check(target != null, "an enemy is available for the rapier thrust");
@@ -2422,6 +2432,7 @@ namespace Emberdelve.EditorTools
 
                         int magazineBefore = ranged.Magazine;
                         float healthBefore = enemy.CurrentHealth;
+                        int projectilesBefore = CountProjectileVisuals();
                         int acceptedBefore = _localAuthority.AcceptedCount;
                         int rejectedBefore = _localAuthority.RejectedCount;
 
@@ -2433,7 +2444,13 @@ namespace Emberdelve.EditorTools
                         input.PrimaryReleasedOverride = true;
                         yield return null;
                         input.PrimaryReleasedOverride = null;
-                        yield return WaitFrames(3);
+                        // The authority launches on release; its projectile needs real time to cross the
+                        // lane. Do not inspect health or move/heal this same enemy until that flight ends.
+                        float flightTimeout = weapon.rangedRange / Mathf.Max(2f, weapon.projectileSpeed) + 2f;
+                        yield return WaitUntil(() => CountProjectileVisuals() <= projectilesBefore, flightTimeout);
+                        bool flightFinished = CountProjectileVisuals() <= projectilesBefore;
+                        Check(flightFinished, $"{label}: authoritative projectile completed within {flightTimeout:F1}s");
+                        yield return WaitFrames(1);
 
                         bool damaged = enemy.CurrentHealth < healthBefore;
                         bool accepted = _localAuthority.AcceptedCount > acceptedBefore;
@@ -3287,8 +3304,8 @@ namespace Emberdelve.EditorTools
                 int equipNotifications = 0;
                 int unequipNotifications = 0;
 
-                System.Action<ItemData, int> onCollected = (item, total) => collectedEvents++;
-                System.Action<ItemData, bool> onEquipment = (item, equipped) =>
+                System.Action<int, ItemData, int> onCollected = (p, item, total) => collectedEvents++;
+                System.Action<int, ItemData, bool> onEquipment = (p, item, equipped) =>
                 {
                     if (equipped) equipNotifications++; else unequipNotifications++;
                 };
@@ -3302,7 +3319,7 @@ namespace Emberdelve.EditorTools
                 bool probeArmed = false;
                 CommitSnapshot seenAtNotification = null;
 
-                System.Action onInventoryChanged = () =>
+                System.Action<int> onInventoryChanged = p =>
                 {
                     if (!probeArmed) return;
                     transferNotifications++;
@@ -3936,6 +3953,14 @@ namespace Emberdelve.EditorTools
                 WeaponData claw = enemy.Data.attackWeapon;
                 float declaredReduction = cuirass.StatTotal(SkillStat.BlockReduction);
                 Check(declaredReduction > 0f, $"the cuirass declares a block reduction to measure ({declaredReduction:F2})");
+                CheckClose("the cuirass authors a separate +0.08 guard modifier", 0.08f, declaredReduction,
+                    "the item record, not the measured damage, supplies this term");
+                WeaponData authoredMainHand = _rig.MainHandWeapon;
+                WeaponData authoredShield = _rig.OffhandWeapon;
+                Check(authoredMainHand != null && authoredMainHand.CanBlock && authoredMainHand.blockReductionOverride == 0.70f,
+                    $"the held Ember Rapier authors the naked 0.70 block profile ({(authoredMainHand != null ? authoredMainHand.displayName : "none")})");
+                Check(authoredShield != null && authoredShield.IsShield && authoredShield.CanBlock,
+                    "the equipped shield supplies the block capability while the one-handed rapier is held");
 
                 MeleeCombat melee = _rig.GetComponent<MeleeCombat>();
                 bool meleeWasEnabled = melee != null && melee.enabled;
@@ -3972,15 +3997,25 @@ namespace Emberdelve.EditorTools
                         $"the cuirass is unequipped for the baseline ({nakedUnequip})");
                     Check(equipment.Equipped(EquipmentSlot.Chest) == null, "the chest slot is empty for the baseline");
                     Check(inventory.IndexOfItem(cuirass) >= 0, "the unequipped cuirass is back in the bag rather than deleted");
-                    Check(_rig.Defense.BlockReduction <= 0.001f && !_rig.Defense.CanBlock,
-                        $"without the armor the archer's own kit declares no reduction to guard with ({_rig.Defense})");
+                    float nakedBlockBonus = _rig.Stats != null
+                        ? _rig.Stats.Bonus(SkillStat.BlockReduction, _rig.Class.blockReduction)
+                        : 0f;
+                    float authoredNakedReduction = ExpectedGuardReductionFromKit(nakedBlockBonus);
+                    CheckClose("naked reduction independently resolves from class + held weapon/shield + non-cuirass modifiers",
+                        0.70f, authoredNakedReduction, $"class={_rig.Class.blockReduction:F2}, rapier override=0.70, shield contributes Block, other bonus={nakedBlockBonus:F2}");
+                    CheckClose("live naked guard profile agrees with the independently authored kit", authoredNakedReduction,
+                        _rig.Defense.BlockReduction, _rig.Defense.ToString());
+                    Check(_rig.Defense.CanBlock,
+                        $"the rapier and equipped shield still let the naked kit block ({_rig.Defense})");
 
                     yield return SubmitMeasuredGuardHit(enemy, claw, 0, 0f, anchor, nakedFront);
                     CheckMeasurement("naked front", nakedFront, enemy);
-                    Check(!nakedFront.blocked && nakedFront.infoReduction <= 0.001f,
-                        "the unarmored baseline is legitimately unblocked, because the kit declares zero reduction");
-                    Check(Mathf.Abs(nakedFront.damage - claw.baseDamage) < 0.75f,
-                        $"the unarmored hit took the weapon's own number ({nakedFront.damage:F1} vs {claw.baseDamage:F1})");
+                    Check(nakedFront.blocked, "the naked rapier-and-shield kit blocks a hit inside its guard arc");
+                    CheckClose("naked DamageInfo reduction matches the authored kit", authoredNakedReduction,
+                        nakedFront.infoReduction, "0.70 is the held rapier's block override");
+                    CheckClose("naked front HP loss is authored claw damage after 70% guard reduction",
+                        claw.baseDamage * (1f - authoredNakedReduction), nakedFront.damage,
+                        $"{claw.baseDamage:F1} * (1 - {authoredNakedReduction:F2})", 0.75f);
 
                     // ---- same attack, same geometry, one more piece worn, put back through the bag
                     int cuirassIndex = inventory.IndexOfItem(cuirass);
@@ -3989,18 +4024,31 @@ namespace Emberdelve.EditorTools
                         $"the cuirass is equipped again from the bag ({wornEquip})");
                     Check(equipment.Equipped(EquipmentSlot.Chest) == cuirass, "the chest slot holds the cuirass again");
                     Check(inventory.IndexOfItem(cuirass) < 0, "the worn cuirass is out of the bag again");
-                    Check(_rig.Defense.BlockReduction >= declaredReduction - 0.001f && _rig.Defense.CanBlock,
-                        $"wearing it raises the resolved reduction to its declared number ({_rig.Defense})");
+                    float wornBlockBonus = _rig.Stats != null
+                        ? _rig.Stats.Bonus(SkillStat.BlockReduction, _rig.Class.blockReduction)
+                        : 0f;
+                    float authoredWornReduction = ExpectedGuardReductionFromKit(wornBlockBonus);
+                    CheckClose("worn reduction independently resolves as authored kit + cuirass .08",
+                        authoredNakedReduction + declaredReduction, authoredWornReduction,
+                        $"class/weapon/shield base={authoredNakedReduction:F2}, worn cuirass={declaredReduction:F2}");
+                    CheckClose("live worn guard profile agrees with the authored calculation", authoredWornReduction,
+                        _rig.Defense.BlockReduction, _rig.Defense.ToString());
+                    Check(_rig.Defense.CanBlock, $"wearing cuirass preserves the block capability ({_rig.Defense})");
 
                     yield return SubmitMeasuredGuardHit(enemy, claw, 1, 0f, anchor, wornFront);
                     CheckMeasurement("worn front", wornFront, enemy);
                     Check(wornFront.blocked, "worn armor blocks a hit that arrives inside the guard arc");
+                    CheckClose("worn DamageInfo reduction matches the authored 0.70 + 0.08 kit", authoredWornReduction,
+                        wornFront.infoReduction, "the cuirass contributes its declared BlockReduction modifier");
+                    CheckClose("worn front HP loss is authored claw damage after 78% guard reduction",
+                        claw.baseDamage * (1f - authoredWornReduction), wornFront.damage,
+                        $"{claw.baseDamage:F1} * (1 - {authoredWornReduction:F2})", 0.75f);
                     Check(wornFront.damage < nakedFront.damage - 0.25f,
                         $"the same attack lands softer behind the cuirass ({nakedFront.damage:F1} -> {wornFront.damage:F1})");
-                    Check(Mathf.Abs(wornFront.infoReduction - declaredReduction) < 0.001f,
-                        $"the authority reports the reduction the item declares ({wornFront.infoReduction:F2} vs {declaredReduction:F2})");
-                    Check(Mathf.Abs(wornFront.damage - nakedFront.damage * (1f - declaredReduction)) < 0.75f,
-                        $"the health delta is that reduction applied to the same hit ({wornFront.damage:F1} vs {nakedFront.damage * (1f - declaredReduction):F1})");
+                    CheckClose("worn DamageInfo reports the authored total 0.70 + 0.08 reduction",
+                        authoredWornReduction, wornFront.infoReduction, "the cuirass contribution stacks over the held kit");
+                    Check(Mathf.Abs(wornFront.damage - claw.baseDamage * (1f - authoredWornReduction)) < 0.75f,
+                        $"the health delta is the authored 0.78 total reduction applied once ({wornFront.damage:F1} vs {claw.baseDamage * (1f - authoredWornReduction):F1})");
                     Check(Mathf.Abs(wornFront.travelDistance - nakedFront.travelDistance) < 0.05f,
                         $"both hits travelled the same distance ({nakedFront.travelDistance:F2} vs {wornFront.travelDistance:F2})");
                     Check(wornFront.facingError <= _rig.Defense.BlockArcDegrees * 0.5f,
@@ -4012,14 +4060,16 @@ namespace Emberdelve.EditorTools
                     Check(!wornRear.blocked, "facing away from the source drops the block even with the armor worn");
                     Check(wornRear.damage > wornFront.damage + 0.25f,
                         $"the rear hit took more damage than the blocked one ({wornRear.damage:F1} vs {wornFront.damage:F1})");
-                    Check(Mathf.Abs(wornRear.damage - nakedFront.damage) < 0.75f,
-                        $"the rear hit took the weapon's full number ({wornRear.damage:F1} vs {claw.baseDamage:F1})");
+                    CheckClose("worn rear hit bypasses the directional guard and takes full authored claw damage",
+                        claw.baseDamage, wornRear.damage, "a rear hit is outside the guard arc", 0.75f);
 
                     yield return SubmitMeasuredGuardHit(enemy, claw, 3, 90f, anchor, wornSide);
                     CheckMeasurement("worn side", wornSide, enemy);
                     Check(!wornSide.blocked, "ninety degrees off the source is outside the guard arc");
                     Check(wornSide.damage > wornFront.damage + 0.25f,
                         $"the side hit took more damage than the blocked one ({wornSide.damage:F1} vs {wornFront.damage:F1})");
+                    CheckClose("worn side hit outside the arc takes full authored claw damage",
+                        claw.baseDamage, wornSide.damage, "a side hit is outside the guard arc", 0.75f);
 
                     Debug.Log($"[Emberdelve][Smoke:items] armor measurement: claw={claw.baseDamage:F1} arc={(_rig.Defense.BlockArcDegrees * 0.5f):F1}deg reduction={declaredReduction:F2} " +
                               $"nakedFront={nakedFront.damage:F1}/blocked={nakedFront.blocked} " +
@@ -4050,6 +4100,27 @@ namespace Emberdelve.EditorTools
             }
 
             private const float MeasuredStandoffDistance = 1.6f;
+
+            /// <summary>
+            /// Independently resolves the guard base from the authored class and actually held kit, then adds
+            /// the stat stack's current modifier delta. The measured damage is never used as an oracle.
+            /// </summary>
+            private float ExpectedGuardReductionFromKit(float modifierBonus)
+            {
+                CharacterClassData classData = _rig != null ? _rig.Class : null;
+                WeaponData mainHand = _rig != null ? _rig.MainHandWeapon : null;
+                WeaponData offHand = _rig != null ? _rig.OffhandWeapon : null;
+                float reduction = classData != null ? classData.blockReduction : 0f;
+
+                if (mainHand != null && mainHand.CanBlock && mainHand.blockReductionOverride >= 0f)
+                    reduction = mainHand.blockReductionOverride;
+
+                bool shieldContributes = offHand != null && !(mainHand != null && mainHand.twoHanded);
+                if (shieldContributes && offHand.blockReductionOverride >= 0f)
+                    reduction = offHand.blockReductionOverride;
+
+                return Mathf.Clamp01(reduction + Mathf.Max(0f, modifierBonus));
+            }
 
             /// <summary>
             /// One controlled submission. The rig is re-seated at the same anchor and turned
@@ -4252,11 +4323,14 @@ namespace Emberdelve.EditorTools
                 inventory.Clear();
                 yield return WaitFrames(2);
 
-                Check(supplyChest.CanInteract(out string supplyBlocked), "the supply chest can be opened");
+                // R2 fixture: chest interaction is checked per actor (alive, within 3 m, line of sight), so the player stands beside each
+                // real level chest before using it (the old calls opened chests from anywhere in the level).
+                StandBeside(supplyChest.transform.position);
+                Check(supplyChest.CanInteract(_rig, out string supplyBlocked), "the supply chest can be opened");
                 int unitsBefore = inventory.TotalUnits;
                 int valueBefore = _director.LootValue;
 
-                Check(supplyChest.Open(), "opening the supply chest handed something over");
+                Check(supplyChest.Open(_rig), "opening the supply chest handed something over");
                 Check(supplyChest.Opened, "the chest records that it was opened");
                 Check(inventory.TotalUnits > unitsBefore,
                     $"the player received the loot ({unitsBefore} -> {inventory.TotalUnits} units)");
@@ -4270,7 +4344,7 @@ namespace Emberdelve.EditorTools
                 Check(supplyChest.Lid != null && Quaternion.Angle(supplyChest.Lid.localRotation, Quaternion.identity) > 30f,
                     "the lid actually swung open");
 
-                Check(!supplyChest.CanInteract(out string emptyReason), "an emptied chest cannot be opened again");
+                Check(!supplyChest.CanInteract(_rig, out string emptyReason), "an emptied chest cannot be opened again");
                 Check(!string.IsNullOrEmpty(emptyReason) && emptyReason.Contains("empty"),
                     $"the chest says so ({emptyReason})");
 
@@ -4279,7 +4353,8 @@ namespace Emberdelve.EditorTools
                 while (inventory.TryAdd(cuirass, 1)) fill++;
                 Check(fill > 0, $"bag filled with {fill} cuirasses to test leftovers");
 
-                Check(emberChest.Open(), "the ember chest was opened with a nearly full bag");
+                StandBeside(emberChest.transform.position);
+                Check(emberChest.Open(_rig), "the ember chest was opened with a nearly full bag");
                 Check(emberChest.Opened, "the ember chest records that it was opened");
                 Check(emberChest.Remaining.Count > 0,
                     $"loot the player could not carry stayed in the chest ({emberChest.Remaining.Count} stacks)");
@@ -4291,29 +4366,30 @@ namespace Emberdelve.EditorTools
                 inventory.Clear();
                 yield return WaitFrames(2);
 
-                Check(emberChest.Open(), "reopening the same chest finished the job");
+                Check(emberChest.Open(_rig), "reopening the same chest finished the job");
                 Check(emberChest.Remaining.Count == 0, "nothing is left in the chest after a second open");
                 Check(emberChest.IsEmpty, "the chest now reports itself empty");
                 Check(inventory.TotalUnits > 0 && inventory.TotalUnits <= carriedAfterPartial,
                     $"the leftover loot was still there to be taken ({dropsLeft} drops -> {inventory.TotalUnits} units)");
 
                 // ---- the sealed chest is gated by what the run has already recovered
-                sealedChest.CanInteract(out string sealedReason);
+                StandBeside(sealedChest.transform.position);
+                sealedChest.CanInteract(_rig, out string sealedReason);
                 Debug.Log($"[Emberdelve][Smoke:items] sealed chest gate: {sealedReason}");
 
                 if (_director.LootValue < ChestInteractable.SealedUnlockValue)
                 {
-                    Check(!sealedChest.CanInteract(out string stillSealed),
+                    Check(!sealedChest.CanInteract(_rig, out string stillSealed),
                         $"a sealed chest stays shut until the run has earned it ({stillSealed})");
                     Check(stillSealed != null && stillSealed.Contains("Sealed"), $"the gate explains itself ({stillSealed})");
 
-                    _director.CollectLoot(relic, 1);
+                    _director.CollectLoot(_rig, relic, 1);
                     Check(_director.LootValue >= ChestInteractable.SealedUnlockValue,
                         $"recovering value opens the gate ({_director.LootValue})");
                 }
 
-                Check(sealedChest.CanInteract(out string nowOpenReason), "the sealed chest will open now");
-                Check(sealedChest.Open(), "the sealed chest opened");
+                Check(sealedChest.CanInteract(_rig, out string nowOpenReason), "the sealed chest will open now");
+                Check(sealedChest.Open(_rig), "the sealed chest opened");
                 Check(sealedChest.Remaining.Count == 0, "the sealed chest gave everything up");
 
                 bool gotRelic = inventory.IndexOfItem(relic) >= 0;
@@ -4378,6 +4454,13 @@ namespace Emberdelve.EditorTools
             private static Vector2Int CellOf(DungeonLayoutData layout, Vector3 world)
             {
                 return layout != null ? layout.CellFromWorld(world) : Vector2Int.zero;
+            }
+
+            // R2 fixture helper: stands the player rig on a world target (reach and line of sight are checked per actor).
+            private void StandBeside(Vector3 position)
+            {
+                _rig.transform.position = new Vector3(position.x, position.y + 0.15f, position.z);
+                Physics.SyncTransforms();
             }
 
             private void PlacePlayerAtCell(Vector2Int cell, Vector3 chestPosition)
@@ -4603,7 +4686,7 @@ namespace Emberdelve.EditorTools
                     // cooldown refusal, reported to the HUD with a reason
                     string capturedReason = null;
                     int capturedSlot = -2;
-                    System.Action<SkillSnapshot, string> onReject = (snapshot, reason) =>
+                    System.Action<int, SkillSnapshot, string> onReject = (p, snapshot, reason) =>
                     {
                         capturedSlot = snapshot.Slot;
                         capturedReason = reason;
@@ -5017,15 +5100,15 @@ namespace Emberdelve.EditorTools
                 if (shotC.Health != null) shotC.Health.Damaged += handlerC;
 
                 Check(caster.TryCastSlot(0), "Multi-shot cast accepted");
+                int arrowsInFlight = CountProjectileVisuals();
+                Check(arrowsInFlight >= arrowsBefore + multi.projectileCount,
+                    $"Multi-shot creates one visible arrow per launched projectile before impact ({arrowsBefore} -> {arrowsInFlight})");
                 yield return WaitSeconds(0.6f);
 
-                int arrowsAfter = CountProjectileVisuals();
                 Check(ranged.Magazine == volleyBefore - multi.projectileCount,
                     $"Multi-shot spent one arrow per projectile from the magazine ({volleyBefore} -> {ranged.Magazine}, volley {multi.projectileCount})");
                 Check(Mathf.Abs(manaBeforeVolley - mana.CurrentMana - multi.EffectiveManaCost) < 0.6f,
                     $"Multi-shot spent its mana ({manaBeforeVolley:F0} -> {mana.CurrentMana:F0})");
-                Check(arrowsAfter >= arrowsBefore + multi.projectileCount,
-                    $"Multi-shot spawned one arrow visual per projectile ({arrowsBefore} -> {arrowsAfter})");
 
                 int hitTargets = 0;
                 if (volleyLaneClear)
@@ -5124,8 +5207,8 @@ namespace Emberdelve.EditorTools
                     Check(hitsA == 1 && hitsB == 1, $"no entity was hit twice by the same arrow (A {hitsA}, B {hitsB})");
                     Check(lineC.CurrentHealth >= healthC - 0.01f,
                         $"the shot stopped at its target cap ({pierce.projectileMaxTargets}) and did not reach the third body ({healthC:F0} -> {lineC.CurrentHealth:F0})");
-                    Check(_localAuthority != null && _localAuthority.AcceptedCount == acceptedBeforePierce + pierce.projectileMaxTargets,
-                        $"the authority accepted both hits of the one activation ({acceptedBeforePierce} -> {(_localAuthority != null ? _localAuthority.AcceptedCount : -1)}, cap {pierce.projectileMaxTargets})");
+                    Check(_localAuthority != null && _localAuthority.AcceptedCount == acceptedBeforePierce + 1,
+                        $"the authority accepted one piercing projectile launch; impact events confirm its two target hits ({acceptedBeforePierce} -> {(_localAuthority != null ? _localAuthority.AcceptedCount : -1)})");
 
                     // The two accepted hits share one activation id. A second button press is a new activation,
                     // and the authority must refuse it while the skill's own cooldown is still running.
@@ -5885,6 +5968,14 @@ namespace Emberdelve.EditorTools
                     _failures++;
                     Debug.LogError($"[Emberdelve][Smoke:{Mode}] FAIL {label}");
                 }
+            }
+
+            private void CheckClose(string label, float expected, float actual, string note, float tolerance = 0.001f)
+            {
+                bool finite = !float.IsNaN(expected) && !float.IsInfinity(expected)
+                              && !float.IsNaN(actual) && !float.IsInfinity(actual);
+                Check(finite && Mathf.Abs(expected - actual) <= tolerance,
+                    $"{label}: expected {expected:F3}, got {actual:F3}, tolerance {tolerance:F3} ({note})");
             }
 
             /// <summary>

@@ -7,14 +7,8 @@ using Emberdelve.Data;
 namespace Emberdelve.Skills
 {
     /// <summary>
-    /// Shared resolution for the archer's projectile skills. One call fires one projectile along one
-    /// direction: it asks HitScanner what that projectile can legitimately reach (nearest first, one
-    /// entry per entity, stopped by walls), submits one SkillIntent per valid target through the combat
-    /// authority, and spawns the cosmetic arrow.
-    ///
-    /// The per-cast <see cref="SkillContext.AlreadyHit"/> list is what makes "no duplicate hits" true:
-    /// a volley cannot delete one enemy by landing three arrows on the same body, and a piercing shot
-    /// cannot hit the same body twice on the way through.
+    /// Shared launch path for archer projectile skills. The authority advances each arrow and discovers
+    /// body, blade and wall contacts in order; client-side target scans never decide a hit.
     /// </summary>
     internal static class RangedSkillUtility
     {
@@ -52,10 +46,9 @@ namespace Emberdelve.Skills
         }
 
         /// <summary>
-        /// Fires one projectile. Returns the number of authority-accepted hits, which may be zero: a shot
-        /// into empty air is still a shot, and the arrow visual proves it happened.
+        /// Fires one projectile. Returns one when the authority accepted the launch, including a shot into air.
         /// </summary>
-        public static int FireOne(SkillContext context, Vector3 origin, Vector3 aim)
+        public static int FireOne(SkillContext context, Vector3 origin, Vector3 aim, int projectileIndex = 0)
         {
             SkillData skill = context.Skill;
             WeaponData weapon = context.ActiveWeapon;
@@ -64,43 +57,10 @@ namespace Emberdelve.Skills
             float range = Mathf.Max(1f, weapon.rangedRange);
 
             context.Hits.Clear();
-            int found = HitScanner.CollectRangedHits(origin, aim, range, context.Rig.CombatId,
-                skill.projectileMaxTargets, context.Hits, context.HitMask, context.LevelMask);
-
-            Vector3 endpoint = origin + aim * range;
-            int applied = 0;
-
-            for (int i = 0; i < found; i++)
-            {
-                HitCandidate hit = context.Hits[i];
-
-                if (!CombatRegistry.TryGet(hit.TargetCombatId, out ICombatEntity target)) continue;
-                if (target.IsDead) continue;
-                if (!CombatTeams.AreHostile(context.Rig, target)) continue;
-
-                // The arrow still sticks where it physically stopped, even when this cast already hit
-                // that entity with another projectile.
-                endpoint = hit.HitPoint;
-
-                if (context.AlreadyHit.Contains(hit.TargetCombatId)) continue;
-
-                int sequence = CombatRegistry.NextSequence(context.Rig.CombatId);
-                // The intent names the activation the authority opened and nothing it could be trusted for:
-                // the authority reads the CHA scale from the caster itself and applies it exactly once per
-                // accepted hit. Range, spread, projectile count, charge and distance falloff are the weapon's
-                // and are deliberately not scaled here or anywhere else in this path.
-                SkillIntent intent = new SkillIntent(context.Rig.CombatId, context.Rig.Kind, skill, weapon,
-                    origin, aim, range, sequence, Time.time, default, context.ActivationId);
-
-                if (context.Authority.SubmitSkill(intent, hit))
-                {
-                    applied++;
-                    context.AlreadyHit.Add(hit.TargetCombatId);
-                }
-            }
-
-            ProjectileVisual.SpawnArrow(origin, endpoint, weapon);
-            return applied;
+            int sequence = CombatRegistry.NextSequence(context.Rig.CombatId);
+            SkillIntent intent = new SkillIntent(context.Rig.CombatId, context.Rig.Kind, skill, weapon,
+                origin, aim, range, sequence, Time.time, default, context.ActivationId);
+            return context.Authority.LaunchSkillProjectile(intent, projectileIndex) ? 1 : 0;
         }
 
         /// <summary>Spread direction for shot <paramref name="index"/> of <paramref name="count"/>, centered on the aim.</summary>

@@ -155,8 +155,10 @@ namespace Emberdelve.Interaction
             if (_host == null) _host = GetComponentInParent<ILootHost>();
         }
 
-        public bool CanInteract(out string blockedReason)
+        public bool CanInteract(IInteractionActor actor, out string blockedReason)
         {
+            if (!InteractionRules.Validate(actor, this, InteractionRules.ReachOf(_host), _host, out blockedReason)) return false;
+
             if (lootTable == null)
             {
                 blockedReason = "This chest has no contents configured";
@@ -171,7 +173,8 @@ namespace Emberdelve.Interaction
 
             if (variant == ChestVariant.Sealed)
             {
-                int recovered = _host != null && _host.Inventory != null ? _host.Inventory.RecoveredValue : 0;
+                // R2: the ACTOR's carried value unlocks it, not some other player's.
+                int recovered = actor.Inventory != null ? actor.Inventory.RecoveredValue : 0;
                 if (recovered < SealedUnlockValue)
                 {
                     blockedReason = $"Sealed chest: recover {SealedUnlockValue} value first ({recovered})";
@@ -183,9 +186,9 @@ namespace Emberdelve.Interaction
             return true;
         }
 
-        public void OnInteractInstant() => Open();
+        public void OnInteractInstant(IInteractionActor actor) => Open(actor);
 
-        public void OnHoldComplete() => Open();
+        public void OnHoldComplete(IInteractionActor actor) => Open(actor);
 
         /// <summary>
         /// Rolls the table once and hands each drop to the run host, counting the units the host actually
@@ -202,18 +205,19 @@ namespace Emberdelve.Interaction
         /// profiles or catalog cannot be produced is a failed open with the reason logged: the chest does not
         /// mark itself rolled, so it does not pretend to be an empty container it never produced.
         /// </summary>
-        public bool Open()
+        public bool Open(IInteractionActor actor)
         {
-            if (!CanInteract(out string reason))
+            int owner = actor != null ? actor.PlayerId : GameEvents.NoPlayer;
+            if (!CanInteract(actor, out string reason))
             {
-                GameEvents.RaiseToast(reason);
+                GameEvents.RaiseToast(owner, reason);
                 return false;
             }
 
             if (!_rolled)
             {
                 // R3: gear is rolled against the run's one item catalog, which the host's bag carries.
-                ItemCatalog catalog = _host != null && _host.Inventory != null ? _host.Inventory.Catalog : null;
+                ItemCatalog catalog = actor.Inventory != null ? actor.Inventory.Catalog : null;
 
                 // R4/R5: the roll belongs to the raid. Its seed is derived from the raid seed, and every UID comes from
                 // the raid's one issuer; a host with no raid session cannot roll a chest at all (no local fallback).
@@ -222,7 +226,7 @@ namespace Emberdelve.Interaction
                 {
                     Debug.LogError($"[Emberdelve][Chest] {name}: the loot host has no raid session, so the chest " +
                                    "cannot be rolled (chests roll through RaidSession, never a private seed)", this);
-                    GameEvents.RaiseToast("Chest contents are invalid");
+                    GameEvents.RaiseToast(owner, "Chest contents are invalid");
                     return false;
                 }
 
@@ -230,7 +234,7 @@ namespace Emberdelve.Interaction
                 {
                     Debug.LogError($"[Emberdelve][Chest] {name} variant={variant} salt={seed}: contents refused, " +
                                     $"nothing was produced - {rollReason}", this);
-                    GameEvents.RaiseToast("Chest contents are invalid");
+                    GameEvents.RaiseToast(owner, "Chest contents are invalid");
                     return false;
                 }
 
@@ -239,7 +243,7 @@ namespace Emberdelve.Interaction
 
             if (_host == null)
             {
-                GameEvents.RaiseToast("No inventory available");
+                GameEvents.RaiseToast(owner, "No inventory available");
                 return false;
             }
 
@@ -263,7 +267,7 @@ namespace Emberdelve.Interaction
                 if (drop.IsRolled)
                 {
                     // One concrete item, offered as itself. Refused means it stays here unchanged.
-                    if (!LootCollection.TryCollectInstance(_host, drop.Instance, out string refusal))
+                    if (!LootCollection.TryCollectInstance(_host, actor, drop.Instance, out string refusal))
                     {
                         Debug.Log($"[Emberdelve][Chest] {name}: kept {drop} in the chest - {refusal}");
                         accepted = 0;
@@ -275,7 +279,7 @@ namespace Emberdelve.Interaction
                 }
                 else
                 {
-                    accepted = LootCollection.CollectAccepted(_host, drop.Item, offered);
+                    accepted = LootCollection.CollectAccepted(_host, actor, drop.Item, offered);
                 }
 
                 if (accepted > 0)
@@ -306,7 +310,7 @@ namespace Emberdelve.Interaction
             Debug.Log($"[Emberdelve][Chest] {name} variant={variant} salt={seed} opened: takenUnits={takenUnits} " +
                       $"value={takenValue} leftUnits={leftUnits} stacks={_remaining.Count} " +
                       $"totalTaken={_takenCount} totalValue={_takenValue}");
-            GameEvents.RaiseToast(_remaining.Count > 0
+            GameEvents.RaiseToast(owner, _remaining.Count > 0
                 ? $"Took {takenUnits} item(s) worth {takenValue}, left {leftUnits} in the chest"
                 : $"Took {takenValue} value from {variant} chest");
 

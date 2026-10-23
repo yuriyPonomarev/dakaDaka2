@@ -7,8 +7,8 @@ namespace Emberdelve.Items
     /// <summary>What a loot holder must provide so pickups can hand items to the player.</summary>
     public interface ILootHost
     {
-        Inventory Inventory { get; }
-        bool CollectLoot(ItemData item, int amount);
+        /// <summary>R2: takes the units for THIS actor's bag (the host keeps its own per-player record; it never falls back to a default player).</summary>
+        bool CollectLoot(IInteractionActor actor, ItemData item, int amount);
         void SpawnLoot(ItemData item, int amount, Vector3 worldPosition);
     }
 
@@ -29,7 +29,7 @@ namespace Emberdelve.Items
         /// units it took: 0 when it took none, <paramref name="amount"/> when it took all of them, and
         /// something in between when it took part. It never returns a negative number or more than was asked.
         /// </summary>
-        int CollectLootCounted(ItemData item, int amount);
+        int CollectLootCounted(IInteractionActor actor, ItemData item, int amount);
     }
 
     /// <summary>
@@ -52,7 +52,7 @@ namespace Emberdelve.Items
         /// happened (no room, a duplicate identity, a run state that may not receive loot, a host that does not
         /// carry instances at all).
         /// </summary>
-        bool TryCollectLootInstance(ItemInstance instance, out string reason);
+        bool TryCollectLootInstance(IInteractionActor actor, ItemInstance instance, out string reason);
     }
 
     /// <summary>
@@ -78,14 +78,14 @@ namespace Emberdelve.Items
         /// Counted host: the host's own number, clamped into the range that was offered.
         ///
         /// Legacy bool-only host: the bool cannot name a count, so the count is read off the bag that host
-        /// reports - the units its <see cref="ILootHost.Inventory"/> gained during the call are the units that
+        /// reports - the units the acting player's bag gained during the call are the units that
         /// were committed, and that is what the source is shrunk by. A bag that shrank or gained more than was
         /// offered is clamped, and a disagreement with the host's own bool is logged instead of being guessed.
         /// When the host reports no bag at all there is nothing to measure, and the only reading left is the
         /// documented bool contract (true = everything landed, false = nothing landed), which is exactly the
         /// pre-count behavior: explicit, and never a silent partial credit.
         /// </summary>
-        public static int CollectAccepted(ILootHost host, ItemData item, int amount)
+        public static int CollectAccepted(ILootHost host, IInteractionActor actor, ItemData item, int amount)
         {
             if (host == null || item == null) return 0;
 
@@ -93,13 +93,13 @@ namespace Emberdelve.Items
             if (requested <= 0) return 0;
 
             if (host is ICountedLootHost counted)
-                return Mathf.Clamp(counted.CollectLootCounted(item, requested), 0, requested);
+                return Mathf.Clamp(counted.CollectLootCounted(actor, item, requested), 0, requested);
 
-            Inventory bag = host.Inventory;
-            if (bag == null) return host.CollectLoot(item, requested) ? requested : 0;
+            Inventory bag = actor != null ? actor.Inventory : null;
+            if (bag == null) return host.CollectLoot(actor, item, requested) ? requested : 0;
 
             int before = bag.TotalUnits;
-            bool tookAll = host.CollectLoot(item, requested);
+            bool tookAll = host.CollectLoot(actor, item, requested);
             int committed = Mathf.Clamp(bag.TotalUnits - before, 0, requested);
 
             if (tookAll && committed != requested)
@@ -124,7 +124,7 @@ namespace Emberdelve.Items
         /// <see cref="ItemData"/> and would remint a Common identity and discard the rolled metadata, which is
         /// the exact thing this contract exists to prevent.
         /// </summary>
-        public static bool TryCollectInstance(ILootHost host, ItemInstance instance, out string reason)
+        public static bool TryCollectInstance(ILootHost host, IInteractionActor actor, ItemInstance instance, out string reason)
         {
             if (instance == null)
             {
@@ -140,7 +140,7 @@ namespace Emberdelve.Items
 
             if (host is IInstanceLootHost instanceHost)
             {
-                if (instanceHost.TryCollectLootInstance(instance, out reason)) return true;
+                if (instanceHost.TryCollectLootInstance(actor, instance, out reason)) return true;
 
                 if (string.IsNullOrEmpty(reason))
                 {
@@ -238,8 +238,11 @@ namespace Emberdelve.Items
             _host = newHost as ILootHost;
         }
 
-        public bool CanInteract(out string reason)
+        public bool CanInteract(IInteractionActor actor, out string reason)
         {
+            if (!Emberdelve.Interaction.InteractionRules.Validate(actor, this,
+                Emberdelve.Interaction.InteractionRules.ReachOf(_host), _host, out reason)) return false;
+
             if (Item == null)
             {
                 reason = "Empty container";
@@ -256,11 +259,11 @@ namespace Emberdelve.Items
             return true;
         }
 
-        public void OnInteractInstant()
+        public void OnInteractInstant(IInteractionActor actor)
         {
-            if (!CanInteract(out string reason))
+            if (!CanInteract(actor, out string reason))
             {
-                GameEvents.RaiseToast(reason ?? "Cannot take item");
+                GameEvents.RaiseToast(actor != null ? actor.PlayerId : GameEvents.NoPlayer, reason ?? "Cannot take item");
                 return;
             }
 
@@ -268,19 +271,19 @@ namespace Emberdelve.Items
             {
                 // One concrete item, offered as itself through the instance path. A refusal (full bag, duplicate
                 // identity, run not running) leaves this pickup and its instance exactly as they were.
-                if (LootCollection.TryCollectInstance(_host, _instance, out string refusal))
+                if (LootCollection.TryCollectInstance(_host, actor, _instance, out string refusal))
                 {
                     Destroy(gameObject);
                     return;
                 }
 
-                GameEvents.RaiseToast("Cannot take item");
+                GameEvents.RaiseToast(actor.PlayerId, "Cannot take item");
                 Debug.Log($"[Emberdelve][LootPickup] {name}: kept {_instance.Describe()} on the ground - {refusal}");
                 return;
             }
 
             int requested = Mathf.Max(1, amount);
-            int accepted = LootCollection.CollectAccepted(_host, item, requested);
+            int accepted = LootCollection.CollectAccepted(_host, actor, item, requested);
 
             // Nothing moved: the pickup stays exactly as it was, same amount, same object.
             if (accepted <= 0) return;
@@ -298,7 +301,7 @@ namespace Emberdelve.Items
                       $"{amount} left on the ground");
         }
 
-        public void OnHoldComplete() => OnInteractInstant();
+        public void OnHoldComplete(IInteractionActor actor) => OnInteractInstant(actor);
 
         private void Update()
         {

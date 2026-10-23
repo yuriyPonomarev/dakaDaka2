@@ -36,6 +36,9 @@ namespace Emberdelve.Player
         private Vector3 _restLocalPosition;
         private Quaternion _restLocalRotation;
         private SwingTrail _trail;
+        private Transform _guardBlade;
+        private bool _guardHeld;
+        private static readonly Vector3 GuardBladeUnitSize = Vector3.one;
 
         /// <summary>The afterimage ribbon spans from this fraction of the blade (from the hand) to the tip: the outer 8 percent, a thin edge trail.</summary>
         public const float TrailInnerFraction = 0.92f;
@@ -66,13 +69,49 @@ namespace Emberdelve.Player
         /// through, the same frame the authority builds the sweep in) and the thin bar that shows the exact
         /// damage segment during a swing.
         /// </summary>
-        public void ConfigureMelee(Transform aimFrame, Transform edge)
+        public void ConfigureMelee(Transform aimFrame, Transform edge, Transform guardBlade)
         {
             _aimFrame = aimFrame;
             _edge = edge;
+            _guardBlade = guardBlade;
             _restLocalPosition = transform.localPosition;
             _restLocalRotation = transform.localRotation;
             if (_edge != null) _edge.gameObject.SetActive(false);
+        }
+
+        /// <summary>The guard pose shown to the player and sampled by the authority during projectile flight.</summary>
+        public void SetGuardHeld(bool held)
+        {
+            _guardHeld = held;
+            if (!_swinging && !_recoiling) ApplyGuardPose();
+        }
+
+        public bool TryGetGuardBladeBox(out GuardBladeBox box)
+        {
+            if (!_isRanged && _guardBlade != null)
+            {
+                box = new GuardBladeBox(_guardBlade, GuardBladeUnitSize);
+                return true;
+            }
+
+            box = default;
+            return false;
+        }
+
+        private void ApplyGuardPose()
+        {
+            if (_swinging || _recoiling || _guardBlade == null) return;
+            if (_guardHeld && _aimFrame != null)
+            {
+                Quaternion aimRotation = Quaternion.LookRotation(_aimFrame.forward, Vector3.up);
+                GuardBladePose.ResolveRoot(_aimFrame.position, aimRotation, true,
+                    out Vector3 worldPosition, out Quaternion worldRotation);
+                transform.SetPositionAndRotation(worldPosition, worldRotation);
+                return;
+            }
+
+            transform.localPosition = GuardBladePose.RootRestPosition;
+            transform.localRotation = GuardBladePose.RootRestRotation;
         }
 
         /// <summary>Starts presenting a swing: from now the rig is posed by the pattern curve, clock = Time.time.</summary>
@@ -144,7 +183,12 @@ namespace Emberdelve.Player
 
         private void LateUpdate()
         {
-            if (_isRanged || _pattern == null) return;
+            if (_isRanged) return;
+            if (_pattern == null)
+            {
+                ApplyGuardPose();
+                return;
+            }
 
             if (_swinging)
             {
@@ -181,6 +225,7 @@ namespace Emberdelve.Player
                 float eased = k * k * (3f - 2f * k);
                 ApplyPose(SwingPose.Lerp(_recoilFrom, _pattern.RestPose, eased), false);
             }
+            else ApplyGuardPose();
         }
 
         private void EndSwing()
@@ -191,6 +236,7 @@ namespace Emberdelve.Player
             transform.localRotation = _restLocalRotation;
             if (_edge != null) _edge.gameObject.SetActive(false);
             if (_trail != null) _trail.EndStroke();
+            ApplyGuardPose();
         }
 
         private void OnDestroy()
@@ -232,8 +278,8 @@ namespace Emberdelve.Player
 
             GameObject root = new GameObject(ranged ? "Weapon_Bow_Blockout" : "Weapon_Sword_Blockout");
             root.transform.SetParent(parent, false);
-            root.transform.localPosition = ranged ? new Vector3(0.20f, -0.17f, 0.30f) : new Vector3(0.26f, -0.20f, 0.30f);
-            root.transform.localRotation = ranged ? Quaternion.Euler(0f, -8f, 0f) : Quaternion.Euler(-8f, 12f, 14f);
+            root.transform.localPosition = ranged ? new Vector3(0.20f, -0.17f, 0.30f) : GuardBladePose.RootRestPosition;
+            root.transform.localRotation = ranged ? Quaternion.Euler(0f, -8f, 0f) : GuardBladePose.RootRestRotation;
             if (ignoreLayer >= 0) root.layer = ignoreLayer;
 
             Transform muzzle;
@@ -251,7 +297,7 @@ namespace Emberdelve.Player
             }
             else
             {
-                BuildPart(root.transform, "Sword_Blade", new Vector3(0f, 0f, 0.36f), new Vector3(0.055f, 0.018f, 0.72f), Quaternion.identity, weapon.edgeMaterial);
+                BuildPart(root.transform, "Sword_Blade", GuardBladePose.BladeLocalCenter, GuardBladePose.BladeSize, Quaternion.identity, weapon.edgeMaterial);
                 BuildPart(root.transform, "Sword_Tip", new Vector3(0f, 0f, 0.74f), new Vector3(0.03f, 0.014f, 0.12f), Quaternion.identity, weapon.edgeMaterial);
                 BuildPart(root.transform, "Sword_Guard", new Vector3(0f, 0f, 0.02f), new Vector3(0.17f, 0.035f, 0.05f), Quaternion.identity, weapon.gripMaterial);
                 BuildPart(root.transform, "Sword_Grip", new Vector3(0f, -0.02f, -0.07f), new Vector3(0.035f, 0.035f, 0.15f), Quaternion.identity, weapon.gripMaterial);
@@ -266,7 +312,7 @@ namespace Emberdelve.Player
                 // The real damage segment, drawn as a thin bar from the hand along the blade direction; it is
                 // only shown while a swing plays and its length is set from the pattern.
                 Transform edge = BuildPart(root.transform, "Sweep_Edge", Vector3.zero, new Vector3(0.01f, 0.01f, 1f), Quaternion.identity, weapon.edgeMaterial);
-                rig.ConfigureMelee(aimFrame != null ? aimFrame : parent, edge);
+                rig.ConfigureMelee(aimFrame != null ? aimFrame : parent, edge, root.transform.Find("Sword_Blade"));
             }
 
             return rig;

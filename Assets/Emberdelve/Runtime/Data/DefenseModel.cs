@@ -78,8 +78,15 @@ namespace Emberdelve.Data
             float reduction = data != null ? data.blockReduction : 0f;
             float arc = data != null ? data.blockArc : 120f;
 
+            // A guard-capable primary weapon owns its authored block profile. Weapons without
+            // Block (for example the Archer's bow) cannot inherit this override by being equipped.
+            if (primary != null && primary.CanBlock && primary.blockReductionOverride >= 0f)
+                reduction = primary.blockReductionOverride;
+            if (primary != null && primary.CanBlock && primary.blockArcOverride >= 0f)
+                arc = primary.blockArcOverride;
+
             // An off-hand shield overrides the class numbers only when it defines its own and is actually
-            // being carried in a free hand.
+            // being carried in a free hand. It keeps precedence over a main-hand weapon override.
             if (shieldContributes && shield.blockReductionOverride >= 0f) reduction = shield.blockReductionOverride;
             if (shieldContributes && shield.blockArcOverride >= 0f) arc = shield.blockArcOverride;
 

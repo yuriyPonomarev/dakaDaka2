@@ -167,6 +167,16 @@ namespace Emberdelve.Items
 
         private bool _givingStartingKit;
 
+        /// <summary>R7: the player this component belongs to; every event it raises carries it (0 = no player, e.g. a bare bag in a tool).</summary>
+        private int OwnerId
+        {
+            get
+            {
+                if (_rig == null) _rig = GetComponent<PlayerRig>();
+                return _rig != null ? _rig.PlayerId : GameEvents.NoPlayer;
+            }
+        }
+
         private void Awake()
         {
             _rig = GetComponent<PlayerRig>();
@@ -223,7 +233,7 @@ namespace Emberdelve.Items
                 {
                     TotalUnits = Mathf.Max(0, TotalUnits - stack.Count);
                     CarriedValue = Mathf.Max(0, CarriedValue - definition.value * stack.Count);
-                    GameEvents.RaiseToast($"Bag too small, left {definition.displayName} behind");
+                    GameEvents.RaiseToast(OwnerId, $"Bag too small, left {definition.displayName} behind");
                     continue;
                 }
 
@@ -231,7 +241,7 @@ namespace Emberdelve.Items
             }
 
             Recompute();
-            GameEvents.RaiseInventoryChanged();
+            GameEvents.RaiseInventoryChanged(OwnerId);
         }
 
         public void GiveStartingItems(ItemData[] items)
@@ -249,7 +259,7 @@ namespace Emberdelve.Items
             finally
             {
                 _givingStartingKit = false;
-                GameEvents.RaiseInventoryChanged();
+                GameEvents.RaiseInventoryChanged(OwnerId);
             }
         }
 
@@ -307,7 +317,7 @@ namespace Emberdelve.Items
             if (item.IsEquippable && !CanMintGear(item, out string mintRefusal))
             {
                 reason = $"could not give {item.displayName} an item identity: {mintRefusal}";
-                GameEvents.RaiseToast(reason);
+                GameEvents.RaiseToast(OwnerId, reason);
                 return false;
             }
 
@@ -349,7 +359,7 @@ namespace Emberdelve.Items
                     {
                         reason = $"could not give {item.displayName} an item identity: {mintReason}";
                         RollbackCreatedStacks(createdStacks);
-                        GameEvents.RaiseToast(reason);
+                        GameEvents.RaiseToast(OwnerId, reason);
                         return false;
                     }
 
@@ -367,7 +377,7 @@ namespace Emberdelve.Items
             if (accepted <= 0)
             {
                 reason = $"no room for {item.displayName} ({item.EffectiveFootprint.x}x{item.EffectiveFootprint.y} cells needed, {FreeCells} free)";
-                GameEvents.RaiseToast("Bag is full");
+                GameEvents.RaiseToast(OwnerId, "Bag is full");
                 return false;
             }
 
@@ -378,15 +388,15 @@ namespace Emberdelve.Items
             {
                 LifetimeCollected += accepted;
                 RecoveredValue += item.value * accepted;
-                GameEvents.RaiseItemCollected(item, LifetimeCollected);
+                GameEvents.RaiseItemCollected(OwnerId, item, LifetimeCollected);
             }
 
-            GameEvents.RaiseInventoryChanged();
+            GameEvents.RaiseInventoryChanged(OwnerId);
 
             if (remaining > 0)
             {
                 reason = $"bag full, left {remaining} {item.displayName} behind";
-                GameEvents.RaiseToast(reason);
+                GameEvents.RaiseToast(OwnerId, reason);
                 return false;
             }
 
@@ -481,10 +491,10 @@ namespace Emberdelve.Items
             {
                 LifetimeCollected += placed;
                 RecoveredValue += item.value * placed;
-                GameEvents.RaiseItemCollected(item, LifetimeCollected);
+                GameEvents.RaiseItemCollected(OwnerId, item, LifetimeCollected);
             }
 
-            GameEvents.RaiseInventoryChanged();
+            GameEvents.RaiseInventoryChanged(OwnerId);
 
             if (placed < amount)
             {
@@ -638,10 +648,10 @@ namespace Emberdelve.Items
             {
                 LifetimeCollected += 1;
                 RecoveredValue += definition.value;
-                GameEvents.RaiseItemCollected(definition, LifetimeCollected);
+                GameEvents.RaiseItemCollected(OwnerId, definition, LifetimeCollected);
             }
 
-            GameEvents.RaiseInventoryChanged();
+            GameEvents.RaiseInventoryChanged(OwnerId);
             return true;
         }
 
@@ -853,7 +863,7 @@ namespace Emberdelve.Items
         /// <summary>Notify half of a restore: a throwing subscriber is logged and cannot undo or abort an applied restore.</summary>
         internal void NotifyRestore()
         {
-            try { GameEvents.RaiseInventoryChanged(); }
+            try { GameEvents.RaiseInventoryChanged(OwnerId); }
             catch (Exception e) { Debug.LogException(e); }
         }
 
@@ -955,7 +965,7 @@ namespace Emberdelve.Items
 
             stack.Origin = origin;
             Recompute();
-            GameEvents.RaiseInventoryChanged();
+            GameEvents.RaiseInventoryChanged(OwnerId);
             return true;
         }
 
@@ -1029,7 +1039,7 @@ namespace Emberdelve.Items
             first.Origin = secondOrigin;
             second.Origin = firstOrigin;
             Recompute();
-            GameEvents.RaiseInventoryChanged();
+            GameEvents.RaiseInventoryChanged(OwnerId);
             return true;
         }
 
@@ -1109,7 +1119,7 @@ namespace Emberdelve.Items
             if (source.Count <= 0) _stacks.RemoveAt(sourceIndex);
 
             Recompute();
-            GameEvents.RaiseInventoryChanged();
+            GameEvents.RaiseInventoryChanged(OwnerId);
             return true;
         }
 
@@ -1321,7 +1331,7 @@ namespace Emberdelve.Items
             Recompute();
             TotalUnits = Mathf.Max(0, TotalUnits - removed);
             CarriedValue = Mathf.Max(0, CarriedValue - stack.Definition.value * removed);
-            GameEvents.RaiseInventoryChanged();
+            GameEvents.RaiseInventoryChanged(OwnerId);
             return removed;
         }
 
@@ -1369,7 +1379,7 @@ namespace Emberdelve.Items
             stack.Count += added;
 
             Recompute();
-            GameEvents.RaiseInventoryChanged();
+            GameEvents.RaiseInventoryChanged(OwnerId);
             return added;
         }
 
@@ -1390,24 +1400,24 @@ namespace Emberdelve.Items
                 if (_rig.Health.IsDead) return false;
                 if (_rig.Health.CurrentHealth >= _rig.Health.MaxHealth)
                 {
-                    GameEvents.RaiseToast("Already at full health");
+                    GameEvents.RaiseToast(OwnerId, "Already at full health");
                     return false;
                 }
                 _rig.Health.Heal(item.healAmount);
-                GameEvents.RaiseToast($"Used {item.displayName} (+{item.healAmount} HP)");
+                GameEvents.RaiseToast(OwnerId, $"Used {item.displayName} (+{item.healAmount} HP)");
                 applied = true;
             }
 
             if (item.ammoGrant > 0 && _rangedCombat != null)
             {
                 _rangedCombat.AddAmmo(item.ammoGrant);
-                GameEvents.RaiseToast($"Used {item.displayName} (+{item.ammoGrant} arrows)");
+                GameEvents.RaiseToast(OwnerId, $"Used {item.displayName} (+{item.ammoGrant} arrows)");
                 applied = true;
             }
 
             if (!applied)
             {
-                GameEvents.RaiseToast($"{item.displayName} cannot be used");
+                GameEvents.RaiseToast(OwnerId, $"{item.displayName} cannot be used");
                 return false;
             }
 
@@ -1421,7 +1431,7 @@ namespace Emberdelve.Items
             TotalUnits = 0;
             CarriedValue = 0;
             Recompute();
-            GameEvents.RaiseInventoryChanged();
+            GameEvents.RaiseInventoryChanged(OwnerId);
         }
 
         // ------------------------------------------------------------ grid bookkeeping

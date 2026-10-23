@@ -156,7 +156,13 @@ namespace Emberdelve.UI
 
         public bool IsOpen { get; private set; }
 
-        private bool RunEnded => _director != null && (_director.State == RunState.Dead || _director.State == RunState.Extracted);
+        private bool RunEnded => _director != null && (_director.State == RunState.Dead || _director.State == RunState.Extracted
+            || _director.LocalPlayerState == RunState.Dead || _director.LocalPlayerState == RunState.Extracted);
+
+        /// <summary>R7: the bag screen shows the bag of the player it is bound to; an event about another player never rebuilds it.</summary>
+        private bool IsMine(int playerId) => PlayerView.Shows(playerId);
+
+        private int ToastOwner => _rig != null ? _rig.PlayerId : GameEvents.NoPlayer;
 
         /// <summary>The stack the cursor is pointing at. It is still carried in the bag.</summary>
         public ItemData SelectedItem => _selectedItem;
@@ -191,6 +197,7 @@ namespace Emberdelve.UI
             GameEvents.InventoryChanged += OnInventoryChanged;
             GameEvents.EquipmentChanged += OnEquipmentChanged;
             GameEvents.RunStateChanged += OnRunState;
+            GameEvents.PlayerRunStateChanged += OnPlayerRunState;
         }
 
         private void OnDisable()
@@ -198,6 +205,7 @@ namespace Emberdelve.UI
             GameEvents.InventoryChanged -= OnInventoryChanged;
             GameEvents.EquipmentChanged -= OnEquipmentChanged;
             GameEvents.RunStateChanged -= OnRunState;
+            GameEvents.PlayerRunStateChanged -= OnPlayerRunState;
 
             // Dying, pausing out of the run or the HUD being torn down must not leave a selection behind
             // that someone later tries to put somewhere. The stack was never removed, so clearing is free.
@@ -252,6 +260,12 @@ namespace Emberdelve.UI
         /// A finished run (death, extraction) or a return to the lobby shuts the satchel and its tooltip at
         /// once, so nothing under the result screen is left open or clickable. The cursor stays free.
         /// </summary>
+        private void OnPlayerRunState(int playerId, RunState state)
+        {
+            if (playerId == GameEvents.NoPlayer || !IsMine(playerId)) return;
+            OnRunState(state);
+        }
+
         private void OnRunState(RunState state)
         {
             if (state == RunState.Dead || state == RunState.Extracted || state == RunState.Lobby)
@@ -264,14 +278,14 @@ namespace Emberdelve.UI
             else Open();
         }
 
-        private void OnInventoryChanged()
+        private void OnInventoryChanged(int playerId)
         {
-            if (IsOpen) Rebuild();
+            if (IsOpen && IsMine(playerId)) Rebuild();
         }
 
-        private void OnEquipmentChanged(ItemData item, bool equipped)
+        private void OnEquipmentChanged(int playerId, ItemData item, bool equipped)
         {
-            if (IsOpen) Rebuild();
+            if (IsOpen && IsMine(playerId)) Rebuild();
         }
 
         /// <summary>
@@ -371,7 +385,7 @@ namespace Emberdelve.UI
             // A finished run is not a moment at which to rearrange a bag: dying, extracting or a result
             // screen handing control elsewhere must not leave a live cursor that can still shuffle gear.
             // Letting go is always safe, because the selected stack never left the bag.
-            if (_director != null && _director.State != RunState.Running)
+            if (_director != null && (_director.State != RunState.Running || _director.LocalPlayerState != RunState.Running))
             {
                 if (_selectedItem != null) CancelSelection();
                 return;
@@ -422,7 +436,7 @@ namespace Emberdelve.UI
         {
             if (_equipment == null)
             {
-                GameEvents.RaiseToast("Nothing is wearing anything");
+                GameEvents.RaiseToast(ToastOwner, "Nothing is wearing anything");
                 return;
             }
 
@@ -436,7 +450,7 @@ namespace Emberdelve.UI
 
                 if (_selectedItem.equipSlot != slot)
                 {
-                    GameEvents.RaiseToast($"{_selectedItem.displayName} does not fit the {slot} slot");
+                    GameEvents.RaiseToast(ToastOwner, $"{_selectedItem.displayName} does not fit the {slot} slot");
                     return;
                 }
 
@@ -450,7 +464,7 @@ namespace Emberdelve.UI
                 }
                 else
                 {
-                    GameEvents.RaiseToast(reason);
+                    GameEvents.RaiseToast(ToastOwner, reason);
                 }
                 return;
             }
@@ -471,7 +485,7 @@ namespace Emberdelve.UI
             }
             else
             {
-                GameEvents.RaiseToast(unequipReason);
+                GameEvents.RaiseToast(ToastOwner, unequipReason);
             }
         }
 
@@ -514,7 +528,7 @@ namespace Emberdelve.UI
                 }
                 else
                 {
-                    GameEvents.RaiseToast(reason);
+                    GameEvents.RaiseToast(ToastOwner, reason);
                 }
                 return;
             }
@@ -530,7 +544,7 @@ namespace Emberdelve.UI
                 }
                 else
                 {
-                    GameEvents.RaiseToast(reason);
+                    GameEvents.RaiseToast(ToastOwner, reason);
                 }
                 return;
             }
@@ -544,7 +558,7 @@ namespace Emberdelve.UI
             }
             else
             {
-                GameEvents.RaiseToast(reason);
+                GameEvents.RaiseToast(ToastOwner, reason);
             }
         }
 
@@ -588,7 +602,7 @@ namespace Emberdelve.UI
                     }
                     else
                     {
-                        GameEvents.RaiseToast(reason);
+                        GameEvents.RaiseToast(ToastOwner, reason);
                     }
                 }
                 return;
@@ -608,7 +622,7 @@ namespace Emberdelve.UI
                     string equipReason = _equipment == null ? "nothing to wear the item" : null;
                     bool worn = _equipment != null && _equipment.TryEquipFromInventory(index, out equipReason);
                     if (worn) Rebuild();
-                    else GameEvents.RaiseToast(equipReason);
+                    else GameEvents.RaiseToast(ToastOwner, equipReason);
                     return;
                 }
 

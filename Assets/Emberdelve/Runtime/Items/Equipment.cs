@@ -98,6 +98,16 @@ namespace Emberdelve.Items
             }
         }
 
+        /// <summary>R7: the player this component belongs to; every event it raises carries it (0 = no player, e.g. a bare bag in a tool).</summary>
+        private int OwnerId
+        {
+            get
+            {
+                if (_rig == null) _rig = GetComponent<PlayerRig>();
+                return _rig != null ? _rig.PlayerId : GameEvents.NoPlayer;
+            }
+        }
+
         private void Awake()
         {
             _rig = GetComponent<PlayerRig>();
@@ -300,7 +310,7 @@ namespace Emberdelve.Items
             if (item.GrantsWeapon && item.equipSlot != EquipmentSlot.OffHand && _rig.Loadout != null && _rig.Loadout.IsActionLocked)
             {
                 reason = "cannot change weapons during an attack";
-                GameEvents.RaiseToast("Cannot swap weapons during an attack");
+                GameEvents.RaiseToast(OwnerId, "Cannot swap weapons during an attack");
                 return false;
             }
 
@@ -326,9 +336,9 @@ namespace Emberdelve.Items
             // Only now is the whole change real: bag, slot, hand and the refreshed stat source. The one
             // inventory notification an equipment transfer owes its observers is raised here, never from
             // inside the bag helper, so a subscriber can never read a half-committed transfer.
-            GameEvents.RaiseInventoryChanged();
-            GameEvents.RaiseEquipmentChanged(item, true);
-            GameEvents.RaiseToast($"Equipped {item.displayName}");
+            GameEvents.RaiseInventoryChanged(OwnerId);
+            GameEvents.RaiseEquipmentChanged(OwnerId, item, true);
+            GameEvents.RaiseToast(OwnerId, $"Equipped {item.displayName}");
             return true;
         }
 
@@ -588,16 +598,16 @@ namespace Emberdelve.Items
         /// <summary>Notify half of a restore: removed items first, then restored ones; a throwing subscriber is logged and changes nothing.</summary>
         internal void NotifyRestore(List<ItemData> removed, ValidatedContainer validated)
         {
-            Guard(() => GameEvents.RaiseInventoryChanged());
+            Guard(() => GameEvents.RaiseInventoryChanged(OwnerId));
             for (int i = 0; i < removed.Count; i++)
             {
                 ItemData item = removed[i];
-                Guard(() => GameEvents.RaiseEquipmentChanged(item, false));
+                Guard(() => GameEvents.RaiseEquipmentChanged(OwnerId, item, false));
             }
             for (int i = 0; i < validated.Entries.Count; i++)
             {
                 ItemData item = validated.Entries[i].Definition;
-                Guard(() => GameEvents.RaiseEquipmentChanged(item, true));
+                Guard(() => GameEvents.RaiseEquipmentChanged(OwnerId, item, true));
             }
         }
 
@@ -674,7 +684,7 @@ namespace Emberdelve.Items
             if (item.GrantsWeapon && item.equipSlot != EquipmentSlot.OffHand && _rig.Loadout != null && _rig.Loadout.IsActionLocked)
             {
                 reason = "cannot change weapons during an attack";
-                GameEvents.RaiseToast("Cannot swap weapons during an attack");
+                GameEvents.RaiseToast(OwnerId, "Cannot swap weapons during an attack");
                 return false;
             }
 
@@ -699,8 +709,8 @@ namespace Emberdelve.Items
 
             // One notification for one committed transfer, raised after the slot, the hand and the numbers
             // all agree with the bag.
-            GameEvents.RaiseInventoryChanged();
-            GameEvents.RaiseEquipmentChanged(item, false);
+            GameEvents.RaiseInventoryChanged(OwnerId);
+            GameEvents.RaiseEquipmentChanged(OwnerId, item, false);
             return true;
         }
 

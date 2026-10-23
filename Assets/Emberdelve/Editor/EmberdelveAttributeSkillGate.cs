@@ -1269,7 +1269,7 @@ namespace Emberdelve.EditorTools
                 _playerDamageHooked = false;
             }
 
-            private void OnPlayerDamaged(DamageInfo info)
+            private void OnPlayerDamaged(int playerId, DamageInfo info)
             {
                 _captured.Add(info);
             }
@@ -1889,9 +1889,8 @@ namespace Emberdelve.EditorTools
 
             /// <summary>
             /// Multi-shot through the real kit: SkillCaster.TryCastSlot -> MultiShotBehavior -> RangedCombat
-            /// magazine -> RangedSkillUtility.FireOne -> HitScanner.CollectRangedHits -> LocalCombatAuthority
-            /// .SubmitSkill -> DamageResolver.ResolveSkill. Each of the three authored arrows resolves its own
-            /// ray, its own sequence and its own accepted hit, and each carries the cast's CHA scale exactly
+            /// magazine -> RangedSkillUtility.FireOne -> authority-owned projectile flight -> DamageResolver.
+            /// Each of the three authored arrows resolves its own live flight, sequence and impact, and carries the cast's CHA scale exactly
             /// once: 34 flat-band bow damage x 0.7 skill multiplier x 1.3216 instigator multipliers (DEX 1.12 x
             /// Farshot 1.18) x the scale. Count, spread, range, ammo, mana and cooldown are identical at 0.96,
             /// 1.00 and 1.16.
@@ -1985,6 +1984,9 @@ namespace Emberdelve.EditorTools
                     caster.CooldownRemaining(0), "effect_scale never scales cooldown");
                 CheckInt($"{label}: Multi-shot spent exactly its authored arrows", shots, magazineBefore - ranged.Magazine,
                     "projectile count is not scaled by CHA");
+
+                // Step the authority-owned flights before changing any target, aim or gear in this fixture.
+                _authority.AdvanceProjectiles(_bow.rangedRange / Mathf.Max(2f, _bow.projectileSpeed) + 0.02f);
 
                 Check(_captured.Count == shots, $"{label}: {shots} arrows resolved as {shots} DamageInfo entries (got {_captured.Count})");
                 Check(_authority.AcceptedCount == acceptedBefore + shots,
@@ -2101,6 +2103,7 @@ namespace Emberdelve.EditorTools
                 ClearCaptured();
 
                 Check(caster.TryCastSlot(1), $"{label}: Piercing Shot accepted through SkillCaster.TryCastSlot");
+                _authority.AdvanceProjectiles(_bow.rangedRange / Mathf.Max(2f, _bow.projectileSpeed) + 0.02f);
                 CheckClose($"{label}: Piercing Shot spent exactly its authored mana", pierce.EffectiveManaCost,
                     manaBefore - rig.Mana.CurrentMana, "effect_scale never scales mana cost");
                 CheckClose($"{label}: Piercing Shot started its authored cooldown", pierce.EffectiveCooldown,
@@ -2109,8 +2112,8 @@ namespace Emberdelve.EditorTools
 
                 Check(_captured.Count == pierce.projectileMaxTargets,
                     $"{label}: one arrow resolved as exactly {pierce.projectileMaxTargets} hits (got {_captured.Count})");
-                Check(_authority.AcceptedCount == acceptedBefore + pierce.projectileMaxTargets,
-                    $"{label}: the authority accepted both bodies and no more ({acceptedBefore} -> {_authority.AcceptedCount})");
+                Check(_authority.AcceptedCount == acceptedBefore + 1,
+                    $"{label}: the authority accepted one piercing projectile launch; captured impact events verify each body ({acceptedBefore} -> {_authority.AcceptedCount})");
                 Check(_authority.RejectedCount == rejectedBefore,
                     $"{label}: neither body was refused ({rejectedBefore} -> {_authority.RejectedCount})");
 
@@ -2212,16 +2215,40 @@ namespace Emberdelve.EditorTools
                 CheckClose($"{label}: outgoing multiplier the authority reads", 1.3216f, rig.GetOutgoingDamageMultiplier(_bow),
                     "DEX 1.12 x Farshot 1.18: the same number at CHA 8, 10 and 18, so CHA is not in it");
 
-                // R1a S1: the expected hit point is derived from the fixture's own geometry, independent of what
-                // the authority reports: a raycast from the muzzle along the aim against the host, pulled into
-                // the 0.5 m body sphere the authority documents (LocalCombatAuthority.TargetBodyRadius).
+                // Predict both independent collision representations. The authority orders its analytic
+                // capsule and physical collider by swept projectile-centre travel, then uses the nearer one.
+                Vector3 muzzle = rig.GetMuzzlePosition();
+                Vector3 shotDirection = rig.AimDirection.normalized;
+                Check(Mathf.Abs(shotDirection.y) < 0.001f, $"{label}: ranged fixture aim remains horizontal for capsule formula");
+                float collisionRadius = Mathf.Max(0.01f, _bow.projectileRadius * 0.5f);
                 Vector3 expectedPoint = host.CombatCenter;
-                if (Physics.Raycast(rig.GetMuzzlePosition(), rig.AimDirection, out RaycastHit probe, distance + 5f, ~0, QueryTriggerInteraction.Ignore)
+                float expectedTravel = float.PositiveInfinity;
+                if (Physics.SphereCast(muzzle, collisionRadius, shotDirection, out RaycastHit probe,
+                        distance + 5f, ~0, QueryTriggerInteraction.Ignore)
                     && probe.collider != null && probe.collider.GetComponentInParent<TestTarget>() == host)
                 {
-                    expectedPoint = host.CombatCenter + Vector3.ClampMagnitude(probe.point - host.CombatCenter, LocalCombatAuthority.TargetBodyRadius);
+                    expectedPoint = probe.point;
+                    expectedTravel = probe.distance;
                 }
 
+                float capsuleCenterY = Mathf.Clamp(muzzle.y,
+                    host.transform.position.y - 0.4f, host.transform.position.y + 0.4f);
+                Vector3 capsuleAxisPoint = new Vector3(host.transform.position.x, capsuleCenterY,
+                    host.transform.position.z);
+                Vector3 toCapsule = capsuleAxisPoint - muzzle;
+                float along = Vector3.Dot(toCapsule, shotDirection);
+                Vector3 perpendicular = toCapsule - shotDirection * along;
+                float expandedRadius = 0.45f + collisionRadius;
+                float radialRemainder = expandedRadius * expandedRadius - perpendicular.sqrMagnitude;
+                if (radialRemainder >= 0f)
+                {
+                    float capsuleTravel = along - Mathf.Sqrt(radialRemainder);
+                    if (capsuleTravel >= 0f && capsuleTravel < expectedTravel)
+                    {
+                        expectedTravel = capsuleTravel;
+                        expectedPoint = muzzle + shotDirection * capsuleTravel;
+                    }
+                }
                 float healthBefore = host.CurrentHealth;
                 int magazineBefore = ranged.Magazine;
                 int acceptedBefore = _authority.AcceptedCount;
@@ -2230,20 +2257,19 @@ namespace Emberdelve.EditorTools
                 ClearCaptured();
 
                 ranged.Fire(charge);
+                _authority.AdvanceProjectiles(_bow.rangedRange / Mathf.Max(2f, _bow.projectileSpeed) + 0.02f);
                 yield return WaitForCaptured(ResolveTimeout);
 
                 Check(_captured.Count == 1, $"{label}: the shot resolved as exactly one DamageInfo from the authority (got {_captured.Count})");
 
-                // R1a: the authority measures range falloff itself, from the shooter's own position to the point
-                // it accepted on the target (DamageInfo.Point), not from the muzzle the client fired at. Inside
-                // the falloff ramp the fixture therefore derives its expectation from that authoritative distance
-                // (the hand constant assumed muzzle-to-centre geometry the authority no longer trusts) and still
-                // pins the result to the nominal figure within a metre of falloff so the ramp stays covered.
+                // R1a: the authority measures falloff from the validated launch muzzle to its ordered impact
+                // point (DamageInfo.Point). The expectation below uses an independent physical spherecast and
+                // capsule sweep prediction, then retains the existing numeric ramp checks.
                 if (distance > _bow.falloffStartRange && _captured.Count > 0)
                 {
                     Check(Vector3.Distance(expectedPoint, _captured[0].Point) < 0.05f,
                         $"{label}: the accepted point equals the fixture's own raycast-derived point (off by {Vector3.Distance(expectedPoint, _captured[0].Point):F3} m)");
-                    float authoritativeDistance = Vector3.Distance(rig.CombatCenter, expectedPoint);
+                    float authoritativeDistance = Vector3.Distance(rig.GetMuzzlePosition(), expectedPoint);
                     float nominal = expectedDamage;
                     expectedDamage = _bow.DamageAtRange(authoritativeDistance, rig.GetFlatWeaponDamageBonus(_bow))
                                      * Mathf.Lerp(_bow.minChargeDamageScale, 1f, charge) * rig.GetOutgoingDamageMultiplier(_bow);

@@ -1222,7 +1222,7 @@ namespace Emberdelve.EditorTools
 
             // ---- observers: consistent at every notification, and a throwing subscriber cannot undo the restore
             int calls = 0, violations = 0;
-            Action consistency = () =>
+            Action<int> consistency = playerId =>
             {
                 calls++;
                 for (int s = 1; s < Equipment.SlotCount; s++)
@@ -1232,9 +1232,9 @@ namespace Emberdelve.EditorTools
                 }
                 if (!gear.HoldsUid(uidB) || bag.HoldsInstanceUid(uidB) || !bag.HoldsInstanceUid(uidA) || gear.HoldsUid(uidA)) violations++;
             };
-            Action<ItemData, bool> consistencyEquip = (item, equipped) => consistency();
-            Action thrower = () => { throw new InvalidOperationException("expected test exception from a throwing subscriber"); };
-            Action<ItemData, bool> throwerEquip = (item, equipped) => { throw new InvalidOperationException("expected test exception from a throwing subscriber"); };
+            Action<int, ItemData, bool> consistencyEquip = (playerId, item, equipped) => consistency(playerId);
+            Action<int> thrower = playerId => { throw new InvalidOperationException("expected test exception from a throwing subscriber"); };
+            Action<int, ItemData, bool> throwerEquip = (playerId, item, equipped) => { throw new InvalidOperationException("expected test exception from a throwing subscriber"); };
 
             GameEvents.InventoryChanged += consistency;
             GameEvents.EquipmentChanged += consistencyEquip;

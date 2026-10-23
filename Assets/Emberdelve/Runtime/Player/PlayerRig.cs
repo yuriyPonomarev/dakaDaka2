@@ -20,7 +20,7 @@ namespace Emberdelve.Player
     [RequireComponent(typeof(PlayerMovement))]
     [RequireComponent(typeof(PlayerLook))]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IMoveFlowSource
+    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback
     {
         [Header("Components")]
         [SerializeField] private EmberdelveInput input;
@@ -52,9 +52,63 @@ namespace Emberdelve.Player
         /// </summary>
         public const float StaminaRegenDelay = 0f;
 
-        public EntityKind Kind => EntityKind.LocalPlayer;
+        [Header("Identity (R7)")]
+        [Tooltip("True when THIS process drives the rig (input, camera, HUD). It selects EntityKind.LocalPlayer vs RemotePlayer and nothing else: no gameplay rule reads it.")]
+        [SerializeField] private bool locallyControlled = true;
+
+        private int _playerId;
+        private int _partyId;
+        private bool _extracted;
+
+        /// <summary>Whether this process controls the rig (input, camera, HUD binding). Not a gameplay rule.</summary>
+        public bool IsLocallyControlled => locallyControlled;
+
+        /// <summary>
+        /// R7: this player's identity in the run. Every player-scoped event carries it. It defaults to the rig's combat id
+        /// (unique per process) until the session layer hands out account ids (U3A); the run director never changes it after the rig is wired,
+        /// so no event is ever raised under a different id than the one a viewer is bound to.
+        /// </summary>
+        public int PlayerId
+        {
+            get
+            {
+                if (_playerId == 0) WireRig();
+                return _playerId;
+            }
+        }
+
+        /// <summary>The party this player belongs to (0 until the run director assigns one). Teammates are friendly, other parties hostile.</summary>
+        public int PartyId => _partyId;
+
+        /// <summary>True after this player extracted: they left the dungeon and are nobody's target.</summary>
+        public bool IsExtracted => _extracted;
+        public bool IsInPlay => !_extracted;
+
+        /// <summary>Called by the run director when it admits the rig to a run (and by tools that build rigs): party and control. Identity never changes the player id.</summary>
+        public void AssignParty(int partyId, bool isLocallyControlled)
+        {
+            _partyId = Mathf.Max(0, partyId);
+            locallyControlled = isLocallyControlled;
+        }
+
+        /// <summary>The run director marks a player that extracted: no input, no longer targetable or hostile.</summary>
+        public void MarkExtracted()
+        {
+            _extracted = true;
+            SetGuardHeld(false);
+            SetInputEnabled(false);
+        }
+
+        public EntityKind Kind => locallyControlled ? EntityKind.LocalPlayer : EntityKind.RemotePlayer;
         public int CombatId => _combatId;
-        public int TeamId => CombatTeams.PlayerTeam;
+        public int TeamId => CombatTeams.TeamForParty(_partyId);
+
+        // ---- IInteractionActor (R2) ----
+        public Vector3 InteractionOrigin => transform.position + Vector3.up * 1.0f;
+
+        // ---- IPlayerCombatFeedback (R7): the authority hands results to the entity, the entity raises its own events ----
+        public void OnDamageTaken(in DamageInfo damage) { GameEvents.RaisePlayerDamaged(PlayerId, damage); }
+        public void OnHitDealt(in HitFeedback feedback) { GameEvents.RaiseDamageDealt(PlayerId, feedback); }
         public Vector3 CombatCenter => transform.position + Vector3.up * 1.1f;
         public Collider HeadCollider => null;
 
@@ -185,6 +239,7 @@ namespace Emberdelve.Player
             if (_wired) return;
 
             _combatId = CombatRegistry.AllocateId();
+            _playerId = _combatId;
             CombatRegistry.Register(_combatId, this);
 
             _hitVolumes = HitVolumeLayout.EnsureHumanoid(gameObject, 0.92f, 1.68f);
@@ -205,12 +260,12 @@ namespace Emberdelve.Player
 
         private void OnHealthChanged(float current, float max)
         {
-            GameEvents.RaisePlayerHealth(current, max);
+            GameEvents.RaisePlayerHealth(PlayerId, current, max);
         }
 
         private void OnManaChanged(float current, float max)
         {
-            GameEvents.RaisePlayerMana(current, max);
+            GameEvents.RaisePlayerMana(PlayerId, current, max);
         }
 
         /// <summary>
@@ -415,6 +470,7 @@ namespace Emberdelve.Player
         {
             _offhand = weapon != null ? weapon : (_class != null ? _class.offhandShield : null);
             _defense = ResolveDefense(_mainHand);
+            SyncGuardVisual();
         }
 
         private DefenseProfile ResolveDefense(WeaponData weapon)
@@ -439,7 +495,7 @@ namespace Emberdelve.Player
         {
             _mainHand = weapon;
             _defense = ResolveDefense(weapon);
-            if (movement != null) movement.SetGuardActive(IsGuarding);
+            SyncGuardVisual();
         }
 
         /// <summary>
@@ -564,7 +620,28 @@ namespace Emberdelve.Player
         public void SetGuardHeld(bool held)
         {
             _guardHeld = held;
-            if (movement != null) movement.SetGuardActive(IsGuarding);
+            SyncGuardVisual();
+        }
+
+        private void SyncGuardVisual()
+        {
+            bool guarding = IsGuarding;
+            if (movement != null) movement.SetGuardActive(guarding);
+            if (loadout != null) loadout.SetGuardHeldVisual(guarding);
+        }
+
+        /// <summary>The current visible guard blade shape, available to the projectile authority at every flight step.</summary>
+        public bool TryGetProjectileGuardBlade(out GuardBladeBox blade)
+        {
+            blade = default;
+            WeaponData weapon = ActiveWeapon;
+            if (!IsGuarding || weapon == null || weapon.IsRanged || !weapon.CanBlock || _defense.HasShield) return false;
+            if (GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
+                && authority is ICombatFlowState flow && flow.IsSwingInProgress(_combatId)) return false;
+            Vector3 aim = AimDirection;
+            if (aim.sqrMagnitude < 0.0001f) return false;
+            blade = GuardBladePose.Resolve(AimOrigin, Quaternion.LookRotation(aim.normalized, Vector3.up), true);
+            return true;
         }
 
         public bool TryGetGuardReduction(in DamageInfo incoming, out float reduction)
@@ -588,6 +665,10 @@ namespace Emberdelve.Player
         public bool TryResolveGuard(in DamageInfo incoming, CombatFlowTuning tuning, out GuardResult result)
         {
             result = default;
+            // A held sword/rapier blocks a projectile only where the live blade physically caught it.
+            // A contributing shield keeps the existing directional block semantics.
+            if (incoming.RangedProjectile && !_defense.HasShield && _mainHand != null && _mainHand.CanBlock
+                && !incoming.GuardBladeContact) return false;
             if (!TryGetArcReduction(incoming, out float reduction)) return false;
 
             bool broken = CombatFlowRules.IsGuardBroken(incoming.ImpactPower, _defense.ImpactResist);

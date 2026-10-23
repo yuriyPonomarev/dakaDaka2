@@ -46,6 +46,16 @@ namespace Emberdelve.Player
         public bool UsingSecondary => _activeSlot == 1;
         public int EquippedCount => (_slots[0] != null ? 1 : 0) + (_slots[1] != null ? 1 : 0);
 
+        /// <summary>R7: the player this component belongs to; every event it raises carries it (0 = no player, e.g. a bare bag in a tool).</summary>
+        private int OwnerId
+        {
+            get
+            {
+                if (_rig == null) _rig = GetComponent<PlayerRig>();
+                return _rig != null ? _rig.PlayerId : GameEvents.NoPlayer;
+            }
+        }
+
         private void Awake()
         {
             if (meleeCombat == null) meleeCombat = GetComponent<MeleeCombat>();
@@ -134,7 +144,7 @@ namespace Emberdelve.Player
             if (IsActionLocked)
             {
                 // Refused with no state change and nothing queued: the swap input is only read on the frame it is pressed.
-                GameEvents.RaiseToast("Cannot swap weapons during an attack");
+                GameEvents.RaiseToast(OwnerId, "Cannot swap weapons during an attack");
                 return false;
             }
 
@@ -171,7 +181,7 @@ namespace Emberdelve.Player
             // last line): refused mid-attack with no state change.
             if (slot == _activeSlot && IsActionLocked)
             {
-                GameEvents.RaiseToast("Cannot swap weapons during an attack");
+                GameEvents.RaiseToast(OwnerId, "Cannot swap weapons during an attack");
                 return null;
             }
 
@@ -246,8 +256,8 @@ namespace Emberdelve.Player
             // with a sword's capability, and a rapier is where a Parry flag may legitimately appear.
             if (_rig != null) _rig.ApplyMainHandWeapon(weapon);
 
-            GameEvents.RaiseActiveWeapon(weapon);
-            if (weapon != null) GameEvents.RaiseToast($"Equipped {weapon.displayName}");
+            GameEvents.RaiseActiveWeapon(OwnerId, weapon);
+            if (weapon != null) GameEvents.RaiseToast(OwnerId, $"Equipped {weapon.displayName}");
         }
 
         private void SeedAmmo(int slot, int startingReserve, int maxReserve)
@@ -315,9 +325,22 @@ namespace Emberdelve.Player
         /// <summary>The first-person weapon visual (null when nothing is held). Exposed for tools and gates.</summary>
         public WeaponVisualRig Visual => _visual;
 
+        /// <summary>R7: a rig cloned from a live one inherits a copy of the template's weapon model under the anchor; the clone builds its own, so the copy goes first.</summary>
+        public void DiscardInheritedVisuals()
+        {
+            _visual = null;
+            if (weaponAnchor == null) return;
+            for (int i = weaponAnchor.childCount - 1; i >= 0; i--) Destroy(weaponAnchor.GetChild(i).gameObject);
+        }
+
         public void SetDrawVisual(float progress)
         {
             if (_visual != null) _visual.SetDrawProgress(progress);
+        }
+
+        public void SetGuardHeldVisual(bool held)
+        {
+            if (_visual != null) _visual.SetGuardHeld(held);
         }
 
         public void RebuildWeaponVisual(WeaponData weapon)

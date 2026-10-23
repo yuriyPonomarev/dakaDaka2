@@ -263,6 +263,9 @@ namespace Emberdelve.Combat
         /// <summary>Returns true when the authority accepted the intent and applied damage.</summary>
         bool SubmitAttack(AttackIntent intent, HitCandidate hit);
 
+        /// <summary>Asks the authority to launch one ranged projectile; no target or block result is client supplied.</summary>
+        bool LaunchProjectile(AttackIntent intent);
+
         /// <summary>
         /// Opens a skill activation. This is the ONLY way a skill cast starts, and the authority decides
         /// everything about it from its own state: the caster must own the skill in its kit, be alive, hold the
@@ -291,6 +294,9 @@ namespace Emberdelve.Combat
         /// sequence with everything else this entity does.
         /// </summary>
         bool SubmitSkill(SkillIntent intent, HitCandidate hit);
+
+        /// <summary>Launches one projectile for an open ranged-skill activation; targets are discovered during flight.</summary>
+        bool LaunchSkillProjectile(SkillIntent intent, int projectileIndex);
     }
 
     /// <summary>
@@ -319,19 +325,44 @@ namespace Emberdelve.Combat
     }
 
     /// <summary>
-    /// The single hostility rule. Teams exist now so that friendly fire, party play and a future
-    /// server-side check all read one rule instead of inventing their own.
+    /// The single hostility rule (R7). A player's team is its PARTY (<see cref="TeamForParty"/>); monsters share
+    /// <see cref="MonsterTeam"/>.
+    ///   different team            -> hostile (monster vs player, and party vs party: PvP is on)
+    ///   same team, monsters       -> not hostile
+    ///   same team, same party     -> friendly, unless <see cref="FriendlyFire"/> is on
+    /// An entity that left the dungeon (<see cref="IRunParticipant.IsInPlay"/> false) is nobody's enemy.
     /// </summary>
     public static class CombatTeams
     {
+        /// <summary>Team of party 0, and the default of a player rig nobody has assigned to a party (a solo run).</summary>
         public const int PlayerTeam = 0;
         public const int MonsterTeam = 1;
 
-        public static bool AreHostile(ICombatEntity instigator, ICombatEntity target)
+        /// <summary>The largest party the dungeon admits (DND_PARITY: parties of up to 3). The run director enforces it; GameConfig can lower it.</summary>
+        public const int DefaultMaxPartySize = 3;
+
+        /// <summary>
+        /// Friendly fire between members of one party. Default OFF (DND_PARITY open question). Per-run state: the run
+        /// director sets it from <c>GameConfig.friendlyFire</c> when a run starts and <see cref="CombatRegistry.ResetForRun"/> clears it.
+        /// </summary>
+        public static bool FriendlyFire { get; set; }
+
+        /// <summary>Party 0 is team 0 (compatible with the old constant); party p >= 1 is team p + 1, which skips the monster team.</summary>
+        public static int TeamForParty(int partyId) => partyId <= 0 ? PlayerTeam : partyId + 1;
+
+        public static bool IsMonsterTeam(int teamId) => teamId == MonsterTeam;
+
+        public static bool AreHostile(ICombatEntity instigator, ICombatEntity target) => AreHostile(instigator, target, FriendlyFire);
+
+        public static bool AreHostile(ICombatEntity instigator, ICombatEntity target, bool friendlyFire)
         {
             if (instigator == null || target == null) return false;
             if (instigator.CombatId == target.CombatId) return false;
-            return instigator.TeamId != target.TeamId;
+            if (target is IRunParticipant targetParticipant && !targetParticipant.IsInPlay) return false;
+            if (instigator is IRunParticipant instigatorParticipant && !instigatorParticipant.IsInPlay) return false;
+            if (instigator.TeamId != target.TeamId) return true;
+            if (IsMonsterTeam(instigator.TeamId)) return false;
+            return friendlyFire;
         }
     }
 
@@ -347,12 +378,22 @@ namespace Emberdelve.Combat
         private static int _nextId = 1;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void ResetStatic()
+        private static void ResetStatic() => ResetForRun();
+
+        /// <summary>
+        /// R7: drops everything this process-wide table learned during a run: entities, per-entity command sequences, the
+        /// id counter and the per-run hostility switch (friendly fire). The run director calls it when its scene is
+        /// destroyed (and on domain/play-mode start), so a second run or scene can never inherit a stale entity, a stale
+        /// replay sequence or a friendly-fire setting. This stays a static table until the U3 server needs one per
+        /// match; the reset points are what keep it from leaking across runs today.
+        /// </summary>
+        public static void ResetForRun()
         {
             _entities.Clear();
             _ordered.Clear();
             _lastSequence.Clear();
             _nextId = 1;
+            CombatTeams.FriendlyFire = false;
         }
 
         public static int AllocateId() => _nextId++;
@@ -387,6 +428,49 @@ namespace Emberdelve.Combat
         public static bool TryGet(int id, out ICombatEntity entity) => _entities.TryGetValue(id, out entity);
 
         public static IReadOnlyList<ICombatEntity> All => _ordered;
+
+        /// <summary>
+        /// R7: the nearest living PLAYER (any controller) that <paramref name="seeker"/> is hostile to, within
+        /// <paramref name="maxDistance"/> of <paramref name="position"/>. Players that extracted, died or are friendly to the seeker
+        /// are skipped, and <paramref name="preferred"/> (the seeker's current aggro target) keeps the choice unless a rival is
+        /// closer by more than <paramref name="switchFactor"/> (0.8 = the rival must be 20 percent closer). Pass null for no preference.
+        /// </summary>
+        public static bool TryGetNearestHostilePlayer(ICombatEntity seeker, Vector3 position, float maxDistance,
+            int preferredCombatId, float switchFactor, out ICombatEntity nearest)
+        {
+            nearest = null;
+            float best = maxDistance * maxDistance;
+            float preferredSqr = float.MaxValue;
+            ICombatEntity preferred = null;
+
+            for (int i = 0; i < _ordered.Count; i++)
+            {
+                ICombatEntity candidate = _ordered[i];
+                if (candidate == null || candidate.IsDead) continue;
+                if (!EntityKinds.IsPlayer(candidate.Kind)) continue;
+                if (!CombatTeams.AreHostile(seeker, candidate)) continue;
+                float sqr = (candidate.CombatCenter - position).sqrMagnitude;
+                if (sqr > maxDistance * maxDistance) continue;
+                if (candidate.CombatId == preferredCombatId)
+                {
+                    preferred = candidate;
+                    preferredSqr = sqr;
+                }
+                if (sqr <= best)
+                {
+                    best = sqr;
+                    nearest = candidate;
+                }
+            }
+
+            if (preferred != null && nearest != null && !ReferenceEquals(preferred, nearest)
+                && best >= preferredSqr * switchFactor * switchFactor)
+            {
+                nearest = preferred;
+            }
+
+            return nearest != null;
+        }
 
         public static bool TryGetNearest(Vector3 position, EntityKind kind, float maxDistance, out ICombatEntity nearest)
         {

@@ -20,6 +20,9 @@ MonoBehaviour:
   extractionHoldDuration: 3
   interactionRange: 2.4
   interactSphereRadius: 0.45
+  interactionAuthorityRange: 3
+  maxPartySize: 3
+  friendlyFire: 0
   inventoryGridWidth: 10
   inventoryGridHeight: 4
   inventoryCapacity: 8

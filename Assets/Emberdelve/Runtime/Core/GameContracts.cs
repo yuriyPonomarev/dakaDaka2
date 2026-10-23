@@ -4,7 +4,19 @@ namespace Emberdelve.Core
 {
     public enum RunState { Lobby, Briefing, Running, Paused, Dead, Extracted }
 
+    /// <summary>
+    /// What an entity is. R7: <see cref="LocalPlayer"/> now means "a player that THIS process controls" (input, camera
+    /// and HUD binding) and <see cref="RemotePlayer"/> "a player somebody else controls". Gameplay rules (hostility,
+    /// enemy targeting, kills, feedback routing) never branch on that difference: they use <see cref="EntityKinds.IsPlayer"/>
+    /// and the player/party ids.
+    /// </summary>
     public enum EntityKind { LocalPlayer, RemotePlayer, Enemy, Neutral }
+
+    public static class EntityKinds
+    {
+        /// <summary>True for any player, whoever controls it.</summary>
+        public static bool IsPlayer(EntityKind kind) => kind == EntityKind.LocalPlayer || kind == EntityKind.RemotePlayer;
+    }
 
     public enum DamageType { Physical, Pierce, Fire, Holy }
 
@@ -42,13 +54,20 @@ namespace Emberdelve.Core
 
         /// <summary>D1b: the defender's guard was engaged but the hit's impact power reached its impact resist: reduced mitigation and a guard stagger. Always accompanied by <see cref="Blocked"/>.</summary>
         public readonly bool GuardBroken;
+        /// <summary>True only for a hit produced by an authority-stepped ranged projectile.</summary>
+        public readonly bool RangedProjectile;
+        /// <summary>True when that projectile physically intersected the defender's guarding blade.</summary>
+        public readonly bool GuardBladeContact;
 
         public DamageInfo(float amount, Vector3 point, Vector3 direction, Vector3 sourcePosition,
             int sourceCombatId, EntityKind sourceKind, DamageType type, bool blocked, bool headshot, float blockReduction,
-            HitLocation location = HitLocation.Unspecified, float impactPower = 0f, bool guardBroken = false)
+            HitLocation location = HitLocation.Unspecified, float impactPower = 0f, bool guardBroken = false,
+            bool rangedProjectile = false, bool guardBladeContact = false)
         {
             ImpactPower = impactPower;
             GuardBroken = guardBroken;
+            RangedProjectile = rangedProjectile;
+            GuardBladeContact = guardBladeContact;
             Location = location;
             Amount = amount;
             Point = point;
@@ -73,13 +92,17 @@ namespace Emberdelve.Core
             blocked = reduction > 0f;
             return new DamageInfo(Mathf.Max(1f, Amount * (1f - Mathf.Clamp01(reduction))), Point, Direction,
                 SourcePosition, SourceCombatId, SourceKind, Type, blocked, Headshot, Mathf.Clamp01(reduction), Location,
-                ImpactPower, guardBroken && blocked);
+                ImpactPower, guardBroken && blocked, RangedProjectile, GuardBladeContact);
         }
 
         /// <summary>The same hit carrying the attacker's impact power (the resolver sets it before the defender's guard is asked).</summary>
         public DamageInfo WithImpactPower(float impactPower) =>
             new DamageInfo(Amount, Point, Direction, SourcePosition, SourceCombatId, SourceKind, Type, Blocked, Headshot,
-                BlockReduction, Location, impactPower, GuardBroken);
+                BlockReduction, Location, impactPower, GuardBroken, RangedProjectile, GuardBladeContact);
+
+        public DamageInfo WithProjectileGuardContact(bool bladeContact) =>
+            new DamageInfo(Amount, Point, Direction, SourcePosition, SourceCombatId, SourceKind, Type, Blocked,
+                Headshot, BlockReduction, Location, ImpactPower, GuardBroken, true, bladeContact);
     }
 
     public readonly struct HitFeedback
@@ -114,10 +137,44 @@ namespace Emberdelve.Core
         Collider HeadCollider { get; }
 
         /// <summary>
-        /// Who this entity fights for. Local and remote players share a team so friendly fire rules
-        /// already exist before any networking does; monsters are a different team. 0 is the player team.
+        /// Who this entity fights for (R7). A player's team id is derived from its party (<see cref="Emberdelve.Combat.CombatTeams.TeamForParty"/>),
+        /// so two parties are hostile to each other (PvP) and party mates are friendly; monsters use
+        /// <see cref="Emberdelve.Combat.CombatTeams.MonsterTeam"/> and are hostile to every player.
         /// </summary>
         int TeamId { get; }
+    }
+
+    /// <summary>
+    /// R7: an entity that belongs to one player. The id is the player's identity in the run (not the combat id, which
+    /// identifies a body): every player-scoped event carries it and every per-player rule is keyed on it.
+    /// </summary>
+    public interface IPlayerOwned
+    {
+        int PlayerId { get; }
+        int PartyId { get; }
+    }
+
+    /// <summary>
+    /// R7: whether an entity is still part of the fight. A player who extracted left the dungeon: no monster targets them
+    /// and no weapon or skill can hit them. Dead players are covered by <see cref="IDamageable.IsDead"/>.
+    /// </summary>
+    public interface IRunParticipant
+    {
+        bool IsInPlay { get; }
+    }
+
+    /// <summary>
+    /// R7: the entity that owns the presentation of a combat result. The authority resolves a hit and hands the result to
+    /// the entities involved; a player rig turns it into events carrying ITS player id, so the authority never raises a
+    /// HUD event or looks at who is "the" local player.
+    /// </summary>
+    public interface IPlayerCombatFeedback
+    {
+        /// <summary>This player was hit (damage already applied).</summary>
+        void OnDamageTaken(in DamageInfo damage);
+
+        /// <summary>This player's attack hit something.</summary>
+        void OnHitDealt(in HitFeedback feedback);
     }
 
     /// <summary>
@@ -284,14 +341,30 @@ namespace Emberdelve.Core
         float GetArmorRating();
     }
 
-    /// <summary>Anything the player can act on with the interact key.</summary>
+    /// <summary>
+    /// R2: the entity that acts on an <see cref="IInteractable"/>. Every interaction names its actor, so distance, line
+    /// of sight, alive state, the bag that receives loot and the extraction rule are all evaluated for THAT player and
+    /// never for a global "the player".
+    /// </summary>
+    public interface IInteractionActor : IPlayerOwned
+    {
+        bool IsAlive { get; }
+
+        /// <summary>World position reach and line of sight are measured from (chest height on a player).</summary>
+        Vector3 InteractionOrigin { get; }
+
+        /// <summary>The actor's own bag (the item catalog comes from it). A host never trusts it for the carried value: it keeps its own session record.</summary>
+        Emberdelve.Items.Inventory Inventory { get; }
+    }
+
+    /// <summary>Anything a player can act on with the interact key. R2: every call carries the acting entity.</summary>
     public interface IInteractable
     {
         string PromptText { get; }
         bool RequiresHold { get; }
         float HoldDuration { get; }
-        bool CanInteract(out string blockedReason);
-        void OnHoldComplete();
-        void OnInteractInstant();
+        bool CanInteract(IInteractionActor actor, out string blockedReason);
+        void OnHoldComplete(IInteractionActor actor);
+        void OnInteractInstant(IInteractionActor actor);
     }
 }

@@ -289,7 +289,7 @@ namespace Emberdelve.EditorTools
 
             // The rapier is the first asset to actually claim Parry. It is still only a capability flag:
             // there is no parry timing window, animation or parry damage anywhere in the runtime yet.
-            SetDefense(Rapier, DefenseRole.Weapon, DefenseCapability.Block | DefenseCapability.Parry, -1f, -1f, false);
+            SetDefense(Rapier, DefenseRole.Weapon, DefenseCapability.Block | DefenseCapability.Parry, 0.7f, -1f, false);
 
             // Deliberately declares Parry to prove the shield rule masks it back off.
             SetDefense(Shield, DefenseRole.Shield, DefenseCapability.Block | DefenseCapability.Parry, -1f, -1f, false);

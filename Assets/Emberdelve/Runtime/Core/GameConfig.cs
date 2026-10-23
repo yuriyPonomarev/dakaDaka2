@@ -26,6 +26,14 @@ namespace Emberdelve.Core
         [Header("Interaction")]
         public float interactionRange = 2.4f;
         public float interactSphereRadius = 0.45f;
+        [Tooltip("R2: the authority accepts an interaction only when the acting player is within this many metres of the target (closest point) with a clear line of sight. The client prompt range (interactionRange) is shorter.")]
+        public float interactionAuthorityRange = 3f;
+
+        [Header("Players and parties (R7)")]
+        [Tooltip("Largest party the run admits (DND_PARITY: up to 3).")]
+        [Range(1, 3)] public int maxPartySize = 3;
+        [Tooltip("Members of one party can hurt each other. OFF by default (open DND_PARITY question); players of different parties always can (PvP).")]
+        public bool friendlyFire = false;
 
         [Header("Inventory")]
         [Tooltip("Carried items live in a width x height cell grid. A 2x3 sword needs a 2x3 hole.")]
@@ -70,6 +78,8 @@ namespace Emberdelve.Core
             if (inventoryGridWidth <= 0) inventoryGridWidth = 10;
             if (inventoryGridHeight <= 0) inventoryGridHeight = 4;
             if (extractionHoldDuration <= 0f) extractionHoldDuration = 3f;
+            if (interactionAuthorityRange <= 0f) interactionAuthorityRange = 3f;
+            maxPartySize = Mathf.Clamp(maxPartySize, 1, 3);
             if (hitMask.value == 0) hitMask = LayerMask.GetMask(PlayerLayerName, EnemyLayerName);
             if (interactMask.value == 0) interactMask = LayerMask.GetMask(LootLayerName, InteractLayerName);
             if (levelMask.value == 0) levelMask = LayerMask.GetMask(LevelLayerName);

@@ -13,15 +13,19 @@ namespace Emberdelve.Core
         public readonly int EnemiesSlain;
         public readonly float DurationSeconds;
 
-        public RunResult(RunState outcome, string className, float lootValue, int itemsCollected, int enemiesSlain, float duration)
+        /// <summary>R7: the player this result belongs to (0 for a result built without one).</summary>
+        public readonly int PlayerId;
+
+        public RunResult(RunState outcome, string className, float lootValue, int itemsCollected, int enemiesSlain, float duration, int playerId = 0)
         {
+            PlayerId = playerId;
             Outcome = outcome; ClassName = className; LootValue = lootValue;
             ItemsCollected = itemsCollected; EnemiesSlain = enemiesSlain; DurationSeconds = duration;
         }
     }
 
     /// <summary>
-    /// Carries the player's chosen class and run bookkeeping between scenes.
+    /// Carries the player's chosen class and the lobby-to-run handoff between scenes.
     /// Today it is filled locally in the lobby. In a networked build this same struct would be
     /// produced by the session/lobby service and handed to the client, so nothing downstream changes.
     /// </summary>
@@ -30,6 +34,21 @@ namespace Emberdelve.Core
         public static CharacterClassData SelectedClass { get; private set; }
         public static RunResult LastResult { get; private set; }
         public static bool HasResult { get; private set; }
+
+        // R7: this class is ONLY the lobby-to-run handoff of the locally controlled player (chosen class, next raid seed,
+        // that player's last result for the lobby screen). Everything a run knows (per-player carried value, kills,
+        // extraction state, results) lives on the RunDirector instance of that run, so two runs or scenes cannot leak.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatic() => ResetHandoff();
+
+        /// <summary>Clears the class choice, the last result and any pending raid seed (process start, tests).</summary>
+        public static void ResetHandoff()
+        {
+            SelectedClass = null;
+            LastResult = default;
+            HasResult = false;
+            _hasPendingRaidSeed = false;
+        }
 
         // ------------------------------------------------------------------ raid seed (R5)
 

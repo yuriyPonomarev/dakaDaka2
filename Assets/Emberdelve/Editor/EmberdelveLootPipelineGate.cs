@@ -840,9 +840,8 @@ namespace Emberdelve.EditorTools
 
         private sealed class BareHost : MonoBehaviour, ILootHost
         {
-            public Inventory Bag;
-            public Inventory Inventory => Bag;
-            public bool CollectLoot(ItemData item, int amount) => false;
+            // R2: the host no longer exposes a bag; it receives the acting player with every call.
+            public bool CollectLoot(IInteractionActor actor, ItemData item, int amount) => false;
             public void SpawnLoot(ItemData item, int amount, Vector3 worldPosition) { }
         }
 
@@ -851,13 +850,26 @@ namespace Emberdelve.EditorTools
             GameObject go = new GameObject("NoSession_Chest");
             _cleanup.Add(go);
             BareHost host = go.AddComponent<BareHost>();
-            host.Bag = _rig.Inventory;
+            // R2 fixture: the chest now evaluates reach and line of sight for its actor, so it stands next to the rig and the
+            // test first proves the actor CAN interact: the refusal below is then the missing raid session, not distance.
+            go.transform.position = _rig.transform.position + _rig.transform.forward * 1.0f;
             ChestInteractable chest = go.AddComponent<ChestInteractable>();
             chest.Configure(ChestVariant.Supply, GearTable(2, 1, true), 5, host);
-            Check(!chest.Open() && chest.Remaining.Count == 0 && !chest.IsEmpty, "a chest whose host has no raid session refuses to roll (no private fallback seed or issuer)");
+            Check(chest.CanInteract(_rig, out string reachReason), "the actor can reach the no-session chest, so the refusal below is about the session (" + reachReason + ")");
+            Check(!chest.Open(_rig) && chest.Remaining.Count == 0 && !chest.IsEmpty, "a chest whose host has no raid session refuses to roll (no private fallback seed or issuer)");
         }
 
         // --------------------------------------------------- live enemy drop -> pickup -> bag -> equipment
+
+        // R2 fixture helper: puts the player rig beside a world target so reach and line of sight (checked per actor) hold.
+        private void StandBeside(Vector3 position)
+        {
+            CharacterController controller = _rig.GetComponent<CharacterController>();
+            if (controller != null) controller.enabled = false;
+            _rig.transform.SetPositionAndRotation(new Vector3(position.x, position.y + 0.15f, position.z), _rig.transform.rotation);
+            if (controller != null) controller.enabled = true;
+            Physics.SyncTransforms();
+        }
 
         private void ResetPlayer(int w, int h)
         {
@@ -920,7 +932,9 @@ namespace Emberdelve.EditorTools
 
             string snapshot = dropped.ToSnapshot().ToJson();
             int uidsBefore = session.Issuer.MintedCount;
-            pickup.OnInteractInstant();
+            // R2 fixture: the drop lies where the enemy died; the actor now has to be within reach of it to take it.
+            StandBeside(pickup.transform.position);
+            pickup.OnInteractInstant(_rig);
             yield return null;
 
             int slot = bag.IndexOfInstance(dropped.Uid);
@@ -955,7 +969,7 @@ namespace Emberdelve.EditorTools
             {
                 ItemInstance inst = ground[i].Instance;
                 string snap = inst.ToSnapshot().ToJson();
-                ground[i].OnInteractInstant();
+                ground[i].OnInteractInstant(_rig);
                 int idx = bag.IndexOfInstance(inst.Uid);
                 preserved &= idx >= 0 && ReferenceEquals(bag.InstanceAt(idx), inst) && bag.InstanceAt(idx).ToSnapshot().ToJson() == snap;
             }
@@ -972,9 +986,10 @@ namespace Emberdelve.EditorTools
             Check(bag.TryAdd(stackCoin, 79, out reason), "bag holds 79 coins");
             GameObject coinGo = new GameObject("Pipeline_CoinPickup");
             _cleanup.Add(coinGo);
+            coinGo.transform.position = _rig.transform.position + _rig.transform.forward; // R2 fixture: within reach of the actor
             LootPickup coinPickup = coinGo.AddComponent<LootPickup>();
             coinPickup.Configure(stackCoin, 5, _director);
-            coinPickup.OnInteractInstant();
+            coinPickup.OnInteractInstant(_rig);
             Check(bag.TotalUnits == 80 && coinPickup.Amount == 4 && coinPickup.Instance == null, "a definition pickup keeps the counted partial contract (4 stay on the ground)");
             ResetPlayer(10, 4);
         }
@@ -1003,7 +1018,7 @@ namespace Emberdelve.EditorTools
             yield return null;
             int units = bag.TotalUnits;
             int issued = session.Issuer.MintedCount;
-            pickup.OnInteractInstant();
+            pickup.OnInteractInstant(_rig);
             yield return null;
 
             Check(pickup != null && ReferenceEquals(pickup.Instance, instance) && pickup.Instance.ToSnapshot().ToJson() == snapshot,
@@ -1013,7 +1028,7 @@ namespace Emberdelve.EditorTools
             // Free the space: the same pickup now delivers exactly that instance.
             bag.Clear();
             bag.ConfigureGrid(10, 4);
-            pickup.OnInteractInstant();
+            pickup.OnInteractInstant(_rig);
             yield return null;
             int slot = bag.IndexOfInstance(instance.Uid);
             Check(slot >= 0 && ReferenceEquals(bag.InstanceAt(slot), instance) && bag.InstanceAt(slot).ToSnapshot().ToJson() == snapshot && pickup == null,
@@ -1023,7 +1038,7 @@ namespace Emberdelve.EditorTools
             LootPickup twin = _director.SpawnLootInstance(instance, _rig.transform.position + Vector3.forward * 2f);
             yield return null;
             int count = bag.UsedSlots;
-            twin.OnInteractInstant();
+            twin.OnInteractInstant(_rig);
             yield return null;
             Check(twin != null && bag.UsedSlots == count && bag.IndexOfInstance(instance.Uid) == slot, "a second pickup of an identity the bag already holds is refused and stays on the ground");
             Destroy(twin.gameObject);
@@ -1053,8 +1068,10 @@ namespace Emberdelve.EditorTools
                 yield break;
             }
 
+            // R2 fixture: the real chest is far from the spawn; the actor stands next to it (the chest now checks reach and sight).
+            StandBeside(ember.transform.position);
             int before = session.Issuer.MintedCount;
-            Check(ember.Open(), "the real ember chest opens through the raid session");
+            Check(ember.Open(_rig), "the real ember chest opens through the raid session");
             int minted = session.Issuer.MintedCount - before;
             bool allMine = true;
             int gear = 0;

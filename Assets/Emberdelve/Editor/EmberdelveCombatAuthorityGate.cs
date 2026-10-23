@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using Emberdelve.Core;
+using Emberdelve.AI;
 using Emberdelve.Data;
 using Emberdelve.Player;
 using Emberdelve.Combat;
@@ -166,6 +167,29 @@ namespace Emberdelve.EditorTools
             return new Outcome { Accepted = ok, Reason = reason ?? string.Empty, Damage = target.Taken - before, Info = target.Last };
         }
 
+        private Outcome LaunchPlayerProjectile(Fake target, WeaponData claimedWeapon, float maxRange, Vector3 aimPoint)
+        {
+            Quaternion originalAim = _rig.Look.AimTransform.rotation;
+            Vector3 muzzle = _rig.GetMuzzlePosition();
+            Vector3 direction = aimPoint - muzzle;
+            if (direction.sqrMagnitude > 0.0001f) _rig.Look.AimTransform.rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+            AttackIntent intent = new AttackIntent(_rig.CombatId, _rig.Kind, claimedWeapon, 1f,
+                muzzle, direction, maxRange, CombatRegistry.NextSequence(_rig.CombatId), _clock);
+            float before = target.Taken;
+            target.Last = DamageInfo.Invalid;
+            bool accepted = _authority.LaunchProjectile(intent);
+            string reason = _authority.LastAttackRejectReason;
+            if (accepted)
+            {
+                float travelTime = claimedWeapon != null
+                    ? claimedWeapon.rangedRange / Mathf.Max(2f, claimedWeapon.projectileSpeed) + 0.02f
+                    : 0.1f;
+                _authority.AdvanceProjectiles(travelTime);
+            }
+            _rig.Look.AimTransform.rotation = originalAim;
+            return new Outcome { Accepted = accepted, Reason = reason, Damage = target.Taken - before, Info = target.Last };
+        }
+
         private void PlaceTarget(float distance)
         {
             _target.Point = _rig.CombatCenter + Vector3.forward * distance;
@@ -181,6 +205,12 @@ namespace Emberdelve.EditorTools
             _rig = FindFirstObjectByType<PlayerRig>();
             Check(_rig != null && !_rig.IsDead, "a living player rig is available");
             if (_rig == null) return;
+
+            // Keep projectile probes away from scene enemies and arena colliders so this gate measures
+            // its own analytic target; wall ordering and physical scene contacts live in ProjectileBlockGate.
+            foreach (EnemyAgent enemy in FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None)) enemy.gameObject.SetActive(false);
+            _rig.transform.position = new Vector3(3000f, 0f, 3000f);
+            Physics.SyncTransforms();
 
             WeaponData sword = _rig.MainHandWeapon;
             WeaponData crossbow = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberCrossbow.asset");
@@ -248,50 +278,55 @@ namespace Emberdelve.EditorTools
             Check(!swordWhileCrossbow.Accepted && swordWhileCrossbow.Reason.Contains("not the equipped weapon"),
                 "the sword is rejected while the crossbow is the equipped weapon");
             Outcome crossbowOk = Submit(_target, crossbow, crossbow.rangedRange, body, false, _clock);
-            Check(crossbowOk.Accepted, "the equipped crossbow is accepted (" + crossbowOk.Reason + ")");
+            Check(!crossbowOk.Accepted && crossbowOk.Reason.Contains("must launch") && crossbowOk.Damage == 0f,
+                "a ranged hit-only SubmitAttack cannot bypass projectile flight (" + crossbowOk.Reason + ")");
+            Outcome crossbowFlight = LaunchPlayerProjectile(_target, crossbow, crossbow.rangedRange, _target.Point);
+            Check(crossbowFlight.Accepted && crossbowFlight.Damage > 0f && crossbowFlight.Info.IsValid,
+                "the equipped crossbow damages the actual target only after its authority-owned flight (" + crossbowFlight.Reason + ")");
 
-            // ---- 2. forged range and no extended reach (crossbow in hand, 34m range)
+            // ---- 2. flight stops at the authoritative weapon range; a forged launch range is refused.
             AdvanceClock(10f);
             PlaceTarget(60f);
-            Outcome farHonest = Submit(_target, crossbow, crossbow.rangedRange, _target.Point, false, _clock);
-            Check(!farHonest.Accepted && farHonest.Damage == 0f && farHonest.Reason.Contains("weapon reaches"),
-                "a target beyond the weapon reach is rejected on the authority's own distance (" + farHonest.Reason + ")");
-            Outcome farForgedRange = Submit(_target, crossbow, 1000f, _target.Point, false, _clock);
+            float farBefore = _target.Taken;
+            Outcome farFlight = LaunchPlayerProjectile(_target, crossbow, crossbow.rangedRange, _target.Point);
+            Check(farFlight.Accepted && Mathf.Abs(_target.Taken - farBefore) < 0.001f,
+                "an arrow may travel to weapon range but cannot hit a target beyond it (" + farFlight.Reason + ")");
+            AdvanceClock(10f);
+            Outcome farForgedRange = LaunchPlayerProjectile(_target, crossbow, 1000f, _target.Point);
             Check(!farForgedRange.Accepted && farForgedRange.Damage == 0f && farForgedRange.Reason.Contains("claimed range"),
-                "a claimed MaxRange of 1000 does not widen the reach (" + farForgedRange.Reason + ")");
+                "a claimed MaxRange of 1000 does not widen an accepted projectile flight (" + farForgedRange.Reason + ")");
             PlaceTarget(20f);
-            Outcome inReachForgedRange = Submit(_target, crossbow, 1000f, _target.Point, false, _clock);
+            AdvanceClock(10f);
+            Outcome inReachForgedRange = LaunchPlayerProjectile(_target, crossbow, 1000f, _target.Point);
             Check(!inReachForgedRange.Accepted && inReachForgedRange.Reason.Contains("claimed range"),
                 "even an in-reach target is refused when the range claim is forged (" + inReachForgedRange.Reason + ")");
 
-            // ---- 3. forged hit point
+            // ---- 3. client hit-point claims cannot bypass projectile launch and collision.
             PlaceTarget(20f);
             Outcome atMuzzle = Submit(_target, crossbow, crossbow.rangedRange, _rig.CombatCenter, false, _clock);
-            Check(!atMuzzle.Accepted && atMuzzle.Damage == 0f && atMuzzle.Reason.Contains("not on the target"),
-                "a hit point at the attacker's own muzzle is rejected (" + atMuzzle.Reason + ")");
+            Check(!atMuzzle.Accepted && atMuzzle.Damage == 0f && atMuzzle.Reason.Contains("must launch"),
+                "a claimed muzzle hit cannot produce ranged damage (" + atMuzzle.Reason + ")");
             Outcome nan = Submit(_target, crossbow, crossbow.rangedRange, new Vector3(float.NaN, 0f, 0f), false, _clock);
-            Check(!nan.Accepted && nan.Damage == 0f && nan.Reason.Contains("not on the target"), "a NaN hit point is rejected as not on the target (" + nan.Reason + ")");
+            Check(!nan.Accepted && nan.Damage == 0f && nan.Reason.Contains("must launch"),
+                "a NaN hit-point claim cannot produce ranged damage (" + nan.Reason + ")");
 
-            // A point claimed in front of the target but inside the tolerance does not skip falloff: the
-            // authority pulls it inside the body sphere, so the distance can shrink by the body radius only.
+            // Falloff now measures the actual flight impact, not any client-supplied hit point.
             AdvanceClock(10f);
             PlaceTarget(30f);
-            Outcome honest30 = Submit(_target, crossbow, crossbow.rangedRange, _target.Point, false, _clock);
-            Check(honest30.Accepted, "an honest 30m crossbow hit is accepted (" + honest30.Reason + ")");
-            AdvanceClock(10f);
-            Vector3 shortened = _target.Point - Vector3.forward * (LocalCombatAuthority.DefaultHitPointTolerance - 0.1f);
-            Outcome shortClaim = Submit(_target, crossbow, crossbow.rangedRange, shortened, false, _clock);
-            Check(shortClaim.Accepted, "a point inside the tolerance is accepted but re-measured (" + shortClaim.Reason + ")");
+            Outcome honest30 = LaunchPlayerProjectile(_target, crossbow, crossbow.rangedRange, _target.Point);
+            Check(honest30.Accepted && honest30.Damage > 0f, "an honest 30m crossbow flight reaches and damages the target (" + honest30.Reason + ")");
             float mult = _rig.GetOutgoingDamageMultiplier(crossbow);
             float flat = _rig.GetFlatWeaponDamageBonus(crossbow);
-            float expectedShort = crossbow.DamageAtRange(30f - LocalCombatAuthority.TargetBodyRadius, flat) * mult;
-            float expectedZeroFalloff = crossbow.DamageAtRange(0f, flat) * mult;
-            Check(Mathf.Abs(shortClaim.Damage - expectedShort) < 0.02f,
-                $"the short claim is measured at the body surface, not at the claimed point ({shortClaim.Damage:F3} vs {expectedShort:F3})");
-            Check(shortClaim.Damage < expectedZeroFalloff - 1f,
-                $"the short claim did not skip falloff ({shortClaim.Damage:F2} < {expectedZeroFalloff:F2})");
-            Check(Mathf.Abs(shortClaim.Damage - honest30.Damage) < 0.5f,
-                $"honest and shortened claims differ by at most the body radius of falloff ({honest30.Damage:F2} vs {shortClaim.Damage:F2})");
+            float actualImpactRange = Vector3.Distance(honest30.Info.SourcePosition, honest30.Info.Point);
+            float expected30 = crossbow.DamageAtRange(actualImpactRange, flat) * mult;
+            Check(Mathf.Abs(honest30.Damage - expected30) < 0.02f,
+                $"the projectile falloff uses its actual impact distance ({honest30.Damage:F3} vs {expected30:F3})");
+            AdvanceClock(10f);
+            Vector3 shortened = _target.Point + _rig.transform.right * 2f;
+            float beforeMissAim = _target.Taken;
+            Outcome shortClaim = LaunchPlayerProjectile(_target, crossbow, crossbow.rangedRange, shortened);
+            Check(shortClaim.Accepted && Mathf.Abs(_target.Taken - beforeMissAim) < 0.001f,
+                "an off-axis launch misses the body even when the client claims its center");
 
             // Back to the sword for the rest.
             Check(_rig.Loadout.SwitchToSlot(0) && _rig.MainHandWeapon == sword, "loadout back on the sword");

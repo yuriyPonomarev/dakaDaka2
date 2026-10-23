@@ -679,21 +679,21 @@ namespace Emberdelve.EditorTools
                 _notifyRig = null;
             }
 
-            private void OnHealthEvent(float current, float max)
+            private void OnHealthEvent(int playerId, float current, float max)
             {
                 _healthNotifications++;
                 _notifyHealthCurrent = current;
                 _notifyHealthMax = max;
             }
 
-            private void OnManaEvent(float current, float max)
+            private void OnManaEvent(int playerId, float current, float max)
             {
                 _manaNotifications++;
                 _notifyManaCurrent = current;
                 _notifyManaMax = max;
             }
 
-            private void OnEquipmentEvent(ItemData item, bool equipped)
+            private void OnEquipmentEvent(int playerId, ItemData item, bool equipped)
             {
                 _equipmentNotifications++;
                 if (_notifyRig == null) return;

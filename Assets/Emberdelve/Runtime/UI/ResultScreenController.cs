@@ -20,8 +20,10 @@ namespace Emberdelve.UI
         private void OnEnable() => GameEvents.RunEnded += OnRunEnded;
         private void OnDisable() => GameEvents.RunEnded -= OnRunEnded;
 
-        private void OnRunEnded(RunResult result)
+        private void OnRunEnded(int playerId, RunResult result)
         {
+            // R7: the overlay shows the LOCAL player's own result, when that player's run ends (not when the whole run does).
+            if (!PlayerView.Shows(playerId)) return;
             BuildIfNeeded();
             if (_root == null) return;
 

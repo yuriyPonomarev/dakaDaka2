@@ -495,12 +495,23 @@ namespace Emberdelve.EditorTools
 
                 GameObject wall = BuildLevelWall(rig, 10f);
                 _objects.Add(wall);
+                int acceptedBeforeWallShot = _authority.AcceptedCount;
                 rejectedBefore = _authority.RejectedCount;
                 healthBefore = _target.CurrentHealth;
-                SubmitAttackExpecting("warrior crossbow through a wall on the level layer", rig, _crossbow, 10f, 1f,
+                AssertWallStopsProjectile("warrior crossbow legally launches into level wall", rig, _crossbow,
+                    10f, _crossbow.rangedRange, wall.GetComponent<Collider>());
+                Check(_authority.AcceptedCount == acceptedBeforeWallShot + 1,
+                    "the wall-obstructed projectile is accepted by launch authority");
+                Check(_authority.RejectedCount == rejectedBefore,
+                    "a physical wall impact does not turn a legal projectile launch into a launch rejection");
+                CheckClose("the accepted projectile stopped at the wall before target damage", 0f,
+                    healthBefore - _target.CurrentHealth, "actual in-flight collision with level geometry");
+
+                // The legacy direct-hit endpoint remains a separate negative route for a ranged weapon.
+                SubmitAttackExpecting("warrior crossbow claim sent through the direct-hit-only endpoint (wall present)", rig, _crossbow, 10f, 1f,
                     _crossbow.rangedRange, false, _clock + AttackSpacing);
-                Check(_authority.RejectedCount == rejectedBefore + 1, "the authority counted the blocked line of sight as a rejection");
-                CheckClose("the blocked shot applied no damage", 0f, healthBefore - _target.CurrentHealth, "line of sight is real geometry");
+                Check(_authority.RejectedCount == rejectedBefore + 1, "the authority rejected the direct-hit-only ranged claim");
+                CheckClose("the rejected direct-hit claim applied no damage", 0f, healthBefore - _target.CurrentHealth, "ranged hits must resolve through projectile flight");
 
                 // The collider is switched off rather than the object destroyed: Object.Destroy is deferred to
                 // the end of the frame, and the very next assertion in this same frame needs a clear line.
@@ -582,7 +593,7 @@ namespace Emberdelve.EditorTools
                 SubmitAttack("archer bow at 15m at half charge", rig, _bow, 15f, 0.5f, _bow.rangedRange,
                     true, 31.45408f, "the authored minChargeDamageScale lerp is preserved");
                 SubmitAttack("archer bow at 30m (inside the falloff ramp)", rig, _bow, 30f, 1f, _bow.rangedRange,
-                    true, 34.3427f, "distance falloff is applied before the attribute factor");
+                    true, 34.806106f, "30m muzzle distance minus independent .525m swept-contact radius, then authored falloff before attribute factor");
 
                 // 6. Finesse rapier in the other modifier order: DEX 3 beats STR 0, then STR 4 beats DEX 3.
                 // The rapier is this class's authored secondary, so it reaches the hand through the real
@@ -725,6 +736,38 @@ namespace Emberdelve.EditorTools
                 SubmitAttackAtClock(label, rig, weapon, distance, charge, maxRange, expectAccepted, expectedDamage, note);
             }
 
+            private void AssertWallStopsProjectile(string label, PlayerRig rig, WeaponData weapon, float distance,
+                float maxRange, Collider expectedWall)
+            {
+                Vector3 muzzle = rig.GetMuzzlePosition();
+                Vector3 direction = rig.AimDirection.normalized;
+                Vector3 targetCenter = muzzle + direction * distance;
+                _target.transform.position = targetCenter - Vector3.up * 1.1f;
+                Physics.SyncTransforms();
+
+                float radius = Mathf.Max(0.01f, weapon.projectileRadius * 0.5f);
+                LayerMask levelMask = _config != null ? _config.levelMask : ~0;
+                bool wallIsInFlightPath = Physics.SphereCast(muzzle, radius, direction, out RaycastHit wallHit,
+                    distance, levelMask, QueryTriggerInteraction.Ignore);
+                Check(wallIsInFlightPath && wallHit.collider == expectedWall && wallHit.distance < distance,
+                    $"{label}: independent swept-ray precondition finds the expected wall first ({(wallIsInFlightPath && wallHit.collider != null ? wallHit.collider.name : "none")})");
+
+                RangedCombat ranged = rig.GetComponent<RangedCombat>();
+                if (ranged != null && ranged.Magazine < 1) ranged.RefundAmmo(3);
+                _clock += AttackSpacing;
+                AttackIntent launch = new AttackIntent(rig.CombatId, rig.Kind, weapon, 1f, muzzle, direction,
+                    maxRange, CombatRegistry.NextSequence(rig.CombatId), _clock);
+                float healthBefore = _target.CurrentHealth;
+                bool accepted = _authority.LaunchProjectile(launch);
+                Check(accepted, $"{label}: valid projectile launch accepted ({_authority.LastAttackRejectReason})");
+                if (accepted)
+                {
+                    for (int frame = 0; frame < 300; frame++) _authority.AdvanceProjectiles(1f / 60f);
+                }
+                CheckClose($"{label}: target remains unharmed after the flight", 0f,
+                    healthBefore - _target.CurrentHealth, "the accepted arrow terminates at level geometry");
+            }
+
             private void SubmitAttackExpecting(string label, PlayerRig rig, WeaponData weapon, float distance,
                 float charge, float maxRange, bool expectAccepted, float timestamp)
             {
@@ -753,6 +796,54 @@ namespace Emberdelve.EditorTools
                 int acceptedBefore = _authority.AcceptedCount;
                 int rejectedBefore = _authority.RejectedCount;
                 float healthBefore = _target.CurrentHealth;
+
+                if (weapon.IsRanged && expectAccepted)
+                {
+                    Vector3 muzzle = rig.GetMuzzlePosition();
+                    Vector3 direction = rig.AimDirection.normalized;
+                    // Put this analytic body fixture on the actual launch ray. Its authored center distance
+                    // is the scenario distance; expected falloff uses the independently predicted first
+                    // swept-sphere contact, including the authority's body and projectile radii.
+                    Vector3 targetCenter = muzzle + direction * distance;
+                    _target.transform.position = targetCenter - Vector3.up * 1.1f;
+                    Physics.SyncTransforms();
+                    float collisionRadius = LocalCombatAuthority.TargetBodyRadius + Mathf.Max(0.01f, weapon.projectileRadius * 0.5f);
+                    float contactDistance = Mathf.Max(0f, Vector3.Distance(muzzle, _target.CombatCenter) - collisionRadius);
+                    float flatBonus = rig.GetFlatWeaponDamageBonus(weapon);
+                    float boostedBase = weapon.baseDamage + flatBonus;
+                    float falloffT = weapon.falloffEndRange > weapon.falloffStartRange
+                        ? Mathf.Clamp01((contactDistance - weapon.falloffStartRange) / (weapon.falloffEndRange - weapon.falloffStartRange))
+                        : 0f;
+                    float independentFalloff = contactDistance <= weapon.falloffStartRange
+                        ? boostedBase
+                        : Mathf.Lerp(boostedBase, boostedBase * weapon.falloffMinScale, falloffT);
+                    float independentDamage = independentFalloff
+                        * Mathf.Lerp(weapon.minChargeDamageScale, 1f, charge)
+                        * rig.GetOutgoingDamageMultiplier(weapon);
+                    CheckClose($"{label}: literal expectation matches independent muzzle-to-swept-contact calculation",
+                        expectedDamage, independentDamage, $"muzzle distance {contactDistance:F3} m after body/projectile radii");
+                    AttackIntent launch = new AttackIntent(rig.CombatId, rig.Kind, weapon, charge,
+                        muzzle, direction, maxRange, CombatRegistry.NextSequence(rig.CombatId), _clock);
+                    bool launched = _authority.LaunchProjectile(launch);
+                    Check(launched, $"{label}: authority accepted the real projectile launch ({_authority.LastAttackRejectReason})");
+                    if (launched)
+                    {
+                        // The editor gate has no rendered frame loop. Advance the actual projectile in small
+                        // bounded steps so world geometry and body contact use the same authority path.
+                        for (int frame = 0; frame < 300 && _target.CurrentHealth >= healthBefore; frame++)
+                            _authority.AdvanceProjectiles(1f / 60f);
+                    }
+
+                    LastDelta = healthBefore - _target.CurrentHealth;
+                    Check(_authority.AcceptedCount == acceptedBefore + (launched ? 1 : 0),
+                        $"{label}: launch counter moved {acceptedBefore} -> {_authority.AcceptedCount}");
+                    Check(_authority.RejectedCount == rejectedBefore,
+                        $"{label}: rejected counter stayed at {rejectedBefore} after launch");
+                    CheckClose($"{label} applied health delta", expectedDamage, LastDelta, note);
+                    Debug.Log($"{Tag} {label}: projectile distance={Vector3.Distance(muzzle, _target.CombatCenter):F2} " +
+                              $"charge={charge:F2} delta={LastDelta:F4} expected={expectedDamage:F4} launched={launched}");
+                    return;
+                }
 
                 bool accepted = _authority.SubmitAttack(intent, new HitCandidate(_target.CombatId, hitPoint, false));
                 LastDelta = healthBefore - _target.CurrentHealth;

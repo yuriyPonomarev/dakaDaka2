@@ -21,7 +21,7 @@ namespace Emberdelve.Combat
         /// </summary>
         public static DamageInfo Resolve(WeaponData weapon, in AttackIntent intent, in HitCandidate hit,
             ICombatEntity target, float instigatorMultiplier = 1f, float weaponBaseDamageBonus = 0f,
-            CombatFlowTuning tuning = null)
+            CombatFlowTuning tuning = null, bool rangedProjectile = false, bool guardBladeContact = false)
         {
             float distance = Vector3.Distance(intent.Origin, hit.HitPoint);
             float amount = weapon.DamageAtRange(distance, weaponBaseDamageBonus);
@@ -37,7 +37,7 @@ namespace Emberdelve.Combat
 
             return Finalize(amount, weapon, intent.Direction, intent.Origin, intent.InstigatorCombatId,
                 intent.InstigatorKind, hit, target, null, HitLocation.Unspecified,
-                weapon != null ? weapon.impactPower : 0f, tuning);
+                weapon != null ? weapon.impactPower : 0f, tuning, rangedProjectile, guardBladeContact);
         }
 
         /// <summary>
@@ -81,7 +81,8 @@ namespace Emberdelve.Combat
         /// untouched and gains nothing from the weapon in hand.
         /// </summary>
         public static DamageInfo ResolveSkill(in SkillIntent intent, in HitCandidate hit, ICombatEntity target,
-            float instigatorMultiplier = 1f, float effectScale = 1f, float weaponBaseDamageBonus = 0f)
+            float instigatorMultiplier = 1f, float effectScale = 1f, float weaponBaseDamageBonus = 0f,
+            bool rangedProjectile = false, bool guardBladeContact = false)
         {
             SkillData skill = intent.Skill;
             float distance = Vector3.Distance(intent.Origin, hit.HitPoint);
@@ -112,7 +113,8 @@ namespace Emberdelve.Combat
             DamageType type = source != null ? source.damageType : skill.UsesFlatDamage ? DamageType.Holy : DamageType.Physical;
 
             return Finalize(amount, source, intent.Direction, intent.Origin, intent.InstigatorCombatId,
-                intent.InstigatorKind, hit, target, type);
+                intent.InstigatorKind, hit, target, type, rangedProjectile: rangedProjectile,
+                guardBladeContact: guardBladeContact);
         }
 
         /// <summary>
@@ -132,12 +134,14 @@ namespace Emberdelve.Combat
         private static DamageInfo Finalize(float amount, WeaponData source, Vector3 direction, Vector3 origin,
             int instigatorCombatId, EntityKind instigatorKind, in HitCandidate hit, ICombatEntity target,
             DamageType? overrideType = null, HitLocation location = HitLocation.Unspecified,
-            float impactPower = 0f, CombatFlowTuning tuning = null)
+            float impactPower = 0f, CombatFlowTuning tuning = null, bool rangedProjectile = false,
+            bool guardBladeContact = false)
         {
             DamageType type = overrideType ?? (source != null ? source.damageType : DamageType.Physical);
 
             DamageInfo info = new DamageInfo(Mathf.Max(1f, amount), hit.HitPoint, direction, origin,
                 instigatorCombatId, instigatorKind, type, false, hit.Headshot, 0f, location, impactPower);
+            if (rangedProjectile) info = info.WithProjectileGuardContact(guardBladeContact);
 
             // D1b: a defender whose guard can break answers with the reduction AND whether the hit's impact power
             // reached its impact resist (reduced mitigation). Other defenders keep the plain directional guard.
@@ -206,7 +210,7 @@ namespace Emberdelve.Combat
 
             return new DamageInfo(final, info.Point, info.Direction, info.SourcePosition, info.SourceCombatId,
                 info.SourceKind, info.Type, info.Blocked, info.Headshot, info.BlockReduction, info.Location,
-                info.ImpactPower, info.GuardBroken);
+                info.ImpactPower, info.GuardBroken, info.RangedProjectile, info.GuardBladeContact);
         }
     }
 

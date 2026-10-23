@@ -57,9 +57,9 @@ namespace Emberdelve.Interaction
                 _current = target;
                 _currentHost = target as MonoBehaviour;
                 _holdProgress = 0f;
-                GameEvents.RaiseInteractionHold(0f);
-                _lastPrompt = target == null ? string.Empty : BuildPrompt(target, out _);
-                GameEvents.RaiseInteractionPrompt(_lastPrompt);
+                GameEvents.RaiseInteractionHold(rig.PlayerId, 0f);
+                _lastPrompt = target == null ? string.Empty : BuildPrompt(rig, target, out _);
+                GameEvents.RaiseInteractionPrompt(rig.PlayerId, _lastPrompt);
             }
 
             if (_current == null) return;
@@ -67,11 +67,11 @@ namespace Emberdelve.Interaction
             // The prompt text can change while the same target stays aimed at (a chest that just emptied, a
             // rule that now blocks the gate): re-read it every frame and only raise it when it differs, so a
             // line that was true when the target was first seen cannot outlive the truth.
-            string prompt = BuildPrompt(_current, out _);
+            string prompt = BuildPrompt(rig, _current, out _);
             if (prompt != _lastPrompt)
             {
                 _lastPrompt = prompt;
-                GameEvents.RaiseInteractionPrompt(prompt);
+                GameEvents.RaiseInteractionPrompt(rig.PlayerId, prompt);
             }
 
             if (_current.RequiresHold)
@@ -81,45 +81,45 @@ namespace Emberdelve.Interaction
                 if (input.InteractHeld)
                 {
                     _holdProgress += Time.deltaTime / duration;
-                    GameEvents.RaiseInteractionHold(_holdProgress);
+                    GameEvents.RaiseInteractionHold(rig.PlayerId, _holdProgress);
 
                     if (_holdProgress >= 1f)
                     {
                         _holdProgress = 0f;
-                        GameEvents.RaiseInteractionHold(0f);
+                        GameEvents.RaiseInteractionHold(rig.PlayerId, 0f);
 
                         // The target may have become invalid during the hold (rule changed, run ended):
                         // ask again instead of trusting the answer from when the hold began.
-                        if (_current.CanInteract(out string blockedReason))
+                        if (_current.CanInteract(rig, out string blockedReason))
                         {
-                            _current.OnHoldComplete();
+                            _current.OnHoldComplete(rig);
                         }
                         else
                         {
-                            GameEvents.RaiseToast(string.IsNullOrEmpty(blockedReason) ? "Cannot interact" : blockedReason);
+                            GameEvents.RaiseToast(rig.PlayerId, string.IsNullOrEmpty(blockedReason) ? "Cannot interact" : blockedReason);
                         }
                     }
                 }
                 else if (_holdProgress > 0f)
                 {
                     _holdProgress = Mathf.Max(0f, _holdProgress - Time.deltaTime * 1.6f);
-                    GameEvents.RaiseInteractionHold(_holdProgress);
+                    GameEvents.RaiseInteractionHold(rig.PlayerId, _holdProgress);
                 }
             }
             else if (input.InteractPressed)
             {
-                _current.OnInteractInstant();
+                _current.OnInteractInstant(rig);
             }
         }
 
         /// <summary>The line the HUD shows for a target (public so a gate can assert on the exact text).</summary>
-        public static string PromptFor(IInteractable target) { return BuildPrompt(target, out _); }
+        public static string PromptFor(IInteractionActor actor, IInteractable target) { return BuildPrompt(actor, target, out _); }
 
-        private static string BuildPrompt(IInteractable target, out string reason)
+        private static string BuildPrompt(IInteractionActor actor, IInteractable target, out string reason)
         {
             string label = target.PromptText;
 
-            if (!target.CanInteract(out reason))
+            if (!target.CanInteract(actor, out reason))
             {
                 string blocked = string.IsNullOrEmpty(reason) ? "Cannot interact" : reason;
                 return label + "  -  " + blocked;
@@ -183,9 +183,9 @@ namespace Emberdelve.Interaction
                 _current = null;
                 _currentHost = null;
                 _holdProgress = 0f;
-                GameEvents.RaiseInteractionHold(0f);
+                GameEvents.RaiseInteractionHold(rig.PlayerId, 0f);
                 _lastPrompt = string.Empty;
-                GameEvents.RaiseInteractionPrompt(string.Empty);
+                GameEvents.RaiseInteractionPrompt(rig.PlayerId, string.Empty);
             }
         }
 
@@ -193,12 +193,13 @@ namespace Emberdelve.Interaction
         {
             _health = GetComponent<HealthComponent>();
             if (_health != null) _health.Damaged += OnDamaged;
-            GameEvents.RunStateChanged += OnRunState;
+            GameEvents.PlayerRunStateChanged += OnRunState;
         }
 
         // A finished run has nothing left to interact with: drop the target and its prompt at once.
-        private void OnRunState(RunState state)
+        private void OnRunState(int playerId, RunState state)
         {
+            if (rig == null || playerId != rig.PlayerId) return;
             _runEnded = state == RunState.Dead || state == RunState.Extracted;
             if (_runEnded) ClearTarget();
         }
@@ -208,13 +209,13 @@ namespace Emberdelve.Interaction
         {
             if (_holdProgress <= 0f) return;
             _holdProgress = 0f;
-            GameEvents.RaiseInteractionHold(0f);
+            GameEvents.RaiseInteractionHold(rig.PlayerId, 0f);
         }
 
         private void OnDisable()
         {
             if (_health != null) _health.Damaged -= OnDamaged;
-            GameEvents.RunStateChanged -= OnRunState;
+            GameEvents.PlayerRunStateChanged -= OnRunState;
             _health = null;
             ClearTarget();
         }

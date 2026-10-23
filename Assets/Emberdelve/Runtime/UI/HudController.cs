@@ -142,6 +142,7 @@ namespace Emberdelve.UI
             GameEvents.ActiveWeaponChanged += OnActiveWeapon;
             GameEvents.ToastRaised += OnToast;
             GameEvents.RunStateChanged += OnRunState;
+            GameEvents.PlayerRunStateChanged += OnPlayerRunState;
             GameEvents.PauseChanged += OnPause;
         }
 
@@ -163,6 +164,7 @@ namespace Emberdelve.UI
             GameEvents.ActiveWeaponChanged -= OnActiveWeapon;
             GameEvents.ToastRaised -= OnToast;
             GameEvents.RunStateChanged -= OnRunState;
+            GameEvents.PlayerRunStateChanged -= OnPlayerRunState;
             GameEvents.PauseChanged -= OnPause;
         }
 
@@ -219,7 +221,7 @@ namespace Emberdelve.UI
 
             PlayerRig rig = _director != null ? _director.Player : null;
             EmberdelveInput input = rig != null ? rig.Input : null;
-            bool running = _director == null || _director.State == RunState.Running;
+            bool running = _director == null || (_director.State == RunState.Running && _director.LocalPlayerState == RunState.Running);
 
             if (input != null && running && input.InventoryPressed)
             {
@@ -609,7 +611,13 @@ namespace Emberdelve.UI
                                     $"value {inventory.CarriedValue}   worn {worn}   [I] satchel";
         }
 
-        private void OnPlayerHealth(float current, float max)
+        private void OnPlayerHealth(int playerId, float current, float max)
+        {
+            if (!PlayerView.Shows(playerId)) return;
+            ApplyPlayerHealth(current, max);
+        }
+
+        private void ApplyPlayerHealth(float current, float max)
         {
             if (_healthFill == null) return;
 
@@ -619,17 +627,19 @@ namespace Emberdelve.UI
             if (_healthLabel != null) _healthLabel.text = Mathf.CeilToInt(current) + " / " + Mathf.CeilToInt(max);
         }
 
-        private void OnPlayerDamaged(DamageInfo info)
+        private void OnPlayerDamaged(int playerId, DamageInfo info)
         {
+            if (!PlayerView.Shows(playerId)) return;
             _vignetteTimer = VignetteDuration;
 
             // D1b: a broken guard says so (the block was engaged but the hit's impact power reached its resist).
             string label = info.GuardBroken ? "GUARD BROKEN" : info.Blocked ? "Blocked" : "Hit";
-            GameEvents.RaiseToast($"{label}  -{Mathf.RoundToInt(info.Amount)} HP");
+            GameEvents.RaiseToast(playerId, $"{label}  -{Mathf.RoundToInt(info.Amount)} HP");
         }
 
-        private void OnDamageDealt(HitFeedback feedback)
+        private void OnDamageDealt(int playerId, HitFeedback feedback)
         {
+            if (!PlayerView.Shows(playerId)) return;
             if (_hitMarker != null)
             {
                 _hitMarker.gameObject.SetActive(true);
@@ -637,18 +647,21 @@ namespace Emberdelve.UI
             }
         }
 
-        private void OnItemCollected(ItemData item, int totalCollected)
+        private void OnItemCollected(int playerId, ItemData item, int totalCollected)
         {
-            GameEvents.RaiseToast($"Took {item.displayName}  (+{item.value} value)");
+            if (!PlayerView.Shows(playerId)) return;
+            GameEvents.RaiseToast(playerId, $"Took {item.displayName}  (+{item.value} value)");
         }
 
-        private void OnInventoryChanged()
+        private void OnInventoryChanged(int playerId)
         {
+            if (!PlayerView.Shows(playerId)) return;
             RebuildInventory();
         }
 
-        private void OnAmmo(int current, int reserve)
+        private void OnAmmo(int playerId, int current, int reserve)
         {
+            if (!PlayerView.Shows(playerId)) return;
             if (_ammoLabel == null) return;
 
             _ammoLabel.gameObject.SetActive(true);
@@ -672,7 +685,13 @@ namespace Emberdelve.UI
             _ammoFillRect.sizeDelta = new Vector2(220f * Mathf.Clamp01(current / (float)magazineCapacity), 10f);
         }
 
-        private void OnPlayerMana(float current, float max)
+        private void OnPlayerMana(int playerId, float current, float max)
+        {
+            if (!PlayerView.Shows(playerId)) return;
+            ApplyPlayerMana(current, max);
+        }
+
+        private void ApplyPlayerMana(float current, float max)
         {
             if (_manaFill == null) return;
 
@@ -723,7 +742,13 @@ namespace Emberdelve.UI
             if (_staminaLabel != null) _staminaLabel.text = $"Stamina  {shownCurrent} / {shownMax}";
         }
 
-        private void OnSkillState(SkillSnapshot snapshot)
+        private void OnSkillState(int playerId, SkillSnapshot snapshot)
+        {
+            if (!PlayerView.Shows(playerId)) return;
+            ApplySkillState(snapshot);
+        }
+
+        private void ApplySkillState(SkillSnapshot snapshot)
         {
             if (snapshot.Slot < 0 || snapshot.Slot >= _skillSlots.Length) return;
 
@@ -779,8 +804,9 @@ namespace Emberdelve.UI
             }
         }
 
-        private void OnSkillRejected(SkillSnapshot snapshot, string reason)
+        private void OnSkillRejected(int playerId, SkillSnapshot snapshot, string reason)
         {
+            if (!PlayerView.Shows(playerId)) return;
             if (snapshot.Slot < 0 || snapshot.Slot >= _skillSlots.Length) return;
 
             SkillSlotWidget widget = _skillSlots[snapshot.Slot];
@@ -794,14 +820,16 @@ namespace Emberdelve.UI
             widget.RejectTimer = SkillRejectFlash;
         }
 
-        private void OnPrompt(string prompt)
+        private void OnPrompt(int playerId, string prompt)
         {
+            if (!PlayerView.Shows(playerId)) return;
             if (_promptLabel == null) return;
             _promptLabel.text = prompt ?? string.Empty;
         }
 
-        private void OnHold(float progress)
+        private void OnHold(int playerId, float progress)
         {
+            if (!PlayerView.Shows(playerId)) return;
             _holdProgress = Mathf.Clamp01(progress);
             if (_holdFill == null) return;
 
@@ -816,13 +844,15 @@ namespace Emberdelve.UI
             if (_objectiveLabel != null) _objectiveLabel.text = objective ?? string.Empty;
         }
 
-        private void OnStatus(string status)
+        private void OnStatus(int playerId, string status)
         {
+            if (!PlayerView.Shows(playerId)) return;
             if (_statusLabel != null) _statusLabel.text = status ?? string.Empty;
         }
 
-        private void OnToast(string message)
+        private void OnToast(int playerId, string message)
         {
+            if (!PlayerView.Shows(playerId)) return;
             if (_toastLabel == null) return;
             _toastLabel.text = message ?? string.Empty;
 
@@ -833,10 +863,24 @@ namespace Emberdelve.UI
             _toastTimer = ToastDuration;
         }
 
-        private void OnActiveWeapon(WeaponData weapon)
+        private void OnActiveWeapon(int playerId, WeaponData weapon)
+        {
+            if (!PlayerView.Shows(playerId)) return;
+            ApplyActiveWeapon(weapon);
+        }
+
+        private void ApplyActiveWeapon(WeaponData weapon)
         {
             if (_weaponLabel == null) return;
             _weaponLabel.text = weapon != null ? weapon.displayName : "Unarmed";
+        }
+
+        // R7: the HUD follows the run-wide state AND the local player's own run state (the local player dying hides it even
+        // while a teammate or another party keeps the run going).
+        private void OnPlayerRunState(int playerId, RunState state)
+        {
+            if (!PlayerView.Shows(playerId) || playerId == GameEvents.NoPlayer) return;
+            OnRunState(state);
         }
 
         private void OnRunState(RunState state)
@@ -856,10 +900,10 @@ namespace Emberdelve.UI
 
                     // Seed the bar from live rig state as well as from the event stream: class setup can
                     // raise the very first health change before this HUD is listening.
-                    OnPlayerHealth(_director.Player.CurrentHealth, _director.Player.MaxHealth);
-                    OnActiveWeapon(_director.Player.Loadout != null ? _director.Player.Loadout.ActiveWeapon : null);
+                    ApplyPlayerHealth(_director.Player.CurrentHealth, _director.Player.MaxHealth);
+                    ApplyActiveWeapon(_director.Player.Loadout != null ? _director.Player.Loadout.ActiveWeapon : null);
 
-                    OnPlayerMana(_director.Player.Mana != null ? _director.Player.Mana.CurrentMana : 0f,
+                    ApplyPlayerMana(_director.Player.Mana != null ? _director.Player.Mana.CurrentMana : 0f,
                         _director.Player.Mana != null ? _director.Player.Mana.MaxMana : 0f);
 
                     // Stamina has no GameEvents channel yet (the pool only raises its own Changed), and the
@@ -872,7 +916,7 @@ namespace Emberdelve.UI
                     SkillCaster caster = _director.Player.Skills;
                     if (caster != null)
                     {
-                        for (int i = 0; i < _skillSlots.Length; i++) OnSkillState(caster.Snapshot(i));
+                        for (int i = 0; i < _skillSlots.Length; i++) ApplySkillState(caster.Snapshot(i));
                         OnKitChanged(caster);
                     }
 

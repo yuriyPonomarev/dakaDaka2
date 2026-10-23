@@ -64,6 +64,16 @@ namespace Emberdelve.Skills
         /// </summary>
         public int KitEpoch { get; private set; }
 
+        /// <summary>R7: the player this component belongs to; every event it raises carries it (0 = no player, e.g. a bare bag in a tool).</summary>
+        private int OwnerId
+        {
+            get
+            {
+                if (rig == null) rig = GetComponent<PlayerRig>();
+                return rig != null ? rig.PlayerId : GameEvents.NoPlayer;
+            }
+        }
+
         private void Awake()
         {
             if (rig == null) rig = GetComponent<PlayerRig>();
@@ -102,7 +112,7 @@ namespace Emberdelve.Skills
             {
                 _castableCache[i] = CanCastSlot(i, out _);
                 _readyCache[i] = IsReady(i);
-                GameEvents.RaiseSkillState(Snapshot(i));
+                GameEvents.RaiseSkillState(OwnerId, Snapshot(i));
             }
         }
 
@@ -160,7 +170,7 @@ namespace Emberdelve.Skills
                 {
                     _readyCache[i] = ready;
                     _castableCache[i] = castable;
-                    GameEvents.RaiseSkillState(Snapshot(i));
+                    GameEvents.RaiseSkillState(OwnerId, Snapshot(i));
                 }
             }
 
@@ -302,7 +312,7 @@ namespace Emberdelve.Skills
                 _castableCache[slot] = false;
                 _readyCache[slot] = false;
                 Reject(slot, "the cast could not be performed");
-                GameEvents.RaiseSkillState(Snapshot(slot));
+                GameEvents.RaiseSkillState(OwnerId, Snapshot(slot));
                 return false;
             }
 
@@ -310,7 +320,7 @@ namespace Emberdelve.Skills
             _castableCache[slot] = false;
             _readyCache[slot] = false;
 
-            GameEvents.RaiseSkillState(Snapshot(slot));
+            GameEvents.RaiseSkillState(OwnerId, Snapshot(slot));
             return true;
         }
 
@@ -353,7 +363,7 @@ namespace Emberdelve.Skills
                 _cooldownRemaining[i] = 0f;
                 _castableCache[i] = false;
                 _readyCache[i] = true;
-                GameEvents.RaiseSkillState(Snapshot(i));
+                GameEvents.RaiseSkillState(OwnerId, Snapshot(i));
             }
 
             if (rig != null)
@@ -373,7 +383,7 @@ namespace Emberdelve.Skills
             for (int i = 0; i < ActiveSlotCapacity; i++)
             {
                 _cooldownRemaining[i] = 0f;
-                GameEvents.RaiseSkillState(Snapshot(i));
+                GameEvents.RaiseSkillState(OwnerId, Snapshot(i));
             }
         }
 
@@ -407,15 +417,15 @@ namespace Emberdelve.Skills
         private void Reject(int slot, string reason)
         {
             SkillSnapshot snapshot = slot >= 0 ? Snapshot(slot) : SkillSnapshot.Empty(-1);
-            GameEvents.RaiseSkillRejected(snapshot, reason);
+            GameEvents.RaiseSkillRejected(OwnerId, snapshot, reason);
 
             if (!string.IsNullOrEmpty(snapshot.DisplayName))
             {
-                GameEvents.RaiseToast($"{snapshot.DisplayName}: {reason}");
+                GameEvents.RaiseToast(OwnerId, $"{snapshot.DisplayName}: {reason}");
             }
             else
             {
-                GameEvents.RaiseToast(reason);
+                GameEvents.RaiseToast(OwnerId, reason);
             }
         }
     }

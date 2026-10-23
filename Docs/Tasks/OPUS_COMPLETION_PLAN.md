@@ -18,13 +18,13 @@ Saved all 57 initial modified/untracked paths at C:/Users/yrapa/.pi/agent/projec
 
 Prior final projectile evidence: focused 50/0; SweptMelee 638/0; CombatFlow 376/0; AttributeSkill 925/0; CombatAuthority 49/0; SkillAuthority 161/0; Archer smoke 120/0. Real Editor diagnostic advanced 39 frames with guard active and matching visible/authority blade poses. See PROJECTILE_WEAPON_BLOCK.md.
 
-Fresh MultiPlayer baseline: 123 checks / 2 failures, both ranged assertions still using the old immediate-damage path (Logs/opus_finish_20261023_01_MultiPlayer.log). Independent review also identified ID-only interaction actor lookup and missing finite-coordinate rejection. These were corrected; the fresh 38-gate batch confirms MultiPlayer134/0. Five legacy fixture groups still require migration to time-of-flight and the authored rapier guard baseline before the integration commit. Raw evidence: Logs/opus_finish_20261023_04_integration; clean runner/authority rerun: Logs/opus_finish_20261023_05_runner.
+Fresh MultiPlayer baseline: 123 checks / 2 failures, both ranged assertions still using the old immediate-damage path (Logs/opus_finish_20261023_01_MultiPlayer.log). Independent review also identified ID-only interaction actor lookup and missing finite-coordinate rejection. These were corrected; the fresh 38-gate batch confirms MultiPlayer134/0. The five legacy fixture groups were migrated and independently rerun; all38 groups now have passing selected evidence (C0_INTEGRATION.md). Raw evidence: Logs/opus_finish_20261023_04_integration; clean runner/authority rerun: Logs/opus_finish_20261023_05_runner.
 
 ## Ordered milestones
 
 | Slice | Work | Acceptance before commit |
 |---|---|---|
-| C0 | Finish/review R2+R7 and integrate projectile work | MultiPlayer negative/positive cases; broad affected combat, inventory, extraction/result gates; honest integration commit |
+| C0 DONE | Finish/review R2+R7 and integrate projectile work | All38 gate groups pass; exact evidence and fixture corrections in C0_INTEGRATION.md. Offline scope only. |
 | R6a | Stable non-reused runtime inventory stack IDs | Move/list compaction/merge/consume/clear/restore identity; gear UIDs and snapshot JSON unchanged |
 | R6b | Owner-bound sequenced inventory commands; authority owns consumable effects | Replay/order/stale revision/ID/owner refusal, atomic transfer and exact effects |
 | R6c | Stable hotbar bindings and inventory view/selection split | No direct UI mutation calls; real input and inventory UI regressions |

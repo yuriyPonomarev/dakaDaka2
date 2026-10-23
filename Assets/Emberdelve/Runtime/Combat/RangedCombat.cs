@@ -9,11 +9,8 @@ using Emberdelve.Player;
 namespace Emberdelve.Combat
 {
     /// <summary>
-    /// Archer draw-and-release state machine plus ammunition bookkeeping.
-    /// Like MeleeCombat it only produces intent: the shot is resolved by a ray the component runs
-    /// from the muzzle, and the resulting HitCandidate (an id, not a reference) is handed to the
-    /// combat authority. A future authoritative server can run the same ray from its own replicated
-    /// positions and ignore the client's claim entirely.
+    /// Archer draw-and-release state machine plus ammunition bookkeeping. It produces a launch intent;
+    /// the authority owns projectile travel, ordered collision, and impact damage.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(PlayerRig))]
@@ -46,6 +43,16 @@ namespace Emberdelve.Combat
         public float Charge => _drawing ? Mathf.Clamp01((Time.time - _drawStartedAt) / Mathf.Max(0.05f, _weapon.drawTime)) : 0f;
         public float ReloadProgress => _reloading ? 1f - Mathf.Clamp01(_reloadTimer / Mathf.Max(0.05f, _weapon.reloadTime)) : 0f;
 
+        /// <summary>R7: the player this component belongs to; every event it raises carries it (0 = no player, e.g. a bare bag in a tool).</summary>
+        private int OwnerId
+        {
+            get
+            {
+                if (rig == null) rig = GetComponent<PlayerRig>();
+                return rig != null ? rig.PlayerId : GameEvents.NoPlayer;
+            }
+        }
+
         private void Awake()
         {
             if (rig == null) rig = GetComponent<PlayerRig>();
@@ -73,7 +80,7 @@ namespace Emberdelve.Combat
             _drawing = false;
             _reloading = false;
 
-            GameEvents.RaiseAmmo(_magazine, _reserve);
+            GameEvents.RaiseAmmo(OwnerId, _magazine, _reserve);
         }
 
         private void Update()
@@ -118,7 +125,7 @@ namespace Emberdelve.Combat
                     CancelDraw();
 
                     if (charge >= _weapon.minChargeToFire) Fire(charge);
-                    else GameEvents.RaiseToast("Shot released too early");
+                    else GameEvents.RaiseToast(OwnerId, "Shot released too early");
                 }
             }
             else
@@ -135,7 +142,7 @@ namespace Emberdelve.Combat
             _reloading = true;
             _reloadTimer = Mathf.Max(0.1f, _weapon.reloadTime);
             CancelDraw();
-            GameEvents.RaiseToast("Reloading...");
+            GameEvents.RaiseToast(OwnerId, "Reloading...");
         }
 
         private void FinishReload()
@@ -145,14 +152,14 @@ namespace Emberdelve.Combat
             int taken = Mathf.Min(need, _reserve);
             _magazine += taken;
             _reserve -= taken;
-            GameEvents.RaiseAmmo(_magazine, _reserve);
+            GameEvents.RaiseAmmo(OwnerId, _magazine, _reserve);
         }
 
         public void AddAmmo(int amount)
         {
             if (_weapon == null || amount <= 0) return;
             _reserve = _maxReserve > 0 ? Mathf.Min(_reserve + amount, _maxReserve) : _reserve + amount;
-            GameEvents.RaiseAmmo(_magazine, _reserve);
+            GameEvents.RaiseAmmo(OwnerId, _magazine, _reserve);
         }
 
         /// <summary>
@@ -172,7 +179,7 @@ namespace Emberdelve.Combat
             if (!HasAmmo(needed)) return false;
 
             _magazine -= needed;
-            GameEvents.RaiseAmmo(_magazine, _reserve);
+            GameEvents.RaiseAmmo(OwnerId, _magazine, _reserve);
             return true;
         }
 
@@ -184,7 +191,7 @@ namespace Emberdelve.Combat
         {
             if (_weapon == null || !_weapon.IsRanged || count <= 0) return;
             _magazine = Mathf.Min(Mathf.Clamp(_weapon.magazineSize, 1, 99), _magazine + count);
-            GameEvents.RaiseAmmo(_magazine, _reserve);
+            GameEvents.RaiseAmmo(OwnerId, _magazine, _reserve);
         }
 
         /// <summary>Abandons an in-progress draw, e.g. because a skill is about to fire instead.</summary>
@@ -208,57 +215,23 @@ namespace Emberdelve.Combat
             Vector3 muzzle = rig.GetMuzzlePosition();
             Vector3 direction = rig.AimDirection;
             float range = Mathf.Max(1f, _weapon.rangedRange);
-
-            LayerMask hitMask = config != null ? config.hitMask : Physics.AllLayers;
-            LayerMask levelMask = config != null ? config.levelMask : Physics.DefaultRaycastLayers;
-            int mask = hitMask.value | levelMask.value;
-
-            int count = Physics.RaycastNonAlloc(muzzle, direction, _rayBuffer, range, mask, QueryTriggerInteraction.Ignore);
-            Array.Sort(_rayBuffer, 0, count, Comparer<RaycastHit>.Create((a, b) => a.distance.CompareTo(b.distance)));
-
-            Vector3 endpoint = muzzle + direction * range;
-            HitCandidate candidate = default;
-            bool hasTarget = false;
-
-            for (int i = 0; i < count; i++)
-            {
-                Collider collider = _rayBuffer[i].collider;
-                if (collider == null) continue;
-
-                endpoint = _rayBuffer[i].point;
-
-                ICombatEntity entity = collider.GetComponentInParent<ICombatEntity>();
-                if (entity == null || entity.IsDead || entity.CombatId == rig.CombatId) break;
-
-                candidate = new HitCandidate(entity.CombatId, _rayBuffer[i].point,
-                    entity.HeadCollider != null && collider == entity.HeadCollider);
-                hasTarget = true;
-                break;
-            }
-
             AttackIntent intent = new AttackIntent(rig.CombatId, rig.Kind, _weapon, charge, muzzle, direction,
                 range, sequence, Time.time);
-
-            // Ammo: the authority validates (it refuses a ranged attack from an empty magazine) and SPENDS the
-            // round for an attack it accepts, because it reads the magazine through IAmmoSource. A shot the
-            // authority did not accept (a miss, no target, a rejected intent) is still a fired round, so it is
-            // spent here. Exactly one of the two spends per shot: no double spend, no free accepted hit.
-            // Note: the draw Charge is still a client claim (clamped 0..1); a server draw timer is U3.
-            bool accepted = hasTarget && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
-                            && authority.SubmitAttack(intent, candidate);
+            bool accepted = GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
+                            && authority.LaunchProjectile(intent);
 
             CombatDiagnostics.Log("ranged-shot",
-                $"[RangedCombat] shot #{sequence} ({_weapon.weaponId}) charge {charge:F2}: {(hasTarget ? $"ray hit #{candidate.TargetCombatId}" : "ray hit no combat entity")}, accepted={accepted}", this);
+                $"[RangedCombat] projectile #{sequence} ({_weapon.weaponId}) charge {charge:F2}, accepted={accepted}", this);
 
+            // A rejected launch still consumes the fired round locally, matching the old miss/rejection path.
+            // Accepted launches spend it once on the authority.
             if (!accepted) _magazine = Mathf.Max(0, _magazine - 1);
-            GameEvents.RaiseAmmo(_magazine, _reserve);
-
-            ProjectileVisual.SpawnArrow(muzzle, endpoint, _weapon);
+            GameEvents.RaiseAmmo(OwnerId, _magazine, _reserve);
 
             AttackStarted?.Invoke(intent);
             ShotFired?.Invoke();
 
-            if (_magazine == 0) GameEvents.RaiseToast($"Out of {(_weapon != null && !string.IsNullOrEmpty(_weapon.ammoDisplayName) ? _weapon.ammoDisplayName : "ammo")} - press R to reload");
+            if (_magazine == 0) GameEvents.RaiseToast(OwnerId, $"Out of {(_weapon != null && !string.IsNullOrEmpty(_weapon.ammoDisplayName) ? _weapon.ammoDisplayName : "ammo")} - press R to reload");
         }
 
         private void OnDisable()
