@@ -79,8 +79,8 @@ namespace Emberdelve.Items
     /// Stack-based carrying bag for the local player, stored as a real width x height cell grid.
     ///
     /// It stores what the player holds; it never decides what a pickup is worth or whether a run succeeds
-    /// (RunDirector does that from the facts raised through GameEvents). Consumables apply their effect here
-    /// because that is the only place that knows both the item data and the owner's combat components.
+    /// (RunDirector does that from the facts raised through GameEvents). Consumable effects are resolved by the
+    /// bound inventory authority so the live stack identity and owner are checked before an effect is applied.
     ///
     /// Placement is validated, not assumed: an item only enters the grid if its footprint fits, an existing
     /// stack only takes units of the same item up to its cap, and a move is refused when the destination
@@ -131,6 +131,7 @@ namespace Emberdelve.Items
         // Local identity plumbing (U2B4). A local trusted issuer for one process, not a network authority.
         private ItemIdentityIssuer _issuer;
         private Equipment _equipment;
+        [NonSerialized] private LocalInventoryAuthority _localAuthority;
 
         // R3: the run's one item catalog. Null until the loadout (or a test) supplies it; gear is only minted
         // against it.
@@ -171,6 +172,8 @@ namespace Emberdelve.Items
         public int UsedCells { get; private set; }
         public int FreeCells => Mathf.Max(0, Capacity - UsedCells);
         public IReadOnlyList<InventorySlot> Slots => _views;
+        /// <summary>Local command authority bound to this rig's exact bag and equipment pair, when wired.</summary>
+        public IInventoryAuthority CommandAuthority => GetOrCreateLocalAuthority();
         public int TotalUnits { get; private set; }
         public int CarriedValue { get; private set; }
 
@@ -224,9 +227,23 @@ namespace Emberdelve.Items
 
         public void Initialize(PlayerRig rig)
         {
+            if (!ReferenceEquals(_rig, rig)) _localAuthority = null;
             _rig = rig;
             _rangedCombat = GetComponent<RangedCombat>();
             EnsureGrid();
+        }
+
+        private LocalInventoryAuthority GetOrCreateLocalAuthority()
+        {
+            if (_rig == null) _rig = GetComponent<PlayerRig>();
+            if (_rig == null) return null;
+            if (_localAuthority == null)
+            {
+                Equipment equipment = _rig.Equipment != null ? _rig.Equipment : EquipmentPartner();
+                if (equipment == null) return null;
+                _localAuthority = new LocalInventoryAuthority(_rig, this, equipment);
+            }
+            return _localAuthority;
         }
 
         /// <summary>Kept for callers that only know a bag size: it becomes a grid of that many cells.</summary>
@@ -1484,6 +1501,46 @@ namespace Emberdelve.Items
             return removed;
         }
 
+        /// <summary>Consumes an exact live stack silently for authority-owned effects, committing one revision.</summary>
+        internal bool TryConsumeStackSilently(ulong stackId, int amount, ItemData expectedDefinition,
+            out ItemData consumedDefinition, out string reason)
+        {
+            consumedDefinition = null;
+            EnsureGrid();
+            int index = IndexOfStack(stackId);
+            if (index < 0 || index >= _stacks.Count)
+            {
+                reason = "source stack identity is unknown or retired";
+                return false;
+            }
+            if (amount != 1)
+            {
+                reason = "authority use consumes exactly one item";
+                return false;
+            }
+
+            Stack stack = _stacks[index];
+            if (stack == null || stack.Count < 1 || stack.Definition == null || stack.Definition != expectedDefinition)
+            {
+                reason = "the live stack no longer matches the requested item";
+                return false;
+            }
+            if (!CanCommitRevision(out reason)) return false;
+
+            consumedDefinition = stack.Definition;
+            stack.Count--;
+            if (stack.Count <= 0) _stacks.RemoveAt(index);
+            Recompute();
+            TotalUnits = Mathf.Max(0, TotalUnits - 1);
+            CarriedValue = Mathf.Max(0, CarriedValue - consumedDefinition.value);
+            CommitRevision();
+            reason = null;
+            return true;
+        }
+
+        /// <summary>Publishes the inventory half after a silent authority-owned consume and its effect commit.</summary>
+        internal void NotifyAuthorityMutation() => GameEvents.RaiseInventoryChanged(OwnerId);
+
         public int IndexOfItem(ItemData item)
         {
             if (item == null) return -1;
@@ -1540,44 +1597,14 @@ namespace Emberdelve.Items
         public bool TryUseSlot(int index)
         {
             if (index < 0 || index >= _stacks.Count) return false;
-            // The effect is applied before the existing nested removal notification; fail closed first at the
-            // terminal revision so a successful heal/ammo grant can never become free.
-            if (!CanCommitRevision(out _)) return false;
-
-            Stack stack = _stacks[index];
-            ItemData item = stack.Definition;
-            if (item == null) return false;
-
-            bool applied = false;
-
-            if (item.healAmount > 0 && _rig != null && _rig.Health != null)
-            {
-                if (_rig.Health.IsDead) return false;
-                if (_rig.Health.CurrentHealth >= _rig.Health.MaxHealth)
-                {
-                    GameEvents.RaiseToast(OwnerId, "Already at full health");
-                    return false;
-                }
-                _rig.Health.Heal(item.healAmount);
-                GameEvents.RaiseToast(OwnerId, $"Used {item.displayName} (+{item.healAmount} HP)");
-                applied = true;
-            }
-
-            if (item.ammoGrant > 0 && _rangedCombat != null)
-            {
-                _rangedCombat.AddAmmo(item.ammoGrant);
-                GameEvents.RaiseToast(OwnerId, $"Used {item.displayName} (+{item.ammoGrant} arrows)");
-                applied = true;
-            }
-
-            if (!applied)
-            {
-                GameEvents.RaiseToast(OwnerId, $"{item.displayName} cannot be used");
-                return false;
-            }
-
-            TryRemoveAt(index, 1);
-            return true;
+            LocalInventoryAuthority authority = GetOrCreateLocalAuthority();
+            InventorySlot slot = _views[index];
+            if (authority == null || slot.StackId == 0 ||
+                !authority.TryCreateLocalCommand(InventoryCommandKind.Use, slot.StackId, 0,
+                    Vector2Int.zero, EquipmentSlot.None,
+                    slot.Instance != null ? slot.Instance.Uid : Guid.Empty, Guid.Empty,
+                    out InventoryCommand command, out _)) return false;
+            return authority.Submit(_rig, command).Accepted;
         }
 
         public void Clear()

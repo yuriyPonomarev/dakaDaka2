@@ -47,6 +47,11 @@ foreach($method in $Methods){
         $expectedDiagnostics=@($bad | Where-Object {$_ -eq $expectedLine})
         $bad=@($bad | Where-Object {$_ -ne $expectedLine})
     }
+    if($method -eq 'Emberdelve.EditorTools.EmberdelveInventoryAuthorityGate.Run'){
+        $expectedLine='InvalidOperationException: expected inventory use observer exception'
+        $expectedDiagnostics=@($bad | Where-Object {$_ -eq $expectedLine})
+        $bad=@($bad | Where-Object {$_ -ne $expectedLine})
+    }
     $passed=(!$timedOut -and $exitCode -eq 0 -and $positive.Count -ge 1 -and $bad.Count -eq 0)
     $result=[pscustomobject]@{
         method=$method; passed=$passed; exitCode=$exitCode; timedOut=$timedOut

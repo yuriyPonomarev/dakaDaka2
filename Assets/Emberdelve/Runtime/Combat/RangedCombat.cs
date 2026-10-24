@@ -38,6 +38,8 @@ namespace Emberdelve.Combat
         public WeaponData Weapon => _weapon;
         public int Magazine => _magazine;
         public int Reserve => _reserve;
+        internal bool CanAcceptAmmo(int amount) => _weapon != null && amount > 0 &&
+            (_maxReserve <= 0 || _reserve < _maxReserve);
         public bool IsDrawing => _drawing;
         public bool IsReloading => _reloading;
         public float Charge => _drawing ? Mathf.Clamp01((Time.time - _drawStartedAt) / Mathf.Max(0.05f, _weapon.drawTime)) : 0f;
