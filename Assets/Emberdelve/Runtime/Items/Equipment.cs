@@ -325,6 +325,8 @@ namespace Emberdelve.Items
 
             ItemInstance previous = _gear[index];
 
+            if (!_inventory.CanCommitRevision(out reason)) return false;
+
             // The bag half first. Inventory plans the hole for the outgoing item using the space the incoming
             // unit is about to vacate, and commits both moves together. A refusal here has changed nothing, and
             // a success has told nobody yet: the transfer is silent so this component can finish its own half.
@@ -332,6 +334,7 @@ namespace Emberdelve.Items
 
             ApplyToSlot(index, incoming);
             RefreshStats();
+            _inventory.CommitRevision();
 
             // Only now is the whole change real: bag, slot, hand and the refreshed stat source. The one
             // inventory notification an equipment transfer owes its observers is raised here, never from
@@ -358,6 +361,20 @@ namespace Emberdelve.Items
 
         public void Clear()
         {
+            bool changed = false;
+            for (int i = 0; i < SlotCount; i++) changed |= _gear[i] != null;
+            Inventory revisionOwner = BagPartner();
+            if (changed && revisionOwner == null)
+            {
+                Debug.LogWarning("Equipment cannot clear a worn loadout without its shared inventory revision owner.", this);
+                return;
+            }
+            if (changed && !revisionOwner.CanCommitRevision(out string revisionReason))
+            {
+                Debug.LogWarning(revisionReason, this);
+                return;
+            }
+
             for (int i = 0; i < SlotCount; i++)
             {
                 if (_gear[i] != null) RestoreClassHand((EquipmentSlot)i);
@@ -366,6 +383,7 @@ namespace Emberdelve.Items
 
             RecomputeSlots();
             RefreshStats();
+            if (changed) revisionOwner.CommitRevision();
         }
 
         /// <summary>
@@ -491,10 +509,18 @@ namespace Emberdelve.Items
         {
             if (!TryPrepareRestore(snapshot, others, true, out ValidatedContainer validated, out reason)) return false;
 
+            Inventory revisionOwner = BagPartner();
+            if (revisionOwner == null || !revisionOwner.CanCommitRevision(out reason))
+            {
+                if (revisionOwner == null) reason = "equipment has no shared inventory revision owner";
+                return false;
+            }
+
             // The ledger passed in is the profile's: it is updated together with the restore (it was already checked).
             if (others != null && !others.TryReplaceOwner(validated.ContainerId, validated.Uids, out reason)) return false;
 
             List<ItemData> removed = ApplyRestore(validated);
+            revisionOwner.CommitRevision();
             NotifyRestore(removed, validated);
             return true;
         }
@@ -694,6 +720,8 @@ namespace Emberdelve.Items
                 return false;
             }
 
+            if (!_inventory.CanCommitRevision(out reason)) return false;
+
             // Silent transfer: the bag now holds the item, but this slot still says it is worn and the stat
             // source still carries its contribution. Finish that before anyone is allowed to look.
             if (!_inventory.TryUnequipTransfer(worn, out reason)) return false;
@@ -706,6 +734,7 @@ namespace Emberdelve.Items
             if (item.GrantsWeapon) RestoreClassHand((EquipmentSlot)index);
 
             RefreshStats();
+            _inventory.CommitRevision();
 
             // One notification for one committed transfer, raised after the slot, the hand and the numbers
             // all agree with the bag.

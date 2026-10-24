@@ -26,7 +26,7 @@ Fresh MultiPlayer baseline: 123 checks / 2 failures, both ranged assertions stil
 |---|---|---|
 | C0 DONE | Finish/review R2+R7 and integrate projectile work | All38 gate groups pass; exact evidence and fixture corrections in C0_INTEGRATION.md. Offline scope only. |
 | R6a DONE | Stable non-reused runtime inventory stack IDs | StackId56/0 and6 regression groups pass (11,875 checks); gear UIDs and snapshot JSON unchanged. See R6a.md. |
-| R6b1 | Shared inventory/loadout revision commit plumbing | Exact-once committed mutation, no refusal/rollback/no-op bump, atomic restore observers. |
+| R6b1 DONE | Shared inventory/loadout revision commit plumbing | Revision35/0 and9 regression groups PASS (12,140 checks); exact-once commits and final-state observers. See R6b1.md. |
 | R6b2 | Owner-bound sequenced inventory commands; authority owns consumable effects | Replay/order/stale revision/ID/owner refusal, atomic transfer and exact effects. |
 | R6c | Stable hotbar bindings and inventory view/selection split | No direct UI mutation calls; real input and inventory UI regressions |
 | R10a DONE | Immutable effective-stat capture over existing authoritative inputs | Commit4127e494; EffectiveStats17/0, independent literals/nonempty affixes and immutable old captures. Runtime integration remains R10b. |

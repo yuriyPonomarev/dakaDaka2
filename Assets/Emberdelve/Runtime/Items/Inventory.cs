@@ -181,6 +181,30 @@ namespace Emberdelve.Items
 
         private bool _givingStartingKit;
 
+        /// <summary>Monotonic revision for the shared bag/equipment loadout owned by this inventory.</summary>
+        public ulong Revision { get; private set; }
+
+        /// <summary>Checks the shared revision boundary before a caller starts a transaction that may mutate state.</summary>
+        internal bool CanCommitRevision(out string reason)
+        {
+            if (Revision == ulong.MaxValue)
+            {
+                reason = "this inventory/loadout revision is exhausted";
+                return false;
+            }
+
+            reason = null;
+            return true;
+        }
+
+        /// <summary>Commits one logical mutation. Call once after every state half is final and before outward events.</summary>
+        internal void CommitRevision()
+        {
+            if (Revision == ulong.MaxValue)
+                throw new InvalidOperationException("This inventory/loadout exhausted its revision space.");
+            Revision++;
+        }
+
         /// <summary>R7: the player this component belongs to; every event it raises carries it (0 = no player, e.g. a bare bag in a tool).</summary>
         private int OwnerId
         {
@@ -225,12 +249,19 @@ namespace Emberdelve.Items
                 return;
             }
 
+            if (!CanCommitRevision(out string revisionReason))
+            {
+                Debug.LogWarning(revisionReason, this);
+                return;
+            }
+
             gridWidth = newWidth;
             gridHeight = newHeight;
 
             // Reseating the grid re-places everything the player is carrying, and an item that no longer
             // fits is left behind rather than silently deleted.
             List<Stack> carried = new List<Stack>(_stacks);
+            List<string> leftBehind = new List<string>();
             _stacks.Clear();
             EnsureGrid();
             Recompute();
@@ -247,7 +278,7 @@ namespace Emberdelve.Items
                 {
                     TotalUnits = Mathf.Max(0, TotalUnits - stack.Count);
                     CarriedValue = Mathf.Max(0, CarriedValue - definition.value * stack.Count);
-                    GameEvents.RaiseToast(OwnerId, $"Bag too small, left {definition.displayName} behind");
+                    leftBehind.Add($"Bag too small, left {definition.displayName} behind");
                     continue;
                 }
 
@@ -255,6 +286,8 @@ namespace Emberdelve.Items
             }
 
             Recompute();
+            CommitRevision();
+            for (int i = 0; i < leftBehind.Count; i++) GameEvents.RaiseToast(OwnerId, leftBehind[i]);
             GameEvents.RaiseInventoryChanged(OwnerId);
         }
 
@@ -334,6 +367,8 @@ namespace Emberdelve.Items
                 GameEvents.RaiseToast(OwnerId, reason);
                 return false;
             }
+
+            if (!CanCommitRevision(out reason)) return false;
 
             EnsureGrid();
 
@@ -419,6 +454,8 @@ namespace Emberdelve.Items
             TotalUnits += accepted;
             CarriedValue += item.value * accepted;
 
+            CommitRevision();
+
             if (!_givingStartingKit)
             {
                 LifetimeCollected += accepted;
@@ -462,6 +499,8 @@ namespace Emberdelve.Items
                 reason = $"no room for {item.displayName} at cell {origin}";
                 return false;
             }
+
+            if (!CanCommitRevision(out reason)) return false;
 
             int stackLimit = item.StackLimitForFootprint;
             // This exact placement begins in an empty footprint. Validate the maximum number of stacks it can
@@ -532,6 +571,8 @@ namespace Emberdelve.Items
 
             TotalUnits += placed;
             CarriedValue += item.value * placed;
+
+            CommitRevision();
 
             if (!_givingStartingKit)
             {
@@ -705,11 +746,15 @@ namespace Emberdelve.Items
                 return false;
             }
 
+            if (!CanCommitRevision(out reason)) return false;
+
             AddStack(definition, instance, 1, landed);
             Recompute();
 
             TotalUnits += 1;
             CarriedValue += definition.value;
+
+            CommitRevision();
 
             // An instance arriving from outside is loot, exactly like the definition path: the starting kit is
             // still not loot, and an internal transfer never reaches this method at all.
@@ -844,10 +889,13 @@ namespace Emberdelve.Items
         {
             if (!TryPrepareRestore(snapshot, others, true, out ValidatedContainer validated, out reason)) return false;
 
+            if (!CanCommitRevision(out reason)) return false;
+
             // The ledger passed in is the profile's: it is updated together with the restore (it was already checked).
             if (others != null && !others.TryReplaceOwner(validated.ContainerId, validated.Uids, out reason)) return false;
 
             ApplyRestore(validated);
+            CommitRevision();
             NotifyRestore();
             return true;
         }
@@ -1038,6 +1086,7 @@ namespace Emberdelve.Items
             }
 
             Stack stack = _stacks[index];
+            bool changed = stack.Origin != origin;
             Vector2Int size = stack.Definition.EffectiveFootprint;
 
             if (!CanPlace(origin, size, index))
@@ -1046,8 +1095,11 @@ namespace Emberdelve.Items
                 return false;
             }
 
+            if (changed && !CanCommitRevision(out reason)) return false;
+
             stack.Origin = origin;
             Recompute();
+            if (changed) CommitRevision();
             GameEvents.RaiseInventoryChanged(OwnerId);
             return true;
         }
@@ -1119,9 +1171,12 @@ namespace Emberdelve.Items
                 return false;
             }
 
+            if (!CanCommitRevision(out reason)) return false;
+
             first.Origin = secondOrigin;
             second.Origin = firstOrigin;
             Recompute();
+            CommitRevision();
             GameEvents.RaiseInventoryChanged(OwnerId);
             return true;
         }
@@ -1194,6 +1249,7 @@ namespace Emberdelve.Items
             }
 
             int moved = Mathf.Min(space, source.Count);
+            if (!CanCommitRevision(out reason)) return false;
             target.Count += moved;
             source.Count -= moved;
 
@@ -1202,6 +1258,7 @@ namespace Emberdelve.Items
             if (source.Count <= 0) _stacks.RemoveAt(sourceIndex);
 
             Recompute();
+            CommitRevision();
             GameEvents.RaiseInventoryChanged(OwnerId);
             return true;
         }
@@ -1412,6 +1469,7 @@ namespace Emberdelve.Items
 
             Stack stack = _stacks[index];
             int removed = Mathf.Min(amount, stack.Count);
+            if (removed <= 0 || !CanCommitRevision(out _)) return 0;
             stack.Count -= removed;
 
             // A stack that runs out takes its identity with it: no stack, no uid, no stale reference left in a
@@ -1421,6 +1479,7 @@ namespace Emberdelve.Items
             Recompute();
             TotalUnits = Mathf.Max(0, TotalUnits - removed);
             CarriedValue = Mathf.Max(0, CarriedValue - stack.Definition.value * removed);
+            CommitRevision();
             GameEvents.RaiseInventoryChanged(OwnerId);
             return removed;
         }
@@ -1466,9 +1525,12 @@ namespace Emberdelve.Items
             int added = Mathf.Min(space, amount);
             if (added <= 0) return 0;
 
+            if (!CanCommitRevision(out _)) return 0;
+
             stack.Count += added;
 
             Recompute();
+            CommitRevision();
             GameEvents.RaiseInventoryChanged(OwnerId);
             return added;
         }
@@ -1478,6 +1540,9 @@ namespace Emberdelve.Items
         public bool TryUseSlot(int index)
         {
             if (index < 0 || index >= _stacks.Count) return false;
+            // The effect is applied before the existing nested removal notification; fail closed first at the
+            // terminal revision so a successful heal/ammo grant can never become free.
+            if (!CanCommitRevision(out _)) return false;
 
             Stack stack = _stacks[index];
             ItemData item = stack.Definition;
@@ -1517,10 +1582,18 @@ namespace Emberdelve.Items
 
         public void Clear()
         {
+            bool changed = _stacks.Count > 0 || TotalUnits != 0 || CarriedValue != 0;
+            if (changed && !CanCommitRevision(out string revisionReason))
+            {
+                Debug.LogWarning(revisionReason, this);
+                return;
+            }
+
             _stacks.Clear();
             TotalUnits = 0;
             CarriedValue = 0;
             Recompute();
+            if (changed) CommitRevision();
             GameEvents.RaiseInventoryChanged(OwnerId);
         }
 

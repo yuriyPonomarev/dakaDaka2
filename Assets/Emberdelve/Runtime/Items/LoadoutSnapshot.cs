@@ -203,6 +203,8 @@ namespace Emberdelve.Items
                 }
             }
 
+            if (!bag.CanCommitRevision(out reason)) return false;
+
             // Both validated and disjoint. The ledger moves both owners in one atomic step (it was checked above, so
             // this cannot refuse; if it ever did, nothing has been applied yet).
             if (others != null)
@@ -219,6 +221,7 @@ namespace Emberdelve.Items
             // can run a subscriber, so by then both containers are final. Then notify once.
             bag.ApplyRestore(validatedBag);
             List<ItemData> removed = equipment.ApplyRestore(validatedGear);
+            bag.CommitRevision();
             equipment.NotifyRestore(removed, validatedGear); // raises InventoryChanged once, then the equipment events
             reason = null;
             return true;
