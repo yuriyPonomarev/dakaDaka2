@@ -31,6 +31,9 @@ namespace Emberdelve.Skills
 
         private readonly List<Source> _sources = new List<Source>();
 
+        /// <summary>Changes whenever a direct stack mutation changes its resolved values.</summary>
+        public int Version { get; private set; }
+
         public IReadOnlyList<SkillData> Passives => _passives;
         public bool IsBuilt => _passives.Count > 0 || _sources.Count > 0;
 
@@ -40,6 +43,7 @@ namespace Emberdelve.Skills
             _flats.Clear();
             _passives.Clear();
             _sources.Clear();
+            Version++;
         }
 
         public void Build(CharacterClassData classData)
@@ -71,6 +75,7 @@ namespace Emberdelve.Skills
 
             _sources.Add(passives);
             Recompute();
+            Version++;
         }
 
         public const string PassiveSourceKey = "passives";
@@ -105,6 +110,7 @@ namespace Emberdelve.Skills
             }
 
             Recompute();
+            Version++;
         }
 
         public void ClearSource(string key) => SetSource(key, null, null);

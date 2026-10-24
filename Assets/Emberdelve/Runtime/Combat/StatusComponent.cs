@@ -32,6 +32,9 @@ namespace Emberdelve.Combat
 
         private readonly List<Entry> _entries = new List<Entry>(4);
 
+        /// <summary>Changes when an apply, clear, or expiry changes a captured multiplier.</summary>
+        public int Version { get; private set; }
+
         public static StatusComponent Ensure(GameObject target)
         {
             if (target == null) return null;
@@ -102,6 +105,7 @@ namespace Emberdelve.Combat
                 });
             }
 
+            Version++;
             GameEvents.RaiseStatusChanged(SelfCombatId(), spec.Kind, spec.Duration);
         }
 
@@ -109,6 +113,7 @@ namespace Emberdelve.Combat
         {
             if (_entries.Count == 0) return;
             _entries.Clear();
+            Version++;
             GameEvents.RaiseStatusChanged(SelfCombatId(), StatusKind.None, 0f);
         }
 
@@ -128,6 +133,7 @@ namespace Emberdelve.Combat
                 if (entry.Remaining <= 0f)
                 {
                     _entries.RemoveAt(i);
+                    Version++;
                     GameEvents.RaiseStatusChanged(SelfCombatId(), entry.Kind, 0f);
                 }
                 else

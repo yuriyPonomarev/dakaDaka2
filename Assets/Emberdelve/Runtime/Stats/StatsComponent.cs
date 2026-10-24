@@ -47,6 +47,9 @@ namespace Emberdelve.Stats
         private AttributeBonuses _rolledBonuses;
         private bool _ready;
 
+        /// <summary>Changes whenever the class or equipped-instance derivation is replaced.</summary>
+        public int Version { get; private set; }
+
         /// <summary>True once a class has been applied and the first derivation pass has run.</summary>
         public bool IsReady => _ready;
 
@@ -165,6 +168,7 @@ namespace Emberdelve.Stats
                 _derived = default;
                 _rolledBonuses = AttributeBonuses.None;
                 _ready = false;
+                Version++;
                 return;
             }
 
@@ -173,6 +177,7 @@ namespace Emberdelve.Stats
             _rolledBonuses = AttributeBonuses.None;
             _derived = AttributeRules.Derive(_snapshot, _bases);
             _ready = true;
+            Version++;
         }
 
         /// <summary>
@@ -192,6 +197,7 @@ namespace Emberdelve.Stats
             _rolledBonuses = AttributeBonuses.None;
             _snapshot = _snapshot.WithBonuses(SumBonuses(equipped));
             _derived = AttributeRules.Derive(_snapshot, _bases);
+            Version++;
         }
 
         /// <summary>
@@ -240,6 +246,7 @@ namespace Emberdelve.Stats
             _rolledBonuses = rolled;
             _snapshot = _snapshot.WithBonuses(fixedBonuses.Plus(rolled));
             _derived = AttributeRules.Derive(_snapshot, _bases);
+            Version++;
         }
 
         /// <summary>

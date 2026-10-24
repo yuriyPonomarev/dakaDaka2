@@ -44,6 +44,17 @@ namespace Emberdelve.Player
         private bool _wired;
 
         private StatsComponent _attributeStats;
+        private EffectiveStatsSnapshot _effectiveStatsSnapshot;
+        private bool _effectiveStatsSnapshotCached;
+        private int _effectiveStatsRevision;
+        private int _effectiveStatsSnapshotRevision;
+        private int _effectiveStatsSnapshotAttributesVersion;
+        private int _effectiveStatsSnapshotModifiersVersion;
+        private int _effectiveStatsSnapshotStatusVersion;
+        private CharacterClassData _effectiveStatsSnapshotClass;
+        private Equipment _effectiveStatsSnapshotEquipment;
+        private StatusComponent _effectiveStatsSnapshotStatus;
+        private CharacterStatStack _effectiveStatsSnapshotModifiers;
 
         /// <summary>
         /// DEPRECATED (D1b): stamina no longer gates or drains anything in combat or movement (user decision:
@@ -169,7 +180,14 @@ namespace Emberdelve.Player
             GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) && authority is ICombatFlowState flow && flow.IsGuardStaggered(_combatId);
         public bool CanGuard => _defense.CanBlock;
         public bool CanParry => _defense.CanParry;
-        public DefenseProfile Defense => _defense;
+        public DefenseProfile Defense
+        {
+            get
+            {
+                EffectiveStatsSnapshot snapshot = EffectiveStats;
+                return snapshot.IsReady ? snapshot.Defense : _defense;
+            }
+        }
         public bool IsAlive => !IsDead;
 
         public EmberdelveInput Input => input;
@@ -196,6 +214,47 @@ namespace Emberdelve.Player
         /// rig has been wired.
         /// </summary>
         public StatsComponent AttributeStats => _attributeStats;
+
+        /// <summary>
+        /// One cached capture over the current authoritative sources. Source version checks cover direct
+        /// stack, attribute, and status mutations; the rig revision covers hand/defense and class commits.
+        /// </summary>
+        public EffectiveStatsSnapshot EffectiveStats
+        {
+            get
+            {
+                CharacterStatStack modifiers = Stats;
+                int attributesVersion = _attributeStats != null ? _attributeStats.Version : 0;
+                int modifiersVersion = modifiers != null ? modifiers.Version : 0;
+                int statusVersion = status != null ? status.Version : 0;
+                if (!_effectiveStatsSnapshotCached
+                    || _effectiveStatsSnapshotRevision != _effectiveStatsRevision
+                    || _effectiveStatsSnapshotClass != _class
+                    || _effectiveStatsSnapshotEquipment != equipment
+                    || _effectiveStatsSnapshotStatus != status
+                    || _effectiveStatsSnapshotModifiers != modifiers
+                    || _effectiveStatsSnapshotAttributesVersion != attributesVersion
+                    || _effectiveStatsSnapshotModifiersVersion != modifiersVersion
+                    || _effectiveStatsSnapshotStatusVersion != statusVersion)
+                {
+                    _effectiveStatsSnapshot = EffectiveStatsResolver.Capture(_class, _attributeStats,
+                        modifiers, equipment != null ? equipment.WornInstances : null, status, _defense);
+                    _effectiveStatsSnapshotCached = true;
+                    _effectiveStatsSnapshotRevision = _effectiveStatsRevision;
+                    _effectiveStatsSnapshotClass = _class;
+                    _effectiveStatsSnapshotEquipment = equipment;
+                    _effectiveStatsSnapshotStatus = status;
+                    _effectiveStatsSnapshotModifiers = modifiers;
+                    _effectiveStatsSnapshotAttributesVersion = attributesVersion;
+                    _effectiveStatsSnapshotModifiersVersion = modifiersVersion;
+                    _effectiveStatsSnapshotStatusVersion = statusVersion;
+                }
+
+                return _effectiveStatsSnapshot;
+            }
+        }
+
+        private void InvalidateEffectiveStats() => _effectiveStatsRevision++;
         public Vector3 AimOrigin => look != null ? look.AimOrigin : transform.position;
         public Vector3 AimDirection => look != null ? look.AimDirection : transform.forward;
         public Vector3 Facing => transform.forward;
@@ -309,6 +368,7 @@ namespace Emberdelve.Player
             if (movement != null) PushMovementStatSources();
 
             _defense = ResolveDefense(_mainHand);
+            InvalidateEffectiveStats();
         }
 
         /// <summary>
@@ -343,22 +403,12 @@ namespace Emberdelve.Player
 
             if (_class == null) return limits;
 
-            if (_attributeStats != null && _attributeStats.IsReady)
-            {
-                limits.MaxHealth = _attributeStats.MaxHealth;
-                limits.MaxMana = _attributeStats.MaxMana;
-                limits.ManaRegen = _attributeStats.ManaRegen;
-                limits.MaxStamina = _attributeStats.MaxStamina;
-                limits.StaminaRegen = _attributeStats.StaminaRegen;
-            }
-
-            CharacterStatStack stack = Stats;
-            if (stack != null)
-            {
-                limits.MaxHealth = Mathf.Max(1, Mathf.RoundToInt(stack.Get(SkillStat.MaxHealth, limits.MaxHealth)));
-                limits.MaxMana = Mathf.Max(1, Mathf.RoundToInt(stack.Get(SkillStat.MaxMana, limits.MaxMana)));
-                limits.ManaRegen = Mathf.Max(0f, stack.Get(SkillStat.ManaRegen, limits.ManaRegen));
-            }
+            EffectiveStatsSnapshot snapshot = EffectiveStats;
+            limits.MaxHealth = snapshot.MaxHealth;
+            limits.MaxMana = snapshot.MaxMana;
+            limits.ManaRegen = snapshot.ManaRegenPerSecond;
+            limits.MaxStamina = snapshot.MaxStamina;
+            limits.StaminaRegen = snapshot.StaminaRegenPerSecond;
 
             // Stamina has no StatModifier vocabulary in the legacy stack yet (no passive or gear declares
             // it), so its ceiling is the attribute-derived number alone until U3 gives it a drain rule.
@@ -403,6 +453,7 @@ namespace Emberdelve.Player
 
             movement.ApplyStatStack(Stats);
             movement.ApplyAttributeStats(_attributeStats);
+            movement.ApplyEffectiveStatsSource(() => EffectiveStats);
         }
 
         /// <summary>
@@ -460,6 +511,7 @@ namespace Emberdelve.Player
             PushMovementStatSources();
 
             _defense = ResolveDefense(_mainHand);
+            InvalidateEffectiveStats();
         }
 
         /// <summary>
@@ -470,6 +522,7 @@ namespace Emberdelve.Player
         {
             _offhand = weapon != null ? weapon : (_class != null ? _class.offhandShield : null);
             _defense = ResolveDefense(_mainHand);
+            InvalidateEffectiveStats();
             SyncGuardVisual();
         }
 
@@ -495,6 +548,7 @@ namespace Emberdelve.Player
         {
             _mainHand = weapon;
             _defense = ResolveDefense(weapon);
+            InvalidateEffectiveStats();
             SyncGuardVisual();
         }
 
@@ -506,6 +560,9 @@ namespace Emberdelve.Player
         /// </summary>
         public float GetOutgoingDamageMultiplier(WeaponData weapon)
         {
+            EffectiveStatsSnapshot snapshot = EffectiveStats;
+            if (snapshot.IsReady) return snapshot.GetOutgoingDamageMultiplier(weapon);
+
             float multiplier = 1f;
             CharacterStatStack stats = Stats;
 
@@ -552,6 +609,9 @@ namespace Emberdelve.Player
         {
             if (weapon == null) return 0f;
 
+            EffectiveStatsSnapshot snapshot = EffectiveStats;
+            if (snapshot.IsReady) return snapshot.GetFlatWeaponDamageBonus(weapon);
+
             IReadOnlyList<ItemInstance> worn = equipment != null ? equipment.WornInstances : null;
             if (worn == null || worn.Count == 0) return 0f;
 
@@ -587,6 +647,9 @@ namespace Emberdelve.Player
         /// </summary>
         public float GetArmorRating()
         {
+            EffectiveStatsSnapshot snapshot = EffectiveStats;
+            if (snapshot.IsReady) return snapshot.ArmorRating;
+
             CharacterStatStack stack = Stats;
             if (stack == null) return 0f;
 

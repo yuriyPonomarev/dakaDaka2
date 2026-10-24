@@ -26,10 +26,12 @@ Fresh MultiPlayer baseline: 123 checks / 2 failures, both ranged assertions stil
 |---|---|---|
 | C0 DONE | Finish/review R2+R7 and integrate projectile work | All38 gate groups pass; exact evidence and fixture corrections in C0_INTEGRATION.md. Offline scope only. |
 | R6a DONE | Stable non-reused runtime inventory stack IDs | StackId56/0 and6 regression groups pass (11,875 checks); gear UIDs and snapshot JSON unchanged. See R6a.md. |
-| R6b | Owner-bound sequenced inventory commands; authority owns consumable effects | Replay/order/stale revision/ID/owner refusal, atomic transfer and exact effects |
+| R6b1 | Shared inventory/loadout revision commit plumbing | Exact-once committed mutation, no refusal/rollback/no-op bump, atomic restore observers. |
+| R6b2 | Owner-bound sequenced inventory commands; authority owns consumable effects | Replay/order/stale revision/ID/owner refusal, atomic transfer and exact effects. |
 | R6c | Stable hotbar bindings and inventory view/selection split | No direct UI mutation calls; real input and inventory UI regressions |
 | R10a DONE | Immutable effective-stat capture over existing authoritative inputs | Commit4127e494; EffectiveStats17/0, independent literals/nonempty affixes and immutable old captures. Runtime integration remains R10b. |
-| R10b | Integrate one effective-stat read path and invalidation | Existing stat/movement/skill/armor gates; no doubled bonuses or free refill |
+| R10b DONE | Runtime effective-stat cache/read integration and source-version invalidation | All20 affected groups pass; EffectiveStats25/0. Scope/evidence in R10b.md; no doubled bonuses/free refill. |
+| R10c | Central typed affix-key routing; audit remaining snapshot consumers | All13 stable key destinations, exact-once totals, old schema/UI values preserved. |
 | R8 | Rules/runtime/presentation/review/editor assembly boundaries and readable NUnit tests | Compile, EditMode tests, runtime has no presentation dependency; old gates retained |
 | D1 follow-ups | Turn-rate cap with matching visuals, enemy sweeps, ranged hit locations; close confirmed combat review findings | Geometry/authority/input tests and live rendered review |
 | R1 follow-ups | Kit epoch and sender ownership, authoritative movement ability execution | Forged/replayed/other-player commands refused, normal skills still work |

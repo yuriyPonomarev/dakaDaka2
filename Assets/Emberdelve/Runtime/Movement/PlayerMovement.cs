@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Combat;
@@ -35,6 +36,7 @@ namespace Emberdelve.Movement
         private CharacterStatStack _stats;
         private StatsComponent _attributes;
         private StatusComponent _status;
+        private Func<EffectiveStatsSnapshot> _effectiveStatsSource;
         private float _horizontalSpeed;
         private float _verticalVelocity;
         private float _terminalVelocity = 55f;
@@ -124,6 +126,9 @@ namespace Emberdelve.Movement
         /// </summary>
         public void ApplyAttributeStats(StatsComponent attributes) => _attributes = attributes;
 
+        /// <summary>Uses the rig's version-checked capture while keeping action-state speed factors local.</summary>
+        public void ApplyEffectiveStatsSource(Func<EffectiveStatsSnapshot> source) => _effectiveStatsSource = source;
+
         /// <summary>
         /// The ground speed this character is allowed to produce for a given input state, with the DEX
         /// locomotion rule, passives, gear, guard and any temporary slow already folded in.
@@ -175,6 +180,12 @@ namespace Emberdelve.Movement
         {
             if (_class == null) return 0f;
 
+            if (_effectiveStatsSource != null)
+            {
+                EffectiveStatsSnapshot snapshot = _effectiveStatsSource();
+                if (snapshot.IsReady) return snapshot.WalkSpeed;
+            }
+
             float multiplier = _stats != null ? _stats.Multiplier(SkillStat.MoveSpeed) : 1f;
             float flat = _stats != null ? _stats.Flat(SkillStat.MoveSpeed) : 0f;
 
@@ -189,6 +200,16 @@ namespace Emberdelve.Movement
         private float ResolveAuthoredSpeed(float authoredBaseSpeed, SkillStat stat)
         {
             if (_class == null) return 0f;
+
+            if (_effectiveStatsSource != null)
+            {
+                EffectiveStatsSnapshot snapshot = _effectiveStatsSource();
+                if (snapshot.IsReady)
+                {
+                    if (stat == SkillStat.SprintSpeed) return snapshot.SprintSpeed;
+                    if (stat == SkillStat.CrouchSpeed) return snapshot.CrouchSpeed;
+                }
+            }
 
             float multiplier = _stats != null ? _stats.Multiplier(stat) : 1f;
             float flat = _stats != null ? _stats.Flat(stat) : 0f;

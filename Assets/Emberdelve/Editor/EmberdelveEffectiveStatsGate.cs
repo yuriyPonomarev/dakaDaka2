@@ -1,5 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using Emberdelve.Combat;
 using Emberdelve.Data;
 using Emberdelve.Items;
@@ -176,6 +178,8 @@ namespace Emberdelve.EditorTools
                     warriorStack, null, status, DefenseProfile.Empty);
                 Check(!missing.IsReady && missing.GetOutgoingDamageMultiplier(rapier) == 0f,
                     "missing class is rejected as an unready neutral snapshot");
+
+                CheckRigCache(Check, warrior, archer, rapier);
             }
             finally
             {
@@ -190,6 +194,114 @@ namespace Emberdelve.EditorTools
                 Debug.LogException(exception);
                 Finish();
             }
+        }
+
+        private static void CheckRigCache(Action<bool, string> check, CharacterClassData warrior,
+            CharacterClassData archer, WeaponData rapier)
+        {
+            GameObject body = new GameObject("EffectiveStatsGate_RigCache");
+            WeaponData noParryMainHand = ScriptableObject.CreateInstance<WeaponData>();
+            WeaponData parryOffhand = ScriptableObject.CreateInstance<WeaponData>();
+            try
+            {
+                Emberdelve.Player.PlayerRig rig = body.AddComponent<Emberdelve.Player.PlayerRig>();
+                rig.WireRig();
+                InvokeAwake(rig.Movement);
+                StatsComponent attributes = new StatsComponent();
+                attributes.Initialize(warrior);
+                SetField(rig, "_class", warrior);
+                SetField(rig, "_attributeStats", attributes);
+                rig.Stats.Build(warrior);
+                noParryMainHand.defenseRole = DefenseRole.Weapon;
+                noParryMainHand.capabilities = DefenseCapability.None;
+                noParryMainHand.twoHanded = false;
+                rig.ApplyMainHandWeapon(noParryMainHand);
+                rig.Movement.ApplyClass(warrior, 0);
+                rig.Movement.ApplyStatStack(rig.Stats);
+                rig.Movement.ApplyAttributeStats(attributes);
+                rig.Movement.ApplyEffectiveStatsSource(() => rig.EffectiveStats);
+
+                EffectiveStatsSnapshot initial = rig.EffectiveStats;
+                check(initial.IsReady && Mathf.Approximately(rig.Movement.ResolveWalkSpeed(), initial.WalkSpeed),
+                    "rig cache feeds the same captured walking speed to movement");
+
+                float warriorDamage = rig.GetOutgoingDamageMultiplier(rapier);
+                rig.Stats.Build(archer);
+                float archerPassiveDamage = rig.GetOutgoingDamageMultiplier(rapier);
+                check(Mathf.Approximately(warriorDamage, 1.344f)
+                    && Mathf.Approximately(archerPassiveDamage, 1.12f),
+                    "direct passive stack rebuild invalidates the rig capture");
+
+                rig.Stats.SetSource(CharacterStatStack.EquipmentSourceKey,
+                    new[] { new StatModifier(SkillStat.MaxHealth, SkillModifierMode.Flat, 7f) }, null);
+                EffectiveStatsSnapshot afterStackMutation = rig.EffectiveStats;
+                check(afterStackMutation.MaxHealth == rig.AttributeStats.MaxHealth + 7,
+                    "direct CharacterStatStack source mutation invalidates rig capture");
+
+                attributes.Initialize(archer);
+                EffectiveStatsSnapshot afterAttributeMutation = rig.EffectiveStats;
+                check(afterAttributeMutation.Attributes.Effective.Dexterity == 16
+                    && afterAttributeMutation.Attributes.Effective.Strength == 10,
+                    "direct StatsComponent.Initialize invalidates rig capture");
+
+                rig.Status.ApplyStatus(new StatusSpec(StatusKind.Empowered, 10f, 1.25f), 0);
+                EffectiveStatsSnapshot afterStatusApply = rig.EffectiveStats;
+                check(Mathf.Approximately(afterStatusApply.StatusOutgoingDamageMultiplier, 1.25f),
+                    "status apply invalidates rig capture");
+                ExpireStatuses(rig.Status);
+                check(Mathf.Approximately(rig.EffectiveStats.StatusOutgoingDamageMultiplier, 1f),
+                    "status expiry invalidates rig capture");
+                rig.Status.ApplyStatus(new StatusSpec(StatusKind.Empowered, 10f, 1.25f), 0);
+                rig.Status.ClearStatuses();
+                check(Mathf.Approximately(rig.EffectiveStats.StatusOutgoingDamageMultiplier, 1f),
+                    "status clear invalidates rig capture");
+
+                EffectiveStatsSnapshot beforeHandChange = rig.EffectiveStats;
+                parryOffhand.defenseRole = DefenseRole.Weapon;
+                parryOffhand.capabilities = DefenseCapability.Parry;
+                rig.SetOffhandWeapon(parryOffhand);
+                EffectiveStatsSnapshot afterHandChange = rig.EffectiveStats;
+                check(!beforeHandChange.Defense.CanParry && afterHandChange.Defense.CanParry,
+                    "offhand changes invalidate the cached defense profile");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(body);
+                UnityEngine.Object.DestroyImmediate(noParryMainHand);
+                UnityEngine.Object.DestroyImmediate(parryOffhand);
+            }
+        }
+
+        private static void SetField(object target, string name, object value)
+        {
+            FieldInfo field = target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic);
+            if (field == null) throw new MissingFieldException(target.GetType().Name, name);
+            field.SetValue(target, value);
+        }
+
+        private static void InvokeAwake(MonoBehaviour component)
+        {
+            if (component == null) throw new ArgumentNullException(nameof(component));
+            MethodInfo awake = component.GetType().GetMethod("Awake", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (awake == null) throw new MissingMethodException(component.GetType().Name, "Awake");
+            awake.Invoke(component, null);
+        }
+
+        private static void ExpireStatuses(StatusComponent status)
+        {
+            FieldInfo entriesField = typeof(StatusComponent).GetField("_entries", BindingFlags.Instance | BindingFlags.NonPublic);
+            IList entries = entriesField != null ? entriesField.GetValue(status) as IList : null;
+            if (entries == null || entries.Count == 0) throw new InvalidOperationException("Status fixture has no active entry.");
+
+            object entry = entries[0];
+            FieldInfo remainingField = entry.GetType().GetField("Remaining", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (remainingField == null) throw new MissingFieldException(entry.GetType().Name, "Remaining");
+            remainingField.SetValue(entry, 0f);
+            entries[0] = entry;
+
+            MethodInfo update = typeof(StatusComponent).GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (update == null) throw new MissingMethodException(typeof(StatusComponent).Name, "Update");
+            update.Invoke(status, null);
         }
 
         private static T Load<T>(string file) where T : UnityEngine.Object =>
