@@ -30,6 +30,46 @@ namespace Emberdelve.Data
         ManaRegen = 12,
     }
 
+    public enum AffixStatRouteKind
+    {
+        Attribute = 0,
+        SkillStatFlat = 1,
+        WeaponBaseDamageFlat = 2,
+    }
+
+    public enum WeaponBaseDamageChannel
+    {
+        Melee = 0,
+        Projectile = 1,
+    }
+
+    /// <summary>Immutable runtime destination for one allowlisted affix key.</summary>
+    public readonly struct AffixStatRoute
+    {
+        public readonly AffixStatRouteKind Kind;
+        public readonly SixAttribute Attribute;
+        public readonly SkillStat SkillStat;
+        public readonly WeaponBaseDamageChannel WeaponDamageChannel;
+
+        private AffixStatRoute(AffixStatRouteKind kind, SixAttribute attribute, SkillStat skillStat,
+            WeaponBaseDamageChannel weaponDamageChannel)
+        {
+            Kind = kind;
+            Attribute = attribute;
+            SkillStat = skillStat;
+            WeaponDamageChannel = weaponDamageChannel;
+        }
+
+        internal static AffixStatRoute ForAttribute(SixAttribute attribute) =>
+            new AffixStatRoute(AffixStatRouteKind.Attribute, attribute, default, default);
+
+        internal static AffixStatRoute ForSkill(SkillStat stat) =>
+            new AffixStatRoute(AffixStatRouteKind.SkillStatFlat, default, stat, default);
+
+        internal static AffixStatRoute ForWeaponDamage(WeaponBaseDamageChannel channel) =>
+            new AffixStatRoute(AffixStatRouteKind.WeaponBaseDamageFlat, default, default, channel);
+    }
+
     /// <summary>
     /// Canonical names, prototype per-key bands and the checked mappings for AffixStatKey. Pure and
     /// stateless: nothing here reads an asset, and every method is total over the enum's legal values.
@@ -48,7 +88,7 @@ namespace Emberdelve.Data
         /// <summary>The six ability-score keys.</summary>
         public static bool IsAttribute(AffixStatKey key)
         {
-            return key >= AffixStatKey.Strength && key <= AffixStatKey.Charisma;
+            return TryAsAttribute(key, out _);
         }
 
         /// <summary>
@@ -148,12 +188,39 @@ namespace Emberdelve.Data
         public static bool TryAsAttribute(AffixStatKey key, out SixAttribute attribute)
         {
             attribute = SixAttribute.Strength;
-            if (!IsAttribute(key)) return false;
+            if (!TryGetRoute(key, out AffixStatRoute route) || route.Kind != AffixStatRouteKind.Attribute)
+                return false;
+            attribute = route.Attribute;
+            return true;
+        }
 
-            SixAttribute candidate = (SixAttribute)(int)key;
-            if (candidate < SixAttribute.Strength || candidate > SixAttribute.Charisma) return false;
+        private static readonly AffixStatRoute[] Routes =
+        {
+            AffixStatRoute.ForAttribute(SixAttribute.Strength),
+            AffixStatRoute.ForAttribute(SixAttribute.Dexterity),
+            AffixStatRoute.ForAttribute(SixAttribute.Constitution),
+            AffixStatRoute.ForAttribute(SixAttribute.Intelligence),
+            AffixStatRoute.ForAttribute(SixAttribute.Wisdom),
+            AffixStatRoute.ForAttribute(SixAttribute.Charisma),
+            AffixStatRoute.ForSkill(SkillStat.Armor),
+            AffixStatRoute.ForSkill(SkillStat.MaxHealth),
+            AffixStatRoute.ForSkill(SkillStat.MaxMana),
+            AffixStatRoute.ForSkill(SkillStat.MoveSpeed),
+            AffixStatRoute.ForWeaponDamage(WeaponBaseDamageChannel.Melee),
+            AffixStatRoute.ForWeaponDamage(WeaponBaseDamageChannel.Projectile),
+            AffixStatRoute.ForSkill(SkillStat.ManaRegen),
+        };
 
-            attribute = candidate;
+        /// <summary>One authoritative destination for every legal affix key. Unknown numeric casts fail.</summary>
+        public static bool TryGetRoute(AffixStatKey key, out AffixStatRoute route)
+        {
+            int index = (int)key;
+            if ((uint)index >= (uint)Routes.Length)
+            {
+                route = default;
+                return false;
+            }
+            route = Routes[index];
             return true;
         }
 

@@ -798,32 +798,13 @@ namespace Emberdelve.Items
             {
                 AffixRecord record = records[r];
 
-                if (!TryNumericStatTarget(record.StatKey, out SkillStat stat)) continue;
+                if (!AffixStatKeys.TryGetRoute(record.StatKey, out AffixStatRoute route)
+                    || route.Kind != AffixStatRouteKind.SkillStatFlat) continue;
 
                 float value = record.Value;
                 if (float.IsNaN(value) || float.IsInfinity(value)) continue;
 
-                _modifierScratch.Add(new StatModifier(stat, SkillModifierMode.Flat, value));
-            }
-        }
-
-        /// <summary>The one allowlisted numeric-key mapping this slice applies. False means "not applied by this
-        /// slice", never "count it as zero": an unmapped key contributes nothing rather than something guessed.
-        /// The attribute keys are excluded on purpose (U2B5 owns them) and so are melee_damage and
-        /// projectile_damage (U2B7's authority-read flat weapon channel owns them). armor maps here (U2B8)
-        /// because the armor rating is defined as this stack's flat total: authored and rolled armor points
-        /// summed once, read back by the rig's armor provider and mitigated by DamageResolver on Physical damage
-        /// only - never reinterpreted as block reduction.</summary>
-        private static bool TryNumericStatTarget(AffixStatKey key, out SkillStat stat)
-        {
-            switch (key)
-            {
-                case AffixStatKey.MaxHealth: stat = SkillStat.MaxHealth; return true;
-                case AffixStatKey.MaxMana: stat = SkillStat.MaxMana; return true;
-                case AffixStatKey.MoveSpeed: stat = SkillStat.MoveSpeed; return true;
-                case AffixStatKey.ManaRegen: stat = SkillStat.ManaRegen; return true;
-                case AffixStatKey.Armor: stat = SkillStat.Armor; return true;
-                default: stat = SkillStat.MoveSpeed; return false;
+                _modifierScratch.Add(new StatModifier(route.SkillStat, SkillModifierMode.Flat, value));
             }
         }
 

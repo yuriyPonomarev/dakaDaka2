@@ -31,7 +31,8 @@ Fresh MultiPlayer baseline: 123 checks / 2 failures, both ranged assertions stil
 | R6c | Stable hotbar bindings and inventory view/selection split | No direct UI mutation calls; real input and inventory UI regressions |
 | R10a DONE | Immutable effective-stat capture over existing authoritative inputs | Commit4127e494; EffectiveStats17/0, independent literals/nonempty affixes and immutable old captures. Runtime integration remains R10b. |
 | R10b DONE | Runtime effective-stat cache/read integration and source-version invalidation | All20 affected groups pass; EffectiveStats25/0. Scope/evidence in R10b.md; no doubled bonuses/free refill. |
-| R10c | Central typed affix-key routing; audit remaining snapshot consumers | All13 stable key destinations, exact-once totals, old schema/UI values preserved. |
+| R10c DONE | Central typed affix-key routing and final consumer audit | All13 selected groups pass (25301 checks); 13 stable destinations and old schema/UI preserved. See R10c.md. |
+| R10d | Close audited snapshot consumer bypasses | Ability/UI/status speed/defense/regen use the snapshot; no pool refill or formula drift. |
 | R8 | Rules/runtime/presentation/review/editor assembly boundaries and readable NUnit tests | Compile, EditMode tests, runtime has no presentation dependency; old gates retained |
 | D1 follow-ups | Turn-rate cap with matching visuals, enemy sweeps, ranged hit locations; close confirmed combat review findings | Geometry/authority/input tests and live rendered review |
 | R1 follow-ups | Kit epoch and sender ownership, authoritative movement ability execution | Forged/replayed/other-player commands refused, normal skills still work |

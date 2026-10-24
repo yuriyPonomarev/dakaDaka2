@@ -186,8 +186,10 @@ namespace Emberdelve.Stats
                 for (int a = 0; a < affixes.Count; a++)
                 {
                     AffixRecord affix = affixes[a];
-                    if (affix.StatKey == AffixStatKey.MeleeDamage) melee += affix.Value;
-                    else if (affix.StatKey == AffixStatKey.ProjectileDamage) projectile += affix.Value;
+                    if (!AffixStatKeys.TryGetRoute(affix.StatKey, out AffixStatRoute route)
+                        || route.Kind != AffixStatRouteKind.WeaponBaseDamageFlat) continue;
+                    if (route.WeaponDamageChannel == WeaponBaseDamageChannel.Melee) melee += affix.Value;
+                    else if (route.WeaponDamageChannel == WeaponBaseDamageChannel.Projectile) projectile += affix.Value;
                 }
             }
         }

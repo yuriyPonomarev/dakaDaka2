@@ -615,14 +615,24 @@ namespace Emberdelve.Player
             IReadOnlyList<ItemInstance> worn = equipment != null ? equipment.WornInstances : null;
             if (worn == null || worn.Count == 0) return 0f;
 
-            AffixStatKey key = weapon.IsRanged ? AffixStatKey.ProjectileDamage : AffixStatKey.MeleeDamage;
+            WeaponBaseDamageChannel channel = weapon.IsRanged
+                ? WeaponBaseDamageChannel.Projectile : WeaponBaseDamageChannel.Melee;
 
             float total = 0f;
             for (int i = 0; i < worn.Count; i++)
             {
                 ItemInstance item = worn[i];
                 if (item == null) continue;
-                total += item.AffixTotal(key);
+                IReadOnlyList<AffixRecord> affixes = item.Affixes;
+                if (affixes == null) continue;
+                for (int a = 0; a < affixes.Count; a++)
+                {
+                    AffixRecord affix = affixes[a];
+                    if (!AffixStatKeys.TryGetRoute(affix.StatKey, out AffixStatRoute route)
+                        || route.Kind != AffixStatRouteKind.WeaponBaseDamageFlat
+                        || route.WeaponDamageChannel != channel) continue;
+                    total += affix.Value;
+                }
             }
 
             return WeaponData.SanitizeBaseDamageBonus(total);
