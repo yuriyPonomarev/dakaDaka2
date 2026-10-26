@@ -82,6 +82,8 @@ namespace Emberdelve.Combat
             public Vector3 LastEye;
             public float LastYaw;
             public float LastPitch;
+            public float TurnCeiling = float.PositiveInfinity;
+            public float TurnClamped;
             public SwingPhase Phase;
             public SwingEndReason EndReason;
             public float EndTs;
@@ -313,7 +315,8 @@ namespace Emberdelve.Combat
                 StepMultiplier = Mathf.Max(0.05f, stepData.damageMultiplier),
                 Sequence = intent.Sequence,
                 StartTime = now,
-                SampleCount = SwingGeometry.SampleCount(pattern, weapon),
+                SampleCount = SwingGeometry.SampleCount(pattern, weapon, FlowTuning.GridSwingTurnCeiling),
+                TurnCeiling = FlowTuning.ResolvedSwingTurnCeiling,
                 BladeLength = pattern.BladeLength(weapon),
                 LastTs = 0f,
                 LastEye = eye,
@@ -343,7 +346,7 @@ namespace Emberdelve.Combat
             if (r.HitsView == null) r.HitsView = r.Hits.AsReadOnly();
             status = new MeleeSwingStatus(r.Id, r.InstigatorId, r.Phase, r.EndReason, elapsed,
                 Mathf.Min(r.NextSample, r.SampleCount + 1), r.SampleCount, r.WallSample, r.HitsView,
-                r.ComboStep, r.StepMultiplier, r.Timing);
+                r.ComboStep, r.StepMultiplier, r.Timing, r.TurnClamped);
             return true;
         }
 
@@ -574,6 +577,34 @@ namespace Emberdelve.Combat
                 eye = rec.LastEye;
                 yaw = rec.LastYaw;
                 pitch = rec.LastPitch;
+            }
+
+            if (float.IsNaN(yaw) || float.IsInfinity(yaw) || float.IsNaN(pitch) || float.IsInfinity(pitch))
+            {
+                yaw = rec.LastYaw;
+                pitch = rec.LastPitch;
+            }
+
+            // D1c2: the turn ceiling. The pose the sweep uses is a rate-limited FOLLOWER of the reported pose: from the last
+            // step it may advance at most ceiling x dt degrees in yaw (shortest way round) and in pitch, in every phase of
+            // the swing. What is held back is discarded (never banked), so a flick cannot be "paid back" later; a turn
+            // inside the budget is passed through untouched, so honest play is bit-identical to the unclamped sweep.
+            if (ts > rec.LastTs && !float.IsInfinity(rec.TurnCeiling))
+            {
+                float budget = rec.TurnCeiling * (ts - rec.LastTs);
+                float dYaw = Mathf.DeltaAngle(rec.LastYaw, yaw);
+                if (Mathf.Abs(dYaw) > budget)
+                {
+                    rec.TurnClamped += Mathf.Abs(dYaw) - budget;
+                    yaw = rec.LastYaw + Mathf.Sign(dYaw) * budget;
+                }
+
+                float dPitch = pitch - rec.LastPitch;
+                if (Mathf.Abs(dPitch) > budget)
+                {
+                    rec.TurnClamped += Mathf.Abs(dPitch) - budget;
+                    pitch = rec.LastPitch + Mathf.Sign(dPitch) * budget;
+                }
             }
 
             SwingPatternData pattern = rec.Pattern;

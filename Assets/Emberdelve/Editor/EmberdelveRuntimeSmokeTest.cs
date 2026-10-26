@@ -2017,6 +2017,7 @@ namespace Emberdelve.EditorTools
 
                     Check(_localAuthority.TryGetMeleeSwingStatus(swingId, out MeleeSwingStatus st) && st.ComboStep == step, $"{label}: the authority recorded step {step + 1}");
                     Check(Mathf.Abs(st.StepMultiplier - weapon.comboSteps[step].damageMultiplier) < 1e-5f, $"{label}: step {step + 1} multiplier x{st.StepMultiplier:F2}");
+                    Check(st.TurnClampedDegrees == 0f, $"{label}: step {step + 1} real input is never held back by the D1c2 turn ceiling ({st.TurnClampedDegrees:F2} degrees)");
                     MeleeSwingHit hit = default;
                     bool landed = false;
                     for (int h = 0; h < st.Hits.Count; h++) if (st.Hits[h].TargetCombatId == enemy.CombatId) { hit = st.Hits[h]; landed = true; }

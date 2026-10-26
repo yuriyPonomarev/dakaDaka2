@@ -43,35 +43,51 @@ namespace Emberdelve.Combat
         }
 
         /// <summary>
-        /// Number of equal time steps the ACTIVE phase is sampled in. It is a pure function of the pattern data
-        /// and the weapon, never of the frame rate or the tick length, which is what makes the sweep result
-        /// independent of how the authority is stepped. Consecutive sampled segments are at most
-        /// <c>clamp(sweepRadius / 2, 0.02, 0.06)</c> metres apart at their farthest point, so no hit volume can
-        /// fall between two samples: a contact the continuous sweep makes with a penetration deeper than half
-        /// that spacing (at most 3 cm) is always found; only a graze shallower than that may be missed.
+        /// Number of equal time steps the ACTIVE phase is sampled in, for the default turn ceiling. See the
+        /// three-argument overload; this is what the authority uses with a default (or old) <c>CombatFlowTuning</c>.
         /// </summary>
-        public static int SampleCount(SwingPatternData pattern, WeaponData weapon)
+        public static int SampleCount(SwingPatternData pattern, WeaponData weapon) =>
+            SampleCount(pattern, weapon, CombatFlowTuning.DefaultSwingTurnCeilingDegPerSec);
+
+        /// <summary>
+        /// Number of equal time steps the ACTIVE phase is sampled in. It is a pure function of the pattern data,
+        /// the weapon and the turn ceiling, never of the frame rate or the tick length, which is what makes the sweep
+        /// result independent of how the authority is stepped. K = ceil(translation + rotation), clamped to
+        /// [MinSamples, MaxSamples]:
+        ///   translation = (largest per-probe step of the base or the tip, over 128 equal time probes) x 128 / spacing
+        ///                 (D1c2 / review M-b: the FASTEST segment of the path decides, not the average);
+        ///   rotation    = ceilingRad x activeTime x EffectiveReach / spacing (D1c2 / review H2: the tip travel the aim
+        ///                 turn can add while the blade is active, at the most the authority's follower lets through).
+        /// With both terms, consecutive sampled segments are at most <c>spacing = clamp(sweepRadius / 2, 0.02, 0.06)</c>
+        /// metres apart at their farthest point (unless the clamp at MaxSamples binds), so a contact the continuous
+        /// sweep makes with a penetration deeper than half that spacing (at most 3 cm) is found. A ceiling of 0 or less
+        /// uses the default 720 deg/s (the grid is never sized for an unlimited turn).
+        /// </summary>
+        public static int SampleCount(SwingPatternData pattern, WeaponData weapon, float turnCeilingDegPerSec)
         {
             float length = pattern.BladeLength(weapon);
             SwingFrame frame = new SwingFrame(Vector3.zero, Quaternion.identity);
 
             const int probes = 128;
             Vector3 previousBase = default, previousTip = default;
-            float baseTravel = 0f, tipTravel = 0f;
+            float maxStep = 0f;
             for (int i = 0; i <= probes; i++)
             {
                 BladeSegment(frame, pattern.ActivePose(i / (float)probes), length, out Vector3 b, out Vector3 t);
                 if (i > 0)
                 {
-                    baseTravel += Vector3.Distance(previousBase, b);
-                    tipTravel += Vector3.Distance(previousTip, t);
+                    maxStep = Mathf.Max(maxStep, Mathf.Max(Vector3.Distance(previousBase, b), Vector3.Distance(previousTip, t)));
                 }
                 previousBase = b;
                 previousTip = t;
             }
 
             float spacing = Mathf.Clamp(pattern.sweepRadius * 0.5f, 0.02f, 0.06f);
-            int count = Mathf.CeilToInt(Mathf.Max(baseTravel, tipTravel) / spacing);
+            float ceiling = turnCeilingDegPerSec > 0f && !float.IsInfinity(turnCeilingDegPerSec)
+                ? turnCeilingDegPerSec : CombatFlowTuning.DefaultSwingTurnCeilingDegPerSec;
+            float translation = maxStep * probes / spacing;
+            float rotation = ceiling * Mathf.Deg2Rad * pattern.activeTime * pattern.EffectiveReach(weapon) / spacing;
+            int count = Mathf.CeilToInt(translation + rotation);
             return Mathf.Clamp(count, MinSamples, MaxSamples);
         }
 

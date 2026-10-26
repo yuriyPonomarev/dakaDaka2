@@ -1767,6 +1767,10 @@ namespace Emberdelve.EditorTools
             Config.fieldOfView = 68f;
             Config.itemCatalog = ItemCatalogAsset;
             Config.hitLocations = HitLocations;
+            // D1c2: an asset saved before the turn ceiling existed holds 0 there. Author the default once (0 means "unset");
+            // a value the owner tuned (positive) or set to unlimited (negative) is left alone.
+            if (Config.flow == null) Config.flow = new CombatFlowTuning();
+            if (Config.flow.swingTurnCeilingDegPerSec == 0f) Config.flow.swingTurnCeilingDegPerSec = CombatFlowTuning.DefaultSwingTurnCeilingDegPerSec;
 
             Config.levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
             Config.playerMask = LayerMask.GetMask(GameConfig.PlayerLayerName);

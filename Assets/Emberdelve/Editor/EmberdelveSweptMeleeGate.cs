@@ -238,7 +238,7 @@ namespace Emberdelve.EditorTools
             return d;
         }
 
-        private Dummy AddHumanoid(Scenario s, Vector3 feet)
+        private Dummy AddHumanoid(Scenario s, Vector3 feet, bool withArms = true)
         {
             feet += Origin;
             GameObject root = new GameObject("SweptGate_Humanoid");
@@ -246,6 +246,7 @@ namespace Emberdelve.EditorTools
             s.Props.Add(root);
             Dummy d = new Dummy { CombatId = CombatRegistry.AllocateId(), Center = feet + Vector3.up * 1.15f };
             d.Volumes = HitVolumeLayout.EnsureHumanoid(root, 1f);
+            if (!withArms) foreach (HitVolume v in d.Volumes) if (v != null && v.location == HitLocation.Arms) v.enabled = false;
             CombatRegistry.Register(d.CombatId, d);
             s.Targets.Add(d);
             s.Registered.Add(d);
@@ -441,6 +442,8 @@ namespace Emberdelve.EditorTools
                     Check(p.windupTime > 0f && p.activeTime > 0f && p.recoveryTime > 0f, $"{p.patternId}: windup, active and recovery durations are authored");
                     Check(SwingGeometry.SampleCount(p, w) == SwingGeometry.SampleCount(p, w) && SwingGeometry.SampleCount(p, w) >= SwingGeometry.MinSamples,
                         $"{p.patternId}: the sample count is a stable function of the data ({SwingGeometry.SampleCount(p, w)})");
+                    // D1c2: the grid includes the rotation allowance for the 720 deg/s ceiling and must not hit the upper clamp, or its spacing guarantee is void
+                    Check(SwingGeometry.SampleCount(p, w) < SwingGeometry.MaxSamples, $"{p.patternId}: the D1c2 sample count stays below the {SwingGeometry.MaxSamples} clamp ({SwingGeometry.SampleCount(p, w)})");
                 }
             }
 
@@ -1148,7 +1151,12 @@ namespace Emberdelve.EditorTools
             // humanoid at 1.5 m, aim at the chest: the slash lands on the body, the overhead comes down on the head
             {
                 Scenario s = NewScenario(_sword, pitch: pitchToChest);
-                Dummy h = AddHumanoid(s, new Vector3(0f, 0f, 1.5f));
+                // D1c2: the arm volumes are switched off here. The left-to-right slash arrives from the left and its first touch is
+                // the left arm (x -0.43, r 0.10): the 210-sample grid finds that touch at sample 51 and the 20 ms window closes while
+                // the arm is still the deepest volume, whereas the old 66-sample grid rounded the window up to 22.7 ms and let the
+                // torso overtake by 2 mm. Arms are geometrically correct for the slash; this section pins body-vs-head multipliers,
+                // so the target has no arms (arm contacts are pinned in the locations section).
+                Dummy h = AddHumanoid(s, new Vector3(0f, 0f, 1.5f), withArms: false);
                 MeleeSwingStatus slash = RunSwing(s, Slash);
                 Check(slash.Hits.Count == 1 && slash.Hits[0].Location == HitLocation.Body, $"aimed at the chest, the horizontal slash lands on the body ({(slash.Hits.Count > 0 ? slash.Hits[0].Location.ToString() : "none")})");
                 Cooldown(2f);
@@ -1553,6 +1561,7 @@ namespace Emberdelve.EditorTools
             Check(_authority.AcceptedCount == acceptedBefore + 1, "the authority counted one accepted hit");
             Check(_authority.TryGetMeleeSwingStatus(melee.LastSwingId, out MeleeSwingStatus done) && done.Finished && done.EndReason == SwingEndReason.Completed,
                 "the finished swing is reported as completed");
+            Check(done.TurnClampedDegrees == 0f, $"D1c2: real input never reaches the turn ceiling (clamped {done.TurnClampedDegrees:F3} degrees)");
             Check(!visual.IsSwinging, "the visual returned to rest");
             // D1b: this used to wait 0.6 s and expect the alternating slash from ChoosePatternIndex (and the overhead for a
             // sprinting press). The pattern order is now the weapon's combo chain, owned by the authority: a second press
@@ -1563,6 +1572,8 @@ namespace Emberdelve.EditorTools
             guard = 0f;
             while (melee.IsSwinging && guard < 3f) { guard += Time.deltaTime; yield return null; }
             Check(target.Received.Count == 2, "the reverse slash hits the same target again (a new swing)");
+            Check(_authority.TryGetMeleeSwingStatus(melee.LastSwingId, out MeleeSwingStatus reverseStatus) && reverseStatus.TurnClampedDegrees == 0f,
+                "D1c2: the second real swing is not clamped either");
             yield return new WaitForSeconds(0.6f);
 
             // M1: a weapon swap in the middle of a swing ends it everywhere: no hit lands, the visual is rebuilt, the client idles

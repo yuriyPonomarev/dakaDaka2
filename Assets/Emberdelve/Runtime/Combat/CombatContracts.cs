@@ -217,10 +217,18 @@ namespace Emberdelve.Combat
         /// <summary>D1b: the resolved timing of this swing (chain step scales and the finisher's extra recovery applied).</summary>
         public readonly Emberdelve.Data.SwingTiming Timing;
 
+        /// <summary>
+        /// D1c2: total degrees (yaw plus pitch, summed over every step of the swing) by which the authority's turn ceiling
+        /// held its swept aim pose back from the reported pose and DISCARDED. 0 for any honest turn.
+        /// </summary>
+        public readonly float TurnClampedDegrees;
+
         public MeleeSwingStatus(int swingId, int instigatorCombatId, SwingPhase phase, SwingEndReason endReason,
             float elapsed, int samplesProcessed, int sampleCount, int wallContactSample, IReadOnlyList<MeleeSwingHit> hits,
-            int comboStep = 0, float stepMultiplier = 1f, Emberdelve.Data.SwingTiming timing = default)
+            int comboStep = 0, float stepMultiplier = 1f, Emberdelve.Data.SwingTiming timing = default,
+            float turnClampedDegrees = 0f)
         {
+            TurnClampedDegrees = turnClampedDegrees;
             ComboStep = comboStep;
             StepMultiplier = stepMultiplier;
             Timing = timing;
