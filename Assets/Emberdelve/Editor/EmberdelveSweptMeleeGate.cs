@@ -425,7 +425,7 @@ namespace Emberdelve.EditorTools
             // ---- pattern data
             Check(_sword.UsesSweptMelee && _sword.swingPatterns.Length == 3, "the sword has three swing patterns");
             Check(_rapier.UsesSweptMelee && _rapier.swingPatterns.Length == 1, "the rapier has one swing pattern");
-            Check(!_claw.UsesSweptMelee && !_crossbow.UsesSweptMelee, "the enemy claw (legacy telegraph melee) and the crossbow have no swing patterns");
+            Check(_claw.UsesSweptMelee && _claw.swingPatterns.Length == 1 && !_crossbow.UsesSweptMelee, "D1c4: the enemy claw has one swing pattern (the telegraph wedge swept) and the crossbow has none");
             Check(_sword.swingPatterns[0].kind == SwingKind.HorizontalLeftToRight && _sword.swingPatterns[1].kind == SwingKind.HorizontalRightToLeft
                   && _sword.swingPatterns[2].kind == SwingKind.Overhead && _rapier.swingPatterns[0].kind == SwingKind.Thrust,
                 "sword = slash L->R, slash R->L, overhead; rapier = thrust");
@@ -1314,8 +1314,12 @@ namespace Emberdelve.EditorTools
             {
                 Scenario crossbow = NewScenario(_crossbow);
                 Check(!_authority.TryBeginMeleeSwing(Intent(crossbow.Who, 0), out _, out r) && r.Contains("no swing patterns"), "a ranged weapon cannot begin a melee swing (" + r + ")");
-                Scenario claw = NewScenario(_claw);
-                Check(!_authority.TryBeginMeleeSwing(Intent(claw.Who, 0), out _, out r) && r.Contains("no swing patterns"), "the enemy claw has no swept swing (" + r + ")");
+                // far from every other fixture of this section, so the empty-air claw swing below can only hit what it is given (nothing)
+                Scenario claw = NewScenario(_claw, new Vector3(500f, 1.8f, 500f));
+                Check(_authority.TryBeginMeleeSwing(Intent(claw.Who, 0), out int clawSwing, out r), "D1c4: the enemy claw now has a swept swing (" + r + ")");
+                _clock += 1.0f; _authority.StepSwings();
+                Check(_authority.TryGetMeleeSwingStatus(clawSwing, out MeleeSwingStatus clawStatus) && clawStatus.Finished && clawStatus.Hits.Count == 0, "and a claw swing at nothing runs to its end without a hit");
+                Cooldown(2f);
                 Scenario rapier = NewScenario(_rapier);
                 Check(!_authority.TryBeginMeleeSwing(Intent(rapier.Who, 1), out _, out r) && r.Contains("not allowed"), "the rapier has no pattern 1 (a sword pattern index does not carry over) (" + r + ")");
                 Check(!_authority.TryBeginMeleeSwing(Intent(rapier.Who, 0, weaponId: "ashen_short_sword"), out _, out r) && r.Contains("not the equipped weapon"), "claiming the sword while holding the rapier is rejected");
@@ -1399,8 +1403,18 @@ namespace Emberdelve.EditorTools
                     victimCenter - claw.Point, _claw.reach + 0.4f, CombatRegistry.NextSequence(claw.CombatId), 0f);
                 float takenBefore = s.Who.Taken;
                 bool ok = _authority.SubmitAttack(clawIntent, new HitCandidate(s.Who.CombatId, victimCenter, false), out reason);
-                Check(ok && Mathf.Abs((s.Who.Taken - takenBefore) - _claw.baseDamage) < 1e-3f, $"the enemy claw attack (committed-wedge path, no swing pose) is unchanged: 15 damage ({s.Who.Taken - takenBefore:F2}; {reason})");
+                Check(ok && Mathf.Abs((s.Who.Taken - takenBefore) - _claw.baseDamage) < 1e-3f, $"the legacy path for a pose-less claw holder (a fake with no swing pose) is unchanged: 15 damage ({s.Who.Taken - takenBefore:F2}; {reason})");
                 Check(s.Who.Taken > 0f, "the claw hit reached the player-side entity");
+
+                // D1c4: a claw holder WITH a swing pose (a real EnemyAgent) is refused on the legacy path like any melee weapon.
+                Scenario poseClaw = NewScenario(_claw);
+                poseClaw.Who.Kind = EntityKind.Enemy; poseClaw.Who.TeamId = CombatTeams.MonsterTeam;
+                float victimBefore = s.Who.Taken;
+                AttackIntent poseIntent = new AttackIntent(poseClaw.Who.CombatId, EntityKind.Enemy, _claw, 1f, poseClaw.Who.CombatCenter,
+                    victimCenter - poseClaw.Who.CombatCenter, _claw.reach + 0.4f, CombatRegistry.NextSequence(poseClaw.Who.CombatId), 0f);
+                Check(!_authority.SubmitAttack(poseIntent, new HitCandidate(s.Who.CombatId, victimCenter, false), out reason) && reason.Contains("swept swing"),
+                    "D1c4: a claw SubmitAttack from an entity with a swing pose is refused (" + reason + ")");
+                Check(Mathf.Abs(s.Who.Taken - victimBefore) < 1e-4f, "and deals nothing");
                 Cooldown(2f);
                 s.Dispose();
             }

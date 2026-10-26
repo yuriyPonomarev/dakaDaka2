@@ -64,14 +64,15 @@ namespace Emberdelve.AI
 
         public EnemyState State => _state;
         public bool IsWindingUp => _windingUp;
+        public bool IsStunned => _state == EnemyState.Stunned;
         public float WindupProgress => _windingUp ? 1f - Mathf.Clamp01(_windupLeft / Mathf.Max(0.05f, _data.attackWindup)) : 0f;
         public float WindupRemaining => Mathf.Max(0f, _windupLeft);
         public Vector3 LastKnownPosition => _lastKnownPosition;
         public Vector3 PatrolTarget => _patrolTarget;
 
         /// <summary>
-        /// The direction committed when the windup started, flattened to the ground plane. The attack is
-        /// submitted along this same vector, so the telegraph the player sees is the hit that arrives -
+        /// The direction committed when the windup started, flattened to the ground plane. The swept swing (D1c4) is
+        /// aimed along this same vector, so the telegraph the player sees is the hit that arrives -
         /// stepping out of the warned wedge is a real dodge, not a coincidence.
         /// Zero until a windup has happened at least once.
         /// </summary>
@@ -106,6 +107,8 @@ namespace Emberdelve.AI
             if (_state == EnemyState.Dead) return BrainOrder.Hold(self);
 
             _attackCooldownLeft = Mathf.Max(0f, _attackCooldownLeft - dt);
+
+            if (_state == EnemyState.Stunned) return BrainOrder.Hold(self);
 
             bool targetAlive = target != null && !target.IsDead;
             Vector3 targetCenter = targetAlive ? target.CombatCenter : _lastKnownPosition;
@@ -261,6 +264,28 @@ namespace Emberdelve.AI
             if (_patrolPoints.Count == 0) return _home;
             _patrolIndex = (_patrolIndex + 1) % _patrolPoints.Count;
             return _patrolPoints[_patrolIndex];
+        }
+
+        /// <summary>
+        /// D1c4: puts the brain into (or takes it out of) the Stunned state. A stunned brain holds still, winds nothing up and
+        /// requests no attack; EnemyAgent reports no active weapon while stunned, so the authority ends a swing the stun
+        /// interrupted. Nothing in the game stuns an enemy yet (the state existed but was never entered); this is the seam a
+        /// stun source will use, and the gates pin the swing cancel through it. Leaving the stun resumes with a chase.
+        /// </summary>
+        public void SetStunned(bool stunned)
+        {
+            if (_state == EnemyState.Dead) return;
+
+            if (stunned)
+            {
+                _state = EnemyState.Stunned;
+                _windingUp = false;
+                _windupLeft = 0f;
+            }
+            else if (_state == EnemyState.Stunned)
+            {
+                _state = EnemyState.Chase;
+            }
         }
 
         public void MarkDead()

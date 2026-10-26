@@ -1853,15 +1853,32 @@ namespace Emberdelve.EditorTools
                 int rejectedBefore = _authority.RejectedCount;
                 float healthBefore = rig.CurrentHealth;
 
+                // D1c4: the claw is a swept swing now, so the hit lands where the blade first touches the victim (the hit-location
+                // table), not at a flat 15. A claw aimed at the victim's centre line from 1.8 m touches the arm and the torso volumes
+                // within a few millimetres of depth of each other, and which one wins depends on the rig's exact height and the
+                // sample grid, so the gate does NOT pin Body vs Arms from a prediction here (the exact predictor-vs-authority equality
+                // is pinned in EnemySweepGate on static volumes). It pins what this gate is about: the damage is 15 x the literal
+                // factor of the location the authority reports, once, unaffected by the victim's CHA; the location is a torso or arm
+                // contact. The prediction is only logged.
+                float windupDeadline = Time.time + ResolveTimeout;
+                while (_enemy != null && !_enemy.IsWindingUp && Time.time < windupDeadline) yield return null;
+                HitLocation predictedLocation = HitLocation.Body;
+                bool predictedContact = _enemy != null && EnemySweepPredictor.TryPredict(_enemy, _enemy.Brain.TelegraphDirection, rig, out predictedLocation);
+                Check(predictedContact, $"{label}: the committed telegraph direction sweeps through the victim");
+
                 yield return WaitForCaptured(ResolveTimeout);
+
+                HitLocation hitLocation = _captured.Count > 0 ? _captured[0].Location : HitLocation.Unspecified;
+                float factor = EnemySweepPredictor.LiteralFactor(hitLocation);
+                Debug.Log($"{Tag} {label}: predicted {predictedLocation}, authority reported {hitLocation}");
 
                 if (_enemy != null) _enemy.enabled = false;
 
                 float delta = healthBefore - rig.CurrentHealth;
 
                 Check(_captured.Count >= 1, $"{label}: the enemy's swing came back through GameEvents.PlayerDamaged");
-                CheckClose($"{label}: incoming health loss", 15f, delta,
-                    "the authored 15 of the Hollow Claw, applied once, whatever CHA the victim wears");
+                CheckClose($"{label}: incoming health loss", 15f * factor, delta,
+                    $"the authored 15 of the Hollow Claw x the literal {hitLocation} factor {factor:F1}, applied once, whatever CHA the victim wears");
                 Check(_authority.AcceptedCount == acceptedBefore + 1,
                     $"{label}: the authority accepted exactly one enemy attack ({acceptedBefore} -> {_authority.AcceptedCount})");
                 Check(_authority.RejectedCount == rejectedBefore,
@@ -1873,9 +1890,10 @@ namespace Emberdelve.EditorTools
                     Check(damage.SourceKind == EntityKind.Enemy && _enemy != null && damage.SourceCombatId == _enemy.CombatId,
                         $"{label}: attributed to the enemy agent that swung it ({damage.SourceKind} #{damage.SourceCombatId})");
                     Check(damage.Type == _claw.damageType, $"{label}: the damage type still comes from the claw definition ({damage.Type})");
-                    CheckClose($"{label}: resolved damage", 15f, damage.Amount, "15 base damage, no attribute factor, no headshot, no block");
-                    Check(!damage.Blocked && !damage.Headshot && damage.BlockReduction <= 0f,
-                        $"{label}: unguarded body hit, so neither a block nor a headshot touched it");
+                    CheckClose($"{label}: resolved damage", 15f * factor, damage.Amount, $"15 base damage x the {hitLocation} location factor, no attribute factor, no block");
+                    Check(damage.Location == HitLocation.Body || damage.Location == HitLocation.Arms, $"{label}: a claw at the centre line touches the torso or an arm ({damage.Location})");
+                    Check(!damage.Blocked && damage.Headshot == (hitLocation == HitLocation.Head) && damage.BlockReduction <= 0f,
+                        $"{label}: unguarded hit, so no block touched it and Headshot is true only for a Head contact");
                 }
 
                 Debug.Log($"{Tag} {label}: victimCHA={rig.AttributeStats.GetAttribute(SixAttribute.Charisma)} " +

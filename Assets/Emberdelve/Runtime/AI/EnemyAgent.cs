@@ -11,12 +11,15 @@ namespace Emberdelve.AI
     /// <summary>
     /// Scene object for one monster. Owns identity (combat id), health and movement; all decisions
     /// come from EnemyBrain and all damage goes through the combat authority, exactly like the player.
+    /// D1c4: its melee is the same authority-owned swept swing the player uses. The agent is the pose provider (eye at its
+    /// attack origin, yaw frozen to the direction the brain committed at windup start, pitch 0); the brain's windup stays the
+    /// telegraph and the swing begins when the brain asks for the attack.
     /// Movement is grid-steered (transform based) rather than CharacterController based, so the body
     /// and head hit colliders can stay plain colliders on child objects.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class EnemyAgent : MonoBehaviour, ICombatEntity, IStatusTarget, IDamageOutgoingProvider, IActiveWeaponProvider, IHitShapeProvider
+    public sealed class EnemyAgent : MonoBehaviour, ICombatEntity, IStatusTarget, IDamageOutgoingProvider, IActiveWeaponProvider, IHitShapeProvider, IAimPoseProvider
     {
         [Header("Data")]
         [SerializeField] private EnemyData data;
@@ -56,6 +59,17 @@ namespace Emberdelve.AI
         private float _aggressorUntil;
         private int _currentTargetId;
 
+        // D1c4: the swept swing in flight. _latchedDirection is the committed direction snapshot taken when the swing began, so
+        // a new windup (a short attackCooldown) can never turn a swing that is still running.
+        private int _swingId;
+        private bool _swingLatched;
+        private bool _swingResolved;
+        private Vector3 _latchedDirection;
+        private SwingPhase _swingPhase;
+
+        /// <summary>Height above the root of the swing's eye: the origin the attack has always been aimed from.</summary>
+        public const float AttackEyeHeight = 1.2f;
+
         public EntityKind Kind => EntityKind.Enemy;
         public int CombatId => _combatId;
         public int TeamId => CombatTeams.MonsterTeam;
@@ -75,8 +89,17 @@ namespace Emberdelve.AI
             HitVolumeLayout.Collect(_hitVolumes, shapes);
         }
 
-        /// <summary>An enemy attacks with its authored attack weapon and nothing else.</summary>
-        public WeaponData ActiveWeapon => data != null ? data.attackWeapon : null;
+        /// <summary>
+        /// An enemy attacks with its authored attack weapon and nothing else. While stunned it holds no weapon, which is how
+        /// the authority learns that a stun cut a running swing short (it ends a swing whose weapon is no longer in hand).
+        /// </summary>
+        public WeaponData ActiveWeapon => data != null && !IsStunned ? data.attackWeapon : null;
+
+        /// <summary>True while the brain is stunned (see <see cref="EnemyBrain.SetStunned"/>).</summary>
+        public bool IsStunned => _brain != null && _brain.IsStunned;
+
+        /// <summary>Stuns or releases this monster (the seam a stun source will use; nothing stuns an enemy yet).</summary>
+        public void SetStunned(bool stunned) => _brain?.SetStunned(stunned);
         public bool IsDead => _health != null && _health.IsDead;
         public float CurrentHealth => _health != null ? _health.CurrentHealth : 0f;
         public float MaxHealth => _health != null ? _health.MaxHealth : 0f;
@@ -92,6 +115,72 @@ namespace Emberdelve.AI
         public bool IsWindingUp => _brain != null && _brain.IsWindingUp;
 
         public StatusComponent Status => _status;
+
+        /// <summary>The swing pattern this monster's attack weapon swings (its first pattern), or null for a weapon without one.</summary>
+        public SwingPatternData AttackPattern
+        {
+            get
+            {
+                WeaponData weapon = data != null ? data.attackWeapon : null;
+                return weapon != null && weapon.TryResolveSwingPattern(0, 0, out SwingPatternData pattern) ? pattern : null;
+            }
+        }
+
+        /// <summary>Radius of the telegraph: the pattern's effective reach from the eye (the legacy reach number for a weapon without a pattern).</summary>
+        public float TelegraphReach
+        {
+            get
+            {
+                SwingPatternData pattern = AttackPattern;
+                if (pattern != null) return pattern.EffectiveReach(data.attackWeapon);
+                float reach = data != null && data.attackWeapon != null ? data.attackWeapon.reach + data.attackWeapon.hitSphereRadius : 1f;
+                return Mathf.Max(0.6f, Mathf.Max(reach, data != null ? data.attackRange : 1f));
+            }
+        }
+
+        /// <summary>Half of the telegraph's angle: half the pattern's yaw range (half the authored cone for a weapon without a pattern).</summary>
+        public float TelegraphHalfAngle
+        {
+            get
+            {
+                SwingPatternData pattern = AttackPattern;
+                if (pattern == null) return Mathf.Clamp(data != null ? data.attackTelegraphCone : 120f, 40f, 200f) * 0.5f;
+                pattern.YawRange(out float min, out float max);
+                return (max - min) * 0.5f;
+            }
+        }
+
+        /// <summary>Id of the most recent swing the authority accepted from this monster (0 = none yet).</summary>
+        public int LastSwingId { get; private set; }
+
+        /// <summary>Swings the authority has accepted from this monster.</summary>
+        public int SwingsBegun { get; private set; }
+
+        /// <summary>The swing's eye: the monster's attack origin (root + <see cref="AttackEyeHeight"/>).</summary>
+        public Vector3 AttackOrigin => transform.position + Vector3.up * AttackEyeHeight;
+
+        /// <summary>True while a swing of this monster is running on the authority (windup, active or recovery).</summary>
+        public bool IsSwinging
+        {
+            get
+            {
+                PollSwing();
+                return _swingId != 0;
+            }
+        }
+
+        /// <summary>
+        /// The authoritative aim pose of the swing (IAimPoseProvider): the eye at the attack origin, the yaw frozen to the direction
+        /// committed at windup start (latched for the whole swing), pitch 0. The body's own turning never enters it.
+        /// </summary>
+        public bool TryGetAimPose(out Vector3 eye, out float yawDegrees, out float pitchDegrees)
+        {
+            eye = AttackOrigin;
+            Vector3 direction = _swingLatched ? _latchedDirection : TelegraphDirection();
+            yawDegrees = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
+            pitchDegrees = 0f;
+            return true;
+        }
 
         /// <summary>Chase speed after whatever the authority has currently done to this monster, e.g. a Battle Cry slow.</summary>
         public float EffectiveChaseSpeed => data != null
@@ -127,7 +216,19 @@ namespace Emberdelve.AI
             _brain = new EnemyBrain(data, _nav, transform.position, config != null ? config.levelMask : Physics.DefaultRaycastLayers);
             _lookRotation = transform.rotation;
 
-            _telegraph = AttackTelegraphVisual.Create(transform, data.attackTelegraphCone, data.telegraphColor);
+            // D1c4: the telegraph is the ground projection of the swing pattern (its yaw range at its effective reach). A weapon
+            // without a pattern cannot attack any more (the arc-less claw path is closed for pose providers); warn once.
+            SwingPatternData attackPattern = AttackPattern;
+            if (attackPattern != null)
+            {
+                attackPattern.YawRange(out float minYaw, out float maxYaw);
+                _telegraph = AttackTelegraphVisual.Create(transform, minYaw, maxYaw, data.telegraphColor);
+            }
+            else
+            {
+                Debug.LogWarning("[EnemyAgent] " + data.displayName + ": the attack weapon has no swing pattern, so this monster cannot attack.", this);
+                _telegraph = AttackTelegraphVisual.Create(transform, data.attackTelegraphCone, data.telegraphColor);
+            }
         }
 
         private void OnDestroy()
@@ -179,6 +280,8 @@ namespace Emberdelve.AI
         private void HandleDeath()
         {
             _brain?.MarkDead();
+            _swingId = 0;
+            _swingLatched = false;
             _status?.ClearStatuses();
             _path.Clear();
             _telegraph?.SetState(false, 0f, Vector3.zero, 1f, false);
@@ -262,12 +365,18 @@ namespace Emberdelve.AI
             CombatRegistry.TryGetNearestHostilePlayer(this, transform.position, perceptionRadius, preferred, TargetSwitchFactor, out ICombatEntity target);
             _currentTargetId = target != null ? target.CombatId : 0;
 
+            PollSwing();
+
             BrainOrder order = _brain.Tick(dt, Time.time, transform.position, transform.forward, target);
 
-            if (order.RequestAttack && target != null) SubmitAttack(target);
+            // D1c4: the windup was the telegraph; its end begins the authority's swept swing along the committed direction.
+            // Whether it lands is the sweep's business (arc, reach, walls), not a wedge check made here.
+            if (order.RequestAttack && target != null) TryBeginAttack(TelegraphDirection(), out _);
 
             RotateTowards(order.FaceTowards, dt);
-            Move(order, dt);
+
+            // A monster that has begun its swing stands its ground until the swing is over: the eye the sweep follows stays put.
+            if (_swingId == 0) Move(order, dt);
             PlayTelegraph();
         }
 
@@ -364,11 +473,11 @@ namespace Emberdelve.AI
 
         private void PlayTelegraph()
         {
-            if (bodyTransform == null || _brain == null) return;
+            if (_brain == null) return;
 
             float progress = _brain.WindupProgress;
             float height = Mathf.Max(0.05f, data.attackTelegraphHeight);
-            bodyTransform.localPosition = _bodyHomePosition + Vector3.up * (progress * height);
+            if (bodyTransform != null) bodyTransform.localPosition = _bodyHomePosition + Vector3.up * (progress * height);
 
             if (_telegraph == null) return;
 
@@ -376,11 +485,13 @@ namespace Emberdelve.AI
             bool whiffed = _whiffTimer > 0f;
             bool winding = _brain.IsWindingUp;
 
-            _telegraph.SetState(winding || whiffed,
+            // The wedge stays lit through the windup and the swing's own windup and active phases, then flashes when the swing found nothing.
+            bool striking = _swingId != 0 && _swingPhase != SwingPhase.Recovery;
+            _telegraph.SetState(winding || striking || whiffed,
                 winding ? progress : 1f,
-                TelegraphDirection(),
-                TelegraphLength(),
-                whiffed && !winding);
+                _swingLatched ? _latchedDirection : TelegraphDirection(),
+                TelegraphReach,
+                whiffed && !winding && !striking);
         }
 
         /// <summary>Ground-plane direction the brain committed at the start of the windup.</summary>
@@ -392,59 +503,85 @@ namespace Emberdelve.AI
             return direction.sqrMagnitude < 0.0001f ? Vector3.forward : direction.normalized;
         }
 
-        private float TelegraphLength()
+        /// <summary>
+        /// D1c4: asks the authority to begin this monster's swept swing along <paramref name="flatDirection"/> (zero = the committed
+        /// telegraph direction). The brain calls it when the windup ends; gates and tools use it to swing a frozen agent. The
+        /// pose, the weapon and the pattern are the agent's own and the authority validates everything (alive, weapon in hand,
+        /// cooldown on its clock, no swing running, aim consistent); nothing about hits or damage is decided here.
+        /// </summary>
+        public bool TryBeginAttack(Vector3 flatDirection, out string reason)
         {
-            float reach = data.attackWeapon != null
-                ? data.attackWeapon.reach + data.attackWeapon.hitSphereRadius
-                : 1f;
-            return Mathf.Max(0.6f, Mathf.Max(reach, data.attackRange));
-        }
+            reason = string.Empty;
+            if (IsDead) { reason = "dead"; return false; }
 
-        private void SubmitAttack(ICombatEntity target)
-        {
-            if (data.attackWeapon == null) return;
-            if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)) return;
+            WeaponData weapon = ActiveWeapon;
+            if (weapon == null) { reason = "no attack weapon in hand"; return false; }
+            if (!weapon.UsesSweptMelee) { reason = "the attack weapon has no swing pattern"; return false; }
+            if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)) { reason = "no combat authority"; return false; }
+            if (IsSwinging) { reason = "a swing is already running"; return false; }
 
-            Vector3 origin = transform.position + Vector3.up * 1.2f;
-            Vector3 warned = TelegraphDirection();
+            flatDirection.y = 0f;
+            _latchedDirection = flatDirection.sqrMagnitude < 0.0001f ? TelegraphDirection() : flatDirection.normalized;
+            _swingLatched = true;
+            TryGetAimPose(out _, out float yaw, out float pitch);
 
-            Vector3 toTarget = target.CombatCenter - origin;
-            Vector3 flatTo = new Vector3(toTarget.x, 0f, toTarget.z);
-            if (flatTo.sqrMagnitude < 0.0001f) flatTo = warned;
+            // Same per-combat-id allocator the player's components use, so an enemy that ever carries two attack sources
+            // cannot collide with itself.
+            int sequence = CombatRegistry.NextSequence(_combatId);
+            MeleeSwingIntent intent = new MeleeSwingIntent(_combatId, weapon.weaponId, 0, 0, yaw, pitch, sequence);
 
-            float halfCone = Mathf.Clamp(data.attackTelegraphCone, 40f, 200f) * 0.5f;
-            float distance = flatTo.magnitude;
-            float maxRange = Mathf.Max(1f, data.attackRange) + 0.4f;
-
-            // The wedge the player was warned about is the only wedge this attack can land in. Outside
-            // it, or out of reach, no intent is submitted at all: dodging cannot be overridden locally.
-            if (Vector3.Angle(warned, flatTo) > halfCone || distance > maxRange)
+            if (!authority.TryBeginMeleeSwing(intent, out int swingId, out reason))
             {
+                _swingLatched = false;
                 LastAttackWhiffed = true;
                 _whiffTimer = 0.22f;
+                return false;
+            }
+
+            _swingId = swingId;
+            _swingResolved = false;
+            _swingPhase = SwingPhase.Windup;
+            LastSwingId = swingId;
+            SwingsBegun++;
+            LastAttackWhiffed = false;
+            return true;
+        }
+
+        /// <summary>
+        /// Reads the authority's state of the running swing. When its active phase is over (or the swing was stopped by a wall)
+        /// with no hit, the attack counts as a whiff (flash + <see cref="LastAttackWhiffed"/>); a swing that ended abnormally (the
+        /// monster died or lost its weapon) is not a whiff. The swing is forgotten once the authority calls it finished.
+        /// </summary>
+        private void PollSwing()
+        {
+            if (_swingId == 0) return;
+
+            if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
+                || !authority.TryGetMeleeSwingStatus(_swingId, out MeleeSwingStatus status))
+            {
+                _swingId = 0;
+                _swingLatched = false;
                 return;
             }
 
-            Vector3 aimPoint = origin + warned * distance + Vector3.up * (target.CombatCenter.y - origin.y);
-            Vector3 direction = (aimPoint - origin).sqrMagnitude > 0.0001f
-                ? (aimPoint - origin).normalized
-                : warned;
+            _swingPhase = status.Phase;
 
-            // Same per-combat-id allocator the player's components use, so an enemy that ever carries two
-            // attack sources cannot collide with itself.
-            int sequence = CombatRegistry.NextSequence(_combatId);
+            if (!_swingResolved && (status.Phase == SwingPhase.Recovery || status.Finished))
+            {
+                _swingResolved = true;
+                bool aborted = status.Finished && status.EndReason != SwingEndReason.Completed && status.EndReason != SwingEndReason.WallStop;
+                if (status.Hits.Count == 0 && !aborted)
+                {
+                    LastAttackWhiffed = true;
+                    _whiffTimer = 0.22f;
+                }
+            }
 
-            AttackIntent intent = new AttackIntent(_combatId, EntityKind.Enemy, data.attackWeapon, 1f,
-                origin, direction, maxRange, sequence, Time.time);
-
-            LastAttackWhiffed = false;
-
-            // The wedge/range gate above decides WHETHER an attack is submitted. The hit point is the target's own
-            // centre: the committed telegraph direction can pass beside a strafing player, and the authority
-            // only accepts a hit point that lies on the target.
-            HitCandidate hit = new HitCandidate(target.CombatId, target.CombatCenter, false);
-
-            authority.SubmitAttack(intent, hit);
+            if (status.Finished)
+            {
+                _swingId = 0;
+                _swingLatched = false;
+            }
         }
 
         private void OnDrawGizmosSelected()

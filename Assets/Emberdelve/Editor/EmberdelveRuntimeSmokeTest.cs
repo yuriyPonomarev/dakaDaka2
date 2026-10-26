@@ -768,8 +768,11 @@ namespace Emberdelve.EditorTools
                     float directionError = landed.sqrMagnitude < 0.0001f
                         ? 180f
                         : Vector3.Angle(warned, landed);
-                    Check(directionError < 12f,
-                        $"the hit arrived along the warned direction ({directionError:F1} deg between telegraph and damage direction)");
+                    // D1c4: the hit is a swept swing; its damage direction runs from the eye to the contact point, which is somewhere
+                    // inside the warned wedge (the telegraph IS the pattern arc), not necessarily along the committed centre line.
+                    float wedgeLimit = enemy.TelegraphHalfAngle + 10f;
+                    Check(directionError < wedgeLimit,
+                        $"the hit arrived inside the warned wedge ({directionError:F1} deg between telegraph centre line and damage direction, limit {wedgeLimit:F0})");
                 }
 
                 // Freeze the agent so the guard measurements below only contain the hits submitted here.
@@ -786,8 +789,8 @@ namespace Emberdelve.EditorTools
 
             /// <summary>
             /// R1a M1: the real enemy windup path with a player who strafes after the direction was committed.
-            /// Inside the warned wedge the hit must still land (the enemy submits the player's own centre, which
-            /// the authority accepts); outside the wedge no intent is submitted at all and the attack whiffs.
+            /// Inside the warned wedge the hit must still land (D1c4: the swept swing passes through the strafing player);
+            /// outside the wedge the swing still begins and sweeps, no hit is accepted and the attack whiffs.
             /// </summary>
             private IEnumerator OffAxisWindupFlow(EnemyAgent enemy)
             {
@@ -812,7 +815,7 @@ namespace Emberdelve.EditorTools
                 Vector3 anchor = _rig.transform.position;
                 Vector3 enemyHome = enemy.transform.position;
                 float standoff = Mathf.Min(1.8f, enemy.Data.attackRange * 0.85f);
-                float halfCone = Mathf.Clamp(enemy.Data.attackTelegraphCone, 40f, 200f) * 0.5f;
+                float halfCone = enemy.TelegraphHalfAngle;     // D1c4: half the swing pattern's yaw range, the warned wedge that really sweeps
 
                 float[] angles = { 45f, -45f, halfCone + 40f };
                 bool[] expectHit = { true, true, false };
@@ -851,6 +854,27 @@ namespace Emberdelve.EditorTools
                         Vector3 eye = home + Vector3.up * 1.15f;
                         if (!HitScanner.HasLineOfSight(eye, spot + centerOffset, levelMask, 0.3f)) { arenaWhy += $"[{home}: strafe {angles[a]} at {spot} no line of sight]"; return false; }
                     }
+
+                    // D1c4: the player now STARTS at the standoff in front of the enemy (not wherever the anchor is), so the enemy does not
+                    // walk before it attacks and the arc checked below is the arc it really swings from.
+                    Vector3 startSpotCheck = home + flat * standoff;
+                    startSpotCheck.y = y;
+                    if (!spotClear(startSpotCheck)) { arenaWhy += $"[{home}: start spot {startSpotCheck} blocked/unwalkable]"; return false; }
+                    if (!HitScanner.HasLineOfSight(home + Vector3.up * 1.15f, startSpotCheck + centerOffset, levelMask, 0.3f)) { arenaWhy += $"[{home}: start spot {startSpotCheck} no line of sight]"; return false; }
+
+                    // D1c4: the strike is a swept swing, and a wall inside its arc stops the blade before it reaches the player. Every
+                    // direction of the pattern arc (-halfCone..+halfCone from the aim) must be clear to the weapon's reach.
+                    Vector3 swingEye = home + Vector3.up * 1.2f;
+                    float reach = enemy.TelegraphReach;
+                    for (float arc = -halfCone; arc <= halfCone + 0.01f; arc += 15f)
+                    {
+                        Vector3 dir = Quaternion.AngleAxis(arc, Vector3.up) * flat;
+                        if (Physics.SphereCast(swingEye, 0.18f, dir, out RaycastHit wallHit, reach, levelMask, QueryTriggerInteraction.Ignore))
+                        {
+                            arenaWhy += $"[{home}: swing arc {arc:F0} blocked at {wallHit.distance:F2} m by {wallHit.collider.name}]";
+                            return false;
+                        }
+                    }
                     return true;
                 };
 
@@ -884,13 +908,18 @@ namespace Emberdelve.EditorTools
                 }
 
                 enemyHome = chosenHome;
+                Vector3 aimFlat = anchor - enemyHome;
+                aimFlat.y = 0f;
+                aimFlat.Normalize();
+                Vector3 startSpot = enemyHome + aimFlat * standoff;
+                startSpot.y = anchor.y;
                 int enemyId = enemy.CombatId;
 
                 for (int i = 0; i < angles.Length; i++)
                 {
                     string label = $"off-axis windup {angles[i]:F0} deg ({(expectHit[i] ? "inside" : "outside")} the {halfCone * 2f:F0} deg wedge)";
 
-                    _rig.transform.position = anchor;
+                    _rig.transform.position = startSpot;
                     _rig.Health.SetHealth(_rig.MaxHealth);
                     enemy.transform.position = enemyHome;
                     Physics.SyncTransforms();
@@ -918,6 +947,7 @@ namespace Emberdelve.EditorTools
                     Vector3 strafeSpot = _rig.transform.position;
 
                     float before = _rig.CurrentHealth;
+                    int swingsBefore = enemy.SwingsBegun;
                     int acceptedBefore = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
                     int rejectedBefore = _localAuthority != null ? _localAuthority.RejectedCount : 0;
                     int sequenceBefore = _localAuthority != null ? _localAuthority.LastSequenceFor(enemyId) : -1;
@@ -927,6 +957,8 @@ namespace Emberdelve.EditorTools
 
                     deadline = Time.unscaledTime + 4f;
                     while (enemy.IsWindingUp && Time.unscaledTime < deadline) yield return null;
+                    // D1c4: the swing begins when the windup ends and sweeps for its own windup + active time (about 0.3 s, plus recovery).
+                    while ((enemy.SwingsBegun == swingsBefore || enemy.IsSwinging) && Time.unscaledTime < deadline) yield return null;
                     yield return WaitFrames(2);
                     _rig.Health.Damaged -= countHit;
 
@@ -946,10 +978,11 @@ namespace Emberdelve.EditorTools
                     else
                     {
                         bool noDamage = lost <= 0f && hitsFromEnemy == 0;
-                        bool noIntent = _localAuthority != null && sequenceAfter == sequenceBefore &&
+                        // D1c4: the swing still begins (the sequence advances) and sweeps its arc; the player is simply not in it, so no hit is accepted.
+                        bool noIntent = _localAuthority != null && sequenceAfter > sequenceBefore && enemy.SwingsBegun == swingsBefore + 1 &&
                                         _localAuthority.AcceptedCount == acceptedBefore && _localAuthority.RejectedCount == rejectedBefore;
                         Check(noDamage, $"{label}: no damage when the player left the warned wedge ({lost:F1})");
-                        Check(noIntent, $"{label}: no intent was submitted for the whiff");
+                        Check(noIntent, $"{label}: the swing began and swept its arc, but no hit was accepted");
                         Check(enemy.LastAttackWhiffed, $"{label}: the enemy recorded a whiff");
                         ok = noDamage && noIntent && enemy.LastAttackWhiffed;
                     }
@@ -957,11 +990,17 @@ namespace Emberdelve.EditorTools
                     if (!ok)
                     {
                         Vector3 toPlayer = _rig.CombatCenter - enemy.CombatCenter; toPlayer.y = 0f;
+                        string swingDiag = "none";
+                        if (_localAuthority != null && _localAuthority.TryGetMeleeSwingStatus(enemy.LastSwingId, out MeleeSwingStatus lastSwing))
+                        {
+                            swingDiag = "end=" + lastSwing.EndReason + " wallSample=" + lastSwing.WallContactSample + " samples=" + lastSwing.SamplesProcessed + "/" + lastSwing.SampleCount + " hits=" + lastSwing.Hits.Count;
+                        }
                         Debug.LogError($"[Emberdelve][Smoke:combat] {label} DIAGNOSTIC: brain={(enemy.Brain != null ? enemy.Brain.State.ToString() : "n/a")} " +
                                        $"distance={toPlayer.magnitude:F2} angleToWarned={Vector3.Angle(warned, toPlayer):F1} " +
                                        $"los={HitScanner.HasLineOfSight(enemy.CombatCenter, _rig.CombatCenter, levelMask, 0.3f)} whiffed={enemy.LastAttackWhiffed} " +
                                        $"rejectReason={(_localAuthority != null ? _localAuthority.LastAttackRejectReason : string.Empty)} hitsFromEnemy={hitsFromEnemy} " +
-                                       $"strafeSpot={strafeSpot} playerNow={_rig.transform.position} nearby={DescribeNearbyEnemies(enemy)}");
+                                       $"strafeSpot={strafeSpot} playerNow={_rig.transform.position} enemyNow={enemy.transform.position} nearby={DescribeNearbyEnemies(enemy)} " +
+                                       "swing=" + swingDiag);
                     }
 
                     enemy.enabled = false;
@@ -1008,6 +1047,12 @@ namespace Emberdelve.EditorTools
                 Vector3 towardSource = -toSource;
                 float maxRange = Mathf.Max(1f, enemy.Data.attackRange) + 0.4f;
                 int enemyConsumedBefore = _localAuthority != null ? _localAuthority.LastSequenceFor(enemy.CombatId) : -1;
+
+                // D1c4: a real EnemyAgent now has a swing pose, so its melee SubmitAttack is refused by default (the claw swings through
+                // TryBeginMeleeSwing). These three submissions are a damage-formula probe of the directional guard (fixed 15 base, no
+                // location factor), so the flow opts into the legacy path explicitly and restores the default below.
+                bool legacyWasAllowed = _localAuthority != null && _localAuthority.AllowLegacyMeleeAttacks;
+                if (_localAuthority != null) _localAuthority.AllowLegacyMeleeAttacks = true;
 
                 // MeleeCombat re-asserts guard from input every frame, and headless batch mode has no
                 // mouse device, so it would clear the guard this harness sets directly.
@@ -1091,6 +1136,7 @@ namespace Emberdelve.EditorTools
                 if (!behindAccepted) SequenceDiag("guardBehind", enemy.CombatId, behindSequence);
                 if (!sideAccepted) SequenceDiag("guardSide", enemy.CombatId, sideSequence);
 
+                if (_localAuthority != null) _localAuthority.AllowLegacyMeleeAttacks = legacyWasAllowed;
                 _rig.SetGuardHeld(false);
                 Check(!_rig.IsGuarding, "guard released after the block tests");
 
@@ -1535,6 +1581,11 @@ namespace Emberdelve.EditorTools
                 int accepted = 0;
                 int sequenceRejections = 0;
 
+                // D1c4: the loop submits synthetic claw intents from a real EnemyAgent (a swing-pose holder), a damage probe that is
+                // refused on the default authority. Opt in for the loop and restore afterwards.
+                bool legacyWasAllowed = _localAuthority != null && _localAuthority.AllowLegacyMeleeAttacks;
+                if (_localAuthority != null) _localAuthority.AllowLegacyMeleeAttacks = true;
+
                 for (int i = 0; i < 24 && !_rig.IsDead; i++)
                 {
                     // Real cooldown wait on the authority clock instead of a stamp 1.2s per step ahead.
@@ -1555,6 +1606,8 @@ namespace Emberdelve.EditorTools
                     else if (freshSequence <= consumedBefore) SequenceDiag($"deathAttack[{i}] consumedBefore={consumedBefore}", enemy.CombatId, freshSequence);
                     yield return WaitFrames(2);
                 }
+
+                if (_localAuthority != null) _localAuthority.AllowLegacyMeleeAttacks = legacyWasAllowed;
 
                 // The enemy's own live attacks share this combat id, so its synthetic intents must still be
                 // fresh. A rejection here would mean the allocator collided, not the cooldown clock.
@@ -4184,10 +4237,15 @@ namespace Emberdelve.EditorTools
 
                 int sequence = CombatRegistry.NextSequence(enemy.CombatId);
                 result.sequence = sequence;
+                // D1c4: a real EnemyAgent holds a swing pose, so this fixed-damage guard probe uses the legacy SubmitAttack path
+                // only through the explicit opt-in (restored right after the one submission).
+                bool legacyWasAllowed = _localAuthority != null && _localAuthority.AllowLegacyMeleeAttacks;
+                if (_localAuthority != null) _localAuthority.AllowLegacyMeleeAttacks = true;
                 result.accepted = _authority.SubmitAttack(
                     new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f, origin, travel, result.maxRange,
                         sequence, Time.time),
                     new HitCandidate(_rig.CombatId, hitPoint, false));
+                if (_localAuthority != null) _localAuthority.AllowLegacyMeleeAttacks = legacyWasAllowed;
 
                 result.damage = before - _rig.CurrentHealth;
                 result.sequenceConsumed = _localAuthority != null && _localAuthority.LastSequenceFor(enemy.CombatId) == sequence;

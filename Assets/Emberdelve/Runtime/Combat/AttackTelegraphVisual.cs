@@ -10,7 +10,9 @@ namespace Emberdelve.Combat
     /// Ignore Raycast, so it can never influence a combat query.
     ///
     /// The wedge is oriented along the direction the brain committed when the windup started, which is
-    /// the same direction EnemyAgent submits the attack along. What the player sees is what can land.
+    /// the same direction EnemyAgent's swept swing is aimed along. D1c4: its angular extent is the yaw range of the
+    /// swing pattern the enemy really swings and its radius is that pattern's effective reach, so the ground
+    /// projection of the sweep and the warning are one thing. What the player sees is what can land.
     /// </summary>
     public sealed class AttackTelegraphVisual : MonoBehaviour
     {
@@ -22,7 +24,27 @@ namespace Emberdelve.Combat
         private Material _material;
         private Color _baseColor = new Color(1f, 0.32f, 0.18f, 1f);
 
+        /// <summary>Lowest blade yaw of the drawn wedge (degrees from the committed direction, positive to the right).</summary>
+        public float MinYawDegrees { get; private set; }
+
+        /// <summary>Highest blade yaw of the drawn wedge.</summary>
+        public float MaxYawDegrees { get; private set; }
+
+        /// <summary>Half of the drawn angular extent.</summary>
+        public float HalfAngleDegrees => (MaxYawDegrees - MinYawDegrees) * 0.5f;
+
+        /// <summary>Radius (metres) the wedge was last asked to draw at full growth (the length passed to <see cref="SetState"/>).</summary>
+        public float LastLength { get; private set; }
+
+        /// <summary>Legacy wedge: a symmetric cone of <paramref name="coneDegrees"/> (clamped to 40..200).</summary>
         public static AttackTelegraphVisual Create(Transform owner, float coneDegrees, Color color)
+        {
+            float half = Mathf.Clamp(coneDegrees, 40f, 200f) * 0.5f;
+            return Create(owner, -half, half, color);
+        }
+
+        /// <summary>D1c4: the wedge between two blade yaws (the yaw range of the enemy's swing pattern).</summary>
+        public static AttackTelegraphVisual Create(Transform owner, float minYawDegrees, float maxYawDegrees, Color color)
         {
             if (owner == null) return null;
 
@@ -34,18 +56,20 @@ namespace Emberdelve.Combat
             if (ignoreLayer >= 0) go.layer = ignoreLayer;
 
             AttackTelegraphVisual visual = go.AddComponent<AttackTelegraphVisual>();
-            visual.Configure(coneDegrees, color);
+            visual.Configure(minYawDegrees, maxYawDegrees, color);
             visual.gameObject.SetActive(false);
             return visual;
         }
 
-        private void Configure(float coneDegrees, Color color)
+        private void Configure(float minYawDegrees, float maxYawDegrees, Color color)
         {
             _baseColor = color;
+            MinYawDegrees = minYawDegrees;
+            MaxYawDegrees = maxYawDegrees;
 
             _filter = gameObject.AddComponent<MeshFilter>();
             _renderer = gameObject.AddComponent<MeshRenderer>();
-            _mesh = BuildWedge(coneDegrees);
+            _mesh = BuildWedge(minYawDegrees, maxYawDegrees);
             _filter.sharedMesh = _mesh;
 
             _material = CreateMaterial(_baseColor);
@@ -61,6 +85,8 @@ namespace Emberdelve.Combat
         public void SetState(bool active, float progress, Vector3 flatDirection, float length, bool whiffed)
         {
             if (_renderer == null) return;
+
+            LastLength = length;
 
             if (!active)
             {
@@ -104,9 +130,8 @@ namespace Emberdelve.Combat
         }
 
         /// <summary>Unit wedge: apex at the origin, opening along +Z, radius 1, both facings so it reads from above and below.</summary>
-        private static Mesh BuildWedge(float coneDegrees)
+        private static Mesh BuildWedge(float minYawDegrees, float maxYawDegrees)
         {
-            float half = Mathf.Clamp(coneDegrees, 40f, 200f) * 0.5f;
 
             List<Vector3> vertices = new List<Vector3>(ArcSegments + 2);
             List<int> triangles = new List<int>(ArcSegments * 6);
@@ -117,7 +142,7 @@ namespace Emberdelve.Combat
 
             for (int i = 0; i <= ArcSegments; i++)
             {
-                float angle = Mathf.Deg2Rad * Mathf.Lerp(-half, half, i / (float)ArcSegments);
+                float angle = Mathf.Deg2Rad * Mathf.Lerp(minYawDegrees, maxYawDegrees, i / (float)ArcSegments);
                 vertices.Add(new Vector3(Mathf.Sin(angle), 0f, Mathf.Cos(angle)));
                 normals.Add(Vector3.up);
             }

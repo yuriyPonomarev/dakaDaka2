@@ -87,6 +87,7 @@ namespace Emberdelve.EditorTools
             BuildLootTables();
             ApplyLootRarityProfiles();
             BuildEnemies();
+            ApplyEnemySwings();
             ApplyEnemyDropTables();
             BuildLayout();
             ApplyChestSpawns();
@@ -1530,6 +1531,17 @@ namespace Emberdelve.EditorTools
         public static SwingPatternData RapierThrust;
         public static HitLocationTable HitLocations;
 
+        // ---------------------------------------------------------------- D1c4 enemy swing patterns
+
+        public static SwingPatternData ClawSlash;
+        public static SwingPatternData MaulSweep;
+
+        /// <summary>D1c4: the pattern windup of an enemy swing. The brain's windup (the telegraph) comes first; this is the short wind-back the swing adds. Proposal, needs a playtest.</summary>
+        public const float EnemySwingWindup = 0.10f;
+
+        /// <summary>D1c4: the active (damage) phase of an enemy swing. Proposal, needs a playtest.</summary>
+        public const float EnemySwingActive = 0.18f;
+
         /// <summary>
         /// D1a: authors the swing patterns of the player's melee weapons as ScriptableObject data and assigns them
         /// to the weapon assets, and the hit-location table. Idempotent and code-authoritative like the other Apply
@@ -1590,6 +1602,75 @@ namespace Emberdelve.EditorTools
             }
 
             AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>
+        /// D1c4: gives the two enemy weapons a swing pattern, so a real monster attacks through the authority's swept swing
+        /// like the player. Code-authoritative and idempotent like ApplySwingPatterns; it runs after BuildEnemies because the
+        /// pattern is authored FROM the enemy: its yaw range is the enemy's <c>attackTelegraphCone</c> (the warned wedge and the
+        /// sweep are one source), its reach is the weapon's own reach (reachScale 1, so the effective reach is
+        /// weapon.reach + weapon.hitSphereRadius, the number the old telegraph already drew). One combo step of damage x1, NO
+        /// impact zones on the weapons (so the claw is not scaled by where along the blade it lands: the hit-location table is
+        /// the only damage variance). Windup 0.10 s and active 0.18 s are the proposal values (EnemySwingWindup / EnemySwingActive);
+        /// the brain's own attackWindup stays the telegraph and the swing begins when the brain asks for the attack. The weapons'
+        /// older windupTime / activeWindow / recoveryTime fields are not read by the swept path and are left as they were.
+        /// </summary>
+        private static void ApplyEnemySwings()
+        {
+            ClawSlash = AuthorEnemyPattern("Pattern_ClawSlash", "claw_slash", Claw, Servitor, 0.60f, 0.18f, -0.20f, 0.40f);
+            MaulSweep = AuthorEnemyPattern("Pattern_MaulSweep", "maul_sweep", ClawElite, Warden, 0.70f, 0.22f, -0.10f, 0.50f);
+
+            AssignPatterns(Claw, ClawSlash);
+            AssignPatterns(ClawElite, MaulSweep);
+
+            // A one-step "chain" would only add a second place to author the multiplier; the weapons stay chainless (step 0 only).
+            // No impact zones: a contact anywhere along the blade does full damage.
+            foreach (WeaponData weapon in new[] { Claw, ClawElite })
+            {
+                if (weapon == null) continue;
+                bool dirty = false;
+                if (weapon.comboSteps != null && weapon.comboSteps.Length != 0) { weapon.comboSteps = new ComboStep[0]; dirty = true; }
+                if (weapon.impactZones != null && weapon.impactZones.Length != 0) { weapon.impactZones = new ImpactZone[0]; dirty = true; }
+                if (dirty) EditorUtility.SetDirty(weapon);
+            }
+
+            AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>
+        /// One enemy pattern: five keys on the arc of a short arm. The hand travels a circle of radius <paramref name="handRadius"/>
+        /// around the eye (the pattern's reachInset is that radius, so the tip reaches exactly the weapon's reach) at height
+        /// <paramref name="handY"/> below the eye, and the blade points along the arm, from -cone/2 to +cone/2 of the committed direction.
+        /// </summary>
+        private static SwingPatternData AuthorEnemyPattern(string assetName, string patternId, WeaponData weapon, EnemyData enemy,
+            float handRadius, float sweepRadius, float handY, float recovery)
+        {
+            if (weapon == null || enemy == null) return null;
+
+            float cone = Mathf.Clamp(enemy.attackTelegraphCone, 40f, 200f);
+            if (!Mathf.Approximately(cone, enemy.attackTelegraphCone))
+            {
+                enemy.attackTelegraphCone = cone;
+                EditorUtility.SetDirty(enemy);
+            }
+
+            float half = cone * 0.5f;
+            SwingKey[] keys = new SwingKey[5];
+            for (int i = 0; i < keys.Length; i++)
+            {
+                float yaw = -half + cone * (i / 4f);
+                float r = yaw * Mathf.Deg2Rad;
+                keys[i] = new SwingKey(i / 4f, new Vector3(handRadius * Mathf.Sin(r), handY, handRadius * Mathf.Cos(r)), yaw, -2f);
+            }
+
+            SwingPatternData p = AuthorPattern(assetName, patternId, SwingKind.HorizontalLeftToRight, weapon,
+                1f, handRadius, sweepRadius, 0.020f, 2, 1f, keys);
+            if (p == null) return null;
+
+            SetPatternTiming(p, EnemySwingWindup, EnemySwingActive, recovery);
+            p.wallRecoilTime = 0.30f;
+            EditorUtility.SetDirty(p);
+            return p;
         }
 
         /// <summary>

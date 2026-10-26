@@ -25,7 +25,8 @@ MonoBehaviour:
   reach: 2.1
   arcAngle: 150
   hitSphereRadius: 0.55
-  swingPatterns: []
+  swingPatterns:
+  - {fileID: 11400000, guid: fddc2bd433cd0ee4e97d181c0fafbd51, type: 2}
   comboSteps: []
   comboWindow: 0.7
   comboFinisherRecovery: 0.35

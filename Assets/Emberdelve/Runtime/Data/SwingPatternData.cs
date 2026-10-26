@@ -164,6 +164,26 @@ namespace Emberdelve.Data
         public float BladeLength(WeaponData weapon) =>
             Mathf.Max(0.3f, EffectiveReach(weapon) - sweepRadius - reachInset);
 
+        /// <summary>
+        /// Smallest and largest blade yaw over the keys (degrees, aim frame, positive to the right): the horizontal angular
+        /// extent of the sweep. D1c4 uses it as the ONE source of an enemy's telegraph wedge (the ground projection of the
+        /// pattern) and the gates pin it against the enemy's authored cone. 0/0 for a pattern with no keys.
+        /// </summary>
+        public void YawRange(out float minYaw, out float maxYaw)
+        {
+            minYaw = 0f;
+            maxYaw = 0f;
+            if (keys == null || keys.Length == 0) return;
+
+            minYaw = float.PositiveInfinity;
+            maxYaw = float.NegativeInfinity;
+            for (int i = 0; i < keys.Length; i++)
+            {
+                minYaw = Mathf.Min(minYaw, keys[i].bladeYaw);
+                maxYaw = Mathf.Max(maxYaw, keys[i].bladeYaw);
+            }
+        }
+
         /// <summary>Pose at normalised ACTIVE time u (0..1): linear interpolation between the keys.</summary>
         public SwingPose ActivePose(float u)
         {

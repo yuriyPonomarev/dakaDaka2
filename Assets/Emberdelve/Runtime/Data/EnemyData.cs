@@ -22,7 +22,7 @@ namespace Emberdelve.Data
         public float attackWindup = 0.65f;
         public float attackCooldown = 1.9f;
         public float attackTelegraphHeight = 0.55f;
-        [Tooltip("Total angle of the warned wedge. The attack is only submitted inside this wedge, so what the telegraph shows is what actually lands.")]
+        [Tooltip("Total angle of the warned wedge. D1c4: this is also the yaw range of the attack weapon's swing pattern (the data build authors the pattern from it), so the telegraph is the ground projection of the swept swing that really lands. The pattern's timing (windup, active, recovery), reach and sweep radius are data on the pattern and the weapon, not here.")]
         [Range(40f, 200f)] public float attackTelegraphCone = 120f;
         public Color telegraphColor = new Color(1f, 0.32f, 0.18f, 1f);
 
