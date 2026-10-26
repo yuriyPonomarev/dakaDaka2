@@ -104,9 +104,9 @@ namespace Emberdelve.UI
         private const float StaminaBarLeft = 610f;
         private const float StaminaLabelWidth = 190f;
 
-        // The raid hotbar. HotbarController.Update loops i = 0..3 and calls Inventory.TryUseSlot(i), so 1-4
-        // address the first four stacks the bag currently holds, never four capacity cells and never a
-        // filtered subset of them. The strip therefore draws exactly those four stacks.
+        // The raid hotbar. HotbarController.Update uses the StackId bound to key N (Inventory.Hotbar, R6c2), so the
+        // strip draws the live stack behind each of the four bindings, and an empty chip for a slot with no
+        // binding or whose stack has retired. It never shows bag list positions.
         private const int HotbarCapacity = 4;
         private const float HotbarChipWidth = 96f;
         private const float HotbarChipHeight = 44f;
@@ -131,6 +131,7 @@ namespace Emberdelve.UI
             GameEvents.DamageDealt += OnDamageDealt;
             GameEvents.ItemCollected += OnItemCollected;
             GameEvents.InventoryChanged += OnInventoryChanged;
+            GameEvents.HotbarChanged += OnHotbarChanged;
             GameEvents.AmmoChanged += OnAmmo;
             GameEvents.PlayerManaChanged += OnPlayerMana;
             GameEvents.SkillStateChanged += OnSkillState;
@@ -153,6 +154,7 @@ namespace Emberdelve.UI
             GameEvents.DamageDealt -= OnDamageDealt;
             GameEvents.ItemCollected -= OnItemCollected;
             GameEvents.InventoryChanged -= OnInventoryChanged;
+            GameEvents.HotbarChanged -= OnHotbarChanged;
             GameEvents.AmmoChanged -= OnAmmo;
             GameEvents.PlayerManaChanged -= OnPlayerMana;
             GameEvents.SkillStateChanged -= OnSkillState;
@@ -473,7 +475,7 @@ namespace Emberdelve.UI
         /// <summary>
         /// The raid hotbar: the four stacks the 1-4 keys actually reach, plus one compact line saying what the
         /// rest of the bag is doing. The full 10x4 satchel is not squeezed into the HUD; it is the screen
-        /// opened with I or Tab, and this strip only names the stacks HotbarController consumes.
+        /// opened with I or Tab, and this strip only names the stacks the 1-4 bindings point at.
         /// </summary>
         private void BuildHotbar()
         {
@@ -489,10 +491,10 @@ namespace Emberdelve.UI
         }
 
         /// <summary>
-        /// Rebuilds the strip from the live bag. The chips are named Slot1..Slot4 and stand for stack indices
-        /// 0..3 of Inventory.Slots, the same indices HotbarController hands to Inventory.TryUseSlot, so a
+        /// Rebuilds the strip from the live bag. The chips are named Slot1..Slot4 and stand for hotbar slots 0..3 of
+        /// Inventory.Hotbar: each shows the live stack behind its bound StackId (current count included), so a
         /// stack that is consumed, removed, merged or shifted is re-read from the bag on the next
-        /// InventoryChanged notification instead of being remembered here.
+        /// InventoryChanged (or HotbarChanged) notification instead of being remembered here.
         /// </summary>
         private void RebuildInventory()
         {
@@ -529,8 +531,7 @@ namespace Emberdelve.UI
             {
                 float x = -total * 0.5f + (HotbarChipWidth + HotbarChipGap) * i + HotbarChipWidth * 0.5f;
 
-                bool filled = i < inventory.Slots.Count;
-                InventorySlot slot = filled ? inventory.Slots[i] : default;
+                bool filled = inventory.Hotbar.TryGetStack(i, out InventorySlot slot);
                 ItemData item = filled ? slot.Item : null;
 
                 Image chip = UiFactory.CreateImage(_inventoryRow, "Slot" + (i + 1),
@@ -539,7 +540,7 @@ namespace Emberdelve.UI
                     new Vector2(0.5f, 0f), new Vector2(0.5f, 0f));
                 chip.raycastTarget = false;
 
-                // The key glyph is the hint, and it is the key HotbarController reads for this stack index.
+                // The key glyph is the hint, and it is the key HotbarController reads for this hotbar slot.
                 Text key = UiFactory.CreateText(chip.transform, "Key", (i + 1).ToString(), 18,
                     item != null ? new Color(1f, 0.9f, 0.72f, 1f) : new Color(0.55f, 0.52f, 0.46f, 0.85f),
                     TextAnchor.MiddleCenter, FontStyle.Bold);
@@ -607,7 +608,7 @@ namespace Emberdelve.UI
             Equipment equipment = _director != null && _director.Player != null ? _director.Player.Equipment : null;
             int worn = equipment != null ? equipment.FilledCount : 0;
 
-            _bagSummaryLabel.text = $"1-4 use these stacks   bag {inventory.UsedCells}/{inventory.Capacity} cells   " +
+            _bagSummaryLabel.text = $"1-4 use bound items   bag {inventory.UsedCells}/{inventory.Capacity} cells   " +
                                     $"value {inventory.CarriedValue}   worn {worn}   [I] satchel";
         }
 
@@ -654,6 +655,12 @@ namespace Emberdelve.UI
         }
 
         private void OnInventoryChanged(int playerId)
+        {
+            if (!PlayerView.Shows(playerId)) return;
+            RebuildInventory();
+        }
+
+        private void OnHotbarChanged(int playerId)
         {
             if (!PlayerView.Shows(playerId)) return;
             RebuildInventory();

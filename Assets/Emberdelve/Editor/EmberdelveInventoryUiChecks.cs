@@ -1,7 +1,10 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.UI;
 using Emberdelve.Core;
 using Emberdelve.Data;
@@ -69,9 +72,13 @@ namespace Emberdelve.EditorTools
             // Observers armed for the scenario that is running, and cleared before it.
             public int CollectedEvents;
             public int InventoryEvents;
+            public int HotbarEvents;
+            public readonly List<string> Toasts = new List<string>();
 
             public void OnItemCollected(int playerId, ItemData item, int totalCollected) { CollectedEvents++; }
             public void OnInventoryChanged(int playerId) { InventoryEvents++; }
+            public void OnHotbarChanged(int playerId) { HotbarEvents++; }
+            public void OnToast(int playerId, string message) { Toasts.Add(message); }
         }
 
         public static IEnumerator Run(PlayerRig rig, RunDirector director, System.Action<bool, string> check)
@@ -117,9 +124,14 @@ namespace Emberdelve.EditorTools
 
             GameEvents.ItemCollected += fixture.OnItemCollected;
             GameEvents.InventoryChanged += fixture.OnInventoryChanged;
+            GameEvents.HotbarChanged += fixture.OnHotbarChanged;
+            GameEvents.ToastRaised += fixture.OnToast;
 
             try
             {
+                // R6c2: the raid loadout the run just established must have bound the first usable stacks.
+                InitialLoadoutBindsDefaults(fixture);
+
                 yield return PrepareScreen(fixture);
                 if (fixture.UiRoot == null) yield break;
 
@@ -132,7 +144,14 @@ namespace Emberdelve.EditorTools
                 yield return CancelAndCloseConserveEverything(fixture);
                 yield return ExternalBagChangeKeepsSelectionHonest(fixture);
                 yield return StableSelectionTracksIdentity(fixture);
+                yield return RebindingDropsSelectionFromTheOldBag(fixture);
                 yield return RightClickUseSubmitsCommand(fixture);
+                yield return HotbarDefaultsAtLoadoutAndRestore(fixture);
+                yield return HotbarKeyUsesBoundStackIdentity(fixture);
+                yield return HotbarRetiredBindingDoesNothing(fixture);
+                yield return HotbarAssignFromOpenScreen(fixture);
+                yield return HotbarRealKeyboardPath(fixture);
+                yield return HotbarHudMatchesBindings(fixture);
                 yield return CloakSlotAndTooltips(fixture);
                 yield return PlayerFacingFixes(fixture);
 
@@ -143,6 +162,8 @@ namespace Emberdelve.EditorTools
                 // Observers and screen state are the fixture's to clean up, not the run's to inherit.
                 GameEvents.ItemCollected -= fixture.OnItemCollected;
                 GameEvents.InventoryChanged -= fixture.OnInventoryChanged;
+                GameEvents.HotbarChanged -= fixture.OnHotbarChanged;
+                GameEvents.ToastRaised -= fixture.OnToast;
 
                 fixture.Screen.Close();
                 fixture.Equipment.Clear();
@@ -778,6 +799,54 @@ namespace Emberdelve.EditorTools
                 "a post-removal click cannot move the replacement through a stale selection");
         }
 
+        // R6d: a selection belongs to the bag it was made in. StackIds are minted per bag, so a stack id from
+        // bag A must never act in bag B. The screen's selection model is reached by reflection because no public
+        // member re-points the screen at a different bag without a second rig.
+        private static IEnumerator RebindingDropsSelectionFromTheOldBag(Fixture f)
+        {
+            Debug.Log("[Emberdelve][Smoke:inventoryui] ---- rebinding the screen to another bag");
+            ResetBag(f);
+            yield return WaitFrames(2);
+            OpenScreen(f);
+            yield return WaitFrames(2);
+
+            Vector2Int coinCell = new Vector2Int(0, 0);
+            f.Check(f.Inventory.TryAddAt(f.Coin, 3, coinCell, out string addReason), "a coin stack is placed in bag A: " + addReason);
+            yield return WaitFrames(2);
+            yield return ClickCell(f, coinCell);
+            f.Check(f.Screen.HasSelection && f.Screen.SelectedItem == f.Coin, "the coin stack of bag A is selected");
+
+            FieldInfo modelField = typeof(InventoryScreenController).GetField("_model", BindingFlags.Instance | BindingFlags.NonPublic);
+            object model = modelField != null ? modelField.GetValue(f.Screen) : null;
+            MethodInfo rebind = model != null
+                ? model.GetType().GetMethod("RebindInventory", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                : null;
+            f.Check(rebind != null, "the screen's selection model exposes its bag rebinding");
+            if (rebind == null) yield break;
+
+            GameObject otherObject = new GameObject("RebindCheckBag");
+            Inventory otherBag = otherObject.AddComponent<Inventory>();
+            try
+            {
+                bool changed = (bool)rebind.Invoke(model, new object[] { otherBag });
+                f.Check(changed && !f.Screen.HasSelection && f.Screen.SelectedStackId == 0 && f.Screen.SelectedItem == null,
+                    "rebinding to bag B drops the selection made in bag A");
+
+                bool unchanged = (bool)rebind.Invoke(model, new object[] { otherBag });
+                f.Check(!unchanged, "rebinding to the bag already bound changes nothing");
+            }
+            finally
+            {
+                rebind.Invoke(model, new object[] { f.Inventory });
+                UnityEngine.Object.DestroyImmediate(otherObject);
+            }
+
+            yield return WaitFrames(2);
+            f.Check(!f.Screen.HasSelection && f.Inventory.IndexAtCell(coinCell) >= 0,
+                "bag A still holds its coins and the old selection does not come back after rebinding to it");
+            f.Screen.Close();
+        }
+
         private static IEnumerator RightClickUseSubmitsCommand(Fixture f)
         {
             Debug.Log("[Emberdelve][Smoke:inventoryui] ---- right-click use command");
@@ -812,6 +881,605 @@ namespace Emberdelve.EditorTools
                 $"the authority commits one revision and publishes one final inventory change ({f.Inventory.Revision - revisionBefore}, {f.InventoryEvents})");
             f.Check(!f.Screen.HasSelection && f.Screen.SelectedStackId == 0,
                 "using the item through the screen leaves no stale selection");
+        }
+
+        // ------------------------------------------------------------------ R6c2 hotbar scenarios
+        //
+        // Key N is read by HotbarController.Update, which needs a keyboard device that batch mode does not
+        // expose (see the archer smoke note). It calls exactly Inventory.Hotbar.TryUse(N - 1, ...), so these
+        // scenarios call that same public method. Assignment from the open screen calls
+        // InventoryScreenController.TryAssignHotbarSlot, which is what the screen's 1-4 key handler calls.
+
+        private static readonly Vector2 OffGrid = new Vector2(-4000f, -4000f);
+
+        private static ulong StackIdOfDefinition(Fixture f, ItemData item)
+        {
+            for (int i = 0; i < f.Inventory.Slots.Count; i++)
+                if (f.Inventory.Slots[i].Item == item) return f.Inventory.Slots[i].StackId;
+            return 0;
+        }
+
+        private static ulong StackIdAtCell(Fixture f, Vector2Int cell)
+        {
+            int index = f.Inventory.IndexAtCell(cell);
+            return index >= 0 ? f.Inventory.Slots[index].StackId : 0;
+        }
+
+        private static string BoundIds(Fixture f)
+        {
+            return f.Inventory.Hotbar.StackIdAt(0) + "," + f.Inventory.Hotbar.StackIdAt(1) + "," +
+                   f.Inventory.Hotbar.StackIdAt(2) + "," + f.Inventory.Hotbar.StackIdAt(3);
+        }
+
+        private static int BoundCount(Fixture f, ulong stackId)
+        {
+            int count = 0;
+            for (int i = 0; i < HotbarBindings.SlotCount; i++)
+                if (f.Inventory.Hotbar.StackIdAt(i) == stackId) count++;
+            return count;
+        }
+
+        private static void InitialLoadoutBindsDefaults(Fixture f)
+        {
+            List<ulong> expected = new List<ulong>();
+            for (int i = 0; i < f.Inventory.Slots.Count && expected.Count < HotbarBindings.SlotCount; i++)
+            {
+                InventorySlot slot = f.Inventory.Slots[i];
+                if (HotbarBindings.IsUsableDefinition(slot.Item)) expected.Add(slot.StackId);
+            }
+
+            bool match = true;
+            for (int i = 0; i < HotbarBindings.SlotCount; i++)
+            {
+                ulong want = i < expected.Count ? expected[i] : 0;
+                if (f.Inventory.Hotbar.StackIdAt(i) != want) match = false;
+            }
+            f.Check(expected.Count > 0,
+                "the actual authored class loadout contains at least one usable starting stack");
+
+            ItemData authoredDraught = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_BloodDraught.asset");
+            ItemData authoredArrows = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_ArrowBundle.asset");
+            bool hasNamedAuthoredConsumable = false;
+            for (int i = 0; i < expected.Count; i++)
+            {
+                if (!f.Inventory.TryGetStack(expected[i], out InventorySlot stack)) continue;
+                if (stack.Item == authoredDraught || stack.Item == authoredArrows) hasNamedAuthoredConsumable = true;
+            }
+            f.Check(hasNamedAuthoredConsumable,
+                "the authored starting kit includes a Blood Draught or Arrow Bundle consumable");
+            f.Check(match, $"the established raid loadout bound its first {expected.Count} usable stack(s) in bag order to keys 1-4 ({BoundIds(f)})");
+        }
+
+        private static IEnumerator HotbarDefaultsAtLoadoutAndRestore(Fixture f)
+        {
+            Debug.Log("[Emberdelve][Smoke:inventoryui] ---- hotbar defaults at loadout, clear and restore");
+            ItemData draught = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_BloodDraught.asset");
+            ItemData arrows = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_ArrowBundle.asset");
+            f.Check(draught != null && arrows != null && HotbarBindings.IsUsableDefinition(draught) &&
+                    HotbarBindings.IsUsableDefinition(arrows) && !HotbarBindings.IsUsableDefinition(f.Coin) &&
+                    !HotbarBindings.IsUsableDefinition(f.Blade),
+                "the draught and the arrow bundle are usable hotbar definitions; the coin and the blade are not");
+            if (draught == null || arrows == null) yield break;
+
+            ResetBag(f);
+            yield return WaitFrames(2);
+            f.Check(BoundCount(f, 0) == HotbarBindings.SlotCount && f.Inventory.Hotbar.StackIdAt(0) == 0,
+                "Clear retires every binding");
+
+            f.InventoryEvents = 0;
+            f.Inventory.GiveStartingItems(new[] { f.Coin, draught, f.Blade, arrows });
+            yield return WaitFrames(2);
+            ulong draughtId = StackIdOfDefinition(f, draught);
+            ulong arrowsId = StackIdOfDefinition(f, arrows);
+            f.Check(draughtId != 0 && arrowsId != 0 && draughtId != arrowsId,
+                "the starting kit holds a draught stack and an arrow stack with their own StackIds");
+            f.Check(f.Inventory.Hotbar.StackIdAt(0) == draughtId && f.Inventory.Hotbar.StackIdAt(1) == arrowsId &&
+                    f.Inventory.Hotbar.StackIdAt(2) == 0 && f.Inventory.Hotbar.StackIdAt(3) == 0,
+                $"the starting kit binds the first usable stacks in bag order and skips the coin and the blade ({BoundIds(f)})");
+
+            // No auto-refill: a usable stack that appears later does not take an empty slot.
+            f.Check(f.Inventory.TryAddAt(draught, 1, new Vector2Int(8, 3), out string addLate),
+                "a second draught stack appears mid-raid: " + addLate);
+            ulong lateId = StackIdAtCell(f, new Vector2Int(8, 3));
+            yield return WaitFrames(2);
+            f.Check(lateId != 0 && lateId != draughtId && f.Inventory.Hotbar.SlotOf(lateId) < 0 &&
+                    f.Inventory.Hotbar.StackIdAt(2) == 0 && f.Inventory.Hotbar.StackIdAt(0) == draughtId,
+                $"a stack that appears mid-raid is never auto-bound ({BoundIds(f)})");
+
+            // Restore: retire all old identities, bind defaults for the restored loadout.
+            ResetBag(f);
+            yield return WaitFrames(2);
+            f.Check(f.Inventory.TryAddAt(f.Coin, 1, new Vector2Int(0, 0), out string a1) &&
+                    f.Inventory.TryAddAt(draught, 2, new Vector2Int(2, 0), out string a2),
+                "a coin and a draught stack are placed for the restore scenario");
+            ContainerSnapshot snapshot = f.Inventory.ToContainerSnapshot();
+            ulong oldDraughtId = StackIdOfDefinition(f, draught);
+            f.Inventory.Hotbar.TryAssign(3, oldDraughtId, out _);
+            f.Check(f.Inventory.Hotbar.StackIdAt(3) == oldDraughtId, "the draught is explicitly bound to slot 4 before the restore");
+            f.Check(f.Inventory.Catalog != null, "the bag has an item catalog, so a snapshot can be restored");
+            if (f.Inventory.Catalog == null) yield break;
+
+            bool restored = f.Inventory.TryRestore(snapshot, out string restoreReason);
+            yield return WaitFrames(2);
+            ulong newDraughtId = StackIdOfDefinition(f, draught);
+            f.Check(restored, "the bag snapshot restores: " + restoreReason);
+            f.Check(newDraughtId != 0 && newDraughtId != oldDraughtId,
+                "the restored draught stack has a fresh StackId");
+            f.Check(f.Inventory.Hotbar.StackIdAt(3) == 0 && f.Inventory.Hotbar.SlotOf(oldDraughtId) < 0 &&
+                    f.Inventory.Hotbar.StackIdAt(0) == newDraughtId && BoundCount(f, newDraughtId) == 1,
+                $"restore retires the old binding and binds the restored loadout by default ({BoundIds(f)})");
+        }
+
+        private static IEnumerator HotbarKeyUsesBoundStackIdentity(Fixture f)
+        {
+            Debug.Log("[Emberdelve][Smoke:inventoryui] ---- hotbar key uses the bound StackId");
+            ItemData draught = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_BloodDraught.asset");
+            if (draught == null) { f.Check(false, "the draught is loadable"); yield break; }
+
+            ResetBag(f);
+            yield return WaitFrames(2);
+            Vector2Int coinCell = new Vector2Int(0, 0);
+            Vector2Int draughtCell = new Vector2Int(2, 0);
+            f.Check(f.Inventory.TryAddAt(f.Coin, 1, coinCell, out _) &&
+                    f.Inventory.TryAddAt(draught, 2, draughtCell, out _),
+                "a coin (earlier in the list) and a two-unit draught stack are placed");
+            ulong draughtId = StackIdAtCell(f, draughtCell);
+            int indexBefore = f.Inventory.IndexOfStack(draughtId);
+            f.Check(f.Inventory.Hotbar.TryAssign(0, draughtId, out string assignReason),
+                "the draught stack is bound to key 1: " + assignReason);
+
+            f.Rig.Health.SetHealth(Mathf.Max(1f, f.Rig.MaxHealth - 30f));
+            float healthBefore = f.Rig.CurrentHealth;
+            ulong revisionBefore = f.Inventory.Revision;
+            f.InventoryEvents = 0;
+            bool used = f.Inventory.Hotbar.TryUse(0, out _);
+            float expectedHealth = Mathf.Min(f.Rig.MaxHealth, healthBefore + draught.healAmount);
+            int afterIndex = f.Inventory.IndexOfStack(draughtId);
+            f.Check(used && afterIndex >= 0 && f.Inventory.Slots[afterIndex].Count == 1 &&
+                    Mathf.Abs(f.Rig.CurrentHealth - expectedHealth) < 0.01f,
+                $"key 1 consumed exactly one unit of the bound stack and healed from the definition ({f.Rig.CurrentHealth:F1}/{expectedHealth:F1} HP)");
+            f.Check(f.Inventory.Revision == revisionBefore + 1 && f.InventoryEvents == 1,
+                $"the hotbar use commits one revision and one inventory event ({f.Inventory.Revision - revisionBefore}, {f.InventoryEvents})");
+            f.Check(f.Inventory.Hotbar.StackIdAt(0) == draughtId,
+                "a partial use keeps the binding on the same StackId");
+
+            // Compaction: an earlier list entry leaves; the key still names the same identity.
+            int coinIndex = f.Inventory.IndexAtCell(coinCell);
+            f.Check(f.Inventory.TryRemoveAt(coinIndex, 1) == 1 && f.Inventory.IndexOfStack(draughtId) == indexBefore - 1,
+                "removing the earlier coin compacts the list so the bound stack shifts down one index");
+            f.Check(f.Inventory.Hotbar.StackIdAt(0) == draughtId,
+                "after compaction the key still names the same StackId");
+
+            f.Rig.Health.SetHealth(Mathf.Max(1f, f.Rig.MaxHealth - 30f));
+            revisionBefore = f.Inventory.Revision;
+            f.InventoryEvents = 0;
+            used = f.Inventory.Hotbar.TryUse(0, out _);
+            f.Check(used && f.Inventory.IndexOfStack(draughtId) < 0 && f.Inventory.Revision == revisionBefore + 1 &&
+                    f.InventoryEvents == 1,
+                "after compaction the key consumes that same stack's last unit (one revision, one event) and retires it");
+            f.Check(f.Inventory.Hotbar.StackIdAt(0) == 0, "the fully consumed stack leaves the slot empty");
+        }
+
+        private static IEnumerator HotbarRetiredBindingDoesNothing(Fixture f)
+        {
+            Debug.Log("[Emberdelve][Smoke:inventoryui] ---- retired hotbar binding never retargets");
+            ItemData draught = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_BloodDraught.asset");
+            if (draught == null) { f.Check(false, "the draught is loadable"); yield break; }
+
+            ResetBag(f);
+            yield return WaitFrames(2);
+            Vector2Int boundCell = new Vector2Int(2, 0);
+            Vector2Int lookalikeCell = new Vector2Int(4, 0);
+            f.Check(f.Inventory.TryAddAt(draught, 1, boundCell, out _) &&
+                    f.Inventory.TryAddAt(draught, 2, lookalikeCell, out _),
+                "a bound one-unit draught stack and a same-definition lookalike stack are placed");
+            ulong boundId = StackIdAtCell(f, boundCell);
+            ulong lookalikeId = StackIdAtCell(f, lookalikeCell);
+            f.Check(boundId != 0 && lookalikeId != 0 && boundId != lookalikeId &&
+                    f.Inventory.Hotbar.TryAssign(0, boundId, out _),
+                "the first stack is bound to key 1; the lookalike has its own StackId and no binding");
+
+            f.Rig.Health.SetHealth(Mathf.Max(1f, f.Rig.MaxHealth - 30f));
+            f.Check(f.Inventory.Hotbar.TryUse(0, out _) && f.Inventory.IndexOfStack(boundId) < 0,
+                "key 1 consumes the bound stack's only unit and retires it");
+            int lookalikeIndex = f.Inventory.IndexOfStack(lookalikeId);
+            f.Check(lookalikeIndex == 0, "the lookalike now sits at the list index the bound stack used to hold");
+
+            f.Rig.Health.SetHealth(Mathf.Max(1f, f.Rig.MaxHealth - 30f));
+            float healthBefore = f.Rig.CurrentHealth;
+            ulong revisionBefore = f.Inventory.Revision;
+            int unitsBefore = f.Inventory.TotalUnits;
+            f.InventoryEvents = 0;
+            bool used = f.Inventory.Hotbar.TryUse(0, out _);
+            lookalikeIndex = f.Inventory.IndexOfStack(lookalikeId);
+            f.Check(!used && f.Inventory.Hotbar.StackIdAt(0) == 0,
+                "key 1 on a retired binding does nothing");
+            f.Check(lookalikeIndex == 0 && f.Inventory.Slots[lookalikeIndex].Count == 2 &&
+                    f.Inventory.TotalUnits == unitsBefore && f.Inventory.Revision == revisionBefore &&
+                    f.InventoryEvents == 0 && Mathf.Abs(f.Rig.CurrentHealth - healthBefore) < 0.01f,
+                "the lookalike at the old index is untouched: same count, no revision, no event, no healing");
+            f.Check(f.Inventory.Hotbar.SlotOf(lookalikeId) < 0,
+                "the lookalike never inherited the retired binding");
+
+            // The index-based adapter is kept for existing callers: it still addresses the list position.
+            f.Check(f.Inventory.TryUseSlot(0) && f.Inventory.Slots[f.Inventory.IndexOfStack(lookalikeId)].Count == 1,
+                "the legacy index-based TryUseSlot adapter still works for existing callers");
+        }
+
+        private static IEnumerator HotbarAssignFromOpenScreen(Fixture f)
+        {
+            Debug.Log("[Emberdelve][Smoke:inventoryui] ---- assign hotbar slots from the open satchel");
+            ItemData draught = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_BloodDraught.asset");
+            ItemData arrows = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_ArrowBundle.asset");
+            if (draught == null || arrows == null) { f.Check(false, "the draught and arrow bundle are loadable"); yield break; }
+
+            ResetBag(f);
+            yield return WaitFrames(2);
+            OpenScreen(f);
+            yield return WaitFrames(2);
+
+            Vector2Int coinCell = new Vector2Int(0, 0);
+            Vector2Int draughtCell = new Vector2Int(2, 0);
+            Vector2Int arrowCell = new Vector2Int(4, 0);
+            Vector2Int bladeCell = new Vector2Int(6, 0);
+            f.Check(f.Inventory.TryAddAt(f.Coin, 1, coinCell, out _) &&
+                    f.Inventory.TryAddAt(draught, 2, draughtCell, out _) &&
+                    f.Inventory.TryAddAt(arrows, 2, arrowCell, out _) &&
+                    f.Inventory.TryAddAt(f.Blade, 1, bladeCell, out _),
+                "a coin, draughts, arrows and a blade are placed in the open satchel");
+            yield return WaitFrames(2);
+            ulong coinId = StackIdAtCell(f, coinCell);
+            ulong draughtId = StackIdAtCell(f, draughtCell);
+            ulong arrowId = StackIdAtCell(f, arrowCell);
+            ulong bladeId = StackIdAtCell(f, bladeCell);
+            f.Check(coinId != 0 && draughtId != 0 && arrowId != 0 && bladeId != 0 && BoundIds(f) == "0,0,0,0",
+                "all four stacks are live and the hotbar starts empty");
+
+            ulong revisionBefore = f.Inventory.Revision;
+            f.HotbarEvents = 0;
+
+            // Selection path: select the draught by click, then press 2 with the pointer over no stack.
+            yield return ClickCell(f, draughtCell);
+            f.Check(f.Screen.SelectedStackId == draughtId, "the draught stack is selected by StackId");
+            bool bound = f.Screen.TryAssignHotbarSlot(1, OffGrid);
+            f.Check(bound && f.Inventory.Hotbar.StackIdAt(1) == draughtId && f.HotbarEvents == 1,
+                $"key 2 with a selected stack binds that StackId to slot 2 and raises one hotbar event ({BoundIds(f)}, {f.HotbarEvents})");
+
+            // Hover path: the stack under the pointer wins over the selection.
+            RectTransform arrowRect = FindChildRect(f.UiRoot, "Cell_" + arrowCell.x + "_" + arrowCell.y);
+            f.Check(arrowRect != null, "the arrow cell rectangle is rendered");
+            if (arrowRect == null) yield break;
+            bound = f.Screen.TryAssignHotbarSlot(2, ScreenPoint(f, arrowRect));
+            f.Check(bound && f.Inventory.Hotbar.StackIdAt(2) == arrowId && f.Inventory.Hotbar.StackIdAt(1) == draughtId &&
+                    f.Screen.SelectedStackId == draughtId,
+                $"key 3 over the arrow stack binds the hovered stack to slot 3 and leaves the selection alone ({BoundIds(f)})");
+
+            // Reassignment moves the binding: no duplicate.
+            f.HotbarEvents = 0;
+            bound = f.Screen.TryAssignHotbarSlot(3, OffGrid);
+            f.Check(bound && f.Inventory.Hotbar.StackIdAt(3) == draughtId && f.Inventory.Hotbar.StackIdAt(1) == 0 &&
+                    BoundCount(f, draughtId) == 1 && f.HotbarEvents == 1,
+                $"binding the selected draught to slot 4 moves it off slot 2 ({BoundIds(f)})");
+            bound = f.Screen.TryAssignHotbarSlot(3, ScreenPoint(f, arrowRect));
+            f.Check(bound && f.Inventory.Hotbar.StackIdAt(3) == arrowId && f.Inventory.Hotbar.StackIdAt(2) == 0 &&
+                    BoundCount(f, arrowId) == 1 && BoundCount(f, draughtId) == 0,
+                $"binding the arrows over an occupied slot replaces it and still holds no duplicate ({BoundIds(f)})");
+            f.HotbarEvents = 0;
+            bound = f.Screen.TryAssignHotbarSlot(3, ScreenPoint(f, arrowRect));
+            f.Check(bound && f.Inventory.Hotbar.StackIdAt(3) == arrowId && f.HotbarEvents == 0,
+                "re-binding the same stack to the same slot is a no-op without an event");
+
+            // Unusable items are refused with a toast, and nothing changes.
+            string bindingsBefore = BoundIds(f);
+            f.Toasts.Clear();
+            f.HotbarEvents = 0;
+            RectTransform coinRect = FindChildRect(f.UiRoot, "Cell_" + coinCell.x + "_" + coinCell.y);
+            RectTransform bladeRect = FindChildRect(f.UiRoot, "Cell_" + bladeCell.x + "_" + bladeCell.y);
+            f.Check(coinRect != null && bladeRect != null, "the coin and blade cell rectangles are rendered");
+            if (coinRect == null || bladeRect == null) yield break;
+            bool coinBound = f.Screen.TryAssignHotbarSlot(0, ScreenPoint(f, coinRect));
+            bool bladeBound = f.Screen.TryAssignHotbarSlot(1, ScreenPoint(f, bladeRect));
+            f.Check(!coinBound && !bladeBound && BoundIds(f) == bindingsBefore && f.HotbarEvents == 0,
+                $"a coin and a blade cannot be put on the hotbar ({BoundIds(f)})");
+            f.Check(f.Toasts.Count == 2 && f.Toasts[0].Contains(f.Coin.displayName) && f.Toasts[1].Contains(f.Blade.displayName),
+                "each refusal uses the screen's toast feedback and names the item");
+
+            // Nothing under the pointer and nothing selected: refused.
+            f.Screen.Close();
+            OpenScreen(f);
+            yield return WaitFrames(2);
+            f.Toasts.Clear();
+            bool nothing = f.Screen.TryAssignHotbarSlot(0, OffGrid);
+            f.Check(!nothing && f.Toasts.Count == 1 && BoundIds(f) == bindingsBefore,
+                "with no stack under the pointer and no selection, the key is refused with a toast");
+
+            f.Check(f.Inventory.Revision == revisionBefore,
+                "assigning hotbar slots never touches the shared inventory revision");
+            RectTransform currentArrowRect = FindChildRect(f.UiRoot, "Cell_" + arrowCell.x + "_" + arrowCell.y);
+            f.Check(currentArrowRect != null, "the arrow cell is still rendered after the satchel rebuild");
+            Vector2 arrowPoint = ScreenPoint(f, currentArrowRect);
+
+            // A closed screen assigns nothing.
+            f.Screen.Close();
+            f.Check(!f.Screen.TryAssignHotbarSlot(0, arrowPoint) && BoundIds(f) == bindingsBefore,
+                "a closed satchel ignores hotbar assignment");
+        }
+
+        private static void LogHotbarInputDiagnostic(Fixture f, Keyboard testKeyboard, string stage)
+        {
+            Keyboard currentKeyboard = Keyboard.current;
+            Emberdelve.InputLayer.EmberdelveInput input = f.Rig != null ? f.Rig.Input : null;
+            InputActionMap playerMap = ReadInputMap(input, "_playerMap");
+            InputActionMap systemMap = ReadInputMap(input, "_systemMap");
+            InputAction playerInventory = playerMap != null ? playerMap.FindAction("Inventory") : null;
+            InputAction systemInventory = systemMap != null ? systemMap.FindAction("Inventory") : null;
+
+            HudController[] huds = UnityEngine.Object.FindObjectsByType<HudController>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+            InventoryScreenController[] screens = UnityEngine.Object.FindObjectsByType<InventoryScreenController>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+
+            FieldInfo hudScreenField = typeof(HudController).GetField("_inventoryScreen", BindingFlags.Instance | BindingFlags.NonPublic);
+            string hudState = string.Empty;
+            for (int i = 0; i < huds.Length; i++)
+            {
+                HudController hud = huds[i];
+                if (i > 0) hudState += " | ";
+                InventoryScreenController boundScreen = hudScreenField != null ? hudScreenField.GetValue(hud) as InventoryScreenController : null;
+                hudState += $"{hud.name}#{hud.GetInstanceID()} enabled={hud.enabled} active={hud.gameObject.activeInHierarchy} boundScreen={(boundScreen != null ? boundScreen.name + "#" + boundScreen.GetInstanceID() : "null")}";
+            }
+
+            string screenState = string.Empty;
+            for (int i = 0; i < screens.Length; i++)
+            {
+                InventoryScreenController screen = screens[i];
+                if (i > 0) screenState += " | ";
+                screenState += $"{screen.name}#{screen.GetInstanceID()} enabled={screen.enabled} active={screen.gameObject.activeInHierarchy} open={screen.IsOpen}";
+            }
+
+            string actionState = input == null ? "input=null" :
+                $"inputEnabled={input.enabled},inputActive={input.gameObject.activeInHierarchy},InventoryPressed={input.InventoryPressed}; player={DescribeInventoryAction(playerMap, playerInventory)}; system={DescribeInventoryAction(systemMap, systemInventory)}";
+            string keyboardState = testKeyboard == null ? "testKeyboard=null" :
+                $"testKeyboardId={testKeyboard.deviceId},enabled={testKeyboard.enabled},I.isPressed={testKeyboard.iKey.isPressed},I.wasPressed={testKeyboard.iKey.wasPressedThisFrame}";
+            string currentState = currentKeyboard == null ? "currentKeyboard=null" :
+                $"currentKeyboardId={currentKeyboard.deviceId},enabled={currentKeyboard.enabled},I.isPressed={currentKeyboard.iKey.isPressed},I.wasPressed={currentKeyboard.iKey.wasPressedThisFrame},sameAsTest={ReferenceEquals(currentKeyboard, testKeyboard)}";
+
+            Debug.Log($"[Emberdelve][HotbarInputDiag] stage={stage} frame={Time.frameCount} batch={Application.isBatchMode} focused={Application.isFocused} inputUpdateMode={InputSystem.settings.updateMode} backgroundBehavior={InputSystem.settings.backgroundBehavior} editorRouting={InputSystem.settings.editorInputBehaviorInPlayMode} deviceCount={InputSystem.devices.Count}; {keyboardState}; {currentState}; {actionState}; directorState={f.Director.State}/{f.Director.LocalPlayerState} inventoryOpen={f.Director.InventoryOpen}; hudCount={huds.Length} [{hudState}]; screenCount={screens.Length} [{screenState}]");
+        }
+
+        private static InputActionMap ReadInputMap(Emberdelve.InputLayer.EmberdelveInput input, string fieldName)
+        {
+            if (input == null) return null;
+            FieldInfo field = input.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            return field != null ? field.GetValue(input) as InputActionMap : null;
+        }
+
+        private static string DescribeInventoryAction(InputActionMap map, InputAction action)
+        {
+            if (map == null) return "map=null";
+            if (action == null) return $"{map.name}.Inventory=null (mapEnabled={map.enabled})";
+            return $"{map.name}.Inventory enabled={action.enabled},wasPressed={action.WasPressedThisFrame()} (mapEnabled={map.enabled})";
+        }
+        private static IEnumerator HotbarRealKeyboardPath(Fixture f)
+        {
+            Debug.Log("[Emberdelve][Smoke:inventoryui] ---- real keyboard events drive hotbar assignment and use");
+
+            InputSettings originalSettings = InputSystem.settings;
+            InputSettings temporarySettings = UnityEngine.Object.Instantiate(originalSettings);
+            Keyboard keyboard = null;
+            Mouse mouse = null;
+
+            try
+            {
+                // The Input System disables new keyboard/mouse devices after focus loss. Use only a transient clone
+                // for this fixture, route input to the game, and restore the original settings object in finally.
+                temporarySettings.hideFlags = HideFlags.HideAndDontSave;
+                temporarySettings.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
+                temporarySettings.editorInputBehaviorInPlayMode = InputSettings.EditorInputBehaviorInPlayMode.AllDeviceInputAlwaysGoesToGameView;
+                InputSystem.settings = temporarySettings;
+
+                keyboard = InputSystem.AddDevice<Keyboard>();
+                mouse = InputSystem.AddDevice<Mouse>();
+                if (keyboard != null) InputSystem.EnableDevice(keyboard);
+                if (mouse != null) InputSystem.EnableDevice(mouse);
+
+                f.Check(keyboard != null && keyboard.enabled && mouse != null && mouse.enabled,
+                    "the real input fixture created and enabled its owned Keyboard and Mouse devices");
+                if (keyboard == null || mouse == null) yield break;
+                ItemData draught = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_BloodDraught.asset");
+                if (draught == null) { f.Check(false, "the Blood Draught is loadable for the keyboard path"); yield break; }
+
+                ResetBag(f);
+                f.Director.SetInventoryOpen(false);
+                yield return WaitFrames(2);
+
+                Vector2Int draughtCell = new Vector2Int(2, 0);
+                f.Check(f.Inventory.TryAddAt(draught, 2, draughtCell, out string addReason),
+                    "a two-unit Blood Draught stack is placed for real keyboard input: " + addReason);
+                ulong draughtId = StackIdAtCell(f, draughtCell);
+                f.Check(draughtId != 0 && f.Inventory.Hotbar.StackIdAt(0) == 0 &&
+                        f.Inventory.Hotbar.StackIdAt(1) == 0 && f.Inventory.Hotbar.StackIdAt(2) == 0 &&
+                        f.Inventory.Hotbar.StackIdAt(3) == 0,
+                    "the stack has a StackId and all four hotbar slots start empty");
+                if (draughtId == 0) yield break;
+
+                f.InventoryEvents = 0;
+                InputSystem.QueueStateEvent(mouse, new MouseState { position = new Vector2(-1000f, -1000f) });
+                LogHotbarInputDiagnostic(f, keyboard, "before I queue");
+                InputSystem.QueueStateEvent(keyboard, new KeyboardState(Key.I));
+                LogHotbarInputDiagnostic(f, keyboard, "after I queue / before frame");
+                yield return WaitFrames(1);
+                LogHotbarInputDiagnostic(f, keyboard, "after first frame");
+                yield return WaitFrames(1);
+                LogHotbarInputDiagnostic(f, keyboard, "after second frame");
+                f.Check(f.Screen.IsOpen && f.Director.InventoryOpen,
+                    "a real I key event opens the satchel through the HUD and disables gameplay input");
+                InputSystem.QueueStateEvent(keyboard, new KeyboardState());
+                yield return WaitFrames(1);
+
+                yield return ClickCell(f, draughtCell);
+                f.Check(f.Screen.SelectedStackId == draughtId, "the draught is selected by its rendered cell");
+
+                ulong revisionBeforeAssignment = f.Inventory.Revision;
+                int unitsBeforeAssignment = f.Inventory.TotalUnits;
+                f.InventoryEvents = 0;
+                f.HotbarEvents = 0;
+                Key[] digits = { Key.Digit1, Key.Digit2, Key.Digit3, Key.Digit4 };
+                for (int i = 0; i < digits.Length; i++)
+                {
+                    InputSystem.QueueStateEvent(mouse, new MouseState { position = new Vector2(-1000f, -1000f) });
+                    InputSystem.QueueStateEvent(keyboard, new KeyboardState(digits[i]));
+                    yield return WaitFrames(1);
+
+                    int expectedSlot = i;
+                    f.Check(f.Inventory.Hotbar.StackIdAt(expectedSlot) == draughtId &&
+                            f.Inventory.Hotbar.SlotOf(draughtId) == expectedSlot,
+                        $"a real {(i + 1)} key event assigns the selected StackId into its empty slot and moves it off the previous slot ({BoundIds(f)})");
+                    f.Check(f.Rig.Input != null && !f.Rig.Input.SlotPressed(expectedSlot),
+                        $"the gameplay UseItem{i + 1} action stays disabled while the satchel is open");
+                    f.Check(f.Inventory.TotalUnits == unitsBeforeAssignment &&
+                            f.Inventory.Revision == revisionBeforeAssignment && f.InventoryEvents == 0,
+                        $"open-screen key {i + 1} only assigns: no unit is consumed and inventory state is unchanged");
+                    f.Check(f.HotbarEvents == i + 1,
+                        $"real assignment key {i + 1} raises exactly one cumulative HotbarChanged event ({f.HotbarEvents})");
+
+                    InputSystem.QueueStateEvent(keyboard, new KeyboardState());
+                    yield return WaitFrames(1);
+                }
+
+                InputSystem.QueueStateEvent(mouse, new MouseState { position = new Vector2(-1000f, -1000f) });
+                InputSystem.QueueStateEvent(keyboard, new KeyboardState(Key.I));
+                yield return WaitFrames(1);
+                f.Check(!f.Screen.IsOpen && !f.Director.InventoryOpen,
+                    "a real I key event closes the satchel and re-enables gameplay input");
+                InputSystem.QueueStateEvent(keyboard, new KeyboardState());
+                yield return WaitFrames(1);
+
+                f.Rig.Health.SetHealth(Mathf.Max(1f, f.Rig.MaxHealth - 30f));
+                float healthBeforeUse = f.Rig.CurrentHealth;
+                float expectedHealth = Mathf.Min(f.Rig.MaxHealth, healthBeforeUse + draught.healAmount);
+                int unitsBeforeUse = f.Inventory.TotalUnits;
+                ulong revisionBeforeUse = f.Inventory.Revision;
+                f.InventoryEvents = 0;
+                InputSystem.QueueStateEvent(keyboard, new KeyboardState(Key.Digit4));
+                yield return WaitFrames(1);
+                InputSystem.QueueStateEvent(keyboard, new KeyboardState());
+
+                f.Check(f.Inventory.TotalUnits == unitsBeforeUse - 1 &&
+                        Mathf.Abs(f.Rig.CurrentHealth - expectedHealth) < 0.01f,
+                    $"a real closed-screen 4 key event uses one bound draught through authority and heals to {expectedHealth:F1} HP");
+                f.Check(f.Inventory.Revision == revisionBeforeUse + 1 && f.InventoryEvents == 1,
+                    $"the real-key authority use commits exactly one inventory revision and change event ({f.Inventory.Revision - revisionBeforeUse}, {f.InventoryEvents})");
+                f.Check(f.Inventory.Hotbar.StackIdAt(3) == draughtId,
+                    "the partial real-key use keeps the slot bound to the same StackId");
+                yield return WaitFrames(1);
+            }
+            finally
+            {
+                if (keyboard != null)
+                {
+                    if (keyboard.enabled) InputSystem.QueueStateEvent(keyboard, new KeyboardState());
+                    InputSystem.RemoveDevice(keyboard);
+                }
+                if (mouse != null)
+                {
+                    if (mouse.enabled) InputSystem.QueueStateEvent(mouse, new MouseState());
+                    InputSystem.RemoveDevice(mouse);
+                }
+
+                // The temporary clone has no asset path and is nonserializable; restore the project settings object.
+                if (!ReferenceEquals(InputSystem.settings, originalSettings)) InputSystem.settings = originalSettings;
+                if (temporarySettings != null) UnityEngine.Object.Destroy(temporarySettings);
+            }
+        }
+        private static IEnumerator HotbarHudMatchesBindings(Fixture f)
+        {
+            Debug.Log("[Emberdelve][Smoke:inventoryui] ---- HUD hotbar chips follow the bindings");
+            ItemData draught = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_BloodDraught.asset");
+            ItemData arrows = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_ArrowBundle.asset");
+            if (draught == null || arrows == null) { f.Check(false, "the draught and arrow bundle are loadable"); yield break; }
+
+            ResetBag(f);
+            yield return WaitFrames(2);
+            Vector2Int coinCell = new Vector2Int(0, 0);
+            Vector2Int draughtCell = new Vector2Int(2, 0);
+            Vector2Int arrowCell = new Vector2Int(4, 0);
+            f.Check(f.Inventory.TryAddAt(f.Coin, 1, coinCell, out _) &&
+                    f.Inventory.TryAddAt(draught, 2, draughtCell, out _) &&
+                    f.Inventory.TryAddAt(arrows, 3, arrowCell, out _),
+                "a coin, two draughts and three arrow bundles are placed for the HUD check");
+            ulong draughtId = StackIdAtCell(f, draughtCell);
+            ulong arrowId = StackIdAtCell(f, arrowCell);
+            f.Check(f.Inventory.Hotbar.TryAssign(0, arrowId, out _) && f.Inventory.Hotbar.TryAssign(1, draughtId, out _),
+                "arrows are bound to key 1 and draughts to key 2");
+            yield return WaitFrames(3);
+
+            RectTransform row = FindHudHotbarRow();
+            f.Check(row != null, "the HUD built its hotbar row");
+            if (row == null) yield break;
+
+            f.Check(ChipText(row, 1) == "Arrow Bundle x3" && ChipText(row, 2) == "Blood Draught x2" &&
+                    ChipText(row, 3) == null && ChipText(row, 4) == null,
+                $"chips show the bound stacks' names and counts and empty slots as empty ('{ChipText(row, 1)}', '{ChipText(row, 2)}', '{ChipText(row, 3)}', '{ChipText(row, 4)}')");
+
+            // Compaction: the coin (index 0) leaves; chips are unchanged.
+            f.Check(f.Inventory.TryRemoveAt(f.Inventory.IndexAtCell(coinCell), 1) == 1, "the earlier coin is removed");
+            yield return WaitFrames(3);
+            row = FindHudHotbarRow();
+            f.Check(row != null && ChipText(row, 1) == "Arrow Bundle x3" && ChipText(row, 2) == "Blood Draught x2",
+                "after list compaction the chips still show the same bound stacks");
+
+            // A partial use updates the count and keeps the chip.
+            f.Rig.Health.SetHealth(Mathf.Max(1f, f.Rig.MaxHealth - 30f));
+            f.Check(f.Inventory.Hotbar.TryUse(1, out _), "key 2 drinks one draught");
+            yield return WaitFrames(3);
+            row = FindHudHotbarRow();
+            f.Check(row != null && ChipText(row, 2) == "Blood Draught", $"the chip count follows a partial use ('{ChipText(row, 2)}')");
+
+            // An explicit assignment refreshes the strip through the hotbar event.
+            f.Check(f.Inventory.Hotbar.TryAssign(3, draughtId, out _), "the draught moves to key 4");
+            yield return WaitFrames(3);
+            row = FindHudHotbarRow();
+            f.Check(row != null && ChipText(row, 2) == null && ChipText(row, 4) == "Blood Draught" &&
+                    ChipText(row, 1) == "Arrow Bundle x3",
+                $"moving a binding refreshes the strip ('{ChipText(row, 2)}', '{ChipText(row, 4)}')");
+
+            // A retired binding empties its chip.
+            f.Check(f.Inventory.TryRemoveAt(f.Inventory.IndexOfStack(arrowId), 3) == 3, "the bound arrows leave the bag");
+            yield return WaitFrames(3);
+            row = FindHudHotbarRow();
+            f.Check(row != null && ChipText(row, 1) == null && ChipText(row, 4) == "Blood Draught",
+                "a retired binding shows as an empty chip");
+
+            // Clear retires everything.
+            f.Inventory.Clear();
+            yield return WaitFrames(3);
+            row = FindHudHotbarRow();
+            f.Check(row != null && ChipText(row, 1) == null && ChipText(row, 2) == null &&
+                    ChipText(row, 3) == null && ChipText(row, 4) == null && BoundIds(f) == "0,0,0,0",
+                "Clear empties every chip and binding");
+        }
+
+        private static RectTransform FindHudHotbarRow()
+        {
+            Canvas[] canvases = UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None);
+            for (int i = 0; i < canvases.Length; i++)
+            {
+                RectTransform row = FindChildRect(canvases[i].transform, "InventoryRow");
+                if (row != null) return row;
+            }
+            return null;
+        }
+
+        /// <summary>The label of HUD chip 1..4, or null when the chip is drawn as empty (it has no Label child).</summary>
+        private static string ChipText(RectTransform row, int slotNumber)
+        {
+            RectTransform chip = FindChildRect(row, "Slot" + slotNumber);
+            if (chip == null) return null;
+            RectTransform label = FindChildRect(chip, "Label");
+            if (label == null) return null;
+            Text text = label.GetComponent<Text>();
+            return text != null ? text.text : null;
         }
 
         private static IEnumerator CloakSlotAndTooltips(Fixture f)

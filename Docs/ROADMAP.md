@@ -6,6 +6,8 @@ Updated19October2026. Continue the existing project. Codex orchestrates/reviews;
 
 The detailed continuation sequence and accepted task evidence are in [OPUS_COMPLETION_PLAN.md](Tasks/OPUS_COMPLETION_PLAN.md). Physical projectile/blade blocking is implemented and freshly verified (50/0). R10d snapshot consumer closure is accepted (seven groups / 11259 checks / 0 failures), and R6c1 inventory-screen identity/authority routing is accepted (four groups / 926 checks / 0 failures). Next narrow slice: R6c2 stable hotbar assignments. These are local Unity results; U3 dedicated-server/client proof remains pending.
 
+Current user scope (26 October 2026): close only started changes and the nearest Opus refactors: R6c2, R6d, prepared R8a and started R8b1. Later gameplay/network/release stages below are retained as backlog.
+
 ## Historical state at original roadmap creation
 
 Implemented code/scenes: lobby/class selection, FPS movement/HP HUD, enemy AI, local melee/ranged attacks and ground telegraphs, yaw block/shield no-parry data, secondary weapons, mana/two actives/two passives, loot/extraction/death/result/re-entry loop.62runtime C#files in modular areas. Historical M4 logs contain7passing scenarios/470checks, but predate unfinished M5 and are not fresh acceptance. Current M5 adds grid/equipment/chests/UI; current independent inventory run197checks/10failures, no C# compile errors, exit0despiteFAIL. No actual multiplayer/server,6attribute integration, per-instance UID/affixes, persistent stash or final visual/art acceptance yet.

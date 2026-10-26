@@ -132,6 +132,7 @@ namespace Emberdelve.Items
         private ItemIdentityIssuer _issuer;
         private Equipment _equipment;
         [NonSerialized] private LocalInventoryAuthority _localAuthority;
+        [NonSerialized] private HotbarBindings _hotbar;
 
         // R3: the run's one item catalog. Null until the loadout (or a test) supplies it; gear is only minted
         // against it.
@@ -174,6 +175,16 @@ namespace Emberdelve.Items
         public IReadOnlyList<InventorySlot> Slots => _views;
         /// <summary>Local command authority bound to this rig's exact bag and equipment pair, when wired.</summary>
         public IInventoryAuthority CommandAuthority => GetOrCreateLocalAuthority();
+        /// <summary>
+        /// R6c2: the 1-4 hotbar assignments for this bag. Each slot names a runtime StackId, never a list index, so
+        /// compaction cannot retarget a key. Cleared by <see cref="Clear"/>, re-seeded by a loadout restore and by
+        /// <see cref="GiveStartingItems"/>.
+        /// </summary>
+        public HotbarBindings Hotbar => _hotbar ?? (_hotbar = new HotbarBindings(this));
+
+        /// <summary>The player id this bag raises events for (0 = none). Exposed for the hotbar's change event.</summary>
+        internal int OwnerPlayerId => OwnerId;
+
         public int TotalUnits { get; private set; }
         public int CarriedValue { get; private set; }
 
@@ -323,6 +334,9 @@ namespace Emberdelve.Items
             finally
             {
                 _givingStartingKit = false;
+                // R6c2: the raid loadout has just been (re)established; bind the first usable stacks to keys 1-4
+                // before observers hear about the bag, so the HUD's refresh already sees the bindings.
+                Hotbar.SeedDefaults();
                 GameEvents.RaiseInventoryChanged(OwnerId);
             }
         }
@@ -1006,6 +1020,11 @@ namespace Emberdelve.Items
             TotalUnits = units;
             CarriedValue = value;
             Recompute();
+
+            // R6c2: every restored stack has a fresh StackId, so no old binding can survive; the restored
+            // loadout is a (re)established raid loadout and gets the default assignment. No event is raised
+            // here (see the doc above); NotifyRestore's InventoryChanged refreshes the HUD.
+            Hotbar.SeedDefaults();
         }
 
         /// <summary>Notify half of a restore: a throwing subscriber is logged and cannot undo or abort an applied restore.</summary>
@@ -1594,11 +1613,29 @@ namespace Emberdelve.Items
 
         // ------------------------------------------------------------ using
 
+        /// <summary>
+        /// Index-addressed use, kept for existing callers and fixtures. Production hotbar input no longer uses it
+        /// (see <see cref="TryUseStack"/> and <see cref="Hotbar"/>): an index silently retargets when the list compacts.
+        /// </summary>
         public bool TryUseSlot(int index)
         {
             if (index < 0 || index >= _stacks.Count) return false;
-            LocalInventoryAuthority authority = GetOrCreateLocalAuthority();
-            InventorySlot slot = _views[index];
+            return SubmitUse(GetOrCreateLocalAuthority(), _views[index]);
+        }
+
+        /// <summary>
+        /// R6c2: uses exactly one unit of the live stack with this identity through the same authority Use
+        /// command as <see cref="TryUseSlot"/> (stack ID plus the exact gear-UID precondition). A zero, unknown or
+        /// retired ID does nothing, and no other stack - including a same-definition lookalike - can answer for it.
+        /// </summary>
+        public bool TryUseStack(ulong stackId)
+        {
+            if (stackId == 0 || !TryGetStack(stackId, out InventorySlot slot)) return false;
+            return SubmitUse(GetOrCreateLocalAuthority(), slot);
+        }
+
+        private bool SubmitUse(LocalInventoryAuthority authority, InventorySlot slot)
+        {
             if (authority == null || slot.StackId == 0 ||
                 !authority.TryCreateLocalCommand(InventoryCommandKind.Use, slot.StackId, 0,
                     Vector2Int.zero, EquipmentSlot.None,
@@ -1620,6 +1657,7 @@ namespace Emberdelve.Items
             TotalUnits = 0;
             CarriedValue = 0;
             Recompute();
+            Hotbar.RetireAll();
             if (changed) CommitRevision();
             GameEvents.RaiseInventoryChanged(OwnerId);
         }

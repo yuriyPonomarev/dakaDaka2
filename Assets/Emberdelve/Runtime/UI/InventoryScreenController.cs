@@ -97,10 +97,13 @@ namespace Emberdelve.UI
         private static readonly Color TabIdleColor = new Color(0.13f, 0.12f, 0.11f, 1f);
         private static readonly Color TabActiveColor = new Color(0.3f, 0.23f, 0.12f, 1f);
 
-        private RunDirector _director;
-        private PlayerRig _rig;
-        private Inventory _inventory;
-        private Equipment _equipment;
+        // R6d: the non-view half (binding, selection, commands, hotbar assignment) lives in the model; the
+        // names below are read-only views of its binding so the drawing code reads as before.
+        private readonly InventoryScreenModel _model = new InventoryScreenModel();
+        private RunDirector _director => _model.Director;
+        private PlayerRig _rig => _model.Rig;
+        private Inventory _inventory => _model.Inventory;
+        private Equipment _equipment => _model.Equipment;
 
         private Canvas _canvas;
         private RectTransform _root;
@@ -149,13 +152,6 @@ namespace Emberdelve.UI
         private readonly List<RectTransform> _equipRects = new List<RectTransform>(6);
         private readonly List<EquipmentSlot> _equipSlots = new List<EquipmentSlot>(6);
 
-        // Identity is the live stack, not its definition, current list index, or current grid position.
-        // The remaining fields are display values refreshed whenever this ID resolves.
-        private ulong _selectedStackId;
-        private ItemData _selectedItem;
-        private Vector2Int _selectedOrigin = new Vector2Int(-1, -1);
-        private int _selectedAmount;
-
         public bool IsOpen { get; private set; }
 
         private bool RunEnded => _director != null && (_director.State == RunState.Dead || _director.State == RunState.Extracted
@@ -164,15 +160,15 @@ namespace Emberdelve.UI
         /// <summary>R7: the bag screen shows the bag of the player it is bound to; an event about another player never rebuilds it.</summary>
         private bool IsMine(int playerId) => PlayerView.Shows(playerId);
 
-        private int ToastOwner => _rig != null ? _rig.PlayerId : GameEvents.NoPlayer;
+        private int ToastOwner => _model.ToastOwner;
 
         /// <summary>The stable identity currently selected in the bag; zero means no live selection.</summary>
-        public ulong SelectedStackId => TryResolveSelection(out _) ? _selectedStackId : 0;
+        public ulong SelectedStackId => TryResolveSelection(out _) ? _model.SelectedStackId : 0;
 
         /// <summary>The stack the cursor is pointing at. It is still carried in the bag.</summary>
-        public ItemData SelectedItem => TryResolveSelection(out _) ? _selectedItem : null;
-        public Vector2Int SelectedOrigin => TryResolveSelection(out _) ? _selectedOrigin : new Vector2Int(-1, -1);
-        public int SelectedAmount => TryResolveSelection(out _) ? _selectedAmount : 0;
+        public ItemData SelectedItem => TryResolveSelection(out _) ? _model.SelectedItem : null;
+        public Vector2Int SelectedOrigin => TryResolveSelection(out _) ? _model.SelectedOrigin : new Vector2Int(-1, -1);
+        public int SelectedAmount => TryResolveSelection(out _) ? _model.SelectedAmount : 0;
         public bool HasSelection => TryResolveSelection(out _);
 
         /// <summary>Old cursor API, kept as a read-only view of the selection: nothing is held outside the bag.</summary>
@@ -185,14 +181,9 @@ namespace Emberdelve.UI
 
         public void Configure(RunDirector director, PlayerRig rig)
         {
-            _director = director;
-            _rig = rig;
-            _inventory = rig != null ? rig.Inventory : null;
-            _equipment = rig != null ? rig.Equipment : null;
-
-            if (_inventory == null && director != null) _inventory = director.Inventory;
-
-            // Re-pointing the screen at another rig is not a moment at which items may move anywhere.
+            // Re-pointing the screen at another rig is not a moment at which items may move anywhere:
+            // the model drops the selection as it binds.
+            _model.Bind(director, rig);
             ClearSelection();
             Build();
         }
@@ -304,26 +295,13 @@ namespace Emberdelve.UI
         /// </summary>
         private bool EnsureLiveRig()
         {
-            if (_director == null) GameServices.TryGet<RunDirector>(out _director);
-
-            PlayerRig live = _director != null ? _director.Player : null;
-            if (live == null) return false;
-
-            Inventory bag = live.Inventory;
-            Equipment worn = live.Equipment;
-
-            if (ReferenceEquals(_rig, live) && _inventory == bag && _equipment == worn) return false;
-
-            bool bagChanged = _inventory != null && bag != null && !ReferenceEquals(_inventory, bag);
-
-            _rig = live;
-            if (bag != null) _inventory = bag;
-            if (worn != null) _equipment = worn;
+            if (!_model.EnsureLiveRig(out bool bagChanged)) return false;
 
             // The pane reads the rig through the view, so the view is re-pointed at the same object the
             // screen just bound to before any line of it is labelled or refreshed.
             if (_statsView != null) _statsView.Configure(_rig);
 
+            // The model already dropped the selection; this hides the ghost that drew it.
             if (bagChanged) ClearSelection();
 
             return true;
@@ -376,6 +354,56 @@ namespace Emberdelve.UI
 
             if (mouse.leftButton.wasPressedThisFrame) HandleClick(screen, false);
             else if (mouse.rightButton.wasPressedThisFrame) HandleClick(screen, true);
+
+            HandleHotbarKeys(screen);
+        }
+
+        /// <summary>
+        /// R6c2: while the satchel is open, keys 1-4 ASSIGN the stack under the pointer (or, with the pointer on no
+        /// stack, the selected stack) to that hotbar slot. The run layer switches the player action map off while
+        /// the satchel is open, so the same keys cannot also use an item; this reads the keyboard device directly,
+        /// as HandlePointer reads the mouse, because that action map is not live.
+        /// </summary>
+        private void HandleHotbarKeys(Vector2 screen)
+        {
+            if (!IsOpen || _showCharacter) return;
+
+            Keyboard keyboard = Keyboard.current;
+            if (keyboard == null) return;
+
+            for (int i = 0; i < HotbarBindings.SlotCount; i++)
+            {
+                if (HotbarDigitPressed(keyboard, i)) TryAssignHotbarSlot(i, screen);
+            }
+        }
+
+        private static bool HotbarDigitPressed(Keyboard keyboard, int hotbarSlot)
+        {
+            switch (hotbarSlot)
+            {
+                case 0: return keyboard.digit1Key.wasPressedThisFrame;
+                case 1: return keyboard.digit2Key.wasPressedThisFrame;
+                case 2: return keyboard.digit3Key.wasPressedThisFrame;
+                case 3: return keyboard.digit4Key.wasPressedThisFrame;
+                default: return false;
+            }
+        }
+
+        /// <summary>
+        /// The one assignment entry point the 1-4 key handler calls (and the focused UI checks call). Binds the stack
+        /// under <paramref name="screenPosition"/> - falling back to the selected stack when the pointer is over no
+        /// stack - to hotbar slot <paramref name="hotbarSlot"/> (0-3) by StackId, moving it off any other slot.
+        /// An unusable or vanished stack is refused with a toast and nothing changes.
+        /// </summary>
+        public bool TryAssignHotbarSlot(int hotbarSlot, Vector2 screenPosition)
+        {
+            if (!IsOpen || _inventory == null) return false;
+            if (!_model.CommandsAllowed) return false;
+
+            ValidateSelection();
+
+            ulong hovered = TryCellAt(screenPosition, out Vector2Int cell) ? _model.StackIdAtCell(cell) : 0;
+            return _model.TryAssignHotbar(hotbarSlot, hovered);
         }
 
         /// <summary>
@@ -390,7 +418,7 @@ namespace Emberdelve.UI
             // A finished run is not a moment at which to rearrange a bag: dying, extracting or a result
             // screen handing control elsewhere must not leave a live cursor that can still shuffle gear.
             // Letting go is always safe, because the selected stack never left the bag.
-            if (_director != null && (_director.State != RunState.Running || _director.LocalPlayerState != RunState.Running))
+            if (!_model.CommandsAllowed)
             {
                 if (HasSelection) CancelSelection();
                 return;
@@ -523,7 +551,7 @@ namespace Emberdelve.UI
             if (targetIndex >= 0)
             {
                 InventorySlot target = _inventory.Slots[targetIndex];
-                if (target.StackId == _selectedStackId)
+                if (target.StackId == _model.SelectedStackId)
                 {
                     // Clicking the selected stack again is the grid's cancel gesture.
                     CancelSelection();
@@ -645,7 +673,7 @@ namespace Emberdelve.UI
                 if (SubmitInventoryCommand(InventoryCommandKind.Use, source, default, Vector2Int.zero,
                         EquipmentSlot.None, Guid.Empty, Guid.Empty, out string useReason))
                 {
-                    if (_selectedStackId == source.StackId) ClearSelection();
+                    if (_model.SelectedStackId == source.StackId) ClearSelection();
                     Rebuild();
                 }
                 else
@@ -787,7 +815,7 @@ namespace Emberdelve.UI
             instance = null;
             definition = null;
 
-            if (_selectedStackId == 0 || !TryResolveSelection(out int index)) return;
+            if (_model.SelectedStackId == 0 || !TryResolveSelection(out int index)) return;
 
             instance = _inventory.Slots[index].Instance;
             definition = _inventory.Slots[index].Item;
@@ -907,82 +935,27 @@ namespace Emberdelve.UI
 
         private void SelectStack(int index)
         {
-            if (_inventory == null || index < 0 || index >= _inventory.Slots.Count) return;
-
-            InventorySlot slot = _inventory.Slots[index];
-            if (slot.Item == null || slot.Count <= 0 || slot.StackId == 0) return;
-
-            SetSelection(slot);
+            if (!_model.TrySelectIndex(index)) return;
             Rebuild();
-        }
-
-        private void SetSelection(InventorySlot slot)
-        {
-            _selectedStackId = slot.StackId;
-            _selectedItem = slot.Item;
-            _selectedOrigin = slot.Origin;
-            _selectedAmount = slot.Count;
         }
 
         /// <summary>Selects the exact gear instance returned by an accepted unequip command.</summary>
         private void SelectReturnedStack(Guid uid)
         {
-            if (_inventory == null || uid == Guid.Empty) return;
-
-            for (int i = 0; i < _inventory.Slots.Count; i++)
-            {
-                InventorySlot slot = _inventory.Slots[i];
-                if (slot.Instance == null || slot.Instance.Uid != uid) continue;
-                SetSelection(slot);
-                return;
-            }
+            _model.SelectReturnedStack(uid);
         }
 
         private bool TryResolveSelection(out int index)
         {
-            index = -1;
-            if (_selectedStackId == 0 || _inventory == null) return false;
-
-            int resolved = _inventory.IndexOfStack(_selectedStackId);
-            if (resolved < 0 || !_inventory.TryGetStack(_selectedStackId, out InventorySlot slot)
-                || slot.StackId != _selectedStackId || slot.Item == null || slot.Count <= 0)
-                return false;
-
-            index = resolved;
-            _selectedItem = slot.Item;
-            _selectedOrigin = slot.Origin;
-            _selectedAmount = slot.Count;
-            return true;
+            return _model.TryResolve(out index);
         }
 
         private bool SubmitInventoryCommand(InventoryCommandKind kind, InventorySlot source, InventorySlot target,
             Vector2Int destinationCell, EquipmentSlot destinationSlot, Guid expectedSourceGearUid,
             Guid expectedTargetGearUid, out string reason)
         {
-            reason = null;
-            IInventoryAuthority authority = _inventory != null ? _inventory.CommandAuthority : null;
-            if (authority == null || _rig == null)
-            {
-                reason = "the inventory command authority is unavailable";
-                return false;
-            }
-
-            Guid sourceUid = source.Instance != null ? source.Instance.Uid : expectedSourceGearUid;
-            Guid targetUid = target.Instance != null ? target.Instance.Uid : Guid.Empty;
-            if (!authority.TryCreateLocalCommand(kind, source.StackId, target.StackId, destinationCell,
-                    destinationSlot, sourceUid, expectedTargetGearUid != Guid.Empty ? expectedTargetGearUid : targetUid,
-                    out InventoryCommand command, out reason))
-                return false;
-
-            InventoryCommandResult result = authority.Submit(_rig, command);
-            if (!result.Accepted)
-            {
-                reason = result.Reason;
-                return false;
-            }
-
-            reason = null;
-            return true;
+            return _model.Submit(kind, source, target, destinationCell, destinationSlot,
+                expectedSourceGearUid, expectedTargetGearUid, out reason);
         }
 
         private void RefreshAfterRefusal()
@@ -993,8 +966,7 @@ namespace Emberdelve.UI
 
         private void ValidateSelection()
         {
-            if (_selectedStackId == 0) return;
-            if (TryResolveSelection(out _)) return;
+            if (!_model.ValidateSelection()) return;
 
             ClearSelection();
             Rebuild();
@@ -1008,10 +980,7 @@ namespace Emberdelve.UI
 
         private void ClearSelection()
         {
-            _selectedStackId = 0;
-            _selectedItem = null;
-            _selectedOrigin = new Vector2Int(-1, -1);
-            _selectedAmount = 0;
+            _model.Clear();
 
             if (_carryGhost != null)
             {
@@ -1265,7 +1234,7 @@ namespace Emberdelve.UI
 
             // InventoryChanged and EquipmentChanged can arrive synchronously inside a command. Retain a
             // surviving StackId at its new location; clear only when that exact identity has disappeared.
-            if (_selectedStackId != 0 && !TryResolveSelection(out _)) ClearSelection();
+            if (_model.SelectedStackId != 0 && !TryResolveSelection(out _)) ClearSelection();
 
             foreach (Image image in _cellImages) if (image != null) Destroy(image.gameObject);
             foreach (Image image in _itemImages) if (image != null) Destroy(image.gameObject);
@@ -1364,7 +1333,7 @@ namespace Emberdelve.UI
                 // The selected stack is marked where it still stands in the bag. It is not lifted out and it
                 // is not drawn twice as two normal owned copies: the bag copy is dimmed inside a frame of
                 // selection colour, and only the ghost at the pointer is translucent.
-                bool isSelected = _selectedStackId != 0 && slot.StackId == _selectedStackId;
+                bool isSelected = _model.SelectedStackId != 0 && slot.StackId == _model.SelectedStackId;
                 if (isSelected) color.a = 0.58f;
 
                 if (isSelected)
@@ -1507,7 +1476,7 @@ namespace Emberdelve.UI
             if (_carryLabel != null)
             {
                 _carryLabel.text = HasSelection
-                    ? $"Selected {_selectedItem.displayName} x{_selectedAmount} ({SelectedSummary()})   " +
+                    ? $"Selected {_model.SelectedItem.displayName} x{_model.SelectedAmount} ({SelectedSummary()})   " +
                       "left click: move, swap, combine or wear   right click: let go"
                     : "left click: select   right click a bag item: wear or use it   right click a worn item: take it off";
                 _carryLabel.rectTransform.sizeDelta = new Vector2(leftColumnWidth, InstructionHeight);
@@ -1549,8 +1518,8 @@ namespace Emberdelve.UI
                 // would put it back, so the same tab test applies here and the bag tab gets it back intact.
                 if (HasSelection && !_showCharacter)
                 {
-                    Vector2Int shape = _selectedItem.EffectiveFootprint;
-                    Color ghostColor = _selectedItem.iconColor;
+                    Vector2Int shape = _model.SelectedItem.EffectiveFootprint;
+                    Color ghostColor = _model.SelectedItem.iconColor;
                     ghostColor.a = 0.62f;
 
                     _carryGhost.gameObject.SetActive(true);
@@ -1576,8 +1545,8 @@ namespace Emberdelve.UI
         /// <summary>Fixed property lines of the selected item, in the same wording as the tooltip (no raw modifier text).</summary>
         private string SelectedSummary()
         {
-            ItemTooltipModel model = ItemTooltip.ForDefinition(_selectedItem);
-            return model != null && model.FixedLines.Count > 0 ? string.Join(", ", model.FixedLines) : _selectedItem.kind.ToString().ToLower();
+            ItemTooltipModel model = ItemTooltip.ForDefinition(_model.SelectedItem);
+            return model != null && model.FixedLines.Count > 0 ? string.Join(", ", model.FixedLines) : _model.SelectedItem.kind.ToString().ToLower();
         }
 
         private string BuildDetailText()

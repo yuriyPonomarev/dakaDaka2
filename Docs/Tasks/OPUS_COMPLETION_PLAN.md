@@ -2,6 +2,12 @@
 
 Codex orchestrates, reviews, runs Unity and commits. Luna implements game changes. This execution continues the user request to finish Opus work. Original design and the latest recorded user decisions take precedence over old proposal tables.
 
+## Current authorized scope — 26 October 2026
+
+The user chose **only already-started changes and the nearest Opus refactors**. This continuation closes R6c2 (the applied hotbar/HUD work), the started R6d view/selection extraction rebased to the current UI, the prepared R8a assembly/NUnit slice, and the already-started R8b1 loot-service/UID-rule slice. Each needs independent review, actual Unity checks, and a local commit.
+
+The full pure-data/ItemInstance rewrite, D1/R1 follow-ups, networking, persistence, new content, and release stages below remain backlog outside this run. The large historical queue is retained for later work; its presence does not authorize continuing past this bounded closure.
+
 ## Preserved decisions
 
 - Continue the existing Unity 6000.2.5f1 project; preserve namespaces, scenes and assets.
@@ -29,12 +35,15 @@ Fresh MultiPlayer baseline: 123 checks / 2 failures, both ranged assertions stil
 | R6b1 DONE | Shared inventory/loadout revision commit plumbing | Revision35/0 and9 regression groups PASS (12,140 checks); exact-once commits and final-state observers. See R6b1.md. |
 | R6b2 DONE | Owner-bound sequenced inventory commands; authority owns consumable effects | Authority103/0 plus9 regressions PASS (2160 checks); identity/replay/stale refusal, exact effects and observer errors. See R6b2.md. |
 | R6c1 DONE | StackId selection and authority commands for the inventory screen | Independent review; InventoryUI328 plus Authority103/InventoryFlow415/ResultLoop80 PASS (926 checks / 0). See R6c1.md. |
-| R6c2 | Stable hotbar assignments and matching HUD | Bind/use exact stack identities, no retarget after compaction/removal; real input and inventory UI regressions. |
+| R6c2 DONE | Stable hotbar assignments and matching HUD | InventoryUI420/0 (incl. hotbar scenarios), Authority103/0, InventoryFlow415/0, ResultLoop80/0, StackId56/0 (1074 checks / 0). Logs/r6c2_r6d_20261026_121547. See R6c2.md. |
 | R10a DONE | Immutable effective-stat capture over existing authoritative inputs | Commit4127e494; EffectiveStats17/0, independent literals/nonempty affixes and immutable old captures. Runtime integration remains R10b. |
 | R10b DONE | Runtime effective-stat cache/read integration and source-version invalidation | All20 affected groups pass; EffectiveStats25/0. Scope/evidence in R10b.md; no doubled bonuses/free refill. |
 | R10c DONE | Central typed affix-key routing and final consumer audit | All13 selected groups pass (25301 checks); 13 stable destinations and old schema/UI preserved. See R10c.md. |
 | R10d DONE | Close audited snapshot consumer bypasses | Independent review and seven fresh groups PASS (11259 checks / 0 failures); snapshot UI/ability/speed/defense/regen and no pool refill. See R10d.md. |
-| R8 | Rules/runtime/presentation/review/editor assembly boundaries and readable NUnit tests | Compile, EditMode tests, runtime has no presentation dependency; old gates retained |
+| R6d DONE | Selection/command helper extracted to InventoryScreenModel; screen keeps view facade | Same fresh run as R6c2 incl. RebindingDropsSelectionFromTheOldBag; public API of InventoryScreenController unchanged. See R6d.md. |
+| R8a | Integrate prepared Rules/runtime/UI/review/editor boundaries and AttributeRules NUnit tests | Compile, discover/run all14 literal tests, deserialize saved scenes/assets and retain runtime gates. |
+| R8b1 | Finish started loot-service separation and unchanged pure UID helper | Literal old-runtime parity, readable UID NUnit cases, catalog/loot/restore regressions. |
+| R8 remainder BACKLOG | Broader pure Data/ItemInstance/Snapshot/LootRoller/Damage math and remaining NUnit port | Separate future scope; R8a/R8b1 do not claim full R8 completion. |
 | D1 follow-ups | Turn-rate cap with matching visuals, enemy sweeps, ranged hit locations; close confirmed combat review findings | Geometry/authority/input tests and live rendered review |
 | R1 follow-ups | Kit epoch and sender ownership, authoritative movement ability execution | Forged/replayed/other-player commands refused, normal skills still work |
 | U3A | Compatible official networking stack; dedicated process and two clients, walking/ownership/late join, offline retained | Real independent process connection/input/cleanup evidence |

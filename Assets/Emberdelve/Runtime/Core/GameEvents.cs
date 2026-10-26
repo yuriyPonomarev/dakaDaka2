@@ -33,6 +33,8 @@ namespace Emberdelve.Core
         public static event Action<int, HitFeedback> DamageDealt;
         public static event Action<int, ItemData, int> ItemCollected;
         public static event Action<int> InventoryChanged;
+        /// <summary>R6c2: a player's hotbar bindings changed by an explicit assignment (the stack data did not).</summary>
+        public static event Action<int> HotbarChanged;
         public static event Action<int, ItemData, bool> EquipmentChanged;
         public static event Action<int, int, int> AmmoChanged;
         public static event Action<int, string> InteractionPromptChanged;
@@ -58,6 +60,7 @@ namespace Emberdelve.Core
         public static void RaiseDamageDealt(int playerId, HitFeedback feedback) => DamageDealt?.Invoke(playerId, feedback);
         public static void RaiseItemCollected(int playerId, ItemData item, int totalCollected) => ItemCollected?.Invoke(playerId, item, totalCollected);
         public static void RaiseInventoryChanged(int playerId) => InventoryChanged?.Invoke(playerId);
+        public static void RaiseHotbarChanged(int playerId) => HotbarChanged?.Invoke(playerId);
         public static void RaiseEquipmentChanged(int playerId, ItemData item, bool equipped) => EquipmentChanged?.Invoke(playerId, item, equipped);
         public static void RaiseAmmo(int playerId, int current, int reserve) => AmmoChanged?.Invoke(playerId, current, reserve);
         public static void RaiseInteractionPrompt(int playerId, string prompt) => InteractionPromptChanged?.Invoke(playerId, prompt);

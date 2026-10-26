@@ -1,12 +1,172 @@
 using UnityEngine;
+using Emberdelve.Core;
+using Emberdelve.Data;
+using Emberdelve.Flow;
 using Emberdelve.InputLayer;
 using Emberdelve.Player;
 
 namespace Emberdelve.Items
 {
     /// <summary>
-    /// Turns the 1-4 keys into "use inventory slot N". Kept separate from Inventory so the bag has no
-    /// dependency on devices, and separate from the world Interactor so picking up and using never mix.
+    /// R6c2: the four hotbar assignments of one bag. A slot holds a runtime StackId (0 = empty), never a list
+    /// index and never a definition, so list compaction, a partial use, or a lookalike stack cannot retarget a key.
+    ///
+    /// Rules:
+    ///  - Default assignment: when a raid loadout is (re)established (<see cref="Inventory.GiveStartingItems"/>, a
+    ///    bag restore) the first four USABLE stacks in bag order are bound to keys 1-4 (<see cref="SeedDefaults"/>).
+    ///    "Usable" mirrors what the Use authority applies: a definition that heals or grants ammo.
+    ///  - No auto-refill: nothing is bound mid-raid except by <see cref="TryAssign"/>. A stack that appears later
+    ///    (a pickup, an unequip, a split) never takes an empty slot on its own, because it is a different identity
+    ///    from the one the player last saw on that key. The one exception is a one-shot first-frame seed in
+    ///    <see cref="HotbarController"/> for a bag whose loadout hook never ran.
+    ///  - A bound stack that retires (consumed, removed, moved out, Clear, restore) reads as empty; the key does
+    ///    nothing. A partial use keeps the same StackId and therefore the binding.
+    ///
+    /// Reads validate against the live bag, so a retired binding is empty even before it is pruned. Changes made
+    /// by <see cref="TryAssign"/> raise <see cref="GameEvents.HotbarChanged"/>; seeding and retiring always accompany an
+    /// InventoryChanged notification, which already refreshes the HUD.
+    /// </summary>
+    public sealed class HotbarBindings
+    {
+        public const int SlotCount = 4;
+
+        private readonly Inventory _inventory;
+        private readonly ulong[] _ids = new ulong[SlotCount];
+        private bool _seeded;
+
+        internal HotbarBindings(Inventory inventory)
+        {
+            _inventory = inventory;
+        }
+
+        /// <summary>True once a loadout hook, a clear or a restore has run for this bag (so no lazy seed is needed).</summary>
+        public bool HasSeeded => _seeded;
+
+        /// <summary>Whether a definition can be put on the hotbar: the same test the Use authority applies to the item (heals or grants ammo).</summary>
+        public static bool IsUsableDefinition(ItemData item)
+        {
+            return item != null && (item.healAmount > 0 || item.ammoGrant > 0);
+        }
+
+        /// <summary>The live StackId bound to a slot, or 0 when the slot is empty or its stack has retired.</summary>
+        public ulong StackIdAt(int slot)
+        {
+            if (slot < 0 || slot >= SlotCount || _inventory == null) return 0;
+            ulong id = _ids[slot];
+            return id != 0 && _inventory.IndexOfStack(id) >= 0 ? id : 0;
+        }
+
+        /// <summary>Reads the live stack bound to a slot (current count, definition, origin). False for an empty or retired slot.</summary>
+        public bool TryGetStack(int slot, out InventorySlot stack)
+        {
+            ulong id = StackIdAt(slot);
+            if (id == 0 || !_inventory.TryGetStack(id, out stack))
+            {
+                stack = default;
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>The hotbar slot (0-3) a live stack is bound to, or -1.</summary>
+        public int SlotOf(ulong stackId)
+        {
+            if (stackId == 0) return -1;
+            for (int i = 0; i < SlotCount; i++)
+                if (StackIdAt(i) == stackId) return i;
+            return -1;
+        }
+
+        /// <summary>
+        /// Binds a live, usable stack to a slot, replacing whatever the slot held and removing the stack from any
+        /// other slot so one stack is never on two keys. A refusal changes nothing.
+        /// </summary>
+        public bool TryAssign(int slot, ulong stackId, out string reason)
+        {
+            if (slot < 0 || slot >= SlotCount) { reason = "there is no such hotbar slot"; return false; }
+            if (_inventory == null || stackId == 0 || !_inventory.TryGetStack(stackId, out InventorySlot stack) ||
+                stack.Item == null)
+            {
+                reason = "that item is no longer in the bag";
+                return false;
+            }
+            if (!IsUsableDefinition(stack.Item))
+            {
+                reason = stack.Item.displayName + " cannot be used from the hotbar";
+                return false;
+            }
+
+            PruneRetired();
+            bool changed = _ids[slot] != stackId;
+            for (int i = 0; i < SlotCount; i++)
+            {
+                if (i != slot && _ids[i] == stackId) { _ids[i] = 0; changed = true; }
+            }
+            _ids[slot] = stackId;
+            _seeded = true;
+
+            if (changed) GameEvents.RaiseHotbarChanged(_inventory.OwnerPlayerId);
+            reason = null;
+            return true;
+        }
+
+        /// <summary>
+        /// Uses exactly the stack bound to the slot, through the authority Use command. An empty or retired slot
+        /// does nothing and never falls through to whatever sits at an index or shares a definition.
+        /// </summary>
+        public bool TryUse(int slot, out string reason)
+        {
+            ulong id = StackIdAt(slot);
+            if (id == 0)
+            {
+                if (slot >= 0 && slot < SlotCount) _ids[slot] = 0;
+                reason = "that hotbar slot is empty";
+                return false;
+            }
+
+            if (_inventory.TryUseStack(id))
+            {
+                reason = null;
+                return true;
+            }
+
+            reason = "the bound item could not be used";
+            return false;
+        }
+
+        /// <summary>Drops every binding. Called by Inventory.Clear.</summary>
+        internal void RetireAll()
+        {
+            for (int i = 0; i < SlotCount; i++) _ids[i] = 0;
+            _seeded = true;
+        }
+
+        /// <summary>Retires every binding, then binds the first usable stacks in bag order to slots 0..3. Raises no event.</summary>
+        internal void SeedDefaults()
+        {
+            RetireAll();
+            if (_inventory == null) return;
+
+            int next = 0;
+            for (int i = 0; i < _inventory.Slots.Count && next < SlotCount; i++)
+            {
+                InventorySlot stack = _inventory.Slots[i];
+                if (stack.StackId == 0 || !IsUsableDefinition(stack.Item)) continue;
+                _ids[next++] = stack.StackId;
+            }
+        }
+
+        private void PruneRetired()
+        {
+            for (int i = 0; i < SlotCount; i++)
+                if (_ids[i] != 0 && _inventory.IndexOfStack(_ids[i]) < 0) _ids[i] = 0;
+        }
+    }
+
+    /// <summary>
+    /// Turns the 1-4 keys into "use the stack bound to hotbar slot N" (see <see cref="HotbarBindings"/>). Kept
+    /// separate from Inventory so the bag has no dependency on devices, and separate from the world Interactor so
+    /// picking up and using never mix.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class HotbarController : MonoBehaviour
@@ -24,12 +184,21 @@ namespace Emberdelve.Items
         {
             if (rig == null || inventory == null) return;
 
+            // Safety net for a bag whose loadout hook never ran: seed once, at the first frame. Every later
+            // change is an explicit assignment; there is no mid-raid auto-refill.
+            if (!inventory.Hotbar.HasSeeded) inventory.Hotbar.SeedDefaults();
+
             EmberdelveInput input = rig.Input;
             if (input == null || rig.IsDead) return;
 
-            for (int i = 0; i < 4; i++)
+            // The satchel screen takes 1-4 to assign the item under the pointer. The run layer already switches
+            // the player action map off while it is open, so SlotPressed is false; this makes the intent explicit.
+            if (GameServices.TryGet<RunDirector>(out RunDirector director) && director.InventoryOpen &&
+                ReferenceEquals(director.Player, rig)) return;
+
+            for (int i = 0; i < HotbarBindings.SlotCount; i++)
             {
-                if (input.SlotPressed(i)) inventory.TryUseSlot(i);
+                if (input.SlotPressed(i)) inventory.Hotbar.TryUse(i, out _);
             }
         }
     }
