@@ -6,6 +6,7 @@ using Emberdelve.Data;
 using Emberdelve.Player;
 
 [assembly: InternalsVisibleTo("Assembly-CSharp-Editor")]
+[assembly: InternalsVisibleTo("Emberdelve.Editor")]
 
 namespace Emberdelve.Combat
 {
@@ -103,8 +104,8 @@ namespace Emberdelve.Combat
         /// <summary>
         /// Injects the authority clock (null restores Time.time). TEST AND REPLAY SEAM ONLY: it is internal on
         /// purpose, so gameplay code (Runtime assembly) cannot call it to rewind the cooldown clock; the Editor
-        /// assembly sees it through InternalsVisibleTo. There is no asmdef split, so within Assembly-CSharp any
-        /// runtime class could technically still call it; nothing does, and a grep gate belongs with the U3
+        /// assembly sees it through InternalsVisibleTo. Runtime source files in the root assembly could technically
+        /// still call it; nothing does, and a grep gate belongs with the U3
         /// server split.
         /// </summary>
         internal void SetClock(System.Func<float> clock) => _clock = clock;

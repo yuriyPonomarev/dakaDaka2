@@ -1,0 +1,17 @@
+{
+  "name": "Emberdelve.Review",
+  "references": [
+    "Emberdelve.Runtime",
+    "Unity.InputSystem"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "autoReferenced": true,
+  "defineConstraints": [
+    "DEVELOPMENT_BUILD || UNITY_EDITOR"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

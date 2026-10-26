@@ -4,6 +4,8 @@ param(
     [Parameter(Mandatory=$true)][string]$OutputDirectory,
     [Parameter(Mandatory=$true)][string[]]$Methods,
     [string]$UnityExe='C:\Program Files\Unity\Hub\Editor\6000.2.5f1\Editor\Unity.exe',
+    [string]$EditModeFilter,
+    [int]$EditModeMinimumTests=1,
     [switch]$Relaunch
 )
 $ErrorActionPreference='Continue'
@@ -17,6 +19,10 @@ for($i=0;$i -lt 60 -and (Test-Path -LiteralPath $lock);$i++){
     try { Remove-Item -LiteralPath $lock -Force -ErrorAction Stop } catch { Start-Sleep -Seconds 1 }
 }
 "editor gone $(Get-Date -Format o)" | Add-Content $wrapLog
+if($EditModeFilter){
+    & (Join-Path $ProjectPath 'Tools/Run-EmberdelveEditModeTests.ps1') -ProjectPath $ProjectPath -TestFilter $EditModeFilter -MinimumTests $EditModeMinimumTests -UnityExe $UnityExe -OutputDirectory (Join-Path $OutputDirectory 'editmode') *>&1 | Add-Content $wrapLog
+    "editmode exit=$LASTEXITCODE $(Get-Date -Format o)" | Add-Content $wrapLog
+}
 $gateOut=Join-Path $OutputDirectory 'gates'
 & (Join-Path $ProjectPath 'Tools/Run-EmberdelveGates.ps1') -ProjectPath $ProjectPath -Methods $Methods -UnityExe $UnityExe -OutputDirectory $gateOut *>&1 | Add-Content $wrapLog
 "gates exit=$LASTEXITCODE $(Get-Date -Format o)" | Add-Content $wrapLog

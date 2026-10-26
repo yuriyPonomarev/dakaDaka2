@@ -1,0 +1,16 @@
+{
+  "name": "Emberdelve.UI",
+  "references": [
+    "Emberdelve.Runtime",
+    "Emberdelve.Rules",
+    "Unity.InputSystem",
+    "UnityEngine.UI"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "autoReferenced": true,
+  "versionDefines": [],
+  "noEngineReferences": false
+}

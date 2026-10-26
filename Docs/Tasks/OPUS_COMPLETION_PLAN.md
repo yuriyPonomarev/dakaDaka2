@@ -41,7 +41,7 @@ Fresh MultiPlayer baseline: 123 checks / 2 failures, both ranged assertions stil
 | R10c DONE | Central typed affix-key routing and final consumer audit | All13 selected groups pass (25301 checks); 13 stable destinations and old schema/UI preserved. See R10c.md. |
 | R10d DONE | Close audited snapshot consumer bypasses | Independent review and seven fresh groups PASS (11259 checks / 0 failures); snapshot UI/ability/speed/defense/regen and no pool refill. See R10d.md. |
 | R6d DONE | Selection/command helper extracted to InventoryScreenModel; screen keeps view facade | Same fresh run as R6c2 incl. RebindingDropsSelectionFromTheOldBag; public API of InventoryScreenController unchanged. See R6d.md. |
-| R8a | Integrate prepared Rules/runtime/UI/review/editor boundaries and AttributeRules NUnit tests | Compile, discover/run all14 literal tests, deserialize saved scenes/assets and retain runtime gates. |
+| R8a DONE | Rules/Runtime/UI/Review/Editor asmdefs and AttributeRules NUnit tests | EditMode 14/0, R8aSavedSerialization 135/0, 44 regression groups PASS (40327 checks / 0). Logs/r8a_20261026_123856. See R8a.md. |
 | R8b1 | Finish started loot-service separation and unchanged pure UID helper | Literal old-runtime parity, readable UID NUnit cases, catalog/loot/restore regressions. |
 | R8 remainder BACKLOG | Broader pure Data/ItemInstance/Snapshot/LootRoller/Damage math and remaining NUnit port | Separate future scope; R8a/R8b1 do not claim full R8 completion. |
 | D1 follow-ups | Turn-rate cap with matching visuals, enemy sweeps, ranged hit locations; close confirmed combat review findings | Geometry/authority/input tests and live rendered review |
