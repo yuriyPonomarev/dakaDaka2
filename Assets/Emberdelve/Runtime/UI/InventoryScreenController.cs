@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -17,11 +18,11 @@ namespace Emberdelve.UI
     /// The bag is a real grid: an item occupies its footprint cells, a stack occupies one footprint, and a
     /// placement is only accepted when every cell it needs is free.
     ///
-    /// The cursor holds a SELECTION, not an item. Clicking a stack names the stack it is pointing at; the
+    /// The cursor holds a SELECTION, not an item. Clicking a stack records its stable runtime identity; the
     /// stack stays in the bag, at its own cells, with its own count, until an operation actually commits.
     /// Nothing is lifted out of the bag to be "carried", so there is no removed stack, no stale index to
     /// trust afterwards, and nothing to drop, duplicate or credit when the screen is closed, cancelled or
-    /// disabled. Every operation re-resolves the selection from the grid first, because a container, a
+    /// disabled. Every operation resolves that identity against the live bag first, because a container, a
     /// hotkey or a death can move the bag underneath the cursor between two clicks.
     ///
     /// Clicks are measured against the rectangles that are actually rendered, through RectTransformUtility and
@@ -148,8 +149,9 @@ namespace Emberdelve.UI
         private readonly List<RectTransform> _equipRects = new List<RectTransform>(6);
         private readonly List<EquipmentSlot> _equipSlots = new List<EquipmentSlot>(6);
 
-        // The selection names one stack by the cell its footprint starts at. Until an operation commits the
-        // stack is still in the bag, so no index is remembered and no unit is removed here.
+        // Identity is the live stack, not its definition, current list index, or current grid position.
+        // The remaining fields are display values refreshed whenever this ID resolves.
+        private ulong _selectedStackId;
         private ItemData _selectedItem;
         private Vector2Int _selectedOrigin = new Vector2Int(-1, -1);
         private int _selectedAmount;
@@ -164,15 +166,18 @@ namespace Emberdelve.UI
 
         private int ToastOwner => _rig != null ? _rig.PlayerId : GameEvents.NoPlayer;
 
+        /// <summary>The stable identity currently selected in the bag; zero means no live selection.</summary>
+        public ulong SelectedStackId => TryResolveSelection(out _) ? _selectedStackId : 0;
+
         /// <summary>The stack the cursor is pointing at. It is still carried in the bag.</summary>
-        public ItemData SelectedItem => _selectedItem;
-        public Vector2Int SelectedOrigin => _selectedOrigin;
-        public int SelectedAmount => _selectedAmount;
-        public bool HasSelection => _selectedItem != null;
+        public ItemData SelectedItem => TryResolveSelection(out _) ? _selectedItem : null;
+        public Vector2Int SelectedOrigin => TryResolveSelection(out _) ? _selectedOrigin : new Vector2Int(-1, -1);
+        public int SelectedAmount => TryResolveSelection(out _) ? _selectedAmount : 0;
+        public bool HasSelection => TryResolveSelection(out _);
 
         /// <summary>Old cursor API, kept as a read-only view of the selection: nothing is held outside the bag.</summary>
-        public ItemData CarriedItem => _selectedItem;
-        public int CarriedAmount => _selectedAmount;
+        public ItemData CarriedItem => SelectedItem;
+        public int CarriedAmount => SelectedAmount;
 
         private Vector2 _gridOrigin;
         private Vector2 _equipOrigin;
@@ -387,7 +392,7 @@ namespace Emberdelve.UI
             // Letting go is always safe, because the selected stack never left the bag.
             if (_director != null && (_director.State != RunState.Running || _director.LocalPlayerState != RunState.Running))
             {
-                if (_selectedItem != null) CancelSelection();
+                if (HasSelection) CancelSelection();
                 return;
             }
 
@@ -403,7 +408,7 @@ namespace Emberdelve.UI
 
             // The ghost names a stack in the grid. The character tab switches the grid - and with it the
             // ghost - off, so a selection that survived the tab switch must not bring it back over the pane.
-            bool carrying = _selectedItem != null && !_showCharacter;
+            bool carrying = HasSelection && !_showCharacter;
             _carryGhost.gameObject.SetActive(carrying);
             if (!carrying) return;
 
@@ -440,7 +445,7 @@ namespace Emberdelve.UI
                 return;
             }
 
-            if (_selectedItem != null)
+            if (HasSelection)
             {
                 if (!TryResolveSelection(out int sourceIndex))
                 {
@@ -448,44 +453,52 @@ namespace Emberdelve.UI
                     return;
                 }
 
-                if (_selectedItem.equipSlot != slot)
+                InventorySlot source = _inventory.Slots[sourceIndex];
+                if (source.Item == null || source.Item.equipSlot != slot)
                 {
-                    GameEvents.RaiseToast(ToastOwner, $"{_selectedItem.displayName} does not fit the {slot} slot");
+                    GameEvents.RaiseToast(ToastOwner, $"{source.Item?.displayName ?? "Item"} does not fit the {slot} slot");
                     return;
                 }
 
-                string reason;
-                if (_equipment.TryEquipFromInventory(sourceIndex, out reason))
+                ItemInstance worn = _equipment.EquippedInstance(slot);
+                Guid targetUid = worn != null ? worn.Uid : Guid.Empty;
+                if (SubmitInventoryCommand(InventoryCommandKind.Equip, source, default, Vector2Int.zero,
+                        slot, Guid.Empty, targetUid, out string reason))
                 {
-                    // Equipment commits the bag half and the slot half as one transfer. The cursor only
-                    // lets go after that call says it happened.
+                    // The authority commits the bag/slot transfer before its change notifications. The
+                    // selected stack ID retires as that exact gear instance leaves the bag.
                     ClearSelection();
                     Rebuild();
                 }
                 else
                 {
                     GameEvents.RaiseToast(ToastOwner, reason);
+                    RefreshAfterRefusal();
                 }
                 return;
             }
 
-            ItemData worn = _equipment.Equipped(slot);
-            if (worn == null) return;
+            ItemData wornDefinition = _equipment.Equipped(slot);
+            if (wornDefinition == null) return;
 
-            // Taking worn gear off goes through the equipment API, which decides where it lands in the bag.
-            // Snapshotting the cells this definition already occupied is how the returned stack is told apart
-            // from another copy of the same definition while copies share one definition and have no uid.
-            List<Vector2Int> cellsBefore = OriginsOfItem(worn);
-
-            string unequipReason;
-            if (_equipment.TryUnequip(slot, out unequipReason))
+            ItemInstance wornInstance = _equipment.EquippedInstance(slot);
+            if (wornInstance == null)
             {
-                SelectReturnedStack(worn, cellsBefore);
+                GameEvents.RaiseToast(ToastOwner, "The worn item has no stable identity");
+                return;
+            }
+
+            Guid returnedUid = wornInstance.Uid;
+            if (SubmitInventoryCommand(InventoryCommandKind.Unequip, default, default, Vector2Int.zero,
+                    slot, returnedUid, Guid.Empty, out string unequipReason))
+            {
+                SelectReturnedStack(returnedUid);
                 Rebuild();
             }
             else
             {
                 GameEvents.RaiseToast(ToastOwner, unequipReason);
+                RefreshAfterRefusal();
             }
         }
 
@@ -494,8 +507,7 @@ namespace Emberdelve.UI
             if (_inventory == null) return;
 
             int targetIndex = _inventory.IndexAtCell(cell);
-
-            if (_selectedItem == null)
+            if (!HasSelection)
             {
                 if (targetIndex >= 0) SelectStack(targetIndex);
                 return;
@@ -507,21 +519,21 @@ namespace Emberdelve.UI
                 return;
             }
 
-            if (targetIndex == sourceIndex)
+            InventorySlot source = _inventory.Slots[sourceIndex];
+            if (targetIndex >= 0)
             {
-                // Clicking the stack that is already selected is the grid's cancel gesture. Same cell,
-                // same stack: nothing is moved, swapped, merged or credited.
-                CancelSelection();
-                return;
-            }
+                InventorySlot target = _inventory.Slots[targetIndex];
+                if (target.StackId == _selectedStackId)
+                {
+                    // Clicking the selected stack again is the grid's cancel gesture.
+                    CancelSelection();
+                    return;
+                }
 
-            string reason;
-
-            if (targetIndex < 0)
-            {
-                // An empty cell is a move of the stack that is still owned by the bag. TryMove ignores the
-                // source's own occupancy, so a shape may also be shifted onto its own footprint.
-                if (_inventory.TryMove(sourceIndex, cell, out reason))
+                InventoryCommandKind kind = target.Item == source.Item && source.Item != null && source.Item.CanStack
+                    ? InventoryCommandKind.Merge : InventoryCommandKind.Swap;
+                if (SubmitInventoryCommand(kind, source, target, Vector2Int.zero, EquipmentSlot.None,
+                        Guid.Empty, Guid.Empty, out string reason))
                 {
                     ClearSelection();
                     Rebuild();
@@ -529,81 +541,71 @@ namespace Emberdelve.UI
                 else
                 {
                     GameEvents.RaiseToast(ToastOwner, reason);
+                    RefreshAfterRefusal();
                 }
                 return;
             }
 
-            InventorySlot target = _inventory.Slots[targetIndex];
-
-            if (target.Item == _selectedItem && _selectedItem.CanStack)
-            {
-                if (_inventory.TryMergeStacks(sourceIndex, targetIndex, out reason))
-                {
-                    ClearSelection();
-                    Rebuild();
-                }
-                else
-                {
-                    GameEvents.RaiseToast(ToastOwner, reason);
-                }
-                return;
-            }
-
-            // Both shapes have to fit in each other's holes, which TrySwap checks. A refusal leaves the
-            // selection and the whole bag exactly as they were.
-            if (_inventory.TrySwap(sourceIndex, targetIndex, out reason))
+            // Empty-cell moves resolve the selected ID at command time, so a prior move, resize or index
+            // compaction cannot redirect this click to a lookalike definition.
+            if (SubmitInventoryCommand(InventoryCommandKind.Move, source, default, cell, EquipmentSlot.None,
+                    Guid.Empty, Guid.Empty, out string moveReason))
             {
                 ClearSelection();
                 Rebuild();
             }
             else
             {
-                GameEvents.RaiseToast(ToastOwner, reason);
+                GameEvents.RaiseToast(ToastOwner, moveReason);
+                RefreshAfterRefusal();
             }
         }
 
         private void HandleRightClick(Vector2 screen)
         {
-            // Right click is cancel first. The selected stack never left the bag, so cancelling has nothing
-            // to put back and cannot drop, duplicate, collect or credit anything.
-            // ...except over an EQUIPPABLE bag item: a right click on gear is "wear this one" whatever is
-            // selected (P4c: a leftover selection used to swallow the click, so the cloak was never worn).
-            // The selection is only a cursor mark, so dropping it here moves, spends and credits nothing.
-            if (_selectedItem != null)
+            // The established gesture is cancel-first: while a selection exists, only a right-click on
+            // equippable bag gear performs another action. Keep that selection if the authority refuses.
+            if (HasSelection)
             {
                 bool overEquippable = false;
-                if (TryCellAt(screen, out Vector2Int overCell) && !TryEquipSlotAt(screen, out _) && _inventory != null)
+                if (TryCellAt(screen, out Vector2Int selectedTabCell)
+                    && !TryEquipSlotAt(screen, out _) && _inventory != null)
                 {
-                    int overIndex = _inventory.IndexAtCell(overCell);
-                    overEquippable = overIndex >= 0 && _inventory.Slots[overIndex].Item != null && _inventory.Slots[overIndex].Item.IsEquippable;
+                    int selectedTargetIndex = _inventory.IndexAtCell(selectedTabCell);
+                    overEquippable = selectedTargetIndex >= 0
+                        && _inventory.Slots[selectedTargetIndex].Item != null
+                        && _inventory.Slots[selectedTargetIndex].Item.IsEquippable;
                 }
-                bool overBagItem = overEquippable;
-                if (!overBagItem)
+                if (!overEquippable)
                 {
                     CancelSelection();
                     return;
                 }
-
-                ClearSelection();
             }
 
             if (TryEquipSlotAt(screen, out EquipmentSlot slot))
             {
-                ItemData worn = _equipment != null ? _equipment.Equipped(slot) : null;
-                if (worn != null)
-                {
-                    List<Vector2Int> cellsBefore = OriginsOfItem(worn);
+                ItemData wornDefinition = _equipment != null ? _equipment.Equipped(slot) : null;
+                if (wornDefinition == null) return;
 
-                    string reason;
-                    if (_equipment.TryUnequip(slot, out reason))
-                    {
-                        SelectReturnedStack(worn, cellsBefore);
-                        Rebuild();
-                    }
-                    else
-                    {
-                        GameEvents.RaiseToast(ToastOwner, reason);
-                    }
+                ItemInstance worn = _equipment.EquippedInstance(slot);
+                if (worn == null)
+                {
+                    GameEvents.RaiseToast(ToastOwner, "The worn item has no stable identity");
+                    return;
+                }
+
+                Guid returnedUid = worn.Uid;
+                if (SubmitInventoryCommand(InventoryCommandKind.Unequip, default, default, Vector2Int.zero,
+                        slot, returnedUid, Guid.Empty, out string reason))
+                {
+                    SelectReturnedStack(returnedUid);
+                    Rebuild();
+                }
+                else
+                {
+                    GameEvents.RaiseToast(ToastOwner, reason);
+                    RefreshAfterRefusal();
                 }
                 return;
             }
@@ -613,20 +615,44 @@ namespace Emberdelve.UI
                 int index = _inventory != null ? _inventory.IndexAtCell(cell) : -1;
                 if (index < 0) return;
 
-                InventorySlot slotData = _inventory.Slots[index];
-                ItemData item = slotData.Item;
-                if (item == null) return;
+                InventorySlot source = _inventory.Slots[index];
+                if (source.Item == null) return;
 
-                if (item.IsEquippable)
+                if (source.Item.IsEquippable)
                 {
-                    string equipReason = _equipment == null ? "nothing to wear the item" : null;
-                    bool worn = _equipment != null && _equipment.TryEquipFromInventory(index, out equipReason);
-                    if (worn) Rebuild();
-                    else GameEvents.RaiseToast(ToastOwner, equipReason);
+                    if (_equipment == null)
+                    {
+                        GameEvents.RaiseToast(ToastOwner, "nothing to wear the item");
+                        return;
+                    }
+
+                    ItemInstance worn = _equipment.EquippedInstance(source.Item.equipSlot);
+                    Guid targetUid = worn != null ? worn.Uid : Guid.Empty;
+                    if (SubmitInventoryCommand(InventoryCommandKind.Equip, source, default, Vector2Int.zero,
+                            source.Item.equipSlot, Guid.Empty, targetUid, out string equipReason))
+                    {
+                        ClearSelection();
+                        Rebuild();
+                    }
+                    else
+                    {
+                        GameEvents.RaiseToast(ToastOwner, equipReason);
+                        RefreshAfterRefusal();
+                    }
                     return;
                 }
 
-                if (_inventory.TryUseSlot(index)) Rebuild();
+                if (SubmitInventoryCommand(InventoryCommandKind.Use, source, default, Vector2Int.zero,
+                        EquipmentSlot.None, Guid.Empty, Guid.Empty, out string useReason))
+                {
+                    if (_selectedStackId == source.StackId) ClearSelection();
+                    Rebuild();
+                }
+                else
+                {
+                    GameEvents.RaiseToast(ToastOwner, useReason);
+                    RefreshAfterRefusal();
+                }
             }
         }
 
@@ -761,7 +787,7 @@ namespace Emberdelve.UI
             instance = null;
             definition = null;
 
-            if (_selectedItem == null || !TryResolveSelection(out int index)) return;
+            if (_selectedStackId == 0 || !TryResolveSelection(out int index)) return;
 
             instance = _inventory.Slots[index].Instance;
             definition = _inventory.Slots[index].Item;
@@ -884,63 +910,90 @@ namespace Emberdelve.UI
             if (_inventory == null || index < 0 || index >= _inventory.Slots.Count) return;
 
             InventorySlot slot = _inventory.Slots[index];
-            if (slot.Item == null || slot.Count <= 0) return;
+            if (slot.Item == null || slot.Count <= 0 || slot.StackId == 0) return;
 
-            _selectedItem = slot.Item;
-            _selectedOrigin = slot.Origin;
-            _selectedAmount = slot.Count;
-
+            SetSelection(slot);
             Rebuild();
         }
 
-        /// <summary>
-        /// Selects the stack that unequipping just put back in the bag. The cells the same definition already
-        /// occupied are excluded, so a duplicate of the worn item cannot be mistaken for the returned one and
-        /// the selection never names a stack the bag does not hold.
-        /// </summary>
-        private void SelectReturnedStack(ItemData item, List<Vector2Int> cellsBefore)
+        private void SetSelection(InventorySlot slot)
         {
-            if (_inventory == null || item == null) return;
+            _selectedStackId = slot.StackId;
+            _selectedItem = slot.Item;
+            _selectedOrigin = slot.Origin;
+            _selectedAmount = slot.Count;
+        }
+
+        /// <summary>Selects the exact gear instance returned by an accepted unequip command.</summary>
+        private void SelectReturnedStack(Guid uid)
+        {
+            if (_inventory == null || uid == Guid.Empty) return;
 
             for (int i = 0; i < _inventory.Slots.Count; i++)
             {
                 InventorySlot slot = _inventory.Slots[i];
-                if (slot.Item != item || slot.Count <= 0) continue;
-                if (cellsBefore != null && cellsBefore.Contains(slot.Origin)) continue;
-
-                _selectedItem = slot.Item;
-                _selectedOrigin = slot.Origin;
-                _selectedAmount = slot.Count;
+                if (slot.Instance == null || slot.Instance.Uid != uid) continue;
+                SetSelection(slot);
                 return;
             }
         }
 
-        /// <summary>
-        /// Turns the selection into the index it names right now, or refuses. The selection is identified by
-        /// the cell its footprint starts at and re-read from the grid, so a stack that moved, shrank, was
-        /// consumed or was removed cannot be reached through an index remembered from an earlier click.
-        /// </summary>
         private bool TryResolveSelection(out int index)
         {
             index = -1;
+            if (_selectedStackId == 0 || _inventory == null) return false;
 
-            if (_selectedItem == null || _inventory == null) return false;
-            if (_selectedOrigin.x < 0 || _selectedOrigin.y < 0) return false;
-
-            int resolved = _inventory.IndexAtCell(_selectedOrigin);
-            if (resolved < 0 || resolved >= _inventory.Slots.Count) return false;
-
-            InventorySlot slot = _inventory.Slots[resolved];
-            if (slot.Item != _selectedItem || slot.Origin != _selectedOrigin || slot.Count <= 0) return false;
+            int resolved = _inventory.IndexOfStack(_selectedStackId);
+            if (resolved < 0 || !_inventory.TryGetStack(_selectedStackId, out InventorySlot slot)
+                || slot.StackId != _selectedStackId || slot.Item == null || slot.Count <= 0)
+                return false;
 
             index = resolved;
+            _selectedItem = slot.Item;
+            _selectedOrigin = slot.Origin;
             _selectedAmount = slot.Count;
             return true;
         }
 
+        private bool SubmitInventoryCommand(InventoryCommandKind kind, InventorySlot source, InventorySlot target,
+            Vector2Int destinationCell, EquipmentSlot destinationSlot, Guid expectedSourceGearUid,
+            Guid expectedTargetGearUid, out string reason)
+        {
+            reason = null;
+            IInventoryAuthority authority = _inventory != null ? _inventory.CommandAuthority : null;
+            if (authority == null || _rig == null)
+            {
+                reason = "the inventory command authority is unavailable";
+                return false;
+            }
+
+            Guid sourceUid = source.Instance != null ? source.Instance.Uid : expectedSourceGearUid;
+            Guid targetUid = target.Instance != null ? target.Instance.Uid : Guid.Empty;
+            if (!authority.TryCreateLocalCommand(kind, source.StackId, target.StackId, destinationCell,
+                    destinationSlot, sourceUid, expectedTargetGearUid != Guid.Empty ? expectedTargetGearUid : targetUid,
+                    out InventoryCommand command, out reason))
+                return false;
+
+            InventoryCommandResult result = authority.Submit(_rig, command);
+            if (!result.Accepted)
+            {
+                reason = result.Reason;
+                return false;
+            }
+
+            reason = null;
+            return true;
+        }
+
+        private void RefreshAfterRefusal()
+        {
+            ValidateSelection();
+            Rebuild();
+        }
+
         private void ValidateSelection()
         {
-            if (_selectedItem == null) return;
+            if (_selectedStackId == 0) return;
             if (TryResolveSelection(out _)) return;
 
             ClearSelection();
@@ -955,6 +1008,7 @@ namespace Emberdelve.UI
 
         private void ClearSelection()
         {
+            _selectedStackId = 0;
             _selectedItem = null;
             _selectedOrigin = new Vector2Int(-1, -1);
             _selectedAmount = 0;
@@ -964,19 +1018,6 @@ namespace Emberdelve.UI
                 _carryGhost.enabled = false;
                 _carryGhost.gameObject.SetActive(false);
             }
-        }
-
-        private List<Vector2Int> OriginsOfItem(ItemData item)
-        {
-            List<Vector2Int> origins = new List<Vector2Int>(4);
-            if (_inventory == null || item == null) return origins;
-
-            for (int i = 0; i < _inventory.Slots.Count; i++)
-            {
-                if (_inventory.Slots[i].Item == item) origins.Add(_inventory.Slots[i].Origin);
-            }
-
-            return origins;
         }
 
         // ------------------------------------------------------------ geometry
@@ -1222,6 +1263,10 @@ namespace Emberdelve.UI
 
             if (_inventory == null) return;
 
+            // InventoryChanged and EquipmentChanged can arrive synchronously inside a command. Retain a
+            // surviving StackId at its new location; clear only when that exact identity has disappeared.
+            if (_selectedStackId != 0 && !TryResolveSelection(out _)) ClearSelection();
+
             foreach (Image image in _cellImages) if (image != null) Destroy(image.gameObject);
             foreach (Image image in _itemImages) if (image != null) Destroy(image.gameObject);
             foreach (Image image in _equipImages) if (image != null) Destroy(image.gameObject);
@@ -1319,7 +1364,7 @@ namespace Emberdelve.UI
                 // The selected stack is marked where it still stands in the bag. It is not lifted out and it
                 // is not drawn twice as two normal owned copies: the bag copy is dimmed inside a frame of
                 // selection colour, and only the ghost at the pointer is translucent.
-                bool isSelected = _selectedItem != null && slot.Item == _selectedItem && slot.Origin == _selectedOrigin;
+                bool isSelected = _selectedStackId != 0 && slot.StackId == _selectedStackId;
                 if (isSelected) color.a = 0.58f;
 
                 if (isSelected)
@@ -1461,7 +1506,7 @@ namespace Emberdelve.UI
 
             if (_carryLabel != null)
             {
-                _carryLabel.text = _selectedItem != null
+                _carryLabel.text = HasSelection
                     ? $"Selected {_selectedItem.displayName} x{_selectedAmount} ({SelectedSummary()})   " +
                       "left click: move, swap, combine or wear   right click: let go"
                     : "left click: select   right click a bag item: wear or use it   right click a worn item: take it off";
@@ -1502,7 +1547,7 @@ namespace Emberdelve.UI
             {
                 // ApplyTabVisibility switched the ghost off with the grid; this is the other place that
                 // would put it back, so the same tab test applies here and the bag tab gets it back intact.
-                if (_selectedItem != null && !_showCharacter)
+                if (HasSelection && !_showCharacter)
                 {
                     Vector2Int shape = _selectedItem.EffectiveFootprint;
                     Color ghostColor = _selectedItem.iconColor;

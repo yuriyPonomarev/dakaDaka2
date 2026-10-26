@@ -131,6 +131,8 @@ namespace Emberdelve.EditorTools
                 yield return WrongSlotRefusalKeepsOwnership(fixture);
                 yield return CancelAndCloseConserveEverything(fixture);
                 yield return ExternalBagChangeKeepsSelectionHonest(fixture);
+                yield return StableSelectionTracksIdentity(fixture);
+                yield return RightClickUseSubmitsCommand(fixture);
                 yield return CloakSlotAndTooltips(fixture);
                 yield return PlayerFacingFixes(fixture);
 
@@ -673,6 +675,143 @@ namespace Emberdelve.EditorTools
         {
             int index = f.Inventory.IndexOfInstance(instance.Uid);
             return index >= 0 ? f.Inventory.Slots[index].Origin : new Vector2Int(-1, -1);
+        }
+
+        private static IEnumerator StableSelectionTracksIdentity(Fixture f)
+        {
+            Debug.Log("[Emberdelve][Smoke:inventoryui] ---- stable stack identity selection");
+            ResetBag(f);
+            yield return WaitFrames(2);
+            OpenScreen(f);
+            yield return WaitFrames(2);
+
+            Vector2Int originalCell = new Vector2Int(0, 0);
+            Vector2Int unrelatedCell = new Vector2Int(4, 0);
+            Vector2Int movedCell = new Vector2Int(6, 0);
+            Vector2Int finalCell = new Vector2Int(8, 1);
+
+            f.Check(f.Inventory.TryAddAt(f.Coin, 2, unrelatedCell, out string addUnrelated),
+                $"an unrelated stack is placed before the selected stack ({addUnrelated})");
+            f.Check(f.Inventory.TryAddAt(f.Blade, 1, originalCell, out string addOriginal),
+                $"original blade instance placed at {originalCell} ({addOriginal})");
+            yield return WaitFrames(2);
+            int originalIndex = f.Inventory.IndexAtCell(originalCell);
+            f.Check(originalIndex >= 0, "the original blade resolves in the live inventory");
+            if (originalIndex < 0) yield break;
+            InventorySlot originalBefore = f.Inventory.Slots[originalIndex];
+            ulong originalStackId = originalBefore.StackId;
+            System.Guid originalUid = originalBefore.Instance != null ? originalBefore.Instance.Uid : System.Guid.Empty;
+            f.Check(originalIndex == 1, "the selected blade begins after the unrelated stack in list order");
+
+            yield return ClickCell(f, originalCell);
+            f.Check(originalUid != System.Guid.Empty && f.Screen.SelectedStackId == originalStackId,
+                $"the exact blade stack is selected by stable ID {originalStackId} and UID {originalUid}");
+
+            int unrelatedIndex = f.Inventory.IndexAtCell(unrelatedCell);
+            int unrelatedRemoved = f.Inventory.TryRemoveAt(unrelatedIndex, 2);
+            yield return WaitFrames(2);
+            int shiftedIndex = f.Inventory.IndexOfStack(originalStackId);
+            f.Check(unrelatedRemoved == 2 && shiftedIndex == 0 && f.Screen.SelectedStackId == originalStackId,
+                "removing an earlier list entry shifts indices without changing the selected identity");
+
+            f.Check(f.Inventory.TryMove(shiftedIndex, movedCell, out string moveReason),
+                $"an external bag move repositions the selected stack ({moveReason})");
+            yield return WaitFrames(2);
+            f.Check(f.Screen.SelectedStackId == originalStackId && f.Screen.SelectedOrigin == movedCell,
+                "an external move keeps the selected StackId and refreshes its current origin");
+
+            f.Check(f.Inventory.TryAddAt(f.Blade, 1, originalCell, out string addLookalike),
+                $"a lookalike blade occupies the old origin ({addLookalike})");
+            yield return WaitFrames(2);
+            int lookalikeIndex = f.Inventory.IndexAtCell(originalCell);
+            f.Check(lookalikeIndex >= 0, "the lookalike resolves at the former origin");
+            if (lookalikeIndex < 0) yield break;
+            InventorySlot lookalike = f.Inventory.Slots[lookalikeIndex];
+            f.Check(lookalike.StackId != originalStackId && lookalike.Instance != null
+                && lookalike.Instance.Uid != originalUid,
+                "the same definition at the old cell is a different live stack and gear UID");
+            f.Check(f.Screen.SelectedStackId == originalStackId && f.Screen.SelectedOrigin == movedCell,
+                "rebuild at the old origin does not retarget the selection to a lookalike");
+
+            f.InventoryEvents = 0;
+            ulong beforeCommandRevision = f.Inventory.Revision;
+            yield return ClickCell(f, finalCell);
+            int finalIndex = f.Inventory.IndexOfStack(originalStackId);
+            int lookalikeAtOrigin = f.Inventory.IndexAtCell(originalCell);
+            f.Check(finalIndex >= 0 && f.Inventory.Slots[finalIndex].Origin == finalCell
+                && f.Inventory.Slots[finalIndex].Instance != null
+                && f.Inventory.Slots[finalIndex].Instance.Uid == originalUid,
+                $"the UI command moves the originally selected UID to {finalCell}");
+            f.Check(lookalikeAtOrigin >= 0 && f.Inventory.Slots[lookalikeAtOrigin].StackId == lookalike.StackId
+                && f.Inventory.Slots[lookalikeAtOrigin].Instance != null
+                && lookalike.Instance != null
+                && f.Inventory.Slots[lookalikeAtOrigin].Instance.Uid == lookalike.Instance.Uid,
+                "the lookalike at the former origin stays untouched by the UI command");
+            f.Check(f.Inventory.Revision == beforeCommandRevision + 1 && f.InventoryEvents == 1,
+                $"the accepted UI command commits one shared revision and one inventory event ({f.Inventory.Revision - beforeCommandRevision}, {f.InventoryEvents})");
+            f.Check(f.Screen.SelectedStackId == 0 && !f.Screen.HasSelection,
+                "a committed move clears the selection");
+
+            // Retiring a selected StackId and replacing it with the same definition at the same origin must
+            // clear the cursor, so a later click cannot act through a stale selection.
+            yield return ClickCell(f, finalCell);
+            f.Check(f.Screen.SelectedStackId == originalStackId, "the moved original stack can be selected again");
+            finalIndex = f.Inventory.IndexOfStack(originalStackId);
+            int removed = f.Inventory.TryRemoveAt(finalIndex, 1);
+            f.Check(removed == 1, "the selected stack is removed by an external inventory owner");
+            f.Check(f.Inventory.TryAddAt(f.Blade, 1, finalCell, out string addReplacement),
+                $"a replacement blade reuses the retired stack's origin ({addReplacement})");
+            yield return WaitFrames(2);
+            int replacementIndex = f.Inventory.IndexAtCell(finalCell);
+            f.Check(replacementIndex >= 0, "the replacement resolves at the retired origin");
+            if (replacementIndex < 0) yield break;
+            InventorySlot replacement = f.Inventory.Slots[replacementIndex];
+            f.Check(replacement.StackId != originalStackId && replacement.Instance != null && replacement.Instance.Uid != originalUid,
+                "replacement at the same definition and cell has new stack and gear identity");
+            f.Check(!f.Screen.HasSelection && f.Screen.SelectedStackId == 0,
+                "rebuild clears selection when its exact StackId is gone");
+
+            Vector2Int untouchedCell = new Vector2Int(9, 0);
+            yield return ClickCell(f, untouchedCell);
+            replacementIndex = f.Inventory.IndexOfStack(replacement.StackId);
+            f.Check(replacementIndex >= 0 && f.Inventory.Slots[replacementIndex].Origin == finalCell,
+                "a post-removal click cannot move the replacement through a stale selection");
+        }
+
+        private static IEnumerator RightClickUseSubmitsCommand(Fixture f)
+        {
+            Debug.Log("[Emberdelve][Smoke:inventoryui] ---- right-click use command");
+            ItemData draught = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_BloodDraught.asset");
+            f.Check(draught != null && draught.healAmount > 0, "the healing consumable is loadable for the UI use command");
+            if (draught == null || draught.healAmount <= 0) yield break;
+
+            ResetBag(f);
+            yield return WaitFrames(2);
+            OpenScreen(f);
+            yield return WaitFrames(2);
+
+            f.Rig.Health.SetHealth(Mathf.Max(1f, f.Rig.MaxHealth - 20f));
+            Vector2Int cell = new Vector2Int(0, 0);
+            f.Check(f.Inventory.TryAddAt(draught, 1, cell, out string reason),
+                "one draught is placed for the right-click command: " + reason);
+            yield return WaitFrames(2);
+
+            int index = f.Inventory.IndexAtCell(cell);
+            ulong stackId = f.Inventory.Slots[index].StackId;
+            float healthBefore = f.Rig.CurrentHealth;
+            ulong revisionBefore = f.Inventory.Revision;
+            f.InventoryEvents = 0;
+
+            yield return ClickCell(f, cell, true);
+
+            float expectedHealth = Mathf.Min(f.Rig.MaxHealth, healthBefore + draught.healAmount);
+            f.Check(Mathf.Abs(f.Rig.CurrentHealth - expectedHealth) < 0.01f
+                && f.Inventory.IndexOfStack(stackId) < 0,
+                $"the right-click use command heals from the definition and consumes the exact stack ({f.Rig.CurrentHealth:F1}/{expectedHealth:F1} HP)");
+            f.Check(f.Inventory.Revision == revisionBefore + 1 && f.InventoryEvents == 1,
+                $"the authority commits one revision and publishes one final inventory change ({f.Inventory.Revision - revisionBefore}, {f.InventoryEvents})");
+            f.Check(!f.Screen.HasSelection && f.Screen.SelectedStackId == 0,
+                "using the item through the screen leaves no stale selection");
         }
 
         private static IEnumerator CloakSlotAndTooltips(Fixture f)

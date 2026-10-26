@@ -28,7 +28,8 @@ Fresh MultiPlayer baseline: 123 checks / 2 failures, both ranged assertions stil
 | R6a DONE | Stable non-reused runtime inventory stack IDs | StackId56/0 and6 regression groups pass (11,875 checks); gear UIDs and snapshot JSON unchanged. See R6a.md. |
 | R6b1 DONE | Shared inventory/loadout revision commit plumbing | Revision35/0 and9 regression groups PASS (12,140 checks); exact-once commits and final-state observers. See R6b1.md. |
 | R6b2 DONE | Owner-bound sequenced inventory commands; authority owns consumable effects | Authority103/0 plus9 regressions PASS (2160 checks); identity/replay/stale refusal, exact effects and observer errors. See R6b2.md. |
-| R6c | Stable hotbar bindings and inventory view/selection split | No direct UI mutation calls; real input and inventory UI regressions |
+| R6c1 DONE | StackId selection and authority commands for the inventory screen | Independent review; InventoryUI328 plus Authority103/InventoryFlow415/ResultLoop80 PASS (926 checks / 0). See R6c1.md. |
+| R6c2 | Stable hotbar assignments and matching HUD | Bind/use exact stack identities, no retarget after compaction/removal; real input and inventory UI regressions. |
 | R10a DONE | Immutable effective-stat capture over existing authoritative inputs | Commit4127e494; EffectiveStats17/0, independent literals/nonempty affixes and immutable old captures. Runtime integration remains R10b. |
 | R10b DONE | Runtime effective-stat cache/read integration and source-version invalidation | All20 affected groups pass; EffectiveStats25/0. Scope/evidence in R10b.md; no doubled bonuses/free refill. |
 | R10c DONE | Central typed affix-key routing and final consumer audit | All13 selected groups pass (25301 checks); 13 stable destinations and old schema/UI preserved. See R10c.md. |
