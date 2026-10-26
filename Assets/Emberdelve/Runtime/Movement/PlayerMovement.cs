@@ -220,6 +220,12 @@ namespace Emberdelve.Movement
 
         private float StatusSpeedMultiplier()
         {
+            if (_effectiveStatsSource != null)
+            {
+                EffectiveStatsSnapshot snapshot = _effectiveStatsSource();
+                if (snapshot.IsReady) return snapshot.StatusSpeedMultiplier;
+            }
+
             if (_status == null) _status = GetComponent<StatusComponent>();
             return _status != null ? _status.SpeedMultiplier : 1f;
         }

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -291,6 +292,11 @@ namespace Emberdelve.EditorTools
                 CheckClose("warrior health regen 1.5 (class authored)", 1.5f, rig.Health.RegenPerSecond, "no attribute rule for health regen yet");
                 CheckClose("warrior mana regen 3.0 (3 + 0.25*0)", 3f, rig.Mana.RegenPerSecond, "WIS modifier 0");
                 CheckClose("warrior stamina regen 6.0 (5 + 0.5*2)", 6f, rig.Stamina.RegenPerSecond, "CON modifier 2");
+                EffectiveStatsSnapshot warriorSnapshot = rig.EffectiveStats;
+                CheckClose("health regen is configured from the snapshot", warriorSnapshot.HealthRegenPerSecond, rig.Health.RegenPerSecond, "same normalized rate");
+                CheckClose("health delay matches the snapshot", warriorSnapshot.HealthRegenDelay, ReadFloatField(rig.Health, "regenDelay"), "private pool configuration parity");
+                CheckClose("mana regen is configured from the snapshot", warriorSnapshot.ManaRegenPerSecond, rig.Mana.RegenPerSecond, "same derived rate");
+                CheckClose("mana delay matches the snapshot", warriorSnapshot.ManaRegenDelay, ReadFloatField(rig.Mana, "regenDelay"), "private pool configuration parity");
 
                 // 4. Movement. U2A8 fixture migration only: the authored walking base is the migrated 4.3
                 // (Docs/Design/ATTRIBUTES.md), the DEX term is max(0.5, 1 + 0.025 * modifier), and the warrior
@@ -316,11 +322,18 @@ namespace Emberdelve.EditorTools
                 string pristineItem = EditorJsonUtility.ToJson(cuirass);
 
                 // 6. Equip / unequip / re-equip: ceilings move, current pools do not.
+                float healthClockBeforeRefresh = ReadFloatField(rig.Health, "_timeSinceDamage");
+                float manaClockBeforeRefresh = ReadFloatField(rig.Mana, "_timeSinceSpend");
                 Equip(rig, cuirass);
                 CheckClose("warrior cuirass ceiling 150 (120 derived + 30 gear flat)", 150f, rig.Health.MaxHealth, "combined exactly once");
                 CheckClose("warrior current health still 80 after equipping", 80f, rig.Health.CurrentHealth, "a bigger ceiling pays out nothing");
                 CheckInt("warrior mana ceiling still 70 with cuirass", 70, rig.Mana.MaxMana, "CON +1 keeps the modifier at 2");
                 CheckClose("warrior current mana still 40 after equipping", 40f, rig.Mana.CurrentMana, "no refill");
+                EffectiveStatsSnapshot refreshedVitals = rig.EffectiveStats;
+                CheckClose("post-refresh health delay still matches the snapshot", refreshedVitals.HealthRegenDelay, ReadFloatField(rig.Health, "regenDelay"), "equipment refresh does not change class delay");
+                CheckClose("post-refresh mana delay still matches the snapshot", refreshedVitals.ManaRegenDelay, ReadFloatField(rig.Mana, "regenDelay"), "equipment refresh uses captured delay");
+                CheckClose("health regen clock is not restarted by refresh", healthClockBeforeRefresh, ReadFloatField(rig.Health, "_timeSinceDamage"), "SetMax leaves the damage clock intact");
+                CheckClose("mana regen clock is not restarted by refresh", manaClockBeforeRefresh, ReadFloatField(rig.Mana, "_timeSinceSpend"), "SetRegen leaves the spend clock intact");
                 CheckInt("warrior stamina ceiling still 100 with cuirass", 100, rig.Stamina.MaxStamina, "CON +1 keeps the modifier at 2");
                 CheckClose("warrior current stamina still 75 after equipping", 75f, rig.Stamina.CurrentStamina, "no refill");
 
@@ -645,6 +658,13 @@ namespace Emberdelve.EditorTools
             private void CheckClose(string name, float expected, float actual, string note)
             {
                 Check(Mathf.Abs(expected - actual) <= 0.011f, $"{name}: got {actual:F3}, expected {expected:F3} ({note})");
+            }
+
+            private static float ReadFloatField(object target, string fieldName)
+            {
+                FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+                if (field == null) throw new System.MissingFieldException(target.GetType().Name, fieldName);
+                return (float)field.GetValue(target);
             }
 
             /// <summary>The gate reads the saved data assets; it does not rebuild or save any of them.</summary>

@@ -207,6 +207,8 @@ namespace Emberdelve.EditorTools
                 Emberdelve.Player.PlayerRig rig = body.AddComponent<Emberdelve.Player.PlayerRig>();
                 rig.WireRig();
                 InvokeAwake(rig.Movement);
+                check(Mathf.Approximately(rig.AbilityEffectScale, 1f),
+                    "unready rig ability scale uses the neutral 1 fallback");
                 StatsComponent attributes = new StatsComponent();
                 attributes.Initialize(warrior);
                 SetField(rig, "_class", warrior);
@@ -238,11 +240,29 @@ namespace Emberdelve.EditorTools
                 check(afterStackMutation.MaxHealth == rig.AttributeStats.MaxHealth + 7,
                     "direct CharacterStatStack source mutation invalidates rig capture");
 
+                float abilityScaleBeforeAttributeMutation = rig.EffectiveStats.AbilityEffectScale;
                 attributes.Initialize(archer);
                 EffectiveStatsSnapshot afterAttributeMutation = rig.EffectiveStats;
                 check(afterAttributeMutation.Attributes.Effective.Dexterity == 16
                     && afterAttributeMutation.Attributes.Effective.Strength == 10,
                     "direct StatsComponent.Initialize invalidates rig capture");
+                check(Mathf.Approximately(afterAttributeMutation.AbilityEffectScale, 0.96f)
+                    && Mathf.Approximately(rig.AbilityEffectScale, afterAttributeMutation.AbilityEffectScale)
+                    && !Mathf.Approximately(abilityScaleBeforeAttributeMutation, afterAttributeMutation.AbilityEffectScale),
+                    "CHA mutation invalidates the old capture and updates the public snapshot-backed ability scale");
+
+                float speedBeforeSlow = rig.Movement.ResolveGroundSpeed(false, false);
+                int statusVersionBeforeSlow = rig.Status.Version;
+                rig.Status.ApplyStatus(new StatusSpec(StatusKind.Slow, 10f, 0.5f), 0);
+                EffectiveStatsSnapshot afterSlow = rig.EffectiveStats;
+                check(rig.Status.Version > statusVersionBeforeSlow
+                    && Mathf.Approximately(afterSlow.StatusSpeedMultiplier, 0.5f)
+                    && Mathf.Approximately(rig.Movement.ResolveGroundSpeed(false, false), speedBeforeSlow * 0.5f),
+                    "status version refreshes the snapshot movement factor");
+                ExpireStatuses(rig.Status);
+                check(Mathf.Approximately(rig.EffectiveStats.StatusSpeedMultiplier, 1f)
+                    && Mathf.Approximately(rig.Movement.ResolveGroundSpeed(false, false), speedBeforeSlow),
+                    "status expiry restores the snapshot-backed movement speed");
 
                 rig.Status.ApplyStatus(new StatusSpec(StatusKind.Empowered, 10f, 1.25f), 0);
                 EffectiveStatsSnapshot afterStatusApply = rig.EffectiveStats;
@@ -263,6 +283,8 @@ namespace Emberdelve.EditorTools
                 EffectiveStatsSnapshot afterHandChange = rig.EffectiveStats;
                 check(!beforeHandChange.Defense.CanParry && afterHandChange.Defense.CanParry,
                     "offhand changes invalidate the cached defense profile");
+                check(rig.CanParry && !rig.CanGuard,
+                    "guard capability properties use swapped snapshot defense and preserve no-block parity");
             }
             finally
             {

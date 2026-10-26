@@ -255,6 +255,13 @@ namespace Emberdelve.EditorTools
             return inst;
         }
 
+        private static AffixDefinition FindAffix(List<AffixDefinition> affixes, AffixStatKey key)
+        {
+            for (int i = 0; i < affixes.Count; i++)
+                if (affixes[i] != null && affixes[i].statKey == key) return affixes[i];
+            return null;
+        }
+
         private static float[] Scores(PlayerRig rig)
         {
             var scores = new float[AttributeRules.AttributeCount];
@@ -511,7 +518,7 @@ namespace Emberdelve.EditorTools
             TooltipChecks(rig, auth, ashen, blade, rareAshen, uncommonAshen, commonAshen);
 
             // ---- character panel read model with the cloak worn
-            CharacterPanelChecks(rig, rareAshen, bag, gear, baseScores);
+            CharacterPanelChecks(rig, rareAshen, ashen, FindAffix(affixes, AffixStatKey.Charisma), auth, bag, gear, baseScores);
 
             bag.Clear();
             gear.Clear();
@@ -641,7 +648,8 @@ namespace Emberdelve.EditorTools
             Check(ashen.StatTotal(SkillStat.Armor) == 2f && ashen.attributeBonuses.Length == 1, "building tooltips left the definition untouched");
         }
 
-        private void CharacterPanelChecks(PlayerRig rig, ItemInstance rare, Inventory bag, Equipment gear, float[] baseScores)
+        private void CharacterPanelChecks(PlayerRig rig, ItemInstance rare, ItemData ashen,
+            AffixDefinition charismaAffix, ItemInstanceAuthority auth, Inventory bag, Equipment gear, float[] baseScores)
         {
             GameObject host = new GameObject("CloakStatsHost", typeof(RectTransform));
             cleanup.Add(host);
@@ -654,6 +662,9 @@ namespace Emberdelve.EditorTools
             string[] names = { "STRENGTH", "DEXTERITY", "CONSTITUTION", "INTELLIGENCE", "WISDOM", "CHARISMA" };
             foreach (string name in names) Check(before.ContainsKey(name), "pane lists " + name);
             Check(before.ContainsKey("Armour") && before["Armour"].StartsWith("0"), "pane shows armour 0 with nothing worn");
+            Check(before.TryGetValue("Skill power", out string skillBefore)
+                && skillBefore.Contains("x  Charisma scales skill effects"),
+                "pane skill row comes from the current ability-scale snapshot: " + (skillBefore ?? "missing"));
 
             Check(bag.TryAddInstance(rare, out string reason) && gear.TryEquipFromInventory(bag.IndexOfInstance(rare.Uid), out reason), "wear the rare cloak for the pane: " + reason);
             view.Refresh();
@@ -661,15 +672,67 @@ namespace Emberdelve.EditorTools
             int wis = (int)SixAttribute.Wisdom;
             int expectedWis = (int)baseScores[wis] + 3;
             Check(after.TryGetValue("WISDOM", out string wisRow) && wisRow.StartsWith(expectedWis + "  ") && wisRow.Contains("worn +3"),
-                "WISDOM row shows the effective score " + expectedWis + " with worn +3: " + (wisRow ?? "missing"));
+                "WISDOM row shows fixed +1 and rolled +2 as worn +3: " + (wisRow ?? "missing"));
             Check(after.TryGetValue("Armour", out string armorRow) && armorRow.StartsWith("6"), "Armour row shows 6 with the cloak: " + (armorRow ?? "missing"));
             Check(after["STRENGTH"] == before["STRENGTH"] && after["CHARISMA"] == before["CHARISMA"], "scores the cloak does not touch are unchanged");
+            Check(after.TryGetValue("Skill power", out string skillAfter) && skillAfter == skillBefore,
+                "rolled Wisdom bonus leaves the snapshot-backed skill row unchanged: " + (skillAfter ?? "missing"));
             Check(view.RowCount == 6 + 2 + 2 + 3, "the pane has one row per number (D1b: the deprecated Stamina row is gone, 3 -> 2 vitals) and did not grow on refresh (" + view.RowCount + ")");
 
             gear.TryUnequip(EquipmentSlot.Back, out _);
             view.Refresh();
             Dictionary<string, string> restored = ReadPane(host.transform);
-            Check(restored["WISDOM"] == before["WISDOM"] && restored["Armour"] == before["Armour"], "unequip restores the pane exactly");
+            Check(restored["WISDOM"] == before["WISDOM"] && restored["Armour"] == before["Armour"]
+                && restored["Skill power"] == skillBefore, "unequip restores the stat and skill rows exactly");
+
+            bool validCharismaProfile = charismaAffix != null
+                && charismaAffix.id == "affix_charisma"
+                && charismaAffix.statKey == AffixStatKey.Charisma
+                && Mathf.Approximately(charismaAffix.minValue, 1f)
+                && Mathf.Approximately(charismaAffix.maxValue, 3f)
+                && Mathf.Approximately(charismaAffix.step, 1f)
+                && charismaAffix.AllowsCategory(AffixCategory.Cloak)
+                && charismaAffix.TryValidateRolledValue(2f, AffixCategory.Cloak, out _);
+            Check(validCharismaProfile, "production Charisma affix supports a valid cloak roll of +2 in its 1..3 step-1 band");
+            if (!validCharismaProfile) return;
+
+            ItemInstance charismaCloak = Mint(auth, ashen, AffixRarity.Uncommon,
+                new AffixRecord(charismaAffix.id, AffixStatKey.Charisma, 2f));
+            Check(charismaCloak != null && charismaCloak.Rarity == AffixRarity.Uncommon
+                && charismaCloak.Affixes.Count == 1
+                && charismaCloak.Affixes[0].StatKey == AffixStatKey.Charisma
+                && Mathf.Approximately(charismaCloak.Affixes[0].Value, 2f),
+                "saved-definition cloak fixture retains one valid uncommon CHA +2 roll");
+            if (charismaCloak == null) return;
+
+            Check(bag.TryAddInstance(charismaCloak, out reason)
+                && gear.TryEquipFromInventory(bag.IndexOfInstance(charismaCloak.Uid), out reason),
+                "equip the CHA-roll cloak for effective score and skill scale checks: " + reason);
+            view.Refresh();
+            Dictionary<string, string> withCharisma = ReadPane(host.transform);
+            int charismaIndex = (int)SixAttribute.Charisma;
+            int expectedCharisma = Mathf.Clamp((int)baseScores[charismaIndex] + 2, 1, 30);
+            int expectedCharismaModifier = AttributeRules.Modifier(expectedCharisma);
+            float expectedSkillScale = AttributeRules.AbilityEffectScale(expectedCharismaModifier);
+            string skillWithCharisma = null;
+            Check(withCharisma.TryGetValue("CHARISMA", out string charismaRow)
+                && charismaRow.StartsWith(expectedCharisma + "  ") && charismaRow.Contains("worn +2"),
+                "CHARISMA row shows effective score with the rolled +2: " + (charismaRow ?? "missing"));
+            Check(Mathf.Approximately(rig.EffectiveStats.AbilityEffectScale, expectedSkillScale)
+                && withCharisma.TryGetValue("Skill power", out skillWithCharisma)
+                && skillWithCharisma != skillBefore
+                && skillWithCharisma == $"{rig.EffectiveStats.AbilityEffectScale:0.##}x  Charisma scales skill effects"
+                && skillWithCharisma == $"{expectedSkillScale:0.##}x  Charisma scales skill effects",
+                "numeric Skill power row matches the new snapshot and independent CHA rule: " + (skillWithCharisma ?? "missing"));
+
+            Check(gear.TryUnequip(EquipmentSlot.Back, out reason), "unequip the CHA-roll cloak: " + reason);
+            view.Refresh();
+            Dictionary<string, string> afterCharismaUnequip = ReadPane(host.transform);
+            Check(afterCharismaUnequip["CHARISMA"] == before["CHARISMA"]
+                && afterCharismaUnequip["Skill power"] == skillBefore
+                && Mathf.Approximately(rig.EffectiveStats.AbilityEffectScale,
+                    AttributeRules.AbilityEffectScale(AttributeRules.Modifier((int)baseScores[charismaIndex]))),
+                "CHA unequip restores the original score and snapshot-backed skill scale");
         }
 
         private static Dictionary<string, string> ReadPane(Transform host)

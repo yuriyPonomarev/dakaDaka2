@@ -5076,13 +5076,99 @@ namespace Emberdelve.EditorTools
                 if (shotA == null || shotB == null || shotC == null) yield break;
 
                 foreach (EnemyAgent target in new[] { shotA, shotB, shotC }) target.enabled = false;
-                PlaceEnemyAhead(shotA, volleyDepth, 0f);
-                PlaceEnemyAhead(shotB, volleyDepth, volleyLateral);
-                PlaceEnemyAhead(shotC, volleyDepth, -volleyLateral);
                 AimAtPoint(_rig.transform.position + FlatForward(_rig.transform) * volleyDepth + Vector3.up * 1.15f);
                 yield return WaitFrames(3);
 
-                Debug.Log($"[Emberdelve][Smoke:{Mode}] volley geometry diag: spread={multi.spreadDegrees:F0} deg lateral={volleyLateral:F2}m depth={volleyDepth:F1}m A={shotA.transform.position} B={shotB.transform.position} C={shotC.transform.position} muzzle={_rig.GetMuzzlePosition()} aim={_rig.AimDirection}");
+                // AimAtPoint and the settling frames can change the final muzzle through rig pose and
+                // weapon bob. Place each target from the actual settled muzzle and the authored spread
+                // formula, then cast in this same frame so those inputs cannot drift between placement
+                // and launch. The target plane stays at the original forward depth and each enemy keeps
+                // its existing floor height and real collider setup.
+                Vector3 settledMuzzle = _rig.GetMuzzlePosition();
+                Vector3 settledAim = _rig.AimDirection.normalized;
+                Vector3 volleyForward = FlatForward(_rig.transform).normalized;
+                Vector3 targetPlanePoint = _rig.transform.position + volleyForward * volleyDepth;
+                EnemyAgent[] volleyTargets = { shotA, shotB, shotC };
+                Vector3[] volleyDirections = new Vector3[3];
+                Vector3[] volleyRayPoints = new Vector3[3];
+                float projectileSpread = Mathf.Clamp(multi.spreadDegrees, 0f, 170f);
+                bool volleyRayGeometryValid = multi.projectileCount == 3;
+                for (int i = 0; i < volleyTargets.Length; i++)
+                {
+                    float t = i / (multi.projectileCount - 1f) - 0.5f;
+                    float spreadOffset = t * projectileSpread;
+                    Vector3 direction = Quaternion.AngleAxis(spreadOffset, Vector3.up) * settledAim;
+                    float planeDenominator = Vector3.Dot(direction, volleyForward);
+                    if (planeDenominator <= 0.001f)
+                    {
+                        volleyRayGeometryValid = false;
+                        continue;
+                    }
+
+                    float rayDistance = Vector3.Dot(targetPlanePoint - settledMuzzle, volleyForward) / planeDenominator;
+                    if (rayDistance <= 0f)
+                    {
+                        volleyRayGeometryValid = false;
+                        continue;
+                    }
+
+                    Vector3 rayPoint = settledMuzzle + direction * rayDistance;
+                    volleyDirections[i] = direction.normalized;
+                    volleyRayPoints[i] = rayPoint;
+                    EnemyAgent target = volleyTargets[i];
+                    Vector3 originalPosition = target.transform.position;
+                    Vector3 shooterPosition = _rig.transform.position;
+                    target.transform.position = new Vector3(rayPoint.x, originalPosition.y, rayPoint.z);
+                    Vector3 toShooter = shooterPosition - target.transform.position;
+                    toShooter.y = 0f;
+                    if (toShooter.sqrMagnitude > 0.0001f)
+                        target.transform.rotation = Quaternion.LookRotation(toShooter.normalized);
+                }
+                Physics.SyncTransforms();
+
+                int volleyQueryMask = _director.Config.hitMask.value | _director.Config.levelMask.value;
+                float volleyProjectileRadius = Mathf.Max(0.01f, bow.projectileRadius * 0.5f);
+                for (int i = 0; i < volleyTargets.Length; i++)
+                {
+                    EnemyAgent target = volleyTargets[i];
+                    string bodyDimensions = "none";
+                    Collider[] targetColliders = target.GetComponentsInChildren<Collider>();
+                    for (int c = 0; c < targetColliders.Length; c++)
+                    {
+                        Collider body = targetColliders[c];
+                        if (body == null) continue;
+                        Vector3 size = body.bounds.size;
+                        bodyDimensions += $" {body.name}=({size.x:F2},{size.y:F2},{size.z:F2})";
+                    }
+
+                    bool rayContactedTarget = false;
+                    string firstContact = "none";
+                    if (volleyRayGeometryValid)
+                    {
+                        Vector3 direction = volleyDirections[i];
+                        float rayDistance = Vector3.Distance(settledMuzzle, volleyRayPoints[i]);
+                        RaycastHit[] rayHits = Physics.SphereCastAll(settledMuzzle, volleyProjectileRadius,
+                            direction, rayDistance + 0.5f, volleyQueryMask, QueryTriggerInteraction.Ignore);
+                        float nearestDistance = float.PositiveInfinity;
+                        for (int h = 0; h < rayHits.Length; h++)
+                        {
+                            RaycastHit hit = rayHits[h];
+                            if (hit.collider == null || hit.distance >= nearestDistance) continue;
+                            ICombatEntity entity = hit.collider.GetComponentInParent<ICombatEntity>();
+                            if (entity != null && entity.CombatId == _rig.CombatId) continue;
+                            nearestDistance = hit.distance;
+                            rayContactedTarget = entity != null && entity.CombatId == target.CombatId;
+                            firstContact = entity != null
+                                ? $"{entity.GetType().Name}#{entity.CombatId} via {hit.collider.name} at {hit.distance:F2}m"
+                                : $"level collider {hit.collider.name} at {hit.distance:F2}m";
+                        }
+                    }
+
+                    Debug.Log($"[Emberdelve][Smoke:{Mode}] volley ray {i + 1}/3 target={target.name} combatId=#{target.CombatId} root={target.transform.position} colliders:{bodyDimensions} origin={settledMuzzle} direction={volleyDirections[i]} planePoint={volleyRayPoints[i]} firstContact={firstContact}");
+                    Check(volleyRayGeometryValid && rayContactedTarget,
+                        $"volley ray {i + 1} first reaches intended target {target.name}#{target.CombatId} before any level obstruction ({firstContact})");
+                }
+                Debug.Log($"[Emberdelve][Smoke:{Mode}] volley geometry diag: spread={multi.spreadDegrees:F0} deg nominal lateral={volleyLateral:F2}m depth={volleyDepth:F1}m settled muzzle={settledMuzzle} aim={settledAim} player={_rig.transform.position}");
 
                 int volleyBefore = ranged.Magazine;
                 int acceptedBeforeVolley = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
@@ -5122,6 +5208,7 @@ namespace Emberdelve.EditorTools
                     {
                         if (!pair.Value.IsValid) continue;
                         hitTargets++;
+                        Debug.Log($"[Emberdelve][Smoke:{Mode}] volley damage recipient={pair.Key.name} combatId=#{pair.Key.CombatId} amount={pair.Value.Amount:F1} point={pair.Value.Point}");
                         // Weapon falloff x the skill's own authored multiplier x the archer's outgoing ranged
                         // factor (DEX 1.12 x Farshot 1.18) x the CHA 8 activation scale 0.96 x headshot if the
                         // arrow actually took one. 34 * 0.7 * 1.3216 * 0.96 = 30.1959168 on a body hit.

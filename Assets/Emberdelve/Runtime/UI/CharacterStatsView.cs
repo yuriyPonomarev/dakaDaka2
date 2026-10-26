@@ -17,11 +17,12 @@ namespace Emberdelve.UI
     ///
     /// It is presentation only and deliberately not a component: it owns Text widgets, reads the rig
     /// through the same public resolvers gameplay uses, and writes nothing anywhere. Every number here
-    /// is a query - <see cref="StatsComponent"/> for the scores and the ability scale, the pool
+    /// is a query - one <see cref="EffectiveStatsSnapshot"/> for attribute rows and ability scale, the pool
     /// components for current/ceiling/rate, <see cref="PlayerMovement.ResolveWalkSpeed"/> for speed,
     /// <see cref="PlayerRig.GetOutgoingDamageMultiplier"/> for the weapon line and
     /// <see cref="PlayerRig.Defense"/> for the guard - so the pane cannot disagree with what the run is
-    /// actually doing, and it cannot invent a stat the rig does not have.
+    /// actually doing, and it cannot invent a stat the rig does not have. Attribute rows share one captured
+    /// version of the effective scores, worn bonuses, and skill scale.
     ///
     /// The rows are built once by <see cref="Build"/> and afterwards only re-labelled by
     /// <see cref="Refresh"/>, which walks the identical sequence of lines. Opening the pane again, or
@@ -118,15 +119,16 @@ namespace Emberdelve.UI
         /// </summary>
         private void Populate()
         {
-            StatsComponent attributes = _rig != null ? _rig.AttributeStats : null;
-            bool ready = attributes != null && attributes.IsReady;
+            EffectiveStatsSnapshot snapshot = _rig != null ? _rig.EffectiveStats : default;
+            AttributeSnapshot attributes = snapshot.Attributes;
+            bool ready = snapshot.AttributesReady;
 
             Section("ABILITY SCORES   effective score  (modifier)");
 
             // Always the same six lines, ready or not: the sequence Build and Refresh walk has to be one
             // sequence, or a pane built before a class was applied would label its next pass onto the
             // wrong lines.
-            AttributeBonuses bonuses = ready ? attributes.EquippedBonuses : AttributeBonuses.None;
+            AttributeBonuses bonuses = ready ? attributes.Bonuses : AttributeBonuses.None;
 
             for (int i = 0; i < AttributeRules.AttributeCount; i++)
             {
@@ -139,8 +141,8 @@ namespace Emberdelve.UI
                     continue;
                 }
 
-                int score = attributes.GetAttribute(attribute);
-                int modifier = attributes.GetModifier(attribute);
+                int score = attributes.Effective.Get(attribute);
+                int modifier = attributes.Modifier(attribute);
                 int bonus = bonuses.Total(attribute);
 
                 string value = score + "  (" + Signed(modifier) + ")";
@@ -161,7 +163,7 @@ namespace Emberdelve.UI
             Section("SPEED, WEAPON AND SKILLS");
             Row("Walk speed", ready && _rig.Movement != null ? _rig.Movement.ResolveWalkSpeed().ToString("0.00") + " m/s" : "-");
             Row("Weapon damage", ready ? DescribeWeapon() : "-");
-            Row("Skill power", ready ? DescribeSkillPower(attributes) : "-");
+            Row("Skill power", ready ? DescribeSkillPower(snapshot.AbilityEffectScale) : "-");
         }
 
         // ------------------------------------------------------------ lines
@@ -255,9 +257,9 @@ namespace Emberdelve.UI
             return name.Substring(0, 22).TrimEnd() + "...";
         }
 
-        private static string DescribeSkillPower(StatsComponent attributes)
+        private static string DescribeSkillPower(float abilityEffectScale)
         {
-            return $"{attributes.GetAbilityEffectScale():0.##}x  Charisma scales skill effects";
+            return $"{abilityEffectScale:0.##}x  Charisma scales skill effects";
         }
 
         private static string Signed(int value)

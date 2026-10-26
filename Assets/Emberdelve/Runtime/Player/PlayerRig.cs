@@ -155,11 +155,17 @@ namespace Emberdelve.Player
 
         /// <summary>
         /// The caster's own ability effect scale (Docs/Design/ATTRIBUTES.md): clamp(1 + 0.04 * CHA modifier,
-        /// 0.6, 1.4) from the live attribute component, 1 when the rig has none. The only definition: the
+        /// 0.6, 1.4) from the current effective snapshot, 1 when the rig has no ready snapshot. The only definition: the
         /// authority reads it for statuses and damage, and the skill kit reads it for local movement effects.
         /// </summary>
-        public float AbilityEffectScale =>
-            _attributeStats != null && _attributeStats.IsReady ? _attributeStats.GetAbilityEffectScale() : 1f;
+        public float AbilityEffectScale
+        {
+            get
+            {
+                EffectiveStatsSnapshot snapshot = EffectiveStats;
+                return snapshot.IsReady ? snapshot.AbilityEffectScale : 1f;
+            }
+        }
 
         private RangedCombat _ranged;
         private RangedCombat Ranged => _ranged != null ? _ranged : (_ranged = GetComponent<RangedCombat>());
@@ -170,7 +176,7 @@ namespace Emberdelve.Player
         public bool IsDead => health != null && health.IsDead;
         public float CurrentHealth => health != null ? health.CurrentHealth : 0f;
         public float MaxHealth => health != null ? health.MaxHealth : 0f;
-        public bool IsGuarding => _guardHeld && _defense.CanBlock && !IsDead && !IsGuardStaggered;
+        public bool IsGuarding => _guardHeld && Defense.CanBlock && !IsDead && !IsGuardStaggered;
 
         /// <summary>
         /// D1b: true while a broken guard keeps this player from raising the guard. The stagger is the combat
@@ -178,8 +184,8 @@ namespace Emberdelve.Player
         /// </summary>
         public bool IsGuardStaggered =>
             GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) && authority is ICombatFlowState flow && flow.IsGuardStaggered(_combatId);
-        public bool CanGuard => _defense.CanBlock;
-        public bool CanParry => _defense.CanParry;
+        public bool CanGuard => Defense.CanBlock;
+        public bool CanParry => Defense.CanParry;
         public DefenseProfile Defense
         {
             get
@@ -356,7 +362,7 @@ namespace Emberdelve.Player
             if (mana != null)
             {
                 mana.SetMax(limits.MaxMana);
-                mana.SetRegen(limits.ManaRegen, _class.manaRegenDelay);
+                mana.SetRegen(limits.ManaRegen, limits.ManaRegenDelay);
             }
 
             if (stamina != null)
@@ -397,6 +403,9 @@ namespace Emberdelve.Player
                 MaxHealth = Mathf.Max(1, _class != null ? _class.maxHealth : 1),
                 MaxMana = Mathf.Max(1, _class != null ? _class.EffectiveMaxMana : 1),
                 ManaRegen = _class != null ? Mathf.Max(0f, _class.manaRegenPerSecond) : 0f,
+                HealthRegenPerSecond = _class != null ? Mathf.Max(0f, _class.healthRegenPerSecond) : 0f,
+                HealthRegenDelay = _class != null ? Mathf.Max(0f, _class.regenDelay) : 0f,
+                ManaRegenDelay = _class != null ? Mathf.Max(0f, _class.manaRegenDelay) : 0f,
                 MaxStamina = Mathf.Max(1, _class != null ? _class.maxStamina : 1),
                 StaminaRegen = _class != null ? Mathf.Max(0f, _class.staminaRegenPerSecond) : 0f
             };
@@ -407,6 +416,9 @@ namespace Emberdelve.Player
             limits.MaxHealth = snapshot.MaxHealth;
             limits.MaxMana = snapshot.MaxMana;
             limits.ManaRegen = snapshot.ManaRegenPerSecond;
+            limits.HealthRegenPerSecond = snapshot.HealthRegenPerSecond;
+            limits.HealthRegenDelay = snapshot.HealthRegenDelay;
+            limits.ManaRegenDelay = snapshot.ManaRegenDelay;
             limits.MaxStamina = snapshot.MaxStamina;
             limits.StaminaRegen = snapshot.StaminaRegenPerSecond;
 
@@ -426,8 +438,8 @@ namespace Emberdelve.Player
 
             VitalLimits limits = ResolveVitalLimits();
 
-            if (health != null) health.Configure(limits.MaxHealth, _class.healthRegenPerSecond, _class.regenDelay);
-            if (mana != null) mana.Configure(limits.MaxMana, limits.ManaRegen, _class.manaRegenDelay);
+            if (health != null) health.Configure(limits.MaxHealth, limits.HealthRegenPerSecond, limits.HealthRegenDelay);
+            if (mana != null) mana.Configure(limits.MaxMana, limits.ManaRegen, limits.ManaRegenDelay);
             if (stamina != null) stamina.Configure(limits.MaxStamina, limits.StaminaRegen, StaminaRegenDelay);
         }
 
@@ -437,6 +449,9 @@ namespace Emberdelve.Player
             public int MaxHealth;
             public int MaxMana;
             public float ManaRegen;
+            public float HealthRegenPerSecond;
+            public float HealthRegenDelay;
+            public float ManaRegenDelay;
             public int MaxStamina;
             public float StaminaRegen;
         }
@@ -707,8 +722,9 @@ namespace Emberdelve.Player
         public bool TryGetProjectileGuardBlade(out GuardBladeBox blade)
         {
             blade = default;
+            DefenseProfile defense = Defense;
             WeaponData weapon = ActiveWeapon;
-            if (!IsGuarding || weapon == null || weapon.IsRanged || !weapon.CanBlock || _defense.HasShield) return false;
+            if (!IsGuardingWithDefense(defense) || weapon == null || weapon.IsRanged || !weapon.CanBlock || defense.HasShield) return false;
             if (GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
                 && authority is ICombatFlowState flow && flow.IsSwingInProgress(_combatId)) return false;
             Vector3 aim = AimDirection;
@@ -738,22 +754,23 @@ namespace Emberdelve.Player
         public bool TryResolveGuard(in DamageInfo incoming, CombatFlowTuning tuning, out GuardResult result)
         {
             result = default;
+            DefenseProfile defense = Defense;
             // A held sword/rapier blocks a projectile only where the live blade physically caught it.
             // A contributing shield keeps the existing directional block semantics.
-            if (incoming.RangedProjectile && !_defense.HasShield && _mainHand != null && _mainHand.CanBlock
+            if (incoming.RangedProjectile && !defense.HasShield && _mainHand != null && _mainHand.CanBlock
                 && !incoming.GuardBladeContact) return false;
-            if (!TryGetArcReduction(incoming, out float reduction)) return false;
+            if (!TryGetArcReduction(incoming, defense, out float reduction)) return false;
 
-            bool broken = CombatFlowRules.IsGuardBroken(incoming.ImpactPower, _defense.ImpactResist);
+            bool broken = CombatFlowRules.IsGuardBroken(incoming.ImpactPower, defense.ImpactResist);
             float scale = tuning != null ? tuning.guardBreakReductionScale : CombatFlowTuning.DefaultGuardBreakReductionScale;
             result = new GuardResult(broken ? reduction * Mathf.Clamp01(scale) : reduction, broken);
             return true;
         }
 
-        private bool TryGetArcReduction(in DamageInfo incoming, out float reduction)
+        private bool TryGetArcReduction(in DamageInfo incoming, DefenseProfile defense, out float reduction)
         {
             reduction = 0f;
-            if (!IsGuarding || !_defense.CanBlock) return false;
+            if (!IsGuardingWithDefense(defense)) return false;
 
             Vector3 toSource = incoming.SourcePosition - transform.position;
             toSource.y = 0f;
@@ -762,11 +779,14 @@ namespace Emberdelve.Player
 
             // Direction-aware block: the guard only holds inside the kit's own arc towards the source.
             float angle = Vector3.Angle(transform.forward, toSource);
-            if (angle > _defense.BlockArcDegrees * 0.5f) return false;
+            if (angle > defense.BlockArcDegrees * 0.5f) return false;
 
-            reduction = Mathf.Clamp01(_defense.BlockReduction);
+            reduction = Mathf.Clamp01(defense.BlockReduction);
             return true;
         }
+
+        private bool IsGuardingWithDefense(DefenseProfile defense) =>
+            _guardHeld && defense.CanBlock && !IsDead && !IsGuardStaggered;
 
         public void PlaySwingVisual(WeaponData weapon, SwingPatternData pattern)
         {
