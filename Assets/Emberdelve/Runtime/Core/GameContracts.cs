@@ -275,6 +275,18 @@ namespace Emberdelve.Core
     }
 
     /// <summary>
+    /// Optional companion of <see cref="IActiveWeaponProvider"/>: a counter that goes up on EVERY change of the held
+    /// weapon (also a change that is undone before anyone looked: an A-B-A swap inside one frame). The combat authority
+    /// remembers it with a combo chain and a running swing and drops both when it differs, because comparing the
+    /// current weapon with the chain's weapon cannot see A-B-A. An entity that does not implement it reports 0 (weapon
+    /// identity comparison only, as before).
+    /// </summary>
+    public interface IWeaponChangeSource
+    {
+        int WeaponChangeCount { get; }
+    }
+
+    /// <summary>
     /// The authoritative aim pose of an entity that can swing a swept melee weapon (D1a): the eye position and
     /// the yaw/pitch (degrees, pitch positive DOWN, i.e. Quaternion.Euler(pitch, yaw, 0)) of its view. The
     /// combat authority reads this on its own tick to place the weapon segment, so a swing is positioned from

@@ -39,6 +39,9 @@ foreach($method in $Methods){
     $logText=if(Test-Path -LiteralPath $logPath){[IO.File]::ReadAllText($logPath)}else{''}
     $positive=@([regex]::Matches($logText,'(?m)^.*\]\s+PASS\b[^\r\n]*\bchecks=\d+[^\r\n]*\bfailures=0\b[^\r\n]*') | ForEach-Object {$_.Value.Trim()})
     $bad=@([regex]::Matches($logText,'(?m)^.*(?:error CS\d+|\]\s+(?:FAIL\b|mismatch\b)|[A-Za-z]+Exception:|Aborting batchmode due to failure)[^\r\n]*') | ForEach-Object {$_.Value.Trim()} | Select-Object -Unique)
+    # com.unity.pipeline (Unity MCP bridge) can log an ObjectDisposedException from its HTTP listener while a batch
+    # Editor shuts down. That is editor tooling noise, not game code; ignore only that exact prefix.
+    $bad=@($bad | Where-Object {$_ -notmatch '^Pipeline: unhandled error serving '})
     # This fixture deliberately throws through an event subscriber to verify atomic restore.
     # Permit only its exact diagnostic under its exact entrypoint; all other exceptions fail.
     $expectedDiagnostics=@()

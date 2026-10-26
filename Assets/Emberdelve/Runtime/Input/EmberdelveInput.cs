@@ -42,9 +42,9 @@ namespace Emberdelve.InputLayer
         private bool _ownsActions;
 
         /// <summary>Test seams (D1b, same idea as the primary overrides): replace the real move / sprint / guard readings while the player map is live. Never set in game code.</summary>
-        public Vector2? MoveOverride { get; set; }
-        public bool? SprintHeldOverride { get; set; }
-        public bool? SecondaryHeldOverride { get; set; }
+        internal Vector2? MoveOverride { get; set; }
+        internal bool? SprintHeldOverride { get; set; }
+        internal bool? SecondaryHeldOverride { get; set; }
 
         public Vector2 Move => MoveOverride.HasValue ? (_playerMap != null && _playerMap.enabled ? MoveOverride.Value : Vector2.zero)
             : _move != null ? _move.ReadValue<Vector2>() : Vector2.zero;
@@ -61,9 +61,9 @@ namespace Emberdelve.InputLayer
         /// means the real action is read. A harness holds one for exactly one frame to produce an edge.
         /// Never set in game code.
         /// </summary>
-        public bool? PrimaryPressedOverride { get; set; }
-        public bool? PrimaryHeldOverride { get; set; }
-        public bool? PrimaryReleasedOverride { get; set; }
+        internal bool? PrimaryPressedOverride { get; set; }
+        internal bool? PrimaryHeldOverride { get; set; }
+        internal bool? PrimaryReleasedOverride { get; set; }
 
         private bool OverrideLive => _playerMap != null && _playerMap.enabled;
 
@@ -84,7 +84,7 @@ namespace Emberdelve.InputLayer
         /// Test seam for batch-mode harnesses that have no input device: when set, it replaces the real
         /// interact-held reading, but still respects disabled gameplay input. Null (the default) means the real action is read. Never set in game code.
         /// </summary>
-        public bool? InteractHeldOverride { get; set; }
+        internal bool? InteractHeldOverride { get; set; }
 
         public bool InteractHeld => InteractHeldOverride.HasValue
             ? InteractHeldOverride.Value && _playerMap != null && _playerMap.enabled

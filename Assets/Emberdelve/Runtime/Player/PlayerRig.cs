@@ -20,7 +20,7 @@ namespace Emberdelve.Player
     [RequireComponent(typeof(PlayerMovement))]
     [RequireComponent(typeof(PlayerLook))]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback
+    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, IWeaponChangeSource, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback
     {
         [Header("Components")]
         [SerializeField] private EmberdelveInput input;
@@ -145,6 +145,7 @@ namespace Emberdelve.Player
 
         /// <summary>The weapon the loadout actually has in hand; the combat authority resolves attacks against this.</summary>
         public WeaponData ActiveWeapon => loadout != null ? loadout.ActiveWeapon : null;
+        public int WeaponChangeCount => loadout != null ? loadout.WeaponChangeCount : 0;
 
         // ---- what the combat authority reads about this caster (ISkillCasterState / IAmmoSource) ----
 

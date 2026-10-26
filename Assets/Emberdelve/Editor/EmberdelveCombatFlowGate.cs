@@ -86,9 +86,11 @@ namespace Emberdelve.EditorTools
         // Fakes
         // ------------------------------------------------------------------------------------------------
 
-        private sealed class Swinger : ICombatEntity, IActiveWeaponProvider, IAimPoseProvider
+        private sealed class Swinger : ICombatEntity, IActiveWeaponProvider, IWeaponChangeSource, IAimPoseProvider
         {
             public int CombatId { get; set; }
+            /// <summary>Bumped by a fixture to model every weapon change, also an A-B-A swap that leaves Weapon unchanged.</summary>
+            public int WeaponChangeCount { get; set; }
             public EntityKind Kind { get; set; } = EntityKind.LocalPlayer;
             public int TeamId { get; set; } = CombatTeams.PlayerTeam;
             public Vector3 Eye = new Vector3(0f, 1.8f, 0f);
@@ -337,6 +339,7 @@ namespace Emberdelve.EditorTools
             Section("rapier thrust chain", RapierChain);
             Section("impact zones", ImpactZones);
             Section("hit slow (authority rules)", HitSlowRules);
+            Section("D1c1: review follow-ups (authority)", D1c1Authority);
 
             foreach (IEnumerator part in new[] { RigSections() })
             {
@@ -604,6 +607,95 @@ namespace Emberdelve.EditorTools
         }
 
         private void Cooldown(float seconds) => _clock += seconds;
+
+        // ------------------------------------------------------------------------------------------------
+        // D1c1: IsSwingInProgress on the clock, A-B-A weapon swap, per-entity state pruning
+        // ------------------------------------------------------------------------------------------------
+
+        private void D1c1Authority()
+        {
+            ZonesOff();
+
+            // 1. IsSwingInProgress is evaluated against Now, with no step in between
+            {
+                Scenario s = NewScenario(_sword);
+                AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                Check(Begin(s, 0, out int id, out _), "in-progress: step 1 begins");
+                _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus st);
+                float total = st.Timing.Total;
+                float t0 = _clock;
+                _authority.StepSwings();
+                Check(_authority.IsSwingInProgress(s.Who.CombatId), "in-progress: running right after the begin");
+                _clock = t0 + total - 0.01f;
+                Check(_authority.IsSwingInProgress(s.Who.CombatId), "in-progress: 10 ms before the end time it is still running (no step ran)");
+                _clock = t0 + total + 0.01f;
+                Check(!_authority.IsSwingInProgress(s.Who.CombatId), "in-progress: 10 ms after the end time it is over although no step ran since (it used to lag to the next step)");
+                Check(_authority.ActiveSwingIdFor(s.Who.CombatId) == id, "in-progress: the record is still unstepped (the answer came from the clock, not from the record)");
+                _authority.StepSwings();
+                Check(!_authority.IsSwingInProgress(s.Who.CombatId), "in-progress: still over after the step");
+                Cooldown(3f);
+                _authority.StepSwings();
+                s.Dispose();
+            }
+
+            // 2. A-B-A inside one frame: the weapon in hand is the same again, the chain must still be gone
+            {
+                Scenario s = NewScenario(_sword);
+                AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                SwingStep(s, 0, out _, out _);
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int e) && e == 1, "A-B-A: step 2 expected before the swap");
+                s.Who.WeaponChangeCount += 2; // sword -> rapier -> sword with no step in between: Weapon is unchanged
+                Check(s.Who.Weapon == _sword, "A-B-A: the weapon in hand is the sword again");
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out e) && e == 0, "A-B-A: the expected step is 0 (the chain is not live)");
+                Check(!BeginForged(s.Who, 1, 1, out string r) && r.Contains("weapon changed"), $"A-B-A: step 2 is refused ({r})");
+                Check(Begin(s, 0, out int fresh, out string why), $"A-B-A: step 1 starts a fresh chain ({why})");
+                Finish(fresh);
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out e) && e == 1, "A-B-A: the fresh chain expects step 2");
+                Check(Begin(s, 1, out int second, out why), $"A-B-A: with no further change step 2 is accepted ({why})");
+                Finish(second);
+                Cooldown(3f);
+                _authority.StepSwings();
+                s.Dispose();
+            }
+
+            // A-B-A in the middle of a swing ends it as WeaponChanged
+            {
+                Scenario s = NewScenario(_sword);
+                AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                Check(Begin(s, 0, out int id, out _), "A-B-A mid-swing: step 1 begins");
+                Advance(0.1f);
+                s.Who.WeaponChangeCount += 2;
+                Advance(0.05f);
+                _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus st);
+                Check(st.Finished && st.EndReason == SwingEndReason.WeaponChanged, $"A-B-A mid-swing: the swing ended as WeaponChanged ({st.EndReason})");
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int e) && e == 0, "A-B-A mid-swing: no chain survives");
+                Cooldown(3f);
+                _authority.StepSwings();
+                s.Dispose();
+            }
+
+            // 4. per-entity swing state is pruned when the entity leaves the registry
+            {
+                _authority.StepSwings();
+                int floors = _authority.SwingFloorEntryCount;
+                int chains = _authority.ChainEntryCount;
+                Scenario s = NewScenario(_sword);
+                AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                SwingStep(s, 0, out _, out _);
+                _authority.StepSwings();
+                Check(_authority.SwingFloorEntryCount == floors + 1, $"prune: the cooldown-floor entry exists for the live swinger ({_authority.SwingFloorEntryCount} vs {floors})");
+                Check(_authority.ChainEntryCount == chains + 1, "prune: the chain entry exists for the live swinger");
+                Advance(0.05f);
+                Check(_authority.SwingFloorEntryCount == floors + 1 && _authority.ChainEntryCount == chains + 1, "prune: a live entity keeps its entries across steps");
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int e) && e == 1, "prune: the live chain still works");
+                s.Dispose(); // unregisters
+                _authority.StepSwings();
+                Check(_authority.SwingFloorEntryCount == floors, "prune: the floor entry is removed once the entity is unregistered");
+                Check(_authority.ChainEntryCount == chains, "prune: the chain entry is removed once the entity is unregistered");
+                Cooldown(3f);
+                _authority.StepSwings();
+            }
+        }
 
         private void NoTickNeeded()
         {
@@ -1279,15 +1371,21 @@ namespace Emberdelve.EditorTools
             Check(!_rig.IsGuarding, "stagger: holding the guard button does not raise the guard");
             float walk = _rig.Movement.ResolveWalkSpeed();
             float held = 1f - 18f / 300f;
+            Check(_rig.Movement.ResolveGroundSpeed(false, false) <= walk + 1e-4f && walk <= 8f + 1e-4f,
+                "D1c1: the held/flow factors only lower the walking speed: ground speed <= rule speed <= the rule's cap of 8 (the factor is <= 1, so applying it after the clamp cannot break the cap)");
             Near(walk * held * 0.6f * 0.9f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "stagger: brief move slow x0.6 (and the heavy hit's own x0.9 hit slow: a broken guard is not blocked)");
 
             // a hit during the stagger finds no guard to resolve
             DamageInfo duringStagger = new DamageInfo(20f, _rig.CombatCenter, Vector3.back, _rig.transform.position + Vector3.forward * 2f, 999, EntityKind.Enemy, DamageType.Physical, false, false, 0f, HitLocation.Body, 10f);
             Check(!_rig.TryResolveGuard(duringStagger, CombatFlowTuning.Default, out _), "stagger: a hit during the stagger finds no guard (it is not blocked)");
 
+            Check(_authority.GuardBrokenEntryCount >= 1, "prune: the guard-break stamp exists while the stagger runs");
+
             // the guard can be raised again once the stagger has passed (authority clock)
             _clock += remaining + 0.05f;
             Check(!_authority.IsGuardStaggered(_rig.CombatId), "stagger: over after its length");
+            _authority.StepSwings();
+            Check(_authority.GuardBrokenEntryCount == 0, "prune: the expired guard-break stamp is removed by the next step");
             _rig.SetGuardHeld(true);
             Check(_rig.IsGuarding, "stagger: the guard can be raised again afterwards");
             _rig.SetGuardHeld(false);
@@ -1436,6 +1534,39 @@ namespace Emberdelve.EditorTools
             Check(loadout.SwitchToSlot(0) && _rig.ActiveWeapon == _sword, "swap lock: swap works after the forced path");
             _clock += 3f;
             _authority.StepSwings();
+
+            // D1c1: A-B-A on the real loadout inside one frame (sword -> crossbow -> sword, no yield) drops the chain
+            {
+                int countBefore = _rig.WeaponChangeCount;
+                _rig.TryGetAimPose(out _, out yaw, out pitch);
+                MeleeSwingIntent first = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+                Check(_authority.TryBeginMeleeSwing(first, out int abaId, out why), $"A-B-A rig: a swing begins ({why})");
+                _authority.TryGetMeleeSwingStatus(abaId, out MeleeSwingStatus abaSt);
+                _clock += abaSt.Timing.Total + 0.01f;
+                Check(!_authority.IsSwingInProgress(_rig.CombatId) && !loadout.IsActionLocked, "A-B-A rig: the swing is over on the clock, so the swap is not locked (no step ran)");
+                Check(_authority.TryGetExpectedComboStep(_rig.CombatId, out int expectedBefore) && expectedBefore == 1, "A-B-A rig: step 2 is expected inside the window");
+                Check(loadout.SwitchToSlot(1) && loadout.SwitchToSlot(0) && _rig.ActiveWeapon == _sword, "A-B-A rig: swapped away and back in one frame");
+                Check(_rig.WeaponChangeCount == countBefore + 2, $"A-B-A rig: the weapon-change counter went up by two ({_rig.WeaponChangeCount - countBefore})");
+                Check(_authority.TryGetExpectedComboStep(_rig.CombatId, out int expectedAfter) && expectedAfter == 0, "A-B-A rig: the chain is gone although the sword is in hand again");
+                _rig.TryGetAimPose(out _, out yaw, out pitch);
+                MeleeSwingIntent forged = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 1, 1, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+                Check(!_authority.TryBeginMeleeSwing(forged, out _, out why) && why.Contains("weapon changed"), $"A-B-A rig: step 2 is refused ({why})");
+
+                // and mid swing (forced path, the player swap itself is locked)
+                _clock += 3f;
+                _authority.StepSwings();
+                _rig.TryGetAimPose(out _, out yaw, out pitch);
+                MeleeSwingIntent midIntent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+                Check(_authority.TryBeginMeleeSwing(midIntent, out int midId, out why), $"A-B-A rig mid-swing: a swing begins ({why})");
+                _clock += 0.1f;
+                Check(loadout.ForceSwitchToSlot(1) && loadout.ForceSwitchToSlot(0) && _rig.ActiveWeapon == _sword, "A-B-A rig mid-swing: forced away and back");
+                _clock += 0.05f;
+                _authority.StepSwings();
+                Check(_authority.TryGetMeleeSwingStatus(midId, out MeleeSwingStatus midSt) && midSt.Finished && midSt.EndReason == SwingEndReason.WeaponChanged,
+                    $"A-B-A rig mid-swing: ended as WeaponChanged although the sword is back ({midSt.EndReason})");
+                _clock += 3f;
+                _authority.StepSwings();
+            }
         }
 
         // ---- review follow-ups: replace-in-hand lock, buffered press, ranged impact ------------------------

@@ -41,6 +41,9 @@ namespace Emberdelve.Player
 
         public WeaponData Primary => _slots[0];
         public WeaponData Secondary => _slots[1];
+        /// <summary>Goes up on every Equip (every change of the weapon in hand, also one undone within the same frame).</summary>
+        public int WeaponChangeCount { get; private set; }
+
         public WeaponData ActiveWeapon => _activeSlot >= 0 && _activeSlot < SlotCapacity ? _slots[_activeSlot] : null;
         public int ActiveSlot => _activeSlot;
         public bool UsingSecondary => _activeSlot == 1;
@@ -222,6 +225,7 @@ namespace Emberdelve.Player
             }
 
             _activeSlot = slot;
+            WeaponChangeCount++;
             WeaponData weapon = _slots[slot];
 
             bool weaponIsMelee = weapon != null && !weapon.IsRanged;

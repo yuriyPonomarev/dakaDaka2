@@ -56,6 +56,7 @@ namespace Emberdelve.Combat
         {
             public WeaponData Weapon;
             public ICombatEntity Instigator;
+            public int WeaponEpoch;
             public int NextStep;
             public float WindowEnd;
         }
@@ -67,6 +68,7 @@ namespace Emberdelve.Combat
             public ICombatEntity Instigator;
             public IAimPoseProvider Actor;
             public WeaponData Weapon;
+            public int WeaponEpoch;
             public SwingPatternData Pattern;
             public SwingTiming Timing;
             public int ComboStep;
@@ -286,6 +288,7 @@ namespace Emberdelve.Combat
                     {
                         Weapon = weapon,
                         Instigator = instigator,
+                        WeaponEpoch = WeaponEpochOf(instigator),
                         NextStep = intent.ComboStep + 1,
                         WindowEnd = now + timing.ActiveEnd + Mathf.Max(0.05f, weapon.comboWindow)
                     };
@@ -303,6 +306,7 @@ namespace Emberdelve.Combat
                 Instigator = instigator,
                 Actor = actor,
                 Weapon = weapon,
+                WeaponEpoch = WeaponEpochOf(instigator),
                 Pattern = pattern,
                 Timing = timing,
                 ComboStep = intent.ComboStep,
@@ -360,8 +364,12 @@ namespace Emberdelve.Combat
         {
             if (chain == null || chain.Instigator != instigator || instigator.IsDead) return false;
             if (!(instigator is IActiveWeaponProvider holder) || holder.ActiveWeapon != chain.Weapon) return false;
+            if (WeaponEpochOf(instigator) != chain.WeaponEpoch) return false;
             return Now <= chain.WindowEnd;
         }
+
+        /// <summary>The instigator's weapon-change counter (0 when it does not report one).</summary>
+        private static int WeaponEpochOf(ICombatEntity entity) => entity is IWeaponChangeSource source ? source.WeaponChangeCount : 0;
 
         private bool ChainAllows(int instigatorId, ICombatEntity instigator, WeaponData weapon, int step, out string reason)
         {
@@ -369,6 +377,12 @@ namespace Emberdelve.Combat
             if (!_chains.TryGetValue(instigatorId, out ChainState chain) || chain.Weapon != weapon || chain.Instigator != instigator)
             {
                 reason = $"no running combo chain for the equipped weapon: step {step} needs step {step - 1} first";
+                return false;
+            }
+
+            if (WeaponEpochOf(instigator) != chain.WeaponEpoch)
+            {
+                reason = $"the weapon changed since combo step {step - 1}: step {step} needs a fresh chain";
                 return false;
             }
 
@@ -414,8 +428,19 @@ namespace Emberdelve.Combat
             return factor;
         }
 
-        public bool IsSwingInProgress(int combatId) =>
-            _swingByInstigator.TryGetValue(combatId, out SwingRecord r) && r.Phase != SwingPhase.Finished;
+        /// <summary>
+        /// True while the instigator's swing is running at the authority time <see cref="Now"/>: it is evaluated against
+        /// the clock, not against the last fixed step, so it flips at exactly the swing's end time (windup + active +
+        /// recovery, or the wall stop's recoil end) even when no step ran since. Death or a weapon change are still
+        /// noticed by the next step (they are events, not time).
+        /// </summary>
+        public bool IsSwingInProgress(int combatId)
+        {
+            if (!_swingByInstigator.TryGetValue(combatId, out SwingRecord r) || r.Phase == SwingPhase.Finished) return false;
+
+            float end = r.Stopped ? r.StopTs + r.Timing.WallRecoil : r.Timing.Total;
+            return Now - r.StartTime < end;
+        }
 
         public bool IsGuardStaggered(int combatId) => GuardStaggerRemaining(combatId) > 0f;
 
@@ -447,6 +472,7 @@ namespace Emberdelve.Combat
         internal void StepSwings()
         {
             ForgetDeadChains();
+            PruneEntityState();
             if (_activeSwings.Count == 0) return;
 
             float now = Now;
@@ -465,11 +491,54 @@ namespace Emberdelve.Combat
             {
                 ChainState chain = pair.Value;
                 bool live = CombatRegistry.TryGet(pair.Key, out ICombatEntity current) && current == chain.Instigator && !current.IsDead
-                            && current is IActiveWeaponProvider holder && holder.ActiveWeapon == chain.Weapon;
+                            && current is IActiveWeaponProvider holder && holder.ActiveWeapon == chain.Weapon
+                            && WeaponEpochOf(current) == chain.WeaponEpoch;
                 if (!live) _chainBuffer.Add(pair.Key);
             }
 
             for (int i = 0; i < _chainBuffer.Count; i++) _chains.Remove(_chainBuffer[i]);
+        }
+
+        private readonly List<int> _pruneBuffer = new List<int>(4);
+
+        /// <summary>Number of entries in the per-entity dictionaries (observability for gates).</summary>
+        internal int GuardBrokenEntryCount => _guardBrokenUntil.Count;
+        internal int SwingFloorEntryCount => _lastSwingFloor.Count;
+        internal int ChainEntryCount => _chains.Count;
+
+        /// <summary>
+        /// (The swing-side dictionaries only. The base anti-replay state, _lastAttackTime and _lastSequence, is deliberately kept:
+        /// it is the cooldown / replay memory and an entity that is disabled and enabled again must not get it reset.)
+        /// Drops per-entity bookkeeping of entities that are no longer registered (removed, unregistered, scene torn
+        /// down) and expired or dead-target guard-break stamps. Live entities are untouched: an entry is only removed when
+        /// the registry no longer knows the id, or (guard break) when the stagger is over or the entity died.
+        /// </summary>
+        private void PruneEntityState()
+        {
+            PruneUnregistered(_lastSwingFloor);
+            PruneUnregistered(_chains);
+
+            if (_guardBrokenUntil.Count == 0) return;
+            float now = Now;
+            _pruneBuffer.Clear();
+            foreach (KeyValuePair<int, float> pair in _guardBrokenUntil)
+            {
+                if (pair.Value <= now || !CombatRegistry.TryGet(pair.Key, out ICombatEntity e) || e.IsDead) _pruneBuffer.Add(pair.Key);
+            }
+
+            for (int i = 0; i < _pruneBuffer.Count; i++) _guardBrokenUntil.Remove(_pruneBuffer[i]);
+        }
+
+        private void PruneUnregistered<T>(Dictionary<int, T> map)
+        {
+            if (map.Count == 0) return;
+            _pruneBuffer.Clear();
+            foreach (KeyValuePair<int, T> pair in map)
+            {
+                if (!CombatRegistry.TryGet(pair.Key, out _)) _pruneBuffer.Add(pair.Key);
+            }
+
+            for (int i = 0; i < _pruneBuffer.Count; i++) map.Remove(_pruneBuffer[i]);
         }
 
         private void StepSwing(SwingRecord rec, float now)
@@ -492,7 +561,8 @@ namespace Emberdelve.Combat
             }
 
             // A weapon swap ends the swing: what is in the hand now is not the weapon this segment belongs to.
-            if (!(rec.Instigator is IActiveWeaponProvider holder) || holder.ActiveWeapon != rec.Weapon)
+            if (!(rec.Instigator is IActiveWeaponProvider holder) || holder.ActiveWeapon != rec.Weapon
+                || WeaponEpochOf(rec.Instigator) != rec.WeaponEpoch)
             {
                 rec.Pending.Clear();
                 FinishSwing(rec, SwingEndReason.WeaponChanged, Mathf.Max(0f, ts));
