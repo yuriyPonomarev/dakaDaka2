@@ -308,10 +308,15 @@ namespace Emberdelve.EditorTools
 
         private void AdvanceClock(float seconds) => _clock += seconds;
 
-        private float ExpectedWeaponSkill(Caster c, SkillData skill, DamageInfo info, bool head)
+        /// <summary>
+        /// Expected weapon-skill damage. <paramref name="locationFactor"/> is the D1c3 hit-location multiplier the
+        /// test KNOWS the shot earned (1.0 for every fixture here: these targets have no hit volumes, so the
+        /// location is Unspecified). It is a literal chosen by the test, never read back from the table in code.
+        /// </summary>
+        private float ExpectedWeaponSkill(Caster c, SkillData skill, DamageInfo info, float locationFactor)
         {
             float distance = Vector3.Distance(info.SourcePosition, info.Point);
-            return _bow.DamageAtRange(distance) * skill.damageMultiplier * c.Scale * (head ? DamageResolver.HeadshotMultiplier : 1f);
+            return _bow.DamageAtRange(distance) * skill.damageMultiplier * c.Scale * locationFactor;
         }
 
         // ---- the gate -------------------------------------------------------------------------------
@@ -488,7 +493,7 @@ namespace Emberdelve.EditorTools
             for (int i = 0; i < 3; i++)
             {
                 Outcome o = Hit(archer, multiAct, _multi, _bow, arrowTargets[i], arrowTargets[i].Point, _bow.rangedRange);
-                Check(o.Accepted && Mathf.Abs(o.Damage - ExpectedWeaponSkill(archer, _multi, o.Info, false)) < 0.01f,
+                Check(o.Accepted && Mathf.Abs(o.Damage - ExpectedWeaponSkill(archer, _multi, o.Info, 1f)) < 0.01f,
                     $"volley arrow {i + 1} lands with weapon falloff x damageMultiplier ({o.Damage:F2}, {o.Reason})");
             }
             Outcome fourthArrow = Hit(archer, multiAct, _multi, _bow, NewTarget(archer.Point + new Vector3(0f, 0f, 10f)), archer.Point + new Vector3(0f, 0f, 10f), _bow.rangedRange);
@@ -505,8 +510,8 @@ namespace Emberdelve.EditorTools
             Outcome pierceB = HonestPierceHit(archer, pierceAct, pB);
             Check(pierceA.Accepted && pA.Taken > pABefore && pB.Taken > pBBefore,
                 "one authority-owned piercing flight resolves both aligned bodies (" + pierceA.Reason + ")");
-            Check(Mathf.Abs(pierceA.Damage - ExpectedWeaponSkill(archer, _pierce, pierceA.Info, false)) < 0.01f, "the first body takes weapon falloff x 1.35");
-            Check(Mathf.Abs((pB.Taken - pBBefore) - ExpectedWeaponSkill(archer, _pierce, pB.Last, false)) < 0.01f,
+            Check(Mathf.Abs(pierceA.Damage - ExpectedWeaponSkill(archer, _pierce, pierceA.Info, 1f)) < 0.01f, "the first body takes weapon falloff x 1.35");
+            Check(Mathf.Abs((pB.Taken - pBBefore) - ExpectedWeaponSkill(archer, _pierce, pB.Last, 1f)) < 0.01f,
                 "the same flight resolves the second body using its own impact distance");
             Check(!pierceB.Accepted && Has(pierceB.Reason, "hit budget"),
                 "a client cannot submit another target hit after the piercing flight exhausted its impact budget");
@@ -615,7 +620,7 @@ namespace Emberdelve.EditorTools
             AdvanceClock(_pierce.cooldownSeconds + 1f);
             Check(Begin(scaled, _pierce.skillId, out int scaleAct4, out reason), "scale cast 4 (caster CHA scale 1.3) opens");
             Outcome real = Hit(scaled, scaleAct4, _pierce, _bow, scaleTarget, scaleTarget.Point, _bow.rangedRange, scale: 0.6f);
-            Check(real.Accepted && Mathf.Abs(real.Damage / honest.Damage - 1.3f) < 0.001f && Mathf.Abs(real.Damage - ExpectedWeaponSkill(scaled, _pierce, real.Info, false)) < 0.01f,
+            Check(real.Accepted && Mathf.Abs(real.Damage / honest.Damage - 1.3f) < 0.001f && Mathf.Abs(real.Damage - ExpectedWeaponSkill(scaled, _pierce, real.Info, 1f)) < 0.01f,
                 $"the scale that applies is the caster's own 1.3 (ratio {real.Damage / honest.Damage:F4}), whatever the intent claims");
 
             // Statuses: forged TargetStatus ignored (asset spec scaled by the CALLER's scale); self status only from the asset.
@@ -686,15 +691,19 @@ namespace Emberdelve.EditorTools
             Physics.SyncTransforms();
             int g2 = OpenGeo();
             Outcome bodyHeadFlag = Hit(geo, g2, _pierce, _bow, gt, gt.Point, _bow.rangedRange, headFlag: true);
-            Check(bodyHeadFlag.Accepted && !bodyHeadFlag.Info.Headshot && Mathf.Abs(bodyHeadFlag.Damage - ExpectedWeaponSkill(geo, _pierce, bodyHeadFlag.Info, false)) < 0.01f,
+            Check(bodyHeadFlag.Accepted && !bodyHeadFlag.Info.Headshot && Mathf.Abs(bodyHeadFlag.Damage - ExpectedWeaponSkill(geo, _pierce, bodyHeadFlag.Info, 1f)) < 0.01f,
                 "a forged headshot flag cannot alter the body's physical impact (" + bodyHeadFlag.Reason + ")");
 
             int g3 = OpenGeo();
             head.enabled = true;
             Physics.SyncTransforms();
             Outcome realHead = Hit(geo, g3, _pierce, _bow, gt, head.transform.position, _bow.rangedRange, headFlag: false);
-            Check(realHead.Accepted && realHead.Info.Headshot && Mathf.Abs(realHead.Damage - ExpectedWeaponSkill(geo, _pierce, realHead.Info, true)) < 0.01f,
-                "a real head-collider hit with the flag cleared is a headshot x1.8 (" + realHead.Reason + ")");
+            // D1c3: the old binary head-collider x1.8 is gone from projectiles. This fixture has a head collider but NO
+            // hit volumes, so the authority resolves no location: Unspecified, x1.0, Headshot false (was: Headshot, x1.8).
+            // Location x-factors for targets that do have volumes are pinned in EmberdelveRangedLocationGate.
+            Check(realHead.Accepted && !realHead.Info.Headshot && realHead.Info.Location == HitLocation.Unspecified
+                  && Mathf.Abs(realHead.Damage - ExpectedWeaponSkill(geo, _pierce, realHead.Info, 1f)) < 0.01f,
+                "a head collider on a target without hit volumes is no headshot: Unspecified, x1.0 (" + realHead.Reason + ")");
             head.enabled = false;
 
             int g4 = OpenGeo();

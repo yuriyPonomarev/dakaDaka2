@@ -328,6 +328,23 @@ namespace Emberdelve.EditorTools
             Check(shortClaim.Accepted && Mathf.Abs(_target.Taken - beforeMissAim) < 0.001f,
                 "an off-axis launch misses the body even when the client claims its center");
 
+            // ---- 3b. D1c3: a ranged shot at a target WITHOUT hit volumes earns no location at all, whatever head collider
+            // it carries. The old rule (head collider contact = headshot x1.8) is gone for projectiles; this fake has an
+            // enabled head collider and no IHitShapeProvider, so the flight resolves Unspecified, x1.0, Headshot false.
+            AdvanceClock(10f);
+            PlaceTarget(15f);
+            _head.enabled = true;
+            RangedCombat noVolumesAmmo = _rig.GetComponent<RangedCombat>();
+            if (noVolumesAmmo != null && noVolumesAmmo.Magazine < 1) noVolumesAmmo.RefundAmmo(3);
+            Outcome noVolumes = LaunchPlayerProjectile(_target, crossbow, crossbow.rangedRange, _target.Point);
+            _head.enabled = false;
+            float noVolumesRange = Vector3.Distance(noVolumes.Info.SourcePosition, noVolumes.Info.Point);
+            float expectedNoVolumes = crossbow.DamageAtRange(noVolumesRange, flat) * mult;   // x1.0: no location factor at all
+            Check(noVolumes.Accepted && noVolumes.Damage > 0f && !noVolumes.Info.Headshot && noVolumes.Info.Location == HitLocation.Unspecified,
+                "D1c3: a volume-less target with an enabled head collider takes an Unspecified, non-headshot arrow (" + noVolumes.Reason + ")");
+            Check(Mathf.Abs(noVolumes.Damage - expectedNoVolumes) < 0.02f,
+                $"D1c3: that arrow carries no location factor, the old x1.8 is gone ({noVolumes.Damage:F3} vs {expectedNoVolumes:F3})");
+
             // Back to the sword for the rest.
             Check(_rig.Loadout.SwitchToSlot(0) && _rig.MainHandWeapon == sword, "loadout back on the sword");
 

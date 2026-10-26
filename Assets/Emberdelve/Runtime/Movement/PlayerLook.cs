@@ -34,6 +34,16 @@ namespace Emberdelve.Movement
         public Vector3 AimDirection => cameraTransform != null ? cameraTransform.forward : transform.forward;
         public float Pitch => _pitch;
 
+        /// <summary>
+        /// D1c3: how much of its standing height the body's hit volumes occupy right now: 1 standing, crouch eye
+        /// height / stand eye height while crouched (a step, not the camera's eased transition, so the authority
+        /// volumes do not depend on frame timing). The player's analytic hit volumes are scaled vertically by this.
+        /// </summary>
+        public float HitVolumeHeightRatio =>
+            movement != null && movement.IsCrouched && standEyeHeight > 0.05f
+                ? Mathf.Clamp(crouchEyeHeight / standEyeHeight, 0.3f, 1f)
+                : 1f;
+
         /// <summary>The transform the player looks through (the aim frame the swing visual is placed in).</summary>
         public Transform AimTransform => cameraTransform != null ? cameraTransform : transform;
 

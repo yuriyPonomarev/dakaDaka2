@@ -133,7 +133,26 @@ namespace Emberdelve.Player
         public void CollectHitShapes(List<HitShape> shapes)
         {
             if (_hitVolumes == null) _hitVolumes = HitVolumeLayout.EnsureHumanoid(gameObject, 0.92f, 1.68f);
+            int first = shapes.Count;
             HitVolumeLayout.Collect(_hitVolumes, shapes);
+
+            // D1c3: the volumes are built for standing. While crouched they follow the lowered eye: every volume is
+            // compressed vertically toward the feet by the crouch ratio (radii keep their size). Standing is an
+            // exact no-op (ratio 1), so every standing melee/ranged number is untouched.
+            float ratio = look != null ? look.HitVolumeHeightRatio : 1f;
+            if (ratio < 0.9999f)
+            {
+                float baseY = transform.position.y;
+                for (int i = first; i < shapes.Count; i++)
+                {
+                    HitShape s = shapes[i];
+                    Vector3 a = s.A;
+                    Vector3 b = s.B;
+                    a.y = baseY + (a.y - baseY) * ratio;
+                    b.y = baseY + (b.y - baseY) * ratio;
+                    shapes[i] = new HitShape(s.Location, a, b, s.Radius);
+                }
+            }
         }
 
         /// <summary>The authoritative aim pose the swept melee is positioned from: the camera the player looks through.</summary>

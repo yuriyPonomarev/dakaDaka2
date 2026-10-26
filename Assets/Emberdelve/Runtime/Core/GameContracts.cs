@@ -46,7 +46,7 @@ namespace Emberdelve.Core
         public readonly bool Headshot;
         public readonly float BlockReduction;
 
-        /// <summary>D1a: the hit volume the swept melee touched (Unspecified for every other damage source).</summary>
+        /// <summary>D1a/D1c3: the hit volume the swept melee or an authority-stepped projectile touched (Unspecified for every other damage source and for targets without hit volumes).</summary>
         public readonly HitLocation Location;
 
         /// <summary>D1b: the attacker weapon's impact power for this hit (weapon x pattern), set by the authority from data. 0 = the source has none (skills with a flat number) and can never break a guard.</summary>

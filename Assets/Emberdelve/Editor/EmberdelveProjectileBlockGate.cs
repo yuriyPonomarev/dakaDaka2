@@ -95,18 +95,6 @@ namespace Emberdelve.EditorTools
             public void ApplyDamage(DamageInfo damage) { }
         }
 
-        private sealed class HeadshotProbe : MonoBehaviour, ICombatEntity
-        {
-            public int CombatId { get; set; }
-            public EntityKind Kind => EntityKind.Enemy;
-            public int TeamId => CombatTeams.MonsterTeam;
-            public Vector3 CombatCenter => transform.position;
-            public Collider HeadCollider => GetComponent<Collider>();
-            public bool IsDead => false;
-            public float CurrentHealth => 100f;
-            public float MaxHealth => 100f;
-            public void ApplyDamage(DamageInfo damage) { }
-        }
         private sealed class AimlessShooter : ICombatEntity, IActiveWeaponProvider
         {
             public int CombatId { get; set; }
@@ -349,20 +337,11 @@ namespace Emberdelve.EditorTools
             Check(armoredProbe.RangedProjectile && armoredProbe.GuardBladeContact && armoredProbe.GuardBroken,
                 "armor mitigation preserves projectile blade-contact and guardbreak provenance");
 
-            // The projectile hit classifier must ignore disabled or inactive head colliders.
-            GameObject headProbeObject = new GameObject("ProjectileBlockGate_DisabledHeadProbe");
-            _cleanup.Add(headProbeObject);
-            SphereCollider headProbe = headProbeObject.AddComponent<SphereCollider>();
-            headProbe.radius = 0.2f;
-            headProbe.enabled = false;
-            HeadshotProbe probeTarget = headProbeObject.AddComponent<HeadshotProbe>();
-            probeTarget.CombatId = CombatRegistry.AllocateId();
-            MethodInfo headshotClassifier = typeof(LocalCombatAuthority).GetMethod("IsProjectileHeadshot", BindingFlags.Static | BindingFlags.NonPublic);
-            Check(headshotClassifier != null && !(bool)headshotClassifier.Invoke(null, new object[] { probeTarget, headProbeObject.transform.position }),
-                "a disabled head collider cannot classify a torso projectile hit as a headshot");
-            headProbe.enabled = true;
-            Check((bool)headshotClassifier.Invoke(null, new object[] { probeTarget, headProbeObject.transform.position }),
-                "an enabled head collider still classifies a physical head contact");
+            // D1c3: the binary head-collider classifier (x1.8, "head collider contact") is gone from the projectile path. It was
+            // replaced by the authority's hit-volume location (same table as melee); these two checks replaced the old
+            // "disabled/enabled head collider classifies a headshot" pair. Location behaviour: EmberdelveRangedLocationGate.
+            Check(typeof(LocalCombatAuthority).GetMethod("IsProjectileHeadshot", BindingFlags.Static | BindingFlags.NonPublic) == null,
+                "the projectile path no longer has a head-collider headshot classifier");
 
             // Authority geometry does not depend on a renderer or cosmetic GameObject.
             _defender.Loadout.DiscardInheritedVisuals();
@@ -389,6 +368,8 @@ namespace Emberdelve.EditorTools
             Check(Launch(bowShooter, 1), "ordinary bow arrow launch is accepted");
             DamageInfo bowBlock = ResolveDamage(bowShooter, 1f);
             Check(bowBlock.IsValid && bowBlock.Blocked, "sword physically intercepts a flying bow arrow");
+            Check(bowBlock.GuardBladeContact && bowBlock.Location == HitLocation.Unspecified && !bowBlock.Headshot,
+                "D1c3: a blade-intercepted arrow is stopped before any body location is decided (Unspecified, no headshot)");
 
             _defender.SetGuardHeld(false);
             Vector3 bowBodyOrigin = _defender.CombatCenter + _defender.transform.forward * 8f;
@@ -398,6 +379,8 @@ namespace Emberdelve.EditorTools
             Check(Launch(bowNearMiss, 1), "ordinary bow body-line launch is accepted");
             DamageInfo bowBodyHit = ResolveDamage(bowNearMiss, 1f);
             Check(bowBodyHit.IsValid && !bowBodyHit.Blocked, "bow arrow that misses sword still damages body");
+            Check(bowBodyHit.Location == HitLocation.Body && !bowBodyHit.Headshot,
+                "D1c3: the torso-line arrow takes the Body location from the player's own hit volumes (x1.0), not a claim");
 
             // A projectile already in flight is caught when the guard is raised before it reaches the blade.
             _defender.SetGuardHeld(false);

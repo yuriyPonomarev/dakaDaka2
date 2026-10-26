@@ -4924,6 +4924,24 @@ namespace Emberdelve.EditorTools
             }
 
             /// <summary>
+            /// D1c3: the hit-location multiplier a projectile earns, written out here as literals on purpose (head 1.5, body 1.0,
+            /// arms 0.8, hands 0.7, legs 0.6, feet 0.5, Unspecified 1.0) so the expectation is not derived from the table code
+            /// it checks. The old binary headshot x1.8 no longer exists for arrows.
+            /// </summary>
+            private static float RangedLocationFactor(HitLocation location)
+            {
+                switch (location)
+                {
+                    case HitLocation.Head: return 1.5f;
+                    case HitLocation.Arms: return 0.8f;
+                    case HitLocation.Hands: return 0.7f;
+                    case HitLocation.Legs: return 0.6f;
+                    case HitLocation.Feet: return 0.5f;
+                    default: return 1f;
+                }
+            }
+
+            /// <summary>
             /// Milestone 4 assertions for the Archer kit: the kit rule, Fleet Footing through the same speed
             /// rule a server would validate, Farshot through the authority's damage number, Multi-shot as a
             /// real three-arrow volley that spends real arrows and hits each target once, Piercing Shot as
@@ -5211,11 +5229,11 @@ namespace Emberdelve.EditorTools
                         hitTargets++;
                         Debug.Log($"[Emberdelve][Smoke:{Mode}] volley damage recipient={pair.Key.name} combatId=#{pair.Key.CombatId} amount={pair.Value.Amount:F1} point={pair.Value.Point}");
                         // Weapon falloff x the skill's own authored multiplier x the archer's outgoing ranged
-                        // factor (DEX 1.12 x Farshot 1.18) x the CHA 8 activation scale 0.96 x headshot if the
-                        // arrow actually took one. 34 * 0.7 * 1.3216 * 0.96 = 30.1959168 on a body hit.
+                        // factor (DEX 1.12 x Farshot 1.18) x the CHA 8 activation scale 0.96 x the hit-location
+                        // factor of the volume the arrow touched (D1c3; was a binary headshot x1.8). 34 * 0.7 * 1.3216 * 0.96 = 30.1959168 on a body hit.
                         float expected = bow.DamageAtRange(Vector3.Distance(pair.Value.SourcePosition, pair.Value.Point))
                                          * multi.damageMultiplier * outgoingRanged * abilityScale
-                                         * (pair.Value.Headshot ? DamageResolver.HeadshotMultiplier : 1f);
+                                         * RangedLocationFactor(pair.Value.Location);
                         Check(Mathf.Abs(pair.Value.Amount - expected) < 0.9f,
                             $"target {pair.Key.name} took one arrow's damage ({pair.Value.Amount:F1} vs expected {expected:F1}), not several");
                     }
@@ -5346,11 +5364,13 @@ namespace Emberdelve.EditorTools
                     // is the number the accepted U2A5 gate measures for this same class at this same CHA.
                     float expected = bow.DamageAtRange(Vector3.Distance(pierceDamageA.SourcePosition, pierceDamageA.Point))
                                      * pierce.damageMultiplier * outgoingRanged * abilityScale
-                                     * (pierceDamageA.Headshot ? DamageResolver.HeadshotMultiplier : 1f);
+                                     * RangedLocationFactor(pierceDamageA.Location);
                     Check(Mathf.Abs(pierceDamageA.Amount - expected) < 0.9f,
                         $"the piercing arrow's damage is weapon falloff x skill multiplier x Farshot x CHA effect scale ({pierceDamageA.Amount:F1} vs expected {expected:F1})");
-                    Check(pierceDamageA.Amount > bow.baseDamage * 0.9f,
-                        $"the piercing multiplier made it a heavy arrow ({pierceDamageA.Amount:F1} vs bow base {bow.baseDamage:F1})");
+                    // D1c3: the arrow lands on a location (feet x0.5 is the lowest), so "heavy" is judged against the base scaled
+                    // by the location factor of the volume this arrow touched (was a flat 0.9 x base, true only for x1.0/x1.8).
+                    Check(pierceDamageA.Amount > bow.baseDamage * 0.9f * RangedLocationFactor(pierceDamageA.Location),
+                        $"the piercing multiplier made it a heavy arrow ({pierceDamageA.Amount:F1} vs bow base {bow.baseDamage:F1} x location {RangedLocationFactor(pierceDamageA.Location):F2})");
                 }
 
                 // ---- the projectile skills respect what is in hand. Both are on cooldown from the tests

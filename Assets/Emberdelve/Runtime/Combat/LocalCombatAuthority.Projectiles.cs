@@ -370,6 +370,7 @@ namespace Emberdelve.Combat
             {
                 Vector3 start = flight.Position;
                 Vector3 end = start + flight.Direction * remainingStep;
+                float segmentLength = remainingStep;
                 if (!TryFindProjectileContact(flight, start, end, out ICombatEntity target,
                         out Vector3 point, out float distance, out bool bladeContact, out bool wall))
                 {
@@ -388,7 +389,7 @@ namespace Emberdelve.Combat
                 bool alreadyHit = flight.SkillGroup != null && flight.SkillGroup.Targets.Contains(target.CombatId);
                 if (canDamage && !alreadyHit)
                 {
-                    ApplyProjectileImpact(flight, target, point, bladeContact);
+                    ApplyProjectileImpact(flight, target, point, bladeContact, start, segmentLength);
                     if (flight.SkillGroup != null && !flight.SkillGroup.Targets.Contains(target.CombatId))
                         flight.SkillGroup.Targets.Add(target.CombatId);
                 }
@@ -600,26 +601,78 @@ namespace Emberdelve.Combat
             return IsFinite(direction) && direction.sqrMagnitude > 0.0001f;
         }
 
-        private static bool IsProjectileHeadshot(ICombatEntity target, Vector3 point)
+        private const float ProjectileLocationTie = 1e-4f;
+
+        /// <summary>
+        /// D1c3: the hit location of a projectile, decided by the authority from the target's own analytic hit
+        /// volumes and nothing the client sends. The FIRST volume the projectile (shaft radius included) touches
+        /// along the swept segment of this step wins (smallest entry distance); equal entries (within 0.1 mm) go to
+        /// the lower <see cref="HitLocation"/> value, the same deterministic tie rule the melee sweep uses. This
+        /// differs from melee on purpose: a swing takes the DEEPEST contact inside a time window, an arrow has no
+        /// window, it simply stops at the first thing it touches. When the contact came from a physics collider and
+        /// no volume is touched inside this step, the volume with the nearest surface to the impact point wins
+        /// (same tie rule). A target without volumes (not an <see cref="IHitShapeProvider"/>, or none collected)
+        /// resolves <see cref="HitLocation.Unspecified"/> (multiplier 1).
+        /// </summary>
+        private HitLocation ResolveProjectileLocation(ProjectileFlight flight, ICombatEntity target,
+            Vector3 segmentStart, float segmentLength, Vector3 impactPoint)
         {
-            Collider headCollider = target != null ? target.HeadCollider : null;
-            return headCollider != null && headCollider.enabled && headCollider.gameObject.activeInHierarchy
-                && Vector3.Distance(point, headCollider.ClosestPoint(point)) < 0.05f;
+            if (!(target is IHitShapeProvider provider)) return HitLocation.Unspecified;
+            _projectileShapeBuffer.Clear();
+            provider.CollectHitShapes(_projectileShapeBuffer);
+            if (_projectileShapeBuffer.Count == 0) return HitLocation.Unspecified;
+
+            bool found = false;
+            HitLocation best = HitLocation.Unspecified;
+            float bestEntry = 0f;
+            for (int s = 0; s < _projectileShapeBuffer.Count; s++)
+            {
+                HitShape shape = _projectileShapeBuffer[s];
+                if (!TrySweepCapsule(segmentStart, flight.Direction, segmentLength, shape.A, shape.B,
+                        shape.Radius + flight.Radius, out float entry)) continue;
+                if (!found || entry < bestEntry - ProjectileLocationTie
+                    || Mathf.Abs(entry - bestEntry) <= ProjectileLocationTie && (int)shape.Location < (int)best)
+                {
+                    found = true;
+                    best = shape.Location;
+                    bestEntry = entry;
+                }
+            }
+            if (found) return best;
+
+            float bestGap = float.MaxValue;
+            for (int s = 0; s < _projectileShapeBuffer.Count; s++)
+            {
+                HitShape shape = _projectileShapeBuffer[s];
+                float gap = Mathf.Sqrt(DistancePointSegmentSquared(impactPoint, shape.A, shape.B)) - shape.Radius;
+                if (gap < bestGap - ProjectileLocationTie
+                    || Mathf.Abs(gap - bestGap) <= ProjectileLocationTie && (int)shape.Location < (int)best)
+                {
+                    bestGap = gap;
+                    best = shape.Location;
+                }
+            }
+            return best;
         }
 
         private void ApplyProjectileImpact(ProjectileFlight flight, ICombatEntity target,
-            Vector3 point, bool bladeContact)
+            Vector3 point, bool bladeContact, Vector3 segmentStart, float segmentLength)
         {
             if (!CombatRegistry.TryGet(flight.InstigatorId, out ICombatEntity instigator) || target.IsDead) return;
-            bool headshot = IsProjectileHeadshot(target, point);
-            HitCandidate hit = new HitCandidate(target.CombatId, point, headshot);
+            // A blade contact is stopped by the guard before the body, so it has no body location (x1, the guard
+            // reduction decides the rest). Otherwise the location comes from the target's hit volumes.
+            HitLocation location = bladeContact
+                ? HitLocation.Unspecified
+                : ResolveProjectileLocation(flight, target, segmentStart, segmentLength, point);
+            float locationMultiplier = LocationTable.Multiplier(location);
+            HitCandidate hit = new HitCandidate(target.CombatId, point, location == HitLocation.Head);
             if (flight.SkillGroup == null)
             {
                 AttackIntent resolved = new AttackIntent(instigator.CombatId, instigator.Kind, flight.Weapon,
                     flight.Attack.Charge, flight.Origin, flight.Direction, flight.Range, flight.Attack.Sequence, Now);
                 DamageInfo damage = DamageResolver.Resolve(flight.Weapon, resolved, hit, target,
                     flight.DamageMultiplier, flight.FlatDamageBonus,
-                    FlowTuning, true, bladeContact);
+                    FlowTuning, true, bladeContact, location, locationMultiplier);
                 if (!damage.IsValid) return;
                 target.ApplyDamage(damage);
                 ApplyHitEffects(target, damage, flight.Weapon);
@@ -636,7 +689,7 @@ namespace Emberdelve.Combat
             float scale = activation.Skill.UsesFlatDamage ? 1f : activation.Scale;
             DamageInfo skillDamage = DamageResolver.ResolveSkill(resolvedSkill, hit, target,
                 flight.DamageMultiplier, scale, flight.FlatDamageBonus,
-                true, bladeContact);
+                true, bladeContact, location, locationMultiplier);
             if (!skillDamage.IsValid) return;
             target.ApplyDamage(skillDamage);
             StatusSpec status = ScaleStatus(activation.Skill.TargetStatusSpec, activation.Scale);

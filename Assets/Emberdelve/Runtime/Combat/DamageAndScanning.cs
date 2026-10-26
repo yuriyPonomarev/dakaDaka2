@@ -21,7 +21,8 @@ namespace Emberdelve.Combat
         /// </summary>
         public static DamageInfo Resolve(WeaponData weapon, in AttackIntent intent, in HitCandidate hit,
             ICombatEntity target, float instigatorMultiplier = 1f, float weaponBaseDamageBonus = 0f,
-            CombatFlowTuning tuning = null, bool rangedProjectile = false, bool guardBladeContact = false)
+            CombatFlowTuning tuning = null, bool rangedProjectile = false, bool guardBladeContact = false,
+            HitLocation projectileLocation = HitLocation.Unspecified, float projectileLocationMultiplier = 1f)
         {
             float distance = Vector3.Distance(intent.Origin, hit.HitPoint);
             float amount = weapon.DamageAtRange(distance, weaponBaseDamageBonus);
@@ -33,11 +34,17 @@ namespace Emberdelve.Combat
 
             amount *= Mathf.Max(0f, instigatorMultiplier);
 
-            if (hit.Headshot) amount *= HeadshotMultiplier;
+            // D1c3: an authority-resolved projectile takes the hit-location table multiplier (the SAME table melee
+            // uses) from the volume it touched; the old binary head-collider x1.8 only remains for non-projectile
+            // legacy hits. A flagged candidate is never trusted on the projectile path: Headshot is derived from
+            // the location.
+            if (rangedProjectile) amount *= Mathf.Max(0f, projectileLocationMultiplier);
+            else if (hit.Headshot) amount *= HeadshotMultiplier;
 
             return Finalize(amount, weapon, intent.Direction, intent.Origin, intent.InstigatorCombatId,
-                intent.InstigatorKind, hit, target, null, HitLocation.Unspecified,
-                weapon != null ? weapon.impactPower : 0f, tuning, rangedProjectile, guardBladeContact);
+                intent.InstigatorKind, hit, target, null, rangedProjectile ? projectileLocation : HitLocation.Unspecified,
+                weapon != null ? weapon.impactPower : 0f, tuning, rangedProjectile, guardBladeContact,
+                locationAuthoritative: rangedProjectile);
         }
 
         /// <summary>
@@ -82,7 +89,8 @@ namespace Emberdelve.Combat
         /// </summary>
         public static DamageInfo ResolveSkill(in SkillIntent intent, in HitCandidate hit, ICombatEntity target,
             float instigatorMultiplier = 1f, float effectScale = 1f, float weaponBaseDamageBonus = 0f,
-            bool rangedProjectile = false, bool guardBladeContact = false)
+            bool rangedProjectile = false, bool guardBladeContact = false,
+            HitLocation projectileLocation = HitLocation.Unspecified, float projectileLocationMultiplier = 1f)
         {
             SkillData skill = intent.Skill;
             float distance = Vector3.Distance(intent.Origin, hit.HitPoint);
@@ -107,14 +115,25 @@ namespace Emberdelve.Combat
             amount *= Mathf.Max(0f, instigatorMultiplier);
             amount *= ClampEffectScale(effectScale);
 
-            if (hit.Headshot) amount *= HeadshotMultiplier;
+            // D1c3: weapon-based projectile skills (MultiShot, PiercingShot) use the hit-location table; a skill
+            // with its own flat number ignores location entirely. See Resolve for the legacy non-projectile rule.
+            HitLocation location = HitLocation.Unspecified;
+            if (rangedProjectile)
+            {
+                if (!skill.UsesFlatDamage)
+                {
+                    location = projectileLocation;
+                    amount *= Mathf.Max(0f, projectileLocationMultiplier);
+                }
+            }
+            else if (hit.Headshot) amount *= HeadshotMultiplier;
 
             WeaponData source = intent.Weapon;
             DamageType type = source != null ? source.damageType : skill.UsesFlatDamage ? DamageType.Holy : DamageType.Physical;
 
             return Finalize(amount, source, intent.Direction, intent.Origin, intent.InstigatorCombatId,
-                intent.InstigatorKind, hit, target, type, rangedProjectile: rangedProjectile,
-                guardBladeContact: guardBladeContact);
+                intent.InstigatorKind, hit, target, type, location: location, rangedProjectile: rangedProjectile,
+                guardBladeContact: guardBladeContact, locationAuthoritative: rangedProjectile);
         }
 
         /// <summary>
@@ -135,12 +154,13 @@ namespace Emberdelve.Combat
             int instigatorCombatId, EntityKind instigatorKind, in HitCandidate hit, ICombatEntity target,
             DamageType? overrideType = null, HitLocation location = HitLocation.Unspecified,
             float impactPower = 0f, CombatFlowTuning tuning = null, bool rangedProjectile = false,
-            bool guardBladeContact = false)
+            bool guardBladeContact = false, bool locationAuthoritative = false)
         {
             DamageType type = overrideType ?? (source != null ? source.damageType : DamageType.Physical);
 
             DamageInfo info = new DamageInfo(Mathf.Max(1f, amount), hit.HitPoint, direction, origin,
-                instigatorCombatId, instigatorKind, type, false, hit.Headshot, 0f, location, impactPower);
+                instigatorCombatId, instigatorKind, type, false,
+                locationAuthoritative ? location == HitLocation.Head : hit.Headshot, 0f, location, impactPower);
             if (rangedProjectile) info = info.WithProjectileGuardContact(guardBladeContact);
 
             // D1b: a defender whose guard can break answers with the reduction AND whether the hit's impact power
@@ -231,43 +251,8 @@ namespace Emberdelve.Combat
             return hits == 0;
         }
 
-        /// <summary>
-        /// Everything one projectile or ray legitimately hits along a direction, nearest first, at most one
-        /// entry per combat entity. Level geometry stops the shot; the instigator's own colliders are
-        /// skipped rather than stopping it, which is what lets a piercing shot pass through a body without
-        /// ever hitting the shooter.
-        /// </summary>
-        public static int CollectRangedHits(Vector3 origin, Vector3 direction, float maxRange, int instigatorId,
-            int maxTargets, List<HitCandidate> output, LayerMask hitMask, LayerMask levelMask)
-        {
-            output.Clear();
-            if (maxTargets <= 0) return 0;
-
-            int mask = hitMask.value | levelMask.value;
-            int count = Physics.RaycastNonAlloc(origin, direction, _rayBuffer, Mathf.Max(0.5f, maxRange), mask,
-                QueryTriggerInteraction.Ignore);
-
-            System.Array.Sort(_rayBuffer, 0, count, Comparer<RaycastHit>.Create((a, b) => a.distance.CompareTo(b.distance)));
-
-            int accepted = 0;
-            for (int i = 0; i < count && accepted < maxTargets; i++)
-            {
-                Collider collider = _rayBuffer[i].collider;
-                if (collider == null) continue;
-
-                ICombatEntity entity = collider.GetComponentInParent<ICombatEntity>();
-                if (entity == null) break;                        // wall or prop: the shot stops here
-                if (entity.IsDead) continue;
-                if (entity.CombatId == instigatorId) continue;     // never shoot yourself
-                if (Contains(output, entity.CombatId)) continue;   // one hit per entity per projectile
-
-                bool headshot = entity.HeadCollider != null && collider == entity.HeadCollider;
-                output.Add(new HitCandidate(entity.CombatId, _rayBuffer[i].point, headshot));
-                accepted++;
-            }
-
-            return accepted;
-        }
+        // D1c3: the dead legacy HitScanner.CollectRangedHits (ray scan with the head-collider headshot rule) was removed:
+        // nothing called it since R1b/ProjectileBlock; projectile hits and their hit location live in LocalCombatAuthority.Projectiles.
 
         /// <summary>Hostile entities inside a radius, nearest first, each listed once.</summary>
         public static int CollectRadialHits(Vector3 center, float radius, int instigatorId, int maxTargets,

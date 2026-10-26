@@ -2011,7 +2011,8 @@ namespace Emberdelve.EditorTools
                     Check(damage.SourceKind == EntityKind.LocalPlayer && damage.SourceCombatId == rig.CombatId,
                         $"{label}: arrow {i} attributed to the archer ({damage.SourceKind} #{damage.SourceCombatId})");
                     Check(damage.Type == _bow.damageType, $"{label}: arrow {i} damage type still comes from the bow ({damage.Type})");
-                    Check(!damage.Headshot && !damage.Blocked, $"{label}: arrow {i} is an unblocked body hit on a host with no head collider");
+                    Check(!damage.Headshot && !damage.Blocked && damage.Location == HitLocation.Body,
+                        $"{label}: arrow {i} is an unblocked hit on the host's Body volume (D1c3 location table x1.0, no head volume, nothing client-claimed)");
                 }
 
                 if (!Mathf.Approximately(expectedScale, 1f))
@@ -2131,7 +2132,8 @@ namespace Emberdelve.EditorTools
                     Check(damage.SourceKind == EntityKind.LocalPlayer && damage.SourceCombatId == rig.CombatId,
                         $"{label}: body {i} attributed to the archer ({damage.SourceKind} #{damage.SourceCombatId})");
                     Check(damage.Type == _bow.damageType, $"{label}: body {i} damage type still comes from the bow ({damage.Type})");
-                    Check(!damage.Headshot && !damage.Blocked, $"{label}: body {i} is an unblocked body hit");
+                    Check(!damage.Headshot && !damage.Blocked && damage.Location == HitLocation.Body,
+                        $"{label}: body {i} is an unblocked hit on the host's Body volume (D1c3 location x1.0)");
                 }
 
                 if (!Mathf.Approximately(expectedScale, 1f))
@@ -2295,7 +2297,8 @@ namespace Emberdelve.EditorTools
                     Check(damage.SourceKind == EntityKind.LocalPlayer && damage.SourceCombatId == rig.CombatId,
                         $"{label}: attributed to the archer ({damage.SourceKind} #{damage.SourceCombatId})");
                     Check(damage.Type == _bow.damageType, $"{label}: damage type still comes from the bow definition ({damage.Type})");
-                    Check(!damage.Headshot && !damage.Blocked, $"{label}: an unblocked body hit on a host with no head collider");
+                    Check(!damage.Headshot && !damage.Blocked && damage.Location == HitLocation.Body,
+                        $"{label}: an unblocked hit on the host's Body volume (D1c3 location x1.0, no head volume)");
                 }
 
                 Debug.Log($"{Tag} {label}: scale={expectedScale:F4} charge={charge:F2} damage={(healthBefore - host.CurrentHealth):F4} " +
