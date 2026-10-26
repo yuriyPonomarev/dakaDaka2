@@ -415,14 +415,14 @@ namespace Emberdelve.EditorTools
             Check(allowlistUsed.Count == RandomAllowlist.Length, "the visual/AI allowlist is not stale (still uses a non-project random: " + string.Join(", ", allowlistUsed) + ")");
 
             // Other non-reproducible or platform sources, and low-level identity minting, outside explicit allowlists.
-            // Entropy (RaidSession seed default) lives in RunContext; ItemInstance.cs owns the default uid draw; the review bridge
+            // Entropy (RaidSession seed default) lives in RunContext; ItemInstance.cs and Rules/ItemIdentityRules.cs own the default uid draw; the review bridge
             // only stamps a log timestamp.
             (string pattern, string[] allowed)[] guarded =
             {
                 (@"Unity\.Mathematics\.Random|\bnew\s+Unity\.Mathematics", new string[0]),
                 (@"RandomNumberGenerator", new string[0]),
                 (@"Environment\.TickCount|Stopwatch\.GetTimestamp", new string[0]),
-                (@"Guid\.NewGuid\s*\(", new[] { "Core/RunContext.cs", "Items/ItemInstance.cs" }),
+                (@"Guid\.NewGuid\s*\(", new[] { "Core/RunContext.cs", "Items/ItemInstance.cs", "Rules/ItemIdentityRules.cs" }),
                 (@"DateTime\.(Now|UtcNow)", new[] { "Core/RunContext.cs", "Review/EmberdelveReviewBridge.cs" }),
                 (@"\bTryCreateNew\s*\(", new[] { "Items/ItemInstance.cs" }),
                 (@"ItemIdentityRules\.TryMintUid\s*\(", new[] { "Items/ItemInstance.cs" }),
@@ -443,6 +443,7 @@ namespace Emberdelve.EditorTools
             string[] scoped =
             {
                 "Items/LootRoller.cs", "Items/LootPickup.cs", "Items/RaidSession.cs", "Items/ItemInstance.cs", "Items/ItemCatalog.cs",
+                "Rules/ItemIdentityRules.cs", "Items/LootTableRollService.cs",
                 "Items/Inventory.cs", "Items/Equipment.cs", "Items/ItemUidRegistry.cs", "Items/ContainerSnapshot.cs",
                 "Data/LootTable.cs", "Data/EnemyData.cs", "Interaction/ChestInteractable.cs", "Level/ChestSpawner.cs",
                 "Flow/RunDirector.cs", "AI/EnemyAgent.cs", "Core/RunContext.cs", "Core/DeterministicRng.cs",
@@ -471,9 +472,9 @@ namespace Emberdelve.EditorTools
                 if (StripComments(File.ReadAllText(file)).Contains("CreateLocalTrusted(")) issuerMakers.Add(file.Substring(RuntimeRoot.Length + 1).Replace('\\', '/'));
             }
             issuerMakers.Sort(StringComparer.Ordinal);
-            // ItemInstance.cs defines it, RaidSession (default, non-seeded session) wraps it, LootTable.cs has the tooling
-            // overload, Inventory.cs is the lazy fixture fallback for a bag nobody pointed at an issuer.
-            Check(string.Join(",", issuerMakers) == "Data/LootTable.cs,Items/Inventory.cs,Items/ItemInstance.cs,Items/RaidSession.cs",
+            // ItemInstance.cs defines it, RaidSession (default, non-seeded session) wraps it, LootTableRollService.cs has the tooling
+            // overload (moved from LootTable.cs in R8b1), Inventory.cs is the lazy fixture fallback for a bag nobody pointed at an issuer.
+            Check(string.Join(",", issuerMakers) == "Items/Inventory.cs,Items/ItemInstance.cs,Items/LootTableRollService.cs,Items/RaidSession.cs",
                 "CreateLocalTrusted is only referenced by its definition, the session, the table tooling overload and the bag fallback: " + string.Join(",", issuerMakers));
 
             string chest = StripComments(ReadRuntime("Interaction/ChestInteractable.cs"));
