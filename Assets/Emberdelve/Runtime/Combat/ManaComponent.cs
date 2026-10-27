@@ -22,6 +22,7 @@ namespace Emberdelve.Combat
         private float _timeSinceSpend;
         private bool _regenAllowed = true;
         private bool _configured;
+        private bool _viewBound;
 
         /// <summary>Raised whenever the pool changes, so the HUD never reads this component.</summary>
         public event Action<float, float> Changed;
@@ -29,6 +30,14 @@ namespace Emberdelve.Combat
         public int MaxMana => maxMana;
         public float CurrentMana => _current;
         public float RegenPerSecond => regenPerSecond;
+        public float RegenDelay => regenDelay;
+
+        /// <summary>
+        /// R1c2: true once the combat authority has started pushing its mana record into this component. From then on the
+        /// numbers here are a DISPLAY of the authority's pool: the component no longer regenerates by itself, and anything
+        /// written to it directly is overwritten by the next push.
+        /// </summary>
+        public bool IsAuthorityView => _viewBound;
         public bool IsFull => _current >= maxMana - 0.001f;
 
         /// <summary>False when something outside the pool - death, a future menu state - has suspended regeneration.</summary>
@@ -137,8 +146,24 @@ namespace Emberdelve.Combat
             if (active) _timeSinceSpend = regenDelay;
         }
 
+        /// <summary>R1c2: mirrors the authority's record (it ticks regeneration itself). Raises Changed when the pool or ceiling moved.</summary>
+        internal void ApplyView(float current, int max, float regen, float delay, float sinceSpend, bool regenAllowed)
+        {
+            _viewBound = true;
+            _configured = true;
+            bool changed = !Mathf.Approximately(_current, current) || maxMana != max;
+            maxMana = Mathf.Max(1, max);
+            regenPerSecond = Mathf.Max(0f, regen);
+            regenDelay = Mathf.Max(0f, delay);
+            _timeSinceSpend = sinceSpend;
+            _regenAllowed = regenAllowed;
+            _current = current;
+            if (changed) Changed?.Invoke(_current, maxMana);
+        }
+
         private void Update()
         {
+            if (_viewBound) return;
             if (!_configured || !_regenAllowed || regenPerSecond <= 0f) return;
             if (IsFull) return;
 

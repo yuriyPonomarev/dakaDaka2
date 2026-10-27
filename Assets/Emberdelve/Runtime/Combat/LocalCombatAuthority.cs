@@ -148,7 +148,11 @@ namespace Emberdelve.Combat
 
         // PlayerLook updates the camera in LateUpdate. Sample the same live aim/guard pose the user sees,
         // after the default-order look and weapon visual components have applied this frame's input.
-        private void LateUpdate() => AdvanceProjectiles(Time.deltaTime);
+        private void LateUpdate()
+        {
+            AdvanceProjectiles(Time.deltaTime);
+            TickKits();
+        }
 
         public bool SubmitAttack(AttackIntent intent, HitCandidate hit) => SubmitAttack(intent, hit, out _);
 
@@ -224,8 +228,10 @@ namespace Emberdelve.Combat
             // Ammunition: a ranged attack from an entity that owns a magazine needs a round in it. The
             // authority reads it through IAmmoSource and spends it itself on an accepted attack (below);
             // RangedCombat.Fire only spends the rounds of shots the authority did not accept.
-            IAmmoSource ammo = weapon.IsRanged ? instigator as IAmmoSource : null;
-            if (ammo != null && !ammo.HasAmmo(1)) return Reject(intent, "no ammunition in the magazine", out reason);
+            KitAccess ammo = weapon.IsRanged
+                ? KitFor(intent.InstigatorCombatId, instigator, null, instigator as IAmmoSource)
+                : default;
+            if (ammo.HasAmmoModel && !ammo.HasAmmo(1)) return Reject(intent, "no ammunition in the magazine", out reason);
 
             Vector3 origin = instigator.CombatCenter;
             Vector3 direction = authoritativePoint - origin;
@@ -241,7 +247,7 @@ namespace Emberdelve.Combat
                 OutgoingMultiplier(instigator, weapon), FlatWeaponBonus(instigator, weapon), FlowTuning);
             if (!damage.IsValid) return Reject(intent, "resolver produced no damage", out reason);
 
-            if (ammo != null && !ammo.TryConsumeAmmo(1)) return Reject(intent, "no ammunition in the magazine", out reason);
+            if (ammo.HasAmmoModel && !ammo.TryConsumeAmmo(1)) return Reject(intent, "no ammunition in the magazine", out reason);
 
             // Only an accepted attack spends the cooldown.
             _lastAttackTime[intent.InstigatorCombatId] = now;
@@ -339,7 +345,8 @@ namespace Emberdelve.Combat
             // The skill is resolved from the caster's own kit. A skill that is not one of its active skills
             // (unknown, foreign, a passive, a different class's) cannot be cast, whatever the caller holds.
             SkillData skill = null;
-            IReadOnlyList<SkillData> kit = state.ActiveSkills;
+            KitAccess kitAccess = KitFor(casterCombatId, caster, state, caster as IAmmoSource);
+            IReadOnlyList<SkillData> kit = kitAccess.Skills;
             if (kit != null)
             {
                 for (int i = 0; i < kit.Count; i++)
@@ -375,31 +382,29 @@ namespace Emberdelve.Combat
             float cooldown = skill.EffectiveCooldown;
             Dictionary<string, SkillStamp> stamps = SkillStampsFor(casterCombatId);
             bool hadStamp = stamps.TryGetValue(skillId, out SkillStamp previous);
-            if (hadStamp && previous.Epoch == state.KitEpoch && cooldown > 0f && now - previous.Time < cooldown - SkillClockTolerance)
+            if (hadStamp && previous.Epoch == kitAccess.Epoch && cooldown > 0f && now - previous.Time < cooldown - SkillClockTolerance)
             {
                 return RejectCast(casterCombatId, skillId, $"{skillId} cast faster than its {cooldown:F1}s cooldown", out reason);
             }
 
             // Mana and ammo are validated against the caster's own components, then spent here.
             int manaCost = skill.EffectiveManaCost;
-            ManaComponent mana = state.Mana;
             if (manaCost > 0)
             {
-                if (mana == null) return RejectCast(casterCombatId, skillId, "no mana pool", out reason);
-                if (!mana.HasAmount(manaCost)) return RejectCast(casterCombatId, skillId, $"not enough mana (needs {manaCost})", out reason);
+                if (!kitAccess.HasManaPool) return RejectCast(casterCombatId, skillId, "no mana pool", out reason);
+                if (!kitAccess.HasMana(manaCost)) return RejectCast(casterCombatId, skillId, $"not enough mana (needs {manaCost})", out reason);
             }
 
             int ammoNeeded = skill.AmmoPerCast;
-            IAmmoSource ammo = caster as IAmmoSource;
-            if (ammoNeeded > 0 && (ammo == null || !ammo.HasAmmo(ammoNeeded)))
+            if (ammoNeeded > 0 && !kitAccess.HasAmmo(ammoNeeded))
             {
                 return RejectCast(casterCombatId, skillId, $"not enough ammunition (needs {ammoNeeded})", out reason);
             }
 
-            if (manaCost > 0 && !mana.TrySpend(manaCost)) return RejectCast(casterCombatId, skillId, $"not enough mana (needs {manaCost})", out reason);
-            if (ammoNeeded > 0 && !ammo.TryConsumeAmmo(ammoNeeded))
+            if (manaCost > 0 && !kitAccess.TrySpendMana(manaCost)) return RejectCast(casterCombatId, skillId, $"not enough mana (needs {manaCost})", out reason);
+            if (ammoNeeded > 0 && !kitAccess.TryConsumeAmmo(ammoNeeded))
             {
-                if (manaCost > 0) mana.Restore(manaCost);
+                if (manaCost > 0) kitAccess.RestoreMana(manaCost);
                 return RejectCast(casterCombatId, skillId, $"not enough ammunition (needs {ammoNeeded})", out reason);
             }
 
@@ -417,7 +422,8 @@ namespace Emberdelve.Combat
                 Budget = skill.HitBudget,
             };
             _activations[activation.Id] = activation;
-            stamps[skillId] = new SkillStamp { Time = now, Epoch = state.KitEpoch };
+            stamps[skillId] = new SkillStamp { Time = now, Epoch = kitAccess.Epoch };
+            kitAccess.NoteCast(activation.Id);
 
             activationId = activation.Id;
             return true;
@@ -431,6 +437,7 @@ namespace Emberdelve.Combat
 
             // Closed: no further hit can ride on this activation.
             activation.Completed = true;
+            NoteCastCompleted(casterCombatId, activationId);
 
             // The self buff comes from the skill asset, scaled by the caster's own effect scale (the one read
             // when the cast opened). It lands even when the burst hit nothing, and it lands AFTER the hits,

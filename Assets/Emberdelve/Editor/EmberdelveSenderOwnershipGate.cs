@@ -164,10 +164,10 @@ namespace Emberdelve.EditorTools
         {
             if (_p1.Health != null) _p1.Health.Heal(100000f);
             if (_p2.Health != null) _p2.Health.Heal(100000f);
-            if (_p1.Mana != null) _p1.Mana.RefillToMax();
-            if (_p2.Mana != null) _p2.Mana.RefillToMax();
+            EmberdelveKitFixtures.RefillMana(_p1);
+            EmberdelveKitFixtures.RefillMana(_p2);
             RangedCombat r2 = RangedOf(_p2);
-            if (r2 != null) r2.RefundAmmo(20);
+            if (r2 != null) EmberdelveKitFixtures.RefundAmmo(r2, 20);
         }
 
         private T Load<T>(string file) where T : UnityEngine.Object

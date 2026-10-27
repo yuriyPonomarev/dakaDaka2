@@ -80,8 +80,8 @@ namespace Emberdelve.Combat
                 FlatDamageBonus = FlatWeaponBonus(instigator, weapon),
             };
 
-            IAmmoSource ammo = instigator as IAmmoSource;
-            if (ammo != null && !ammo.TryConsumeAmmo(1))
+            KitAccess ammo = KitFor(instigator.CombatId, instigator, null, instigator as IAmmoSource);
+            if (ammo.HasAmmoModel && !ammo.TryConsumeAmmo(1))
             {
                 LastAttackRejectReason = "no ammunition in the magazine";
                 RejectedCount++;

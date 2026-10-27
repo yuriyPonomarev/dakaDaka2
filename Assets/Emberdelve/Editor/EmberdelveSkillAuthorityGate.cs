@@ -741,7 +741,7 @@ namespace Emberdelve.EditorTools
 
             // The caster talks to the gate's authority (the scene one stays untouched).
             typeof(SkillCaster).GetField("authority", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(caster, _auth);
-            rig.Mana.RefillToMax();
+            EmberdelveKitFixtures.RefillMana(rig);
             Check(rig.ActiveWeapon == rig.MainHandWeapon && rig.ActiveWeapon != null, "the warrior holds its sword");
 
             float mana0 = rig.Mana.CurrentMana;
@@ -754,7 +754,7 @@ namespace Emberdelve.EditorTools
             Check(!again && Has(againReason, "cooldown"), "and the authority independently refuses it on cooldown (" + againReason + ")");
 
             // A real Battle Cry on a real body.
-            rig.Mana.RefillToMax();
+            EmberdelveKitFixtures.RefillMana(rig);
             GameObject bodyGo = new GameObject("SkillGate_Body");
             _cleanup.Add(bodyGo);
             bodyGo.layer = LayerMask.NameToLayer(GameConfig.EnemyLayerName);
@@ -807,7 +807,7 @@ namespace Emberdelve.EditorTools
             if (shot) _auth.AdvanceProjectiles(realBow.rangedRange / Mathf.Max(2f, realBow.projectileSpeed) + 0.02f);
             Check(body.Taken > beforeLaunch, $"the authority-stepped bow flight reaches the real body ({beforeLaunch:F1} -> {body.Taken:F1})");
 
-            Check(ranged.TryConsumeAmmo(ranged.Magazine) && ranged.Magazine == 0, "magazine emptied");
+            Check(EmberdelveKitFixtures.ConsumeAmmo(ranged, ranged.Magazine) && ranged.Magazine == 0, "magazine emptied");
             AdvanceClock(10f);
             float before = body.Taken;
             shot = _auth.LaunchProjectile(bowIntent(body.CombatCenter));
@@ -815,7 +815,7 @@ namespace Emberdelve.EditorTools
             Check(!shot && Has(shotReason, "ammunition") && body.Taken == before && ranged.Magazine == 0,
                 "a projectile launch with an empty magazine is rejected, deals no damage and spends nothing (" + shotReason + ")");
 
-            ranged.RefundAmmo(4);
+            EmberdelveKitFixtures.RefundAmmo(ranged, 4);
             int beforeFire = ranged.Magazine;
             body.Taken = 0f;
             body.transform.position = muzzle + direction.normalized * 10f - Vector3.up * 1.1f;

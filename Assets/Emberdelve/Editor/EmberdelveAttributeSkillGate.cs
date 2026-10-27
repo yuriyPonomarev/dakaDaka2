@@ -758,7 +758,7 @@ namespace Emberdelve.EditorTools
                 rig.transform.position = _warriorSpawn;
                 rig.transform.rotation = Quaternion.LookRotation(Vector3.forward);
                 caster.HandleKitRestored();
-                rig.Mana.RefillToMax();
+                EmberdelveKitFixtures.RefillMana(rig);
                 Physics.SyncTransforms();
                 yield return WaitFrames(2);
 
@@ -872,7 +872,7 @@ namespace Emberdelve.EditorTools
                 rig.transform.position = _warriorSpawn;
                 rig.transform.rotation = Quaternion.LookRotation(Vector3.forward);
                 caster.HandleKitRestored();
-                rig.Mana.RefillToMax();
+                EmberdelveKitFixtures.RefillMana(rig);
 
                 GameObject wall = BuildLevelBox("U2A5_Dash_Wall", _warriorSpawn + new Vector3(0f, 1.4f, 2.6f), new Vector3(3f, 4f, 0.6f));
                 Physics.SyncTransforms();
@@ -957,7 +957,7 @@ namespace Emberdelve.EditorTools
                 rig.transform.position = _warriorSpawn;
                 rig.transform.rotation = Quaternion.LookRotation(Vector3.forward);
                 caster.HandleKitRestored();
-                rig.Mana.RefillToMax();
+                EmberdelveKitFixtures.RefillMana(rig);
 
                 // Fixture arithmetic (R3 correction, the runtime is untouched): a host is inside the burst when
                 // its CombatCenter is within radius + 0.35 = 6.35 m of the cast centre (HitScanner.CollectRadial
@@ -1113,7 +1113,7 @@ namespace Emberdelve.EditorTools
                 rig.ClearStatuses();
                 rig.transform.position = _warriorSpawn;
                 caster.HandleKitRestored();
-                rig.Mana.RefillToMax();
+                EmberdelveKitFixtures.RefillMana(rig);
 
                 TestTarget host = BuildTarget("U2A5_Cry_Snapshot", _warriorSpawn + new Vector3(0f, 0.9f, 3f));
                 Physics.SyncTransforms();
@@ -1145,7 +1145,7 @@ namespace Emberdelve.EditorTools
                 rig.ClearStatuses();
                 host.ClearStatuses();
                 caster.HandleKitRestored();
-                rig.Mana.RefillToMax();
+                EmberdelveKitFixtures.RefillMana(rig);
                 yield return WaitFrames(2);
 
                 yield return SpaceForNextCryCast(caster.ActiveSkill(1));
@@ -1162,7 +1162,7 @@ namespace Emberdelve.EditorTools
                 rig.ClearStatuses();
                 host.ClearStatuses();
                 caster.HandleKitRestored();
-                rig.Mana.RefillToMax();
+                EmberdelveKitFixtures.RefillMana(rig);
                 yield return WaitFrames(2);
 
                 yield return SpaceForNextCryCast(caster.ActiveSkill(1));
@@ -1716,7 +1716,7 @@ namespace Emberdelve.EditorTools
                 rig.transform.position = _warriorSpawn;
                 rig.transform.rotation = Quaternion.LookRotation(Vector3.forward);
                 rig.Skills.HandleKitRestored();
-                rig.Mana.RefillToMax();
+                EmberdelveKitFixtures.RefillMana(rig);
 
                 TestTarget host = BuildTarget("U2A5_Sword_Host_" + _checks, _warriorSpawn + new Vector3(0f, 0.9f, MeleeHostDepth));
                 Physics.SyncTransforms();
@@ -1833,7 +1833,7 @@ namespace Emberdelve.EditorTools
                 rig.SetGuardHeld(false);
                 rig.transform.position = _warriorSpawn;
                 rig.transform.rotation = Quaternion.LookRotation(Vector3.forward);
-                rig.Mana.RefillToMax();
+                EmberdelveKitFixtures.RefillMana(rig);
                 Physics.SyncTransforms();
                 yield return WaitFrames(2);
 
@@ -1952,8 +1952,8 @@ namespace Emberdelve.EditorTools
                 rig.transform.position = _archerSpawn;
                 rig.transform.rotation = Quaternion.LookRotation(Vector3.forward);
                 caster.HandleKitRestored();
-                rig.Mana.RefillToMax();
-                ranged.Initialize(_bow, _archerClass.startingReserveAmmo, _archerClass.maxReserveAmmo, -1);
+                EmberdelveKitFixtures.RefillMana(rig);
+                EmberdelveKitFixtures.ResetAmmo(ranged, _bow, _archerClass.startingReserveAmmo, _archerClass.maxReserveAmmo, -1);
 
                 Vector3 muzzle = rig.GetMuzzlePosition();
                 Vector3 aim = rig.AimDirection;
@@ -2089,8 +2089,8 @@ namespace Emberdelve.EditorTools
                 rig.transform.position = _archerSpawn;
                 rig.transform.rotation = Quaternion.LookRotation(Vector3.forward);
                 caster.HandleKitRestored();
-                rig.Mana.RefillToMax();
-                ranged.Initialize(_bow, _archerClass.startingReserveAmmo, _archerClass.maxReserveAmmo, -1);
+                EmberdelveKitFixtures.RefillMana(rig);
+                EmberdelveKitFixtures.ResetAmmo(ranged, _bow, _archerClass.startingReserveAmmo, _archerClass.maxReserveAmmo, -1);
 
                 Vector3 muzzle = rig.GetMuzzlePosition();
                 Vector3 aim = rig.AimDirection;
@@ -2218,8 +2218,8 @@ namespace Emberdelve.EditorTools
                 rig.transform.position = _archerSpawn;
                 rig.transform.rotation = Quaternion.LookRotation(Vector3.forward);
                 rig.Skills.HandleKitRestored();
-                rig.Mana.RefillToMax();
-                ranged.Initialize(_bow, _archerClass.startingReserveAmmo, _archerClass.maxReserveAmmo, -1);
+                EmberdelveKitFixtures.RefillMana(rig);
+                EmberdelveKitFixtures.ResetAmmo(ranged, _bow, _archerClass.startingReserveAmmo, _archerClass.maxReserveAmmo, -1);
 
                 TestTarget host = BuildHostAlongAim($"U2A5_Bow_Host_{_checks}", rig, rig.GetMuzzlePosition(), rig.AimDirection, distance);
                 Physics.SyncTransforms();
@@ -2348,7 +2348,7 @@ namespace Emberdelve.EditorTools
                 rig.transform.position = _archerSpawn;
                 rig.transform.rotation = Quaternion.LookRotation(Vector3.forward);
                 rig.Skills.HandleKitRestored();
-                rig.Mana.RefillToMax();
+                EmberdelveKitFixtures.RefillMana(rig);
 
                 TestTarget host = BuildTarget($"U2A5_Rapier_Host_{_checks}", _archerSpawn + new Vector3(0f, 0.9f, MeleeHostDepth));
                 Physics.SyncTransforms();

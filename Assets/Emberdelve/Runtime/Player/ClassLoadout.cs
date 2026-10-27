@@ -288,6 +288,48 @@ namespace Emberdelve.Player
             state.reserve = rangedCombat.Reserve;
         }
 
+        /// <summary>
+        /// R1c2: every ranged weapon's ammunition as a kit seed. The pool of the weapon in hand comes from the live component, the
+        /// others from the stored per-weapon state (the same numbers a swap would restore).
+        /// </summary>
+        internal KitAmmoSeed[] CaptureAmmoSeeds(RangedCombat live)
+        {
+            List<KitAmmoSeed> seeds = new List<KitAmmoSeed>();
+            for (int i = 0; i < _ammo.Count; i++)
+            {
+                RangedAmmoState state = _ammo[i];
+                if (state == null) continue;
+
+                WeaponData weapon = null;
+                for (int s = 0; s < _slots.Length; s++)
+                {
+                    if (_slots[s] != null && _slots[s].weaponId == state.weaponId) { weapon = _slots[s]; break; }
+                }
+                if (weapon == null || !weapon.IsRanged) continue;
+
+                int magazine = state.magazine;
+                int reserve = state.reserve;
+                int maxReserve = state.maxReserve;
+                if (live != null && live.enabled && live.Weapon == weapon)
+                {
+                    magazine = live.Magazine;
+                    reserve = live.Reserve;
+                    maxReserve = live.MaxReserve;
+                }
+
+                seeds.Add(new KitAmmoSeed
+                {
+                    WeaponId = state.weaponId,
+                    MagazineSize = Mathf.Clamp(weapon.magazineSize, 1, 99),
+                    ReloadTime = weapon.reloadTime,
+                    Magazine = magazine,
+                    Reserve = reserve,
+                    MaxReserve = maxReserve,
+                });
+            }
+            return seeds.ToArray();
+        }
+
         /// <summary>Ammo carried for a weapon that is not currently in hand, or null if the kit has none.</summary>
         public RangedAmmoState GetAmmoState(WeaponData weapon)
         {

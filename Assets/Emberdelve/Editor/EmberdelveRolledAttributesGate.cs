@@ -31,7 +31,7 @@ var testCatalog=ItemCatalog.CreateForTest(new[]{boots},defs);cleanup.Add(testCat
 Check(rig.AttributeStats.GetAttribute(Emberdelve.Stats.SixAttribute.Constitution)==14&&rig.MaxHealth==120&&rig.Mana.MaxMana==70,"bare warrior baseline");
 string classBefore=EditorJsonUtility.ToJson(rig.Class),bootsBefore=EditorJsonUtility.ToJson(boots);
 ItemInstance rare;Check(ItemInstance.TryCreateNew(boots,1,AffixRarity.Rare,new[]{new AffixRecord("stat_2",AffixStatKey.Constitution,3),new AffixRecord("stat_3",AffixStatKey.Intelligence,3)},auth,out rare,out reason),"rare CON INT gear");
-Check(bag.TryAddInstance(rare,out reason),"carry rare gear");rig.Mana.TrySpend(20);
+Check(bag.TryAddInstance(rare,out reason),"carry rare gear");EmberdelveKitFixtures.SpendMana(rig.Mana, 20);
 float hp=rig.CurrentHealth,mp=rig.Mana.CurrentMana;int minted=bag.MintedInstanceCount;
 for(int cycle=0;cycle<3;cycle++){
 Check(gear.TryEquipFromInventory(bag.IndexOfInstance(rare.Uid),out reason),"equip rare cycle"+cycle);

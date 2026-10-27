@@ -493,7 +493,7 @@ namespace Emberdelve.EditorTools
                   _bag.ToContainerSnapshot().ToJson() == bagBefore,
                 "full reserve refuses ammo use without consuming its stack or revision: " + Describe(fullResult));
 
-            ranged.Initialize(weapon, 0, state.maxReserve, ranged.Magazine);
+            EmberdelveKitFixtures.ResetAmmo(ranged, weapon, 0, state.maxReserve, ranged.Magazine);
             // Keep the full-reserve refusal snapshot intact above, then start an independent two-unit success fixture.
             _bag.Clear();
             Check(_bag.TryAdd(arrows, 2, out reason), "add two arrow bundles for a successful grant: " + reason);

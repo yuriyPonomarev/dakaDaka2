@@ -307,7 +307,7 @@ namespace Emberdelve.EditorTools
                 // 5. Damage and spend, so every later no-refill check has a pool below its ceiling.
                 Damage(rig, 40f);
                 CheckClose("warrior damaged to 80/120", 80f, rig.Health.CurrentHealth, "40 damage");
-                Check(rig.Mana.TrySpend(30), "warrior spent 30 mana");
+                Check(EmberdelveKitFixtures.SpendMana(rig.Mana, 30), "warrior spent 30 mana");
                 CheckClose("warrior mana at 40/70", 40f, rig.Mana.CurrentMana, "30 spent");
 
                 CarryItem(rig, cuirass);
@@ -397,7 +397,7 @@ namespace Emberdelve.EditorTools
                 Unequip(rig, EquipmentSlot.Head);
                 CheckClose("CON+2 removed: ceiling back to 120", 120f, rig.Health.MaxHealth, "recomputed from the pristine base");
 
-                Check(rig.Mana.TrySpend(20), "warrior spent 20 mana for the INT test");
+                Check(EmberdelveKitFixtures.SpendMana(rig.Mana, 20), "warrior spent 20 mana for the INT test");
                 CheckClose("warrior mana at 20/70 before the INT test", 20f, rig.Mana.CurrentMana, "40 - 20");
 
                 ItemData intGem = MakeBonusItem("u2a3_int_gem", "U2A3 INT+2", EquipmentSlot.Legs, SixAttribute.Intelligence, 2);
@@ -498,7 +498,7 @@ namespace Emberdelve.EditorTools
                 Unequip(rig, EquipmentSlot.Chest);
                 CheckClose("archer current health still 60 after unequipping", 60f, rig.Health.CurrentHealth, "no clamp needed and no refill either");
 
-                Check(rig.Mana.TrySpend(40), "archer spent 40 mana");
+                Check(EmberdelveKitFixtures.SpendMana(rig.Mana, 40), "archer spent 40 mana");
                 CheckClose("archer mana at 50/90", 50f, rig.Mana.CurrentMana, "40 spent");
 
                 Debug.Log($"{Tag} archer end snapshot: {rig.AttributeStats.Describe()}");

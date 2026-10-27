@@ -347,6 +347,26 @@ namespace Emberdelve.Combat
         bool CompleteSkillCast(CombatSenderId sender, int casterCombatId, int activationId);
         bool SubmitSkill(CombatSenderId sender, SkillIntent intent, HitCandidate hit, out string reason);
         bool LaunchSkillProjectile(CombatSenderId sender, SkillIntent intent, int projectileIndex, out string reason);
+
+        // ---- R1c2: authority-owned kit state ---------------------------------------------------------------------
+        // The authority keeps each entity's kit epoch, mana, ammunition, reload and open cast in its own record,
+        // ticks regeneration and reload on its own clock and validates/spends every command against that record.
+        // The rig seeds it at defined points and reads it back to display; it never writes numbers into it.
+
+        /// <summary>The one seeding API: class apply, death, respawn, equipment revision, weapon change. See <see cref="KitSeedReason"/>.</summary>
+        bool SeedKit(CombatSenderId sender, int combatId, in KitSeed seed, out string reason);
+
+        /// <summary>Read-only view of the entity's kit record. False when the entity has none.</summary>
+        bool TryGetKit(int combatId, out KitView view);
+
+        /// <summary>Seconds until the authority accepts this skill again from this entity. False when the entity has no kit record.</summary>
+        bool TryGetSkillCooldown(int combatId, string skillId, out float remaining);
+
+        /// <summary>Starts a reload of the weapon in hand; the authority runs the timer and moves the rounds.</summary>
+        bool TryStartReload(CombatSenderId sender, int combatId, out string reason);
+
+        /// <summary>A shot the authority refused still costs the round it fired (the old client-side penalty), applied to the record.</summary>
+        bool TryForfeitRound(CombatSenderId sender, int combatId);
     }
 
     /// <summary>

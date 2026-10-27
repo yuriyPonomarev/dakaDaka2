@@ -158,7 +158,13 @@ namespace Emberdelve.Skills
 
             for (int i = 0; i < ActiveSlotCapacity; i++)
             {
-                if (_cooldownRemaining[i] > 0f)
+                // R1c2: with a kit record the displayed cooldown IS the authority's (its stamp on its clock).
+                if (authority != null && _active[i] != null
+                    && authority.TryGetSkillCooldown(rig.CombatId, _active[i].skillId, out float authorityRemaining))
+                {
+                    _cooldownRemaining[i] = authorityRemaining;
+                }
+                else if (_cooldownRemaining[i] > 0f)
                 {
                     _cooldownRemaining[i] = Mathf.Max(0f, _cooldownRemaining[i] - dt);
                 }
@@ -373,6 +379,7 @@ namespace Emberdelve.Skills
             }
 
             if (mana != null) mana.SetRegenerationActive(false);
+            if (rig != null) rig.SeedKit(KitSeedReason.Death);
         }
 
         /// <summary>Re-enables the kit after a respawn or a fresh run.</summary>
@@ -385,6 +392,8 @@ namespace Emberdelve.Skills
                 _cooldownRemaining[i] = 0f;
                 GameEvents.RaiseSkillState(OwnerId, Snapshot(i));
             }
+
+            if (rig != null) rig.SeedKit(KitSeedReason.Respawn);
         }
 
         private void BuildContext(SkillData skill)

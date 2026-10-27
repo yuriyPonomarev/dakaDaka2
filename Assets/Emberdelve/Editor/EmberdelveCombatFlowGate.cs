@@ -1929,7 +1929,7 @@ namespace Emberdelve.EditorTools
             if (ranged == null || !ranged.enabled) yield break;
 
             // 1. reload in hand: swap refused (both entry points and the input path), nothing changes, nothing queued
-            ranged.TryConsumeAmmo(1);
+            EmberdelveKitFixtures.ConsumeAmmo(ranged, 1);
             ranged.AddAmmo(3);
             int magazine = ranged.Magazine, reserve = ranged.Reserve;
             Check(magazine < _crossbow.magazineSize && reserve > 0, $"reload lock: a reload is possible (mag {magazine}/{_crossbow.magazineSize}, reserve {reserve})");
@@ -1960,7 +1960,8 @@ namespace Emberdelve.EditorTools
 
             // the reload finishes: exact ammo, the swap works right after, and the refused swap was not queued
             float waited = 0f;
-            while (ranged.IsReloading && waited < _crossbow.reloadTime + 2f) { waited += Time.deltaTime; yield return null; }
+            // The authority runs the reload on ITS clock, which this gate injects (_clock): let it run in step with real time here.
+            while (ranged.IsReloading && waited < _crossbow.reloadTime + 2f) { waited += Time.deltaTime; _clock += Time.deltaTime; yield return null; }
             yield return null;
             int taken = Mathf.Min(_crossbow.magazineSize - magazine, reserve);
             Check(!ranged.IsReloading && ranged.Magazine == magazine + taken && ranged.Reserve == reserve - taken, $"reload lock: the reload finished with exactly {taken} round(s) moved");
@@ -1970,7 +1971,7 @@ namespace Emberdelve.EditorTools
 
             // 2. forced change during a reload goes through and cancels it cleanly (no free ammo, nothing completes later)
             Check(loadout.SwitchToSlot(1) && _rig.ActiveWeapon == _crossbow, "forced: back to the crossbow");
-            ranged.TryConsumeAmmo(2);
+            EmberdelveKitFixtures.ConsumeAmmo(ranged, 2);
             magazine = ranged.Magazine;
             reserve = ranged.Reserve;
             _rig.Input.ReloadPressedOverride = true;
@@ -1981,7 +1982,8 @@ namespace Emberdelve.EditorTools
             Check(loadout.ForceSwitchToSlot(0) && _rig.ActiveWeapon == _sword, "forced: ForceSwitchToSlot goes through during the reload");
             Check(!ranged.IsReloading && !ranged.enabled, "forced: the reload was cancelled and the ranged component is off");
             LoadoutAmmoCheck(loadout, magazine, reserve, "forced: right after the cancel");
-            yield return new WaitForSeconds(_crossbow.reloadTime + 0.4f);
+            // (authority clock in step with real time, so a reload that wrongly survived the cancel WOULD complete here)
+            for (float idle = 0f; idle < _crossbow.reloadTime + 0.4f; idle += Time.deltaTime) { _clock += Time.deltaTime; yield return null; }
             LoadoutAmmoCheck(loadout, magazine, reserve, "forced: the cancelled reload never completes in the background (no free ammo)");
             Check(loadout.SwitchToSlot(1) && _rig.ActiveWeapon == _crossbow, "forced: swapping back works");
             Check(!ranged.IsReloading && ranged.Magazine == magazine && ranged.Reserve == reserve && !loadout.IsActionLocked, "forced: back in hand the crossbow is not reloading and has exactly its old ammo");

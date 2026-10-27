@@ -30,7 +30,7 @@ ItemInstanceAuthority auth;string reason;Check(ItemInstanceAuthority.TryCreate(n
 // R3 fixture: the gate rolls with its own ad-hoc affix definitions, which the production catalog does not own and the bag now validates every instance against, so the bag carries an explicit TEST catalog (real boots + exactly those affixes).
 var testCatalog=ItemCatalog.CreateForTest(new[]{boots},defs);cleanup.Add(testCatalog);bag.SetCatalog(testCatalog);string before=EditorJsonUtility.ToJson(boots);
 ItemInstance pools;Check(ItemInstance.TryCreateNew(boots,1,AffixRarity.Rare,new[]{new AffixRecord("numeric_0",AffixStatKey.MaxHealth,10),new AffixRecord("numeric_1",AffixStatKey.MaxMana,10)},auth,out pools,out reason),"pool gear");
-rig.Mana.TrySpend(20);float hp=rig.CurrentHealth,mp=rig.Mana.CurrentMana,delay=rig.Mana.RegenDelayRemaining;
+EmberdelveKitFixtures.SpendMana(rig.Mana, 20);float hp=rig.CurrentHealth,mp=rig.Mana.CurrentMana,delay=rig.Mana.RegenDelayRemaining;
 Check(bag.TryAddInstance(pools,out reason),"add pool gear");
 for(int cycle=0;cycle<3;cycle++){
 Check(gear.TryEquipFromInventory(bag.IndexOfInstance(pools.Uid),out reason),"equip pool gear");

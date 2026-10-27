@@ -177,6 +177,10 @@ namespace Emberdelve.EditorTools
                 muzzle, direction, maxRange, CombatRegistry.NextSequence(_rig.CombatId), _clock);
             float before = target.Taken;
             target.Last = DamageInfo.Invalid;
+            // The magazine is the authority's record now (the old rig-side reload no longer refills it behind this gate's back):
+            // keep a round available through the host seam so every probe tests its own rule, not the crossbow's 4-round magazine.
+            RangedCombat probeRanged = _rig.GetComponent<RangedCombat>();
+            if (probeRanged != null && probeRanged.Magazine < 1) EmberdelveKitFixtures.RefundAmmo(probeRanged, 1);
             bool accepted = _authority.LaunchProjectile(intent);
             string reason = _authority.LastAttackRejectReason;
             if (accepted)
@@ -334,8 +338,6 @@ namespace Emberdelve.EditorTools
             AdvanceClock(10f);
             PlaceTarget(15f);
             _head.enabled = true;
-            RangedCombat noVolumesAmmo = _rig.GetComponent<RangedCombat>();
-            if (noVolumesAmmo != null && noVolumesAmmo.Magazine < 1) noVolumesAmmo.RefundAmmo(3);
             Outcome noVolumes = LaunchPlayerProjectile(_target, crossbow, crossbow.rangedRange, _target.Point);
             _head.enabled = false;
             float noVolumesRange = Vector3.Distance(noVolumes.Info.SourcePosition, noVolumes.Info.Point);

@@ -2533,7 +2533,7 @@ namespace Emberdelve.EditorTools
                         if (!_grid.IsWalkable(cell.x, cell.y)) continue;
 
                         // Refill so the matrix measures aim and authority, not the size of the magazine.
-                        if (ranged.Magazine < 2) ranged.RefundAmmo(weapon.magazineSize);
+                        if (ranged.Magazine < 2) EmberdelveKitFixtures.RefundAmmo(ranged, weapon.magazineSize);
 
                         enemy.Health.Heal(10000f);
                         Vector3 root = enemy.transform.position;
@@ -4997,7 +4997,7 @@ namespace Emberdelve.EditorTools
                     $"both warrior skills are off cooldown before the mana refusal test ({caster.CooldownRemaining(0):F1}/{caster.CooldownRemaining(1):F1}s)");
 
                 Check(!_rig.IsDead, $"the warrior is alive for the mana refusal test ({_rig.CurrentHealth:F0}/{_rig.MaxHealth})");
-                mana.TrySpend((int)mana.CurrentMana);
+                EmberdelveKitFixtures.SpendMana(mana, (int)mana.CurrentMana);
                 Check(mana.CurrentMana < dash.EffectiveManaCost, $"mana drained below the kit's cheapest cost ({mana.CurrentMana:F0})");
                 Check(!caster.CanCastSlot(0, out string manaReason), "Dash is refused when mana cannot cover it");
                 Check(manaReason != null && manaReason.ToLower().Contains("mana"), $"the refusal names mana ({manaReason})");
@@ -5015,9 +5015,9 @@ namespace Emberdelve.EditorTools
                     "an unaffordable cast submits nothing to the authority");
 
                 // ---- regen
-                mana.Restore(mana.MaxMana);
+                EmberdelveKitFixtures.RestoreMana(mana, mana.MaxMana);
                 Check(mana.CurrentMana >= mana.MaxMana - 0.01f, $"mana can be restored to full ({mana.CurrentMana:F0}/{mana.MaxMana})");
-                Check(mana.TrySpend(30), "mana spend accepted for the regen measurement");
+                Check(EmberdelveKitFixtures.SpendMana(mana, 30), "mana spend accepted for the regen measurement");
                 float afterSpend = mana.CurrentMana;
                 Check(mana.RegenDelayRemaining > 0f, "spending mana pauses regeneration");
 
@@ -5177,7 +5177,7 @@ namespace Emberdelve.EditorTools
 
                 // ---- ammo refusal: a skill cannot fire without the rounds the weapon actually holds
                 int magazineStart = ranged.Magazine;
-                Check(ranged.TryConsumeAmmo(ranged.Magazine), $"magazine emptied for the ammo refusal test ({magazineStart} -> {ranged.Magazine})");
+                Check(EmberdelveKitFixtures.ConsumeAmmo(ranged, ranged.Magazine), $"magazine emptied for the ammo refusal test ({magazineStart} -> {ranged.Magazine})");
                 float manaBeforeAmmoRefusal = mana.CurrentMana;
                 int acceptedBeforeAmmoRefusal = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
                 Check(!caster.CanCastSlot(0, out string ammoReason), "Multi-shot is refused with an empty magazine");
@@ -5189,12 +5189,12 @@ namespace Emberdelve.EditorTools
                     "a refused volley submits nothing to the authority");
 
                 ClassLoadout.RangedAmmoState bowAmmo = loadout != null ? loadout.GetAmmoState(bow) : null;
-                ranged.Initialize(bow, bowAmmo != null ? bowAmmo.reserve : ranged.Reserve,
+                EmberdelveKitFixtures.ResetAmmo(ranged, bow, bowAmmo != null ? bowAmmo.reserve : ranged.Reserve,
                     bowAmmo != null ? bowAmmo.maxReserve : 0, Mathf.Max(1, bow.magazineSize));
                 Check(ranged.Magazine == bow.magazineSize, $"re-equipping the bow restores its magazine ({ranged.Magazine}/{bow.magazineSize})");
 
                 // ---- mana refusal, before any of the skills are on cooldown
-                mana.TrySpend((int)mana.CurrentMana);
+                EmberdelveKitFixtures.SpendMana(mana, (int)mana.CurrentMana);
                 Check(mana.CurrentMana < multi.EffectiveManaCost, $"mana drained below the kit's costs ({mana.CurrentMana:F0})");
                 Check(!caster.CanCastSlot(0, out string manaReason), "Multi-shot is refused when mana cannot cover it");
                 Check(manaReason != null && manaReason.ToLower().Contains("mana"), $"the refusal names mana ({manaReason})");
@@ -5203,7 +5203,7 @@ namespace Emberdelve.EditorTools
                 Check(!caster.TryCastSlot(0), "an unaffordable volley is refused");
                 Check(Mathf.Abs(mana.CurrentMana - manaBeforeManaRefusal) < 0.001f, "an unaffordable volley spends no mana");
                 Check(ranged.Magazine == magazineBeforeManaRefusal, "an unaffordable volley spends no arrows");
-                mana.Restore(mana.MaxMana);
+                EmberdelveKitFixtures.RestoreMana(mana, mana.MaxMana);
                 Check(mana.CurrentMana >= mana.MaxMana - 0.01f, $"mana restored for the skill tests ({mana.CurrentMana:F0}/{mana.MaxMana})");
 
                 // ---- active 1: Multi-shot, three arrows into three separate targets
@@ -5533,7 +5533,7 @@ namespace Emberdelve.EditorTools
                 Check(ranged.enabled, "ranged combat is live again for the bow");
 
                 // ---- mana regen
-                Check(mana.TrySpend(40), "mana spend accepted for the regen measurement");
+                Check(EmberdelveKitFixtures.SpendMana(mana, 40), "mana spend accepted for the regen measurement");
                 float afterSpend = mana.CurrentMana;
                 Check(mana.RegenDelayRemaining > 0f, "spending mana pauses regeneration");
                 yield return WaitSeconds(classData.manaRegenDelay + 1.5f);

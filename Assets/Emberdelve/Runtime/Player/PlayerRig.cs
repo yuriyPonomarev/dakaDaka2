@@ -20,7 +20,7 @@ namespace Emberdelve.Player
     [RequireComponent(typeof(PlayerMovement))]
     [RequireComponent(typeof(PlayerLook))]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, IWeaponChangeSource, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IGuardStateSource, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback
+    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, IWeaponChangeSource, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IGuardStateSource, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback, IKitSeedSource, IKitView
     {
         [Header("Components")]
         [SerializeField] private EmberdelveInput input;
@@ -183,6 +183,69 @@ namespace Emberdelve.Player
                 EffectiveStatsSnapshot snapshot = EffectiveStats;
                 return snapshot.IsReady ? snapshot.AbilityEffectScale : 1f;
             }
+        }
+
+        // ---- R1c2: the authority owns the kit record; this rig seeds it at defined points and only displays it ----
+
+        private int _kitSeedSuppress;
+        private KitView _authorityKit;
+        private bool _hasAuthorityKit;
+
+        /// <summary>The last authority kit record pushed into this rig (mana, ammunition, reload, epoch). False until the authority has one.</summary>
+        public bool TryGetAuthorityKit(out KitView view)
+        {
+            view = _authorityKit;
+            return _hasAuthorityKit;
+        }
+
+        /// <summary>
+        /// Seeds the combat authority's kit record from this rig. Called at class apply, death, respawn, equipment revision and
+        /// weapon change; a no-op while a class application is still assembling the rig, or when no authority exists (the rig then
+        /// keeps its own R1b behavior).
+        /// </summary>
+        public void SeedKit(KitSeedReason reason)
+        {
+            if (_kitSeedSuppress > 0) return;
+            if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)) return;
+            WireRig();
+
+            KitSeed seed = CaptureKitSeed(reason);
+            authority.SeedKit(CombatSender, _combatId, in seed, out _);
+        }
+
+        public KitSeed CaptureKitSeed(KitSeedReason reason)
+        {
+            KitSeed seed = new KitSeed { Reason = reason, MaxMana = 1 };
+            if (mana != null)
+            {
+                seed.Mana = mana.CurrentMana;
+                seed.MaxMana = mana.MaxMana;
+                seed.ManaRegen = mana.RegenPerSecond;
+                seed.ManaRegenDelay = mana.RegenDelay;
+            }
+
+            WeaponData weapon = ActiveWeapon;
+            seed.ActiveWeaponId = weapon != null && weapon.IsRanged ? weapon.weaponId : string.Empty;
+            seed.Pools = loadout != null ? loadout.CaptureAmmoSeeds(Ranged) : new KitAmmoSeed[0];
+
+            IReadOnlyList<SkillData> active = skills != null ? skills.ActiveSkills : null;
+            if (active == null) seed.ActiveSkills = new SkillData[0];
+            else
+            {
+                seed.ActiveSkills = new SkillData[active.Count];
+                for (int i = 0; i < active.Count; i++) seed.ActiveSkills[i] = active[i];
+            }
+            return seed;
+        }
+
+        /// <summary>The authority pushes its record here; mana and ammunition components become displays of it.</summary>
+        public void ApplyKitView(in KitView view)
+        {
+            _authorityKit = view;
+            _hasAuthorityKit = true;
+            if (mana != null) mana.ApplyView(view.Mana, view.MaxMana, view.ManaRegen, view.ManaRegenDelay, view.ManaSinceSpend, view.ManaRegenAllowed);
+            RangedCombat ranged = Ranged;
+            if (ranged != null) ranged.ApplyKitView(in view);
         }
 
         private RangedCombat _ranged;
@@ -381,6 +444,9 @@ namespace Emberdelve.Player
                 mana.SetRegen(limits.ManaRegen, limits.ManaRegenDelay);
             }
 
+            // R1c2: an equipment revision tells the authority the new ceiling/regen. Clamp-only there: never a refill.
+            SeedKit(KitSeedReason.Revision);
+
             if (movement != null) PushMovementStatSources();
 
             _defense = ResolveDefense(_mainHand);
@@ -517,7 +583,13 @@ namespace Emberdelve.Player
 
             // ClassLoadout is the single class-application point: it configures vitals, mana, the skill kit
             // and the weapon slots, and equipping the primary weapon calls back into ApplyMainHandWeapon.
-            if (loadout != null) loadout.Apply(data, config, this);
+            if (loadout != null)
+            {
+                // R1c2: the rig is still being assembled; the authority is seeded once, below, from the finished rig.
+                _kitSeedSuppress++;
+                try { loadout.Apply(data, config, this); }
+                finally { _kitSeedSuppress--; }
+            }
 
             // ClassLoadout handed movement the passive/gear stack; the attribute term comes from this rig,
             // which is the only owner of the live scores. Both are pushed together so movement resolves one
@@ -526,6 +598,9 @@ namespace Emberdelve.Player
 
             _defense = ResolveDefense(_mainHand);
             InvalidateEffectiveStats();
+
+            // R1c2: a class apply is a run start; the authority rebuilds and refills its record from the finished rig.
+            SeedKit(KitSeedReason.ClassApply);
         }
 
         /// <summary>

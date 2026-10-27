@@ -753,7 +753,7 @@ namespace Emberdelve.EditorTools
                     $"{label}: independent swept-ray precondition finds the expected wall first ({(wallIsInFlightPath && wallHit.collider != null ? wallHit.collider.name : "none")})");
 
                 RangedCombat ranged = rig.GetComponent<RangedCombat>();
-                if (ranged != null && ranged.Magazine < 1) ranged.RefundAmmo(3);
+                if (ranged != null && ranged.Magazine < 1) EmberdelveKitFixtures.RefundAmmo(ranged, 3);
                 _clock += AttackSpacing;
                 AttackIntent launch = new AttackIntent(rig.CombatId, rig.Kind, weapon, 1f, muzzle, direction,
                     maxRange, CombatRegistry.NextSequence(rig.CombatId), _clock);
@@ -785,7 +785,7 @@ namespace Emberdelve.EditorTools
                 // damage/range/LOS, not ammunition, so a legitimate round is loaded in the weapon in hand
                 // (RangedCombat.RefundAmmo) whenever the magazine is empty. The accepted attacks spend it.
                 RangedCombat ranged = weapon.IsRanged ? rig.GetComponent<RangedCombat>() : null;
-                if (ranged != null && ranged.Magazine < 1) ranged.RefundAmmo(3);
+                if (ranged != null && ranged.Magazine < 1) EmberdelveKitFixtures.RefundAmmo(ranged, 3);
 
                 Vector3 origin = rig.AimOrigin;
                 Vector3 hitPoint = _target.CombatCenter;

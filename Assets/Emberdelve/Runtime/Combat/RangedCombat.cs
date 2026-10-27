@@ -31,6 +31,7 @@ namespace Emberdelve.Combat
         private float _drawStartedAt;
         private bool _reloading;
         private float _reloadTimer;
+        private bool _viewBound;
 
         public event Action<AttackIntent> AttackStarted;
         public event Action ShotFired;
@@ -38,6 +39,9 @@ namespace Emberdelve.Combat
         public WeaponData Weapon => _weapon;
         public int Magazine => _magazine;
         public int Reserve => _reserve;
+        internal int MaxReserve => _maxReserve;
+        /// <summary>R1c2: true once the combat authority pushes its ammunition record here; the numbers are then a display.</summary>
+        public bool IsAuthorityView => _viewBound;
         internal bool CanAcceptAmmo(int amount) => _weapon != null && amount > 0 &&
             (_maxReserve <= 0 || _reserve < _maxReserve);
         public bool IsDrawing => _drawing;
@@ -66,6 +70,16 @@ namespace Emberdelve.Combat
         /// for free.
         /// </summary>
         public void Initialize(WeaponData weapon, int startingReserve = 0, int maxReserve = 0, int startingMagazine = -1)
+        {
+            InitializeLocal(weapon, startingReserve, maxReserve, startingMagazine);
+
+            // R1c2: the hand changed, so the authority's record learns it. Pools it already holds win over what is passed
+            // here (a swap is not a refill); only a weapon it has never seen is adopted.
+            if (rig == null) rig = GetComponent<PlayerRig>();
+            if (rig != null) rig.SeedKit(KitSeedReason.Weapon);
+        }
+
+        private void InitializeLocal(WeaponData weapon, int startingReserve, int maxReserve, int startingMagazine)
         {
             _weapon = weapon;
 
@@ -106,12 +120,17 @@ namespace Emberdelve.Combat
 
             if (_reloading)
             {
-                _reloadTimer -= dt;
-                if (_reloadTimer <= 0f) FinishReload();
+                // R1c2: with a kit record the authority runs the timer and moves the rounds.
+                if (!_viewBound)
+                {
+                    _reloadTimer -= dt;
+                    if (_reloadTimer <= 0f) FinishReload();
+                }
             }
             else if (input.ReloadPressed && CanReload)
             {
-                StartReload();
+                if (_viewBound) RequestReload();
+                else StartReload();
             }
 
             if (input.PrimaryPressed && !_reloading && _magazine > 0)
@@ -151,6 +170,31 @@ namespace Emberdelve.Combat
             GameEvents.RaiseToast(OwnerId, "Reloading...");
         }
 
+        private void RequestReload()
+        {
+            if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)) return;
+            if (!authority.TryStartReload(rig.CombatSender, rig.CombatId, out _)) return;
+
+            // The authority has started it (and pushed _reloading/_reloadTimer back into this view).
+            CancelDraw();
+            GameEvents.RaiseToast(OwnerId, "Reloading...");
+        }
+
+        /// <summary>R1c2: the authority's ammunition record for the weapon in hand. This component only displays it.</summary>
+        internal void ApplyKitView(in KitView view)
+        {
+            _viewBound = true;
+            if (_weapon == null || !_weapon.IsRanged || !view.HasActiveAmmo || view.ActiveWeaponId != _weapon.weaponId) return;
+
+            bool changed = _magazine != view.Magazine || _reserve != view.Reserve;
+            _magazine = view.Magazine;
+            _reserve = view.Reserve;
+            _maxReserve = view.MaxReserve;
+            _reloading = view.Reloading;
+            _reloadTimer = view.ReloadRemaining;
+            if (changed) GameEvents.RaiseAmmo(OwnerId, _magazine, _reserve);
+        }
+
         private void FinishReload()
         {
             _reloading = false;
@@ -161,9 +205,17 @@ namespace Emberdelve.Combat
             GameEvents.RaiseAmmo(OwnerId, _magazine, _reserve);
         }
 
-        public void AddAmmo(int amount)
+        internal void AddAmmo(int amount)
         {
             if (_weapon == null || amount <= 0) return;
+
+            // R1c2: a reserve grant (inventory use, pickup) is an authority operation once a kit record exists.
+            if (_viewBound && rig != null && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority granting)
+                && granting is LocalCombatAuthority local && local.HostGrantReserve(rig.CombatId, amount))
+            {
+                return;
+            }
+
             _reserve = _maxReserve > 0 ? Mathf.Min(_reserve + amount, _maxReserve) : _reserve + amount;
             GameEvents.RaiseAmmo(OwnerId, _magazine, _reserve);
         }
@@ -231,7 +283,15 @@ namespace Emberdelve.Combat
 
             // A rejected launch still consumes the fired round locally, matching the old miss/rejection path.
             // Accepted launches spend it once on the authority.
-            if (!accepted) _magazine = Mathf.Max(0, _magazine - 1);
+            if (!accepted)
+            {
+                if (_viewBound && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority forfeiting)
+                    && forfeiting.TryForfeitRound(rig.CombatSender, rig.CombatId))
+                {
+                    // the record lost the round and pushed it back into this view
+                }
+                else _magazine = Mathf.Max(0, _magazine - 1);
+            }
             GameEvents.RaiseAmmo(OwnerId, _magazine, _reserve);
 
             AttackStarted?.Invoke(intent);
