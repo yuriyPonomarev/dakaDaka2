@@ -242,7 +242,7 @@ namespace Emberdelve.Combat
             int sequence = CombatRegistry.NextSequence(rig.CombatId);
             MeleeSwingIntent intent = new MeleeSwingIntent(rig.CombatId, _weapon.weaponId, patternIndex, step, yaw, pitch, sequence);
 
-            if (!authority.TryBeginMeleeSwing(intent, out int swingId, out string reason))
+            if (!authority.TryBeginMeleeSwing(rig.CombatSender, intent, out int swingId, out string reason))
             {
                 CombatDiagnostics.Log("melee-refused", $"[MeleeCombat] swing #{sequence} ({_weapon.weaponId} step {step}) refused by the authority: {reason}", this);
                 return false;

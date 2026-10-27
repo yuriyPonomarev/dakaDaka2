@@ -290,7 +290,7 @@ namespace Emberdelve.Skills
             // The authority decides: it re-checks kit, weapon, cooldown (its own clock), mana and ammo and
             // spends mana and ammo itself. Nothing is spent here, and the activation id the hits must carry
             // is the one the authority hands back.
-            if (!authority.TryBeginSkillCast(rig.CombatId, skill.skillId, out int activationId, out string authorityReason))
+            if (!authority.TryBeginSkillCast(rig.CombatSender, rig.CombatId, skill.skillId, out int activationId, out string authorityReason))
             {
                 Reject(slot, authorityReason);
                 return false;
@@ -303,7 +303,7 @@ namespace Emberdelve.Skills
             // The authority closes the activation either way and never refunds: mana, ammo and cooldown were
             // spent when it opened the cast. Feasibility (e.g. a dash needs a controller) is checked in the
             // behavior's CanCast BEFORE the cast opens, so a behavior failing here is a bug, not a refund.
-            authority.CompleteSkillCast(rig.CombatId, activationId);
+            authority.CompleteSkillCast(rig.CombatSender, rig.CombatId, activationId);
 
             if (!performed)
             {

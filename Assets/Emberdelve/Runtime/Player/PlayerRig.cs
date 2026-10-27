@@ -104,6 +104,12 @@ namespace Emberdelve.Player
 
         public EntityKind Kind => locallyControlled ? EntityKind.LocalPlayer : EntityKind.RemotePlayer;
         public int CombatId => _combatId;
+        /// <summary>
+        /// R1c1: the sender identity this rig's own components put on the commands they send for it. The player sender the run
+        /// director bound at admission; a rig that no run admitted (fixtures, tools) is an unowned entity and acts as the trusted
+        /// host. Local process only: a server takes the sender from the connection and never from the rig.
+        /// </summary>
+        public CombatSenderId CombatSender => CombatSenders.TryGetOwner(_combatId, out CombatSenderId owner) ? owner : CombatSenderId.TrustedHost;
         public int TeamId => CombatTeams.TeamForParty(_partyId);
 
         // ---- IInteractionActor (R2) ----

@@ -60,7 +60,7 @@ namespace Emberdelve.Skills
             int sequence = CombatRegistry.NextSequence(context.Rig.CombatId);
             SkillIntent intent = new SkillIntent(context.Rig.CombatId, context.Rig.Kind, skill, weapon,
                 origin, aim, range, sequence, Time.time, default, context.ActivationId);
-            return context.Authority.LaunchSkillProjectile(intent, projectileIndex) ? 1 : 0;
+            return context.Authority.LaunchSkillProjectile(context.Rig.CombatSender, intent, projectileIndex, out _) ? 1 : 0;
         }
 
         /// <summary>Spread direction for shot <paramref name="index"/> of <paramref name="count"/>, centered on the aim.</summary>

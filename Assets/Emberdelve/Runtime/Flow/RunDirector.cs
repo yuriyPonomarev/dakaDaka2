@@ -315,6 +315,10 @@ namespace Emberdelve.Flow
 
             if (!TryResolveParty(requestedParty, out int party, out reason)) return false;
 
+            // R1c1: the admitted player owns its rig's combat id as a command sender (sender id = the player id this
+            // session is keyed by). Bound before anything else about the rig changes; a refusal leaves it untouched.
+            if (!CombatSenders.Bind(CombatSenderId.ForPlayer(rig.PlayerId), rig.CombatId, out reason)) return false;
+
             rig.AssignParty(party, locallyControlled);
 
             // R4: the bag mints its starting kit from the raid's one issuer, not from a private one.

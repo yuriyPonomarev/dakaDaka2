@@ -71,7 +71,7 @@ namespace Emberdelve.Skills
                 SkillIntent intent = new SkillIntent(rig.CombatId, rig.Kind, skill, context.ActiveWeapon,
                     center, outward, skill.radius, sequence, Time.time, default, context.ActivationId);
 
-                context.Authority.SubmitSkill(intent, hit);
+                context.Authority.SubmitSkill(rig.CombatSender, intent, hit, out _);
             }
 
             return true;

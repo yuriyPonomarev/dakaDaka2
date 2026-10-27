@@ -224,7 +224,7 @@ namespace Emberdelve.Combat
             AttackIntent intent = new AttackIntent(rig.CombatId, rig.Kind, _weapon, charge, muzzle, direction,
                 range, sequence, Time.time);
             bool accepted = GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
-                            && authority.LaunchProjectile(intent);
+                            && authority.LaunchProjectile(rig.CombatSender, intent, out _);
 
             CombatDiagnostics.Log("ranged-shot",
                 $"[RangedCombat] projectile #{sequence} ({_weapon.weaponId}) charge {charge:F2}, accepted={accepted}", this);

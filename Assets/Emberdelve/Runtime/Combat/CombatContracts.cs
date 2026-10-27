@@ -333,6 +333,20 @@ namespace Emberdelve.Combat
 
         /// <summary>Launches one projectile for an open ranged-skill activation; targets are discovered during flight.</summary>
         bool LaunchSkillProjectile(SkillIntent intent, int projectileIndex);
+
+        // ---- R1c1: sender-bound commands -------------------------------------------------------------------------
+        // The same commands, carrying the identity of whoever sent them. The authority refuses, before reading or
+        // changing any state, a command whose instigator/caster combat id the sender does not own (see
+        // CombatSenders.Authorize). Player code uses these with PlayerRig.CombatSender; the overloads above stay the
+        // local trusted path for enemies, fixtures and tools.
+
+        bool SubmitAttack(CombatSenderId sender, AttackIntent intent, HitCandidate hit, out string reason);
+        bool TryBeginMeleeSwing(CombatSenderId sender, in MeleeSwingIntent intent, out int swingId, out string reason);
+        bool LaunchProjectile(CombatSenderId sender, AttackIntent intent, out string reason);
+        bool TryBeginSkillCast(CombatSenderId sender, int casterCombatId, string skillId, out int activationId, out string reason);
+        bool CompleteSkillCast(CombatSenderId sender, int casterCombatId, int activationId);
+        bool SubmitSkill(CombatSenderId sender, SkillIntent intent, HitCandidate hit, out string reason);
+        bool LaunchSkillProjectile(CombatSenderId sender, SkillIntent intent, int projectileIndex, out string reason);
     }
 
     /// <summary>
@@ -428,6 +442,7 @@ namespace Emberdelve.Combat
             _entities.Clear();
             _ordered.Clear();
             _lastSequence.Clear();
+            CombatSenders.Reset();
             _nextId = 1;
             CombatTeams.FriendlyFire = false;
         }
@@ -458,6 +473,7 @@ namespace Emberdelve.Combat
         public static void Unregister(int id, ICombatEntity entity)
         {
             _entities.Remove(id);
+            CombatSenders.Unbind(id);
             if (entity != null) _ordered.Remove(entity);
         }
 
