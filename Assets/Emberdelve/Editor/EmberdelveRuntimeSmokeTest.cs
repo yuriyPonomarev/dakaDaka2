@@ -2124,6 +2124,46 @@ namespace Emberdelve.EditorTools
                 Check(melee.LastSwingId != firstId && melee.ComboStep == 1,
                     $"{label}: the press during the recovery was buffered and became combo step 2 (step {melee.ComboStep + 1}, swing {melee.LastSwingId} after {firstId})");
                 yield return WaitUntil(() => !melee.IsSwinging, 3f);
+
+                // ---- 4. D1c5 buffered-press edges, real time. (a) only a RECOVERY press is buffered: a press during the windup is dropped
+                yield return WaitUntil(() => Ready() && ExpectedComboStep() == 0, weapon.cooldown + 4f);
+                enemy.Health.Heal(10000f);
+                int edgeBefore = melee.LastSwingId;
+                input.PrimaryPressedOverride = true;
+                yield return null;
+                input.PrimaryPressedOverride = null;
+                yield return WaitFrames(1);
+                int edgeSwing = melee.LastSwingId;
+                Check(edgeSwing != edgeBefore && melee.IsSwinging, $"{label}: buffer edge (a): the first press began a swing");
+                yield return WaitSeconds(Mathf.Max(0.02f, melee.ActiveTiming.Windup * 0.4f));
+                input.PrimaryPressedOverride = true;
+                yield return null;
+                input.PrimaryPressedOverride = null;          // pressed during the windup: not buffered
+                yield return WaitSeconds(melee.ActiveTiming.Total + weapon.cooldown + 0.4f);
+                Check(melee.LastSwingId == edgeSwing, $"{label}: buffer edge (a): a press during the windup is not buffered, no second swing followed (swing {melee.LastSwingId}, expected {edgeSwing})");
+
+                // (b) a press buffered in the recovery while the guard is held does not fire (block and attack are exclusive) and it
+                // expires after its 0.5 s: releasing the guard later does not start a swing
+                yield return WaitUntil(() => Ready() && ExpectedComboStep() == 0, weapon.cooldown + 4f + weapon.comboWindow);
+                enemy.Health.Heal(10000f);
+                int guardBefore = melee.LastSwingId;
+                input.PrimaryPressedOverride = true;
+                yield return null;
+                input.PrimaryPressedOverride = null;
+                yield return WaitFrames(1);
+                int guardSwing = melee.LastSwingId;
+                Check(guardSwing != guardBefore, $"{label}: buffer edge (b): the first press began a swing");
+                yield return WaitSeconds(melee.ActiveTiming.ActiveEnd + 0.05f);               // inside the recovery
+                input.SecondaryHeldOverride = true;
+                input.PrimaryPressedOverride = true;
+                yield return null;
+                input.PrimaryPressedOverride = null;          // the only extra press, buffered while the guard is held
+                yield return WaitSeconds(melee.ActiveTiming.Recovery + 0.9f);               // past the swing, the cooldown and the 0.5 s buffer
+                Check(melee.LastSwingId == guardSwing, $"{label}: buffer edge (b): no swing starts while the guard is held (swing {melee.LastSwingId}, expected {guardSwing})");
+                input.SecondaryHeldOverride = null;
+                yield return WaitSeconds(0.4f);
+                Check(melee.LastSwingId == guardSwing && !melee.IsSwinging, $"{label}: buffer edge (b): the expired buffered press does not fire when the guard is released");
+                yield return WaitSeconds(weapon.comboWindow + 0.3f);
             }
 
             private bool PrepareRealCombat(out EmberdelveInput input)
@@ -2157,6 +2197,7 @@ namespace Emberdelve.EditorTools
                 input.PrimaryPressedOverride = null;
                 input.PrimaryReleasedOverride = null;
                 input.PrimaryHeldOverride = null;
+                input.SecondaryHeldOverride = null;
                 EnemyAgent[] agents = FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None);
                 for (int i = 0; i < agents.Length; i++) agents[i].enabled = true;
             }
@@ -2373,6 +2414,24 @@ namespace Emberdelve.EditorTools
                 Debug.Log($"[Emberdelve][Smoke:{Mode}] {label}: {exercised} cases asserted, {skippedAmbiguous} skipped as ambiguous");
                 Check(skippedAmbiguous <= 2, $"{label}: at most 2 cases are ambiguous band edges ({skippedAmbiguous})");
             }
+
+            /// <summary>D1c5: the hit-location table as literals (head 1.5, body 1.0, arms 0.8, hands 0.7, legs 0.6, feet 0.5), independent of the data.</summary>
+            private static float LiteralLocationFactor(HitLocation location)
+            {
+                switch (location)
+                {
+                    case HitLocation.Head: return 1.5f;
+                    case HitLocation.Body: return 1.0f;
+                    case HitLocation.Arms: return 0.8f;
+                    case HitLocation.Hands: return 0.7f;
+                    case HitLocation.Legs: return 0.6f;
+                    case HitLocation.Feet: return 0.5f;
+                    default: return 1.0f;
+                }
+            }
+
+            /// <summary>D1c5: the sword's impact zones as literals (0.7 from the hilt, 0.9 from t 0.35, 1.0 from t 0.70).</summary>
+            private static float LiteralSwordZone(float t) => t >= 0.70f ? 1.0f : t >= 0.35f ? 0.9f : 0.7f;
 
             /// <summary>
             /// The test's own prediction of where a pattern's first contact with a target lands: the same published geometry helpers
@@ -4689,6 +4748,25 @@ namespace Emberdelve.EditorTools
                         Debug.Log($"[Emberdelve][Smoke:{Mode}] predicted contact {predictedLocation} at t={predictedT:F2} (zone x{zoneMultiplier:F2}), delivered {captured.Amount:F2}, expected {expected:F2}");
                         Check(Mathf.Abs(captured.Amount - expected) < 0.8f,
                             $"melee damage is weapon base x passive x predicted location x predicted zone ({captured.Amount:F1} vs expected {expected:F1}, {predictedLocation} x{locationMultiplier:F2}, zone x{zoneMultiplier:F2})");
+
+                        // D1c5: the same prediction against LITERAL factors written here (the D1b hit-location table and the sword's
+                        // zone bands, never read from the data in code), with a tolerance of rounding only. Location and the headshot
+                        // flag must agree with the prediction too. A contact within 0.01 of a zone edge is the one case where the
+                        // test's own sampler and the authority's grid could land on different sides: it is logged and not asserted.
+                        float literalLocation = LiteralLocationFactor(predictedLocation);
+                        float literalZone = LiteralSwordZone(predictedT);
+                        bool nearZoneEdge = Mathf.Abs(predictedT - 0.35f) < 0.01f || Mathf.Abs(predictedT - 0.70f) < 0.01f;
+                        Check(captured.Location == predictedLocation && captured.Headshot == (predictedLocation == HitLocation.Head),
+                            $"melee hit location is the predicted one ({captured.Location} vs {predictedLocation}, headshot {captured.Headshot})");
+                        Check(Mathf.Abs(locationMultiplier - literalLocation) < 1e-4f && (nearZoneEdge || Mathf.Abs(zoneMultiplier - literalZone) < 1e-4f),
+                            $"the data's location x{locationMultiplier:F2} and zone x{zoneMultiplier:F2} equal the literal table x{literalLocation:F2} / x{literalZone:F2} (t={predictedT:F3})");
+                        if (!nearZoneEdge)
+                        {
+                            float literalExpected = sword.baseDamage * outgoingMelee * literalLocation * literalZone;
+                            Check(Mathf.Abs(captured.Amount - literalExpected) < 0.15f,
+                                $"melee damage equals base {sword.baseDamage:F0} x passive {outgoingMelee:F3} x literal location {literalLocation:F2} x literal zone {literalZone:F2} = {literalExpected:F2} ({captured.Amount:F2})");
+                        }
+                        else Debug.Log($"[Emberdelve][Smoke:{Mode}] contact t={predictedT:F3} is on a zone edge; the literal damage check is skipped");
                         Check(captured.Amount > sword.baseDamage * locationMultiplier * zoneMultiplier + 1f,
                             $"the passive made the swing hit harder than the weapon alone at the same contact ({captured.Amount:F1} > {sword.baseDamage * locationMultiplier * zoneMultiplier:F1})");
                         Check(captured.SourceCombatId == _rig.CombatId && captured.SourceKind == EntityKind.LocalPlayer,

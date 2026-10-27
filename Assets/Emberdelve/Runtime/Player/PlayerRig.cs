@@ -20,7 +20,7 @@ namespace Emberdelve.Player
     [RequireComponent(typeof(PlayerMovement))]
     [RequireComponent(typeof(PlayerLook))]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, IWeaponChangeSource, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback
+    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, IWeaponChangeSource, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IGuardStateSource, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback
     {
         [Header("Components")]
         [SerializeField] private EmberdelveInput input;
@@ -805,8 +805,14 @@ namespace Emberdelve.Player
             return true;
         }
 
+        // D1c5: the guard flag does not reduce incoming damage while this rig's own swing runs on the authority (the
+        // authority also refuses a swing begin while the flag is up, so the two states never legitimately overlap).
         private bool IsGuardingWithDefense(DefenseProfile defense) =>
-            _guardHeld && defense.CanBlock && !IsDead && !IsGuardStaggered;
+            _guardHeld && defense.CanBlock && !IsDead && !IsGuardStaggered && !OwnSwingRunning;
+
+        private bool OwnSwingRunning =>
+            GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
+            && authority is ICombatFlowState flow && flow.IsSwingInProgress(_combatId);
 
         public void PlaySwingVisual(WeaponData weapon, SwingPatternData pattern)
         {

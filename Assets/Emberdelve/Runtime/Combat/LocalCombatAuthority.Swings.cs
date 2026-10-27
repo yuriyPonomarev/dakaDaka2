@@ -163,8 +163,23 @@ namespace Emberdelve.Combat
         private HitLocationTable LocationTable =>
             config != null && config.hitLocations != null ? config.hitLocations : HitLocationTable.Default;
 
-        private LayerMask SwingLevelMask =>
-            config != null ? config.levelMask : (LayerMask)LayerMask.GetMask(GameConfig.LevelLayerName);
+        /// <summary>
+        /// D1c5: what can stop a swing. The level mask MINUS every prop layer (interact and loot layers, plus the config's
+        /// interact mask): chests, the Ember Gate pillars and loot are walk-through for a blade by design (a sword does not
+        /// stop on a chest between the attacker and the target; walls are what a swing recoils from). Trigger colliders are
+        /// ignored by every query below (QueryTriggerInteraction.Ignore). Derived, not serialized: a config whose level mask
+        /// was widened to include a prop layer still cannot make props blockers.
+        /// </summary>
+        internal LayerMask SwingBlockerMask
+        {
+            get
+            {
+                int level = config != null ? config.levelMask.value : LayerMask.GetMask(GameConfig.LevelLayerName);
+                int props = LayerMask.GetMask(GameConfig.InteractLayerName, GameConfig.LootLayerName);
+                if (config != null) props |= config.interactMask.value;
+                return level & ~props;
+            }
+        }
 
         private void FixedUpdate()
         {
@@ -186,6 +201,12 @@ namespace Emberdelve.Combat
             {
                 _chains.Remove(intent.InstigatorCombatId);
                 return RejectSwing(intent, "instigator is dead", out reason);
+            }
+
+            // D1c5 (M-c, authority half): block and attack are exclusive. Nothing is stamped or spent on a refusal.
+            if (instigator is IGuardStateSource guardState && guardState.IsGuarding)
+            {
+                return RejectSwing(intent, "instigator is guarding: lower the guard before swinging", out reason);
             }
 
             if (!(instigator is IActiveWeaponProvider holder)) return RejectSwing(intent, "instigator has no authoritative weapon", out reason);
@@ -668,7 +689,7 @@ namespace Emberdelve.Combat
             // the segment to nothing and always stops the swing.
             float clip = length;
             bool wall = false;
-            LayerMask mask = SwingLevelMask;
+            LayerMask mask = SwingBlockerMask;
             if (mask.value != 0)
             {
                 // The line from the eye to the hand is tested too: a swing cannot start around an outside corner

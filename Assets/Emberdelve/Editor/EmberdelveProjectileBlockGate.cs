@@ -545,13 +545,21 @@ namespace Emberdelve.EditorTools
                 int pattern = _sword.HasComboChain ? _sword.comboSteps[0].patternIndex : 0;
                 MeleeSwingIntent swing = new MeleeSwingIntent(_defender.CombatId, _sword.weaponId, pattern, 0,
                     yaw, pitch, CombatRegistry.NextSequence(_defender.CombatId));
+                // D1c5: a swing cannot begin while the guard is up, so the guard is lowered for the begin and raised again
+                // afterwards (a client that raises it mid swing): the blade must still be unavailable throughout the swing.
+                _defender.SetGuardHeld(false);
                 bool began = _authority.TryBeginMeleeSwing(swing, out _, out string swingReason);
                 Check(began, "authoritative swing starts for live guard eligibility test (" + swingReason + ")");
+                _defender.SetGuardHeld(true);
                 if (began)
                     Check(!_defender.TryGetProjectileGuardBlade(out _), "an active authority swing disables projectile blade guard");
             }
             else Check(false, "sword has an aim-resolvable swing pattern for the active-swing guard test");
 
+            // D1c5: the guard flag no longer reduces damage while the defender's own swing runs, so the swing is retired on the
+            // authority clock before the shield's directional block semantics are probed (they were probed mid swing before).
+            _clock += _sword.cooldown * 4f;
+            _authority.StepSwings();
             _defender.SetGuardHeld(false);
             _defender.SetOffhandWeapon(_originalOffhand);
             Check(_defender.Defense.HasShield && !_defender.CanParry, "restored offhand shield keeps block without enabling parry");

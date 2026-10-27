@@ -152,6 +152,25 @@ namespace Emberdelve.Data
         public bool UsesSweptMelee => !IsRanged && swingPatterns != null && swingPatterns.Length > 0;
 
         /// <summary>
+        /// D1c5: the timings a card, tooltip or HUD should SHOW. The pattern is authoritative for a swept melee weapon (its first
+        /// pattern, the one step 0 swings), so the display can never drift from what the authority runs. The serialized
+        /// <c>windupTime</c> / <c>activeWindow</c> / <c>recoveryTime</c> fields stay as the data of weapons without patterns
+        /// (ranged, legacy) and as the build's authoring seed; no reader outside this type should use them for a melee weapon.
+        /// </summary>
+        public SwingTiming DisplayTiming
+        {
+            get
+            {
+                if (UsesSweptMelee && swingPatterns[0] != null) return swingPatterns[0].Timing;
+                return new SwingTiming(windupTime, activeWindow, recoveryTime, 0f);
+            }
+        }
+
+        public float DisplayWindup => DisplayTiming.Windup;
+        public float DisplayActive => DisplayTiming.Active;
+        public float DisplayRecovery => DisplayTiming.Recovery;
+
+        /// <summary>
         /// Resolves a (combat step, pattern index) pair to the pattern the weapon allows. The combo step is the
         /// seam D1b needs: today only step 0 exists, so any other step is refused; D1b adds data (a chain per
         /// step) behind this one function instead of touching the authority or the client.

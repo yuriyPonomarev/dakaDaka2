@@ -329,6 +329,17 @@ namespace Emberdelve.Core
     }
 
     /// <summary>
+    /// D1c5: an entity that reports whether its guard is up right now (the existing <c>PlayerRig.IsGuarding</c> read).
+    /// The combat authority refuses a melee swing begin while the instigator reports true, so a forged client cannot
+    /// block and attack at once. The guard flag itself is still client-held until U3B; this only removes the offline
+    /// window. Optional: an entity that does not implement it is never refused.
+    /// </summary>
+    public interface IGuardStateSource
+    {
+        bool IsGuarding { get; }
+    }
+
+    /// <summary>
     /// Defenders that wear physical armor expose their CURRENT effective armor rating here, so the mitigation
     /// is the authority's own read of the defender on the hit it already accepted - the same shape as
     /// <see cref="IDefenseProvider"/>. An <see cref="Emberdelve.Combat.AttackIntent"/>/

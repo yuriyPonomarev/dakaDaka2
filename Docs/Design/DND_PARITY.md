@@ -103,6 +103,18 @@ DaD changes every season, so treat any number as "current shape", not as a spec.
 | Healing | Potions and bandages heal over time, with a use time. Potions glow and reveal you [V]. | Potion heals instantly inside the bag (`Inventory.TryUseSlot`, Health F6). | S | **D3/R6**: heal over time with a use channel |
 | Doors, traps, stealth | Doors open, close and break; door play is central. Spike/pressure traps, mimic chests, crouch-walk is quieter, footsteps carry far [U]. | Crouch exists (`Runtime/Movement/PlayerMovement.cs`). No doors, traps or footstep audio rules. | M | **D8** (doors, traps), U5B (footstep audibility as a gameplay rule) |
 
+### 1.5a Recorded combat rules (D1a to D1c5, our own rules where the reference is silent)
+
+These are implementation rules the swept combat follows today. They are ours (not copied numbers); the authority applies them offline and a server would run the same code.
+
+- **Melee location: deepest volume inside a contact window.** The first time a swing's damage segment (inflated by the pattern's sweep radius) touches any of a target's hit volumes, a short contact window opens (`contactWindow`, 0.016 to 0.020 s for the shipped patterns). Every sample inside the window keeps testing; the volume the segment penetrated DEEPEST wins the location (ties go to the more important location, head before body before limbs). Damage is applied once, after the window closes, so a blade that grazes an arm and then bites into the torso inside the window counts as a torso hit. One hit per target per swing.
+- **Projectile location: first touch.** An arrow or bolt takes the location of the first hit volume it touches along its step segment (D1c3, user decision). There is no window and no depth rule for projectiles; the location table is the same one melee uses, the location is decided by the authority and never claimed by the client, and a target without hit volumes is x1.0 `Unspecified`.
+- **Enemies swing too.** The Hollow Servitor's claw and the Ashen Warden's maul begin authority-owned swept swings (D1c4) with the same sweep, wall stop, location table, guard and guard break as a player; the telegraph wedge is the ground projection of the swing pattern's yaw range. Brain timings are unchanged: the swing begins when the brain requests the attack, so the player sees the telegraph plus the short pattern windup before damage.
+- **Swing turn ceiling: 720 degrees per second.** While a swing runs (windup, active and recovery) the aim pose the authority sweeps follows the reported pose at no more than 720 deg/s (yaw and pitch each); the excess is discarded. It is an anti-cheat ceiling, not a feel limit: the camera and the weapon visual are not slowed (`CombatFlowTuning.swingTurnCeilingDegPerSec`; positive is used as is, 0 is unset and means 720, negative means unlimited for tests).
+- **Block and attack are exclusive (D1c5).** The authority refuses a swing begin while the instigator reports a raised guard, and a raised guard does not reduce damage while the defender's own swing runs. The guard flag itself is still client-held until U3B.
+- **Props do not stop swings (D1c5).** Chests, Ember Gate pillars, loot and trigger colliders are not swing blockers; only level geometry (the level layer minus the prop layers, triggers ignored) stops a swing.
+- **Pattern timings are authoritative (D1c5).** For a weapon with swing patterns, windup, active and recovery come from the pattern (`WeaponData.DisplayTiming` for any card, tooltip or HUD); the weapon's own timing fields are kept for ranged and pattern-less weapons.
+
 ### 1.6 PvE
 
 | Mechanic | Dark and Darker | Emberdelve now | Gap | Deliver in |

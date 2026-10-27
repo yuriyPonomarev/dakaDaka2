@@ -86,8 +86,11 @@ namespace Emberdelve.EditorTools
         // Fakes
         // ------------------------------------------------------------------------------------------------
 
-        private sealed class Swinger : ICombatEntity, IActiveWeaponProvider, IWeaponChangeSource, IAimPoseProvider
+        private sealed class Swinger : ICombatEntity, IActiveWeaponProvider, IWeaponChangeSource, IAimPoseProvider, IGuardStateSource
         {
+            /// <summary>D1c5: the guard flag a fixture raises (the authority refuses a swing begin while it is up).</summary>
+            public bool Guarding;
+            public bool IsGuarding => Guarding;
             public int CombatId { get; set; }
             /// <summary>Bumped by a fixture to model every weapon change, also an A-B-A swap that leaves Weapon unchanged.</summary>
             public int WeaponChangeCount { get; set; }
@@ -260,6 +263,22 @@ namespace Emberdelve.EditorTools
             return wall;
         }
 
+        /// <summary>A box collider on a named layer (or the level layer as a trigger) standing in for a chest, a gate pillar or a pickup.</summary>
+        private GameObject AddProp(Scenario s, Vector3 center, Vector3 size, string layerName, bool trigger)
+        {
+            GameObject prop = new GameObject("FlowGate_Prop_" + layerName + (trigger ? "_trigger" : string.Empty));
+            prop.transform.position = center + Origin;
+            BoxCollider box = prop.AddComponent<BoxCollider>();
+            box.size = size;
+            box.isTrigger = trigger;
+            int layer = LayerMask.NameToLayer(layerName);
+            Check(layer >= 0, $"the layer '{layerName}' exists in the project");
+            if (layer >= 0) prop.layer = layer;
+            s.Props.Add(prop);
+            Physics.SyncTransforms();
+            return prop;
+        }
+
         private MeleeSwingIntent Intent(Swinger who, int step, int pattern, string weaponId = null, int? instigator = null)
         {
             int id = instigator ?? who.CombatId;
@@ -340,6 +359,8 @@ namespace Emberdelve.EditorTools
             Section("impact zones", ImpactZones);
             Section("hit slow (authority rules)", HitSlowRules);
             Section("D1c1: review follow-ups (authority)", D1c1Authority);
+            Section("D1c5: props do not stop swings", PropsDoNotBlock);
+            Section("D1c5: display timing derives from the pattern", DisplayTimingFromPattern);
 
             foreach (IEnumerator part in new[] { RigSections() })
             {
@@ -876,6 +897,111 @@ namespace Emberdelve.EditorTools
         }
 
         // ------------------------------------------------------------------------------------------------
+        // D1c5: props (chests, gate pillars, loot, trigger colliders) are not swing blockers; level walls are
+        // ------------------------------------------------------------------------------------------------
+
+        private void PropsDoNotBlock()
+        {
+            ZonesOff();
+            int levelBits = LayerMask.GetMask(GameConfig.LevelLayerName);
+            int interactBits = LayerMask.GetMask(GameConfig.InteractLayerName);
+            int lootBits = LayerMask.GetMask(GameConfig.LootLayerName);
+            Check(_authority.SwingBlockerMask.value == levelBits, "D1c5 props: the swing blocker mask is the level layer alone");
+            Check((_authority.SwingBlockerMask.value & (interactBits | lootBits)) == 0, "D1c5 props: no interact or loot layer is in the swing blocker mask");
+
+            // (name, layer, trigger, expected to stop the swing)
+            (string label, string layer, bool trigger, bool blocks)[] cases =
+            {
+                ("no obstacle (control)", null, false, false),
+                ("chest on the interact layer", GameConfig.InteractLayerName, false, false),
+                ("Ember Gate pillar on the interact layer", GameConfig.InteractLayerName, false, false),
+                ("pickup on the loot layer", GameConfig.LootLayerName, false, false),
+                ("trigger collider on the level layer", GameConfig.LevelLayerName, true, false),
+                ("level wall", GameConfig.LevelLayerName, false, true)
+            };
+
+            foreach ((string label, string layer, bool trigger, bool blocks) c in cases)
+            {
+                Scenario s = NewScenario(_sword);
+                Dummy target = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                if (c.layer != null) AddProp(s, new Vector3(0f, 1.8f, 1.0f), new Vector3(8f, 4f, 0.3f), c.layer, c.trigger);
+                MeleeSwingStatus st = SwingStep(s, 0, out bool accepted, out string why);
+                Check(accepted, $"D1c5 props: {c.label}: the swing begins ({why})");
+                Check(st.WallStopped == c.blocks, $"D1c5 props: {c.label}: {(c.blocks ? "the swing stops" : "the swing is not stopped")} ({st.EndReason})");
+                Check(WasHit(st, target) == !c.blocks, $"D1c5 props: {c.label}: the target behind it {(c.blocks ? "is not touched" : "is hit")}");
+                Cooldown(3f);
+                s.Dispose();
+            }
+
+            // a config whose level mask was widened to include the prop layers still cannot make them blockers
+            LayerMask saved = _config.levelMask;
+            _config.levelMask = levelBits | interactBits | lootBits;
+            Check(_authority.SwingBlockerMask.value == levelBits, "D1c5 props: a widened level mask still derives the level layer alone");
+            foreach (string layer in new[] { GameConfig.InteractLayerName, GameConfig.LootLayerName })
+            {
+                Scenario s = NewScenario(_sword);
+                Dummy target = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                AddProp(s, new Vector3(0f, 1.8f, 1.0f), new Vector3(8f, 4f, 0.3f), layer, false);
+                MeleeSwingStatus st = SwingStep(s, 0, out bool accepted, out _);
+                Check(accepted && !st.WallStopped && WasHit(st, target), $"D1c5 props: widened mask, prop on {layer}: still no stop, target hit");
+                Cooldown(3f);
+                s.Dispose();
+            }
+            _config.levelMask = saved;
+
+            // the real Level01 scene: no collider on a prop layer is in the mask, whatever built it
+            int inspected = 0;
+            bool leaked = false;
+            foreach (Collider col in FindObjectsByType<Collider>(FindObjectsSortMode.None))
+            {
+                if (((1 << col.gameObject.layer) & (interactBits | lootBits)) == 0) continue;
+                inspected++;
+                if (((1 << col.gameObject.layer) & _authority.SwingBlockerMask.value) != 0) leaked = true;
+            }
+            Check(!leaked, $"D1c5 props: none of the {inspected} interact/loot-layer colliders in Level01 is a swing blocker");
+            GameObject gate = GameObject.Find("Ember_Gate");
+            Check(gate == null || gate.layer == LayerMask.NameToLayer(GameConfig.InteractLayerName), "D1c5 props: the Ember Gate is on the interact layer (so its pillars are not blockers)");
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // D1c5: what cards / tooltips / the HUD show is the pattern's timing for a swept weapon
+        // ------------------------------------------------------------------------------------------------
+
+        private void DisplayTimingFromPattern()
+        {
+            foreach ((WeaponData weapon, string label) c in new[] { (_sword, "sword"), (_rapier, "rapier"), (_claw, "claw"), (_maul, "maul") })
+            {
+                SwingPatternData first = c.weapon.swingPatterns[0];
+                Near(first.windupTime, c.weapon.DisplayWindup, 1e-6f, $"D1c5 display: {c.label} windup is the first pattern's");
+                Near(first.activeTime, c.weapon.DisplayActive, 1e-6f, $"D1c5 display: {c.label} active is the first pattern's");
+                Near(first.recoveryTime, c.weapon.DisplayRecovery, 1e-6f, $"D1c5 display: {c.label} recovery is the first pattern's");
+            }
+
+            foreach ((WeaponData weapon, string label) c in new[] { (_bow, "bow"), (_crossbow, "crossbow") })
+            {
+                Near(c.weapon.windupTime, c.weapon.DisplayWindup, 1e-6f, $"D1c5 display: {c.label} (no patterns) keeps the weapon's windup field");
+                Near(c.weapon.activeWindow, c.weapon.DisplayActive, 1e-6f, $"D1c5 display: {c.label} keeps the weapon's active field");
+                Near(c.weapon.recoveryTime, c.weapon.DisplayRecovery, 1e-6f, $"D1c5 display: {c.label} keeps the weapon's recovery field");
+            }
+
+            // a weapon whose serialized fields disagree with its pattern shows the pattern
+            SwingPatternData pattern = UnityEngine.Object.Instantiate(_sword.swingPatterns[0]);
+            _cleanup.Add(pattern);
+            pattern.windupTime = 0.50f;
+            pattern.activeTime = 0.21f;
+            pattern.recoveryTime = 0.77f;
+            WeaponData clone = UnityEngine.Object.Instantiate(_sword);
+            _cleanup.Add(clone);
+            clone.windupTime = 0.01f;
+            clone.activeWindow = 0.02f;
+            clone.recoveryTime = 0.03f;
+            clone.swingPatterns = new[] { pattern };
+            Near(0.50f, clone.DisplayWindup, 1e-6f, "D1c5 display: a pattern that disagrees with the weapon fields wins (windup 0.50, not 0.01)");
+            Near(0.21f, clone.DisplayActive, 1e-6f, "D1c5 display: active 0.21, not 0.02");
+            Near(0.77f, clone.DisplayRecovery, 1e-6f, "D1c5 display: recovery 0.77, not 0.03");
+        }
+
+        // ------------------------------------------------------------------------------------------------
         // 5. rapier chain
         // ------------------------------------------------------------------------------------------------
 
@@ -1183,6 +1309,7 @@ namespace Emberdelve.EditorTools
             {
                 MovePhases();
                 GuardBreak();
+                GuardExclusion();
                 EnemyClawAgainstTheRig();
                 StaminaSource();
                 HudSection();
@@ -1450,6 +1577,85 @@ namespace Emberdelve.EditorTools
             Check(Array.TrueForAll(damageFields, x => !x.Contains("parry")), "DamageInfo has no parry state: guard break did not introduce one");
 
             _clock += 2f;
+        }
+
+        // ---- D1c5: block and attack are exclusive (authority half of M-c) --------------------------------
+
+        private void GuardExclusion()
+        {
+            ZonesOff();
+            _rig.SetGuardHeld(false);
+            _rig.Health.Heal(1000f);
+            _authority.StepSwings();
+            Cooldown(3f);
+
+            // fake instigator that reports a raised guard
+            Scenario s = NewScenario(_sword, new Vector3(30f, 1.8f, 0f));      // 30 m from the rig
+            s.Who.Guarding = true;
+            MeleeSwingIntent forged = Intent(s.Who, 0, 0);
+            int rejectedBefore = _authority.RejectedCount;
+            int startedBefore = _authority.SwingsStarted;
+            int activeBefore = _authority.ActiveSwingCount;
+            int chainsBefore = _authority.ChainEntryCount;
+            bool ok = _authority.TryBeginMeleeSwing(forged, out int id, out string why);
+            Check(!ok && id == 0, "D1c5 guard: a swing begin while the instigator is guarding is refused");
+            Check(why.Contains("guarding") && _authority.LastAttackRejectReason == why, $"D1c5 guard: the refusal says why ({why})");
+            Check(_authority.RejectedCount == rejectedBefore + 1 && _authority.SwingsStarted == startedBefore
+                  && _authority.ActiveSwingCount == activeBefore && _authority.ChainEntryCount == chainsBefore,
+                "D1c5 guard: refusal changes nothing (one more rejection, no swing, no chain)");
+            Check(!_authority.IsSwingInProgress(s.Who.CombatId), "D1c5 guard: no swing is in progress after the refusal");
+            s.Who.Guarding = false;
+            ok = _authority.TryBeginMeleeSwing(forged, out id, out why);
+            Check(ok && id != 0, $"D1c5 guard: the very same intent (same sequence, same clock) is accepted once the guard is down: nothing was stamped or spent ({why})");
+            s.Who.Guarding = true;      // raising the guard mid swing does not cancel or alter the running swing
+            MeleeSwingStatus status = Finish(id);
+            Check(status.Finished && status.EndReason == SwingEndReason.Completed, "D1c5 guard: a guard raised mid swing does not cancel the swing");
+            Cooldown(3f);
+            ok = Begin(s, 0, out _, out why);
+            Check(!ok && why.Contains("guarding"), "D1c5 guard: while the guard stays up the next swing is refused too");
+
+            // the real rig
+            _rig.TryGetAimPose(out _, out float yaw, out float pitch);
+            _rig.SetGuardHeld(true);
+            Check(_rig.IsGuarding, "D1c5 guard: the rig guard is up");
+            activeBefore = _authority.ActiveSwingCount;
+            MeleeSwingIntent rigIntent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+            ok = _authority.TryBeginMeleeSwing(rigIntent, out id, out why);
+            Check(!ok && why.Contains("guarding"), $"D1c5 guard: the real rig cannot begin a swing while guarding ({why})");
+            Check(_authority.ActiveSwingCount == activeBefore && !_authority.IsSwingInProgress(_rig.CombatId), "D1c5 guard: the refused rig swing left no swing behind");
+
+            _rig.SetGuardHeld(false);
+            ok = _authority.TryBeginMeleeSwing(rigIntent, out id, out why);
+            Check(ok, $"D1c5 guard: with the guard down the same rig intent is accepted ({why})");
+
+            // forged raise of the guard flag while the rig's own swing runs: it does not reduce incoming damage
+            _rig.SetGuardHeld(true);
+            Check(_rig.IsGuarding && _authority.IsSwingInProgress(_rig.CombatId), "D1c5 guard: guard flag up while the rig's own swing runs");
+            DamageInfo front = new DamageInfo(20f, _rig.CombatCenter, Vector3.back, _rig.transform.position + Vector3.forward * 2f, 999, EntityKind.Enemy,
+                DamageType.Physical, false, false, 0f, HitLocation.Body, 10f);
+            Check(!_rig.TryResolveGuard(front, CombatFlowTuning.Default, out _), "D1c5 guard: a frontal hit finds no guard during the rig's own swing (TryResolveGuard)");
+            Check(!_rig.TryGetGuardReduction(front, out _), "D1c5 guard: ... and no plain block reduction either (TryGetGuardReduction)");
+
+            // end to end: an enemy swing lands on the rig while the rig's own swing is still running
+            Scenario attacker = NewScenario(_sword);
+            attacker.Who.Kind = EntityKind.Enemy;
+            attacker.Who.TeamId = CombatTeams.MonsterTeam;
+            attacker.Who.Eye = _rig.transform.position + new Vector3(0f, 1.65f, 1.5f);
+            attacker.Who.Yaw = 180f;
+            _playerHits.Clear();
+            Check(Begin(attacker, 0, out int attackId, out why), $"D1c5 guard: the enemy swing begins ({why})");
+            Finish(attackId);
+            Check(_playerHits.Count == 1 && !_playerHits[0].Blocked && !_playerHits[0].GuardBroken,
+                "D1c5 guard: the hit that lands during the rig's own swing is neither blocked nor broken");
+            attacker.Dispose();
+
+            _clock += 3f;
+            _authority.StepSwings();
+            Check(!_authority.IsSwingInProgress(_rig.CombatId), "D1c5 guard: the rig swing is over");
+            Check(_rig.TryResolveGuard(front, CombatFlowTuning.Default, out _), "D1c5 guard: the guard works again once the swing is over");
+            _rig.SetGuardHeld(false);
+            _rig.Health.Heal(1000f);
+            Cooldown(3f);
         }
 
         // ---- weapon swap is blocked during an attack -----------------------------------------------------

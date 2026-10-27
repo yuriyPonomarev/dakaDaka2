@@ -352,6 +352,7 @@ namespace Emberdelve.EditorTools
             Section("forged intents", ForgedIntents);
             Section("guard, enemy claw, legacy path", GuardAndLegacy);
             Section("weapon swap and cooldown floor", WeaponSwapAndCooldown);
+            Section("D1c5: production configuration (zones on, real chain selection)", ProductionConfiguration);
 
             IEnumerator real = RealRigSection();
             while (true)
@@ -1423,6 +1424,108 @@ namespace Emberdelve.EditorTools
         // ------------------------------------------------------------------------------------------------
         // 10b. weapon swap mid-swing (M1) and the cooldown floor (M-d)
         // ------------------------------------------------------------------------------------------------
+
+        /// <summary>D1c5: the sword's impact zones as literals (0.7 from the hilt, 0.9 from t 0.35, 1.0 from t 0.70), independent of the data.</summary>
+        private static float LiteralSwordZone(float t) => t >= 0.70f ? 1.0f : t >= 0.35f ? 0.9f : 0.7f;
+
+        /// <summary>
+        /// D1c5 (D1b review 3b): everything above runs with the two internal test seams (legacy pattern selection on, impact zones
+        /// off). This section switches both to their PRODUCTION values: the chain's own patterns are the only step-0 patterns,
+        /// the chain multipliers apply, and the impact zone is part of the damage. Expectations are literals (26 base, chain
+        /// 1.00 / 1.05 / 1.10, body x1.0, the sword's bands).
+        /// </summary>
+        private void ProductionConfiguration()
+        {
+            bool legacy = _authority.AllowLegacyPatternSelection;
+            bool zones = _authority.ImpactZonesEnabled;
+            _authority.AllowLegacyPatternSelection = false;
+            _authority.ImpactZonesEnabled = true;
+            try
+            {
+                Near(26f, _sword.baseDamage, 1e-4f, "production: the sword's base damage is the literal 26");
+
+                // the overhead cannot be picked at step 0 any more
+                {
+                    Scenario s = NewScenario(_sword);
+                    AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                    bool ok = _authority.TryBeginMeleeSwing(Intent(s.Who, Overhead), out int id, out string why);
+                    Check(!ok && id == 0 && why.Contains("chain"), $"production: the overhead is refused at combo step 0 ({why})");
+                    ok = _authority.TryBeginMeleeSwing(Intent(s.Who, SlashBack), out id, out why);
+                    Check(!ok && why.Contains("chain"), $"production: the back slash is refused at combo step 0 ({why})");
+                    Cooldown(3f);
+                    s.Dispose();
+                }
+
+                // the three chain steps, real selection, zones on: damage = 26 x step x body 1.0 x literal zone of the measured contact t
+                {
+                    Scenario s = NewScenario(_sword);
+                    Dummy d = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
+                    float[] step = { 1.00f, 1.05f, 1.10f };
+                    int[] pattern = { Slash, SlashBack, Overhead };
+                    for (int i = 0; i < 3; i++)
+                    {
+                        d.Received.Clear();
+                        bool ok = _authority.TryBeginMeleeSwing(Intent(s.Who, pattern[i], null, null, i), out int id, out string why);
+                        Check(ok, $"production: chain step {i + 1} is accepted with its own pattern ({why})");
+                        if (!ok) break;
+                        float simulated = 0f;
+                        MeleeSwingStatus st = default;
+                        while (simulated < 4f)
+                        {
+                            _clock += 0.005f;
+                            simulated += 0.005f;
+                            _authority.StepSwings();
+                            if (_authority.TryGetMeleeSwingStatus(id, out st) && st.Finished) break;
+                        }
+
+                        Check(st.ComboStep == i && Mathf.Abs(st.StepMultiplier - step[i]) < 1e-5f, $"production: step {i + 1} carries the chain multiplier x{step[i]:F2} ({st.StepMultiplier:F2})");
+                        bool hit = d.Received.Count == 1 && st.Hits.Count == 1;
+                        Check(hit, $"production: step {i + 1} hits the body once");
+                        if (hit)
+                        {
+                            MeleeSwingHit h = st.Hits[0];
+                            float zone = LiteralSwordZone(h.ContactT);
+                            bool onEdge = Mathf.Abs(h.ContactT - 0.35f) < 0.005f || Mathf.Abs(h.ContactT - 0.70f) < 0.005f;
+                            Check(onEdge || Mathf.Abs(h.ZoneMultiplier - zone) < 1e-5f, $"production: step {i + 1} zone x{h.ZoneMultiplier:F2} is the literal band for t={h.ContactT:F3} (x{zone:F2})");
+                            Near(26f * step[i] * 1.0f * h.ZoneMultiplier, d.Received[0].Amount, 1e-3f,
+                                $"production: step {i + 1} damage = 26 x {step[i]:F2} x body 1.0 x zone {h.ZoneMultiplier:F2}");
+                        }
+                    }
+
+                    Check(!_authority.TryGetExpectedComboStep(s.Who.CombatId, out int next) || next == 0, "production: the finisher reset the chain");
+                    Cooldown(3f);
+                    s.Dispose();
+                }
+
+                // near vs far along the blade: the zone band follows where on the blade the contact is (hilt end weaker than tip)
+                {
+                    float nearZone = -1f, farZone = -1f;
+                    foreach ((float z, bool isNear) c in new[] { (1.0f, true), (2.0f, false) })
+                    {
+                        Scenario s = NewScenario(_sword);
+                        Dummy d = AddBody(s, new Vector3(0f, 1.5f, c.z), 0.3f);
+                        MeleeSwingStatus st = RunSwing(s, Slash);
+                        bool hit = d.Received.Count == 1 && st.Hits.Count == 1;
+                        Check(hit, $"production: the slash hits a body {c.z:F1} m ahead");
+                        if (hit)
+                        {
+                            float zone = st.Hits[0].ZoneMultiplier;
+                            if (c.isNear) nearZone = zone; else farZone = zone;
+                            Near(26f * zone, d.Received[0].Amount, 1e-3f, $"production: body at {c.z:F1} m: damage = 26 x zone {zone:F2}");
+                        }
+                        Cooldown(3f);
+                        s.Dispose();
+                    }
+
+                    Check(nearZone > 0f && farZone > 0f && nearZone < farZone, $"production: a near contact (zone x{nearZone:F2}) deals less than a far one (x{farZone:F2})");
+                }
+            }
+            finally
+            {
+                _authority.AllowLegacyPatternSelection = legacy;
+                _authority.ImpactZonesEnabled = zones;
+            }
+        }
 
         private void WeaponSwapAndCooldown()
         {
