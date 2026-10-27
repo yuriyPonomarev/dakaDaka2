@@ -156,7 +156,7 @@ namespace Emberdelve.EditorTools
             who.Yaw = start.x;
             who.Pitch = start.y;
             MeleeSwingIntent intent = new MeleeSwingIntent(who.CombatId, who.Weapon.weaponId, pattern, 0, who.Yaw, who.Pitch, CombatRegistry.NextSequence(who.CombatId));
-            bool ok = _authority.TryBeginMeleeSwing(intent, out int id, out string reason);
+            bool ok = _authority.TryBeginMeleeSwingAsOwner(intent, out int id, out string reason);
             Check(ok, "swing accepted (" + reason + ")");
             if (!ok) return default;
 

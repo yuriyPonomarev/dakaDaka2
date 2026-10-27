@@ -54,6 +54,7 @@ namespace Emberdelve.Combat
         /// <summary>Validates and owns one ordinary ranged arrow/bolt flight.</summary>
         public bool LaunchProjectile(AttackIntent intent)
         {
+            if (!LegacyAllowed(intent.InstigatorCombatId, "projectile", false, out _)) return false;
             if (!TryValidateProjectileLaunch(intent, out ICombatEntity instigator, out WeaponData weapon,
                     out Vector3 origin, out Vector3 direction, out float range, out string reason))
             {
@@ -165,6 +166,7 @@ namespace Emberdelve.Combat
         public bool LaunchSkillProjectile(SkillIntent intent, int projectileIndex)
         {
             LastSkillRejectReason = string.Empty;
+            if (!LegacyAllowed(intent.InstigatorCombatId, "skill projectile", true, out _)) return false;
             if (!CombatRegistry.TryGet(intent.InstigatorCombatId, out ICombatEntity instigator))
                 return RejectSkillLaunch(intent, "unknown instigator id");
             if (instigator.IsDead) return RejectSkillLaunch(intent, "instigator is dead");

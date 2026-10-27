@@ -163,7 +163,7 @@ namespace Emberdelve.EditorTools
 
             float before = target.Taken;
             target.Last = DamageInfo.Invalid;
-            bool ok = _authority.SubmitAttack(intent, new HitCandidate(target.CombatId, hitPoint, headFlag), out string reason);
+            bool ok = _authority.SubmitAttackAsOwner(intent, new HitCandidate(target.CombatId, hitPoint, headFlag), out string reason);
             return new Outcome { Accepted = ok, Reason = reason ?? string.Empty, Damage = target.Taken - before, Info = target.Last };
         }
 
@@ -181,7 +181,7 @@ namespace Emberdelve.EditorTools
             // keep a round available through the host seam so every probe tests its own rule, not the crossbow's 4-round magazine.
             RangedCombat probeRanged = _rig.GetComponent<RangedCombat>();
             if (probeRanged != null && probeRanged.Magazine < 1) EmberdelveKitFixtures.RefundAmmo(probeRanged, 1);
-            bool accepted = _authority.LaunchProjectile(intent);
+            bool accepted = _authority.LaunchProjectileAsOwner(intent);
             string reason = _authority.LastAttackRejectReason;
             if (accepted)
             {
@@ -407,7 +407,7 @@ namespace Emberdelve.EditorTools
             Check(!unknownInstigator.Accepted && unknownInstigator.Reason.Contains("unknown instigator"), "an unknown instigator id is rejected (" + unknownInstigator.Reason + ")");
 
             Fake ghostTarget = new Fake { CombatId = 987654322 };
-            bool unknownTarget = _authority.SubmitAttack(
+            bool unknownTarget = _authority.SubmitAttackAsOwner(
                 new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, sword, 1f, _rig.CombatCenter, Vector3.forward, 3f, CombatRegistry.NextSequence(_rig.CombatId), _clock),
                 new HitCandidate(ghostTarget.CombatId, body, false), out string unknownTargetReason);
             Check(!unknownTarget && unknownTargetReason.Contains("unknown target"), "an unknown target id is rejected (" + unknownTargetReason + ")");
@@ -415,12 +415,12 @@ namespace Emberdelve.EditorTools
             Fake friend = MakeFake("friend", CombatTeams.PlayerTeam, EntityKind.LocalPlayer, null);
             friend.Point = body;
             float friendBefore = friend.Taken;
-            bool friendly = _authority.SubmitAttack(
+            bool friendly = _authority.SubmitAttackAsOwner(
                 new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, sword, 1f, _rig.CombatCenter, Vector3.forward, 3f, CombatRegistry.NextSequence(_rig.CombatId), _clock),
                 new HitCandidate(friend.CombatId, body, false), out string friendlyReason);
             Check(!friendly && friend.Taken == friendBefore && friendlyReason.Contains("not hostile"), "friendly fire is rejected (" + friendlyReason + ")");
 
-            bool selfHit = _authority.SubmitAttack(
+            bool selfHit = _authority.SubmitAttackAsOwner(
                 new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, sword, 1f, _rig.CombatCenter, Vector3.forward, 3f, CombatRegistry.NextSequence(_rig.CombatId), _clock),
                 new HitCandidate(_rig.CombatId, _rig.CombatCenter, false), out string selfReason);
             Check(!selfHit && selfReason.Contains("self"), "a self hit is rejected (" + selfReason + ")");
@@ -447,7 +447,7 @@ namespace Emberdelve.EditorTools
             // A dead target is not an error and not a hit.
             _target.Dead = true;
             float deadTargetBefore = _target.Taken;
-            bool deadTarget = _authority.SubmitAttack(
+            bool deadTarget = _authority.SubmitAttackAsOwner(
                 new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, sword, 1f, _rig.CombatCenter, Vector3.forward, 3f, CombatRegistry.NextSequence(_rig.CombatId), _clock),
                 new HitCandidate(_target.CombatId, body, false), out string deadTargetReason);
             Check(!deadTarget && _target.Taken == deadTargetBefore && deadTargetReason.Contains("target is dead"), "a dead target takes no damage (" + deadTargetReason + ")");

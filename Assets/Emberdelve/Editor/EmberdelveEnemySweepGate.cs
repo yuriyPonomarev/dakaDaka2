@@ -487,7 +487,7 @@ namespace Emberdelve.EditorTools
             int rejectedBefore = _authority.RejectedCount;
             AttackIntent intent = new AttackIntent(enemy.CombatId, EntityKind.Enemy, _claw, 1f, enemy.CombatCenter,
                 player.CombatCenter - enemy.CombatCenter, _claw.reach + 0.4f, CombatRegistry.NextSequence(enemy.CombatId), 0f);
-            bool ok = _authority.SubmitAttack(intent, new HitCandidate(player.CombatId, player.CombatCenter, false), out string reason);
+            bool ok = _authority.SubmitAttackAsOwner(intent, new HitCandidate(player.CombatId, player.CombatCenter, false), out string reason);
             Check(!ok && reason.Contains("swept swing"), $"a real agent's claw SubmitAttack is refused ({reason})");
             Check(player.Taken == 0f, "and deals nothing");
             Check(_authority.RejectedCount == rejectedBefore + 1, "and is counted as a rejection");

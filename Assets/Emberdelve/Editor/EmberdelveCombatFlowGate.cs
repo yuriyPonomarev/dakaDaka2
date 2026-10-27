@@ -291,10 +291,10 @@ namespace Emberdelve.EditorTools
             weapon.HasComboChain && step >= 0 && step < weapon.comboSteps.Length ? weapon.comboSteps[step].patternIndex : 0;
 
         private bool Begin(Scenario s, int step, out int id, out string reason) =>
-            _authority.TryBeginMeleeSwing(Intent(s.Who, step, ChainPattern(s.Who.Weapon, step)), out id, out reason);
+            _authority.TryBeginMeleeSwingAsOwner(Intent(s.Who, step, ChainPattern(s.Who.Weapon, step)), out id, out reason);
 
         private bool BeginForged(Swinger who, int step, int pattern, out string reason, string weaponId = null) =>
-            _authority.TryBeginMeleeSwing(Intent(who, step, pattern, weaponId), out _, out reason);
+            _authority.TryBeginMeleeSwingAsOwner(Intent(who, step, pattern, weaponId), out _, out reason);
 
         /// <summary>Steps the authority clock until the swing is finished (or 4 s). Returns the final status.</summary>
         private MeleeSwingStatus Finish(int id, float dt = 0.005f)
@@ -796,7 +796,7 @@ namespace Emberdelve.EditorTools
             SwingStep(s, 0, out ok, out why);
             int lastSequence = _authority.LastSequenceFor(who.CombatId);
             MeleeSwingIntent replay = new MeleeSwingIntent(who.CombatId, _sword.weaponId, 1, 1, who.Yaw, who.Pitch, lastSequence);
-            Check(!_authority.TryBeginMeleeSwing(replay, out _, out r) && r.Contains("stale"), $"a replayed command sequence is refused on a chain step ({r})");
+            Check(!_authority.TryBeginMeleeSwingAsOwner(replay, out _, out r) && r.Contains("stale"), $"a replayed command sequence is refused on a chain step ({r})");
             Cooldown(3f);
 
             // the rapier's chain forgeries (wrong chain)
@@ -1365,7 +1365,7 @@ namespace Emberdelve.EditorTools
             _rig.TryGetAimPose(out _, out float yaw, out float pitch);
             float t0 = _clock;
             MeleeSwingIntent intent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
-            Check(_authority.TryBeginMeleeSwing(intent, out int swingId, out string why), $"move phases: the rig's swing is accepted ({why})");
+            Check(_authority.TryBeginMeleeSwingAsOwner(intent, out int swingId, out string why), $"move phases: the rig's swing is accepted ({why})");
 
             SwingPatternData slash = _sword.swingPatterns[0];
             float w = slash.windupTime, a = slash.activeTime, r = slash.recoveryTime;
@@ -1385,7 +1385,7 @@ namespace Emberdelve.EditorTools
             // chain step 2 winds up 15 percent quicker, so 0.22 s in it is already the hit phase (x0.70); step 1 would still be winding up
             float t1 = _clock;
             MeleeSwingIntent second = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 1, 1, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
-            Check(_authority.TryBeginMeleeSwing(second, out int secondId, out why), $"move phases: step 2 accepted ({why})");
+            Check(_authority.TryBeginMeleeSwingAsOwner(second, out int secondId, out why), $"move phases: step 2 accepted ({why})");
             _clock = t1 + 0.22f;
             Check(0.22f > slash.windupTime * 0.85f && 0.22f < slash.windupTime, "move phases: 0.22 s is inside step 1's windup but past step 2's");
             Near(idleWalk * 0.70f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "step 2: the shorter windup also moves the hit-phase slowdown earlier");
@@ -1424,7 +1424,7 @@ namespace Emberdelve.EditorTools
             _rig.Health.Heal(1000f);
             _playerHits.Clear();
             _authority.AllowLegacyPatternSelection = legacyPattern;
-            bool ok = _authority.TryBeginMeleeSwing(Intent(s.Who, 0, pattern), out int id, out string why);
+            bool ok = _authority.TryBeginMeleeSwingAsOwner(Intent(s.Who, 0, pattern), out int id, out string why);
             _authority.AllowLegacyPatternSelection = false;
             if (!ok)
             {
@@ -1608,7 +1608,7 @@ namespace Emberdelve.EditorTools
             int startedBefore = _authority.SwingsStarted;
             int activeBefore = _authority.ActiveSwingCount;
             int chainsBefore = _authority.ChainEntryCount;
-            bool ok = _authority.TryBeginMeleeSwing(forged, out int id, out string why);
+            bool ok = _authority.TryBeginMeleeSwingAsOwner(forged, out int id, out string why);
             Check(!ok && id == 0, "D1c5 guard: a swing begin while the instigator is guarding is refused");
             Check(why.Contains("guarding") && _authority.LastAttackRejectReason == why, $"D1c5 guard: the refusal says why ({why})");
             Check(_authority.RejectedCount == rejectedBefore + 1 && _authority.SwingsStarted == startedBefore
@@ -1616,7 +1616,7 @@ namespace Emberdelve.EditorTools
                 "D1c5 guard: refusal changes nothing (one more rejection, no swing, no chain)");
             Check(!_authority.IsSwingInProgress(s.Who.CombatId), "D1c5 guard: no swing is in progress after the refusal");
             s.Who.Guarding = false;
-            ok = _authority.TryBeginMeleeSwing(forged, out id, out why);
+            ok = _authority.TryBeginMeleeSwingAsOwner(forged, out id, out why);
             Check(ok && id != 0, $"D1c5 guard: the very same intent (same sequence, same clock) is accepted once the guard is down: nothing was stamped or spent ({why})");
             s.Who.Guarding = true;      // raising the guard mid swing does not cancel or alter the running swing
             MeleeSwingStatus status = Finish(id);
@@ -1631,12 +1631,12 @@ namespace Emberdelve.EditorTools
             Check(_rig.IsGuarding, "D1c5 guard: the rig guard is up");
             activeBefore = _authority.ActiveSwingCount;
             MeleeSwingIntent rigIntent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
-            ok = _authority.TryBeginMeleeSwing(rigIntent, out id, out why);
+            ok = _authority.TryBeginMeleeSwingAsOwner(rigIntent, out id, out why);
             Check(!ok && why.Contains("guarding"), $"D1c5 guard: the real rig cannot begin a swing while guarding ({why})");
             Check(_authority.ActiveSwingCount == activeBefore && !_authority.IsSwingInProgress(_rig.CombatId), "D1c5 guard: the refused rig swing left no swing behind");
 
             _rig.SetGuardHeld(false);
-            ok = _authority.TryBeginMeleeSwing(rigIntent, out id, out why);
+            ok = _authority.TryBeginMeleeSwingAsOwner(rigIntent, out id, out why);
             Check(ok, $"D1c5 guard: with the guard down the same rig intent is accepted ({why})");
 
             // forged raise of the guard flag while the rig's own swing runs: it does not reduce incoming damage
@@ -1686,7 +1686,7 @@ namespace Emberdelve.EditorTools
             _rig.TryGetAimPose(out _, out float yaw, out float pitch);
             float t0 = _clock;
             MeleeSwingIntent intent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
-            Check(_authority.TryBeginMeleeSwing(intent, out int swingId, out string why), $"swap lock: a swing begins ({why})");
+            Check(_authority.TryBeginMeleeSwingAsOwner(intent, out int swingId, out string why), $"swap lock: a swing begins ({why})");
             SwingPatternData p = _sword.swingPatterns[0];
             _authority.TryGetExpectedComboStep(_rig.CombatId, out int comboBefore);
             int acceptedBefore = _authority.AcceptedCount;
@@ -1742,7 +1742,7 @@ namespace Emberdelve.EditorTools
             _authority.StepSwings();
             _rig.TryGetAimPose(out _, out yaw, out pitch);
             MeleeSwingIntent again = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
-            Check(_authority.TryBeginMeleeSwing(again, out int forcedId, out why), $"swap lock: another swing begins ({why})");
+            Check(_authority.TryBeginMeleeSwingAsOwner(again, out int forcedId, out why), $"swap lock: another swing begins ({why})");
             _clock += 0.1f;
             Check(loadout.ForceSwitchToSlot(1) && _rig.ActiveWeapon == _crossbow, "swap lock: a forced change goes through");
             _clock += 0.05f;
@@ -1757,7 +1757,7 @@ namespace Emberdelve.EditorTools
                 int countBefore = _rig.WeaponChangeCount;
                 _rig.TryGetAimPose(out _, out yaw, out pitch);
                 MeleeSwingIntent first = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
-                Check(_authority.TryBeginMeleeSwing(first, out int abaId, out why), $"A-B-A rig: a swing begins ({why})");
+                Check(_authority.TryBeginMeleeSwingAsOwner(first, out int abaId, out why), $"A-B-A rig: a swing begins ({why})");
                 _authority.TryGetMeleeSwingStatus(abaId, out MeleeSwingStatus abaSt);
                 _clock += abaSt.Timing.Total + 0.01f;
                 Check(!_authority.IsSwingInProgress(_rig.CombatId) && !loadout.IsActionLocked, "A-B-A rig: the swing is over on the clock, so the swap is not locked (no step ran)");
@@ -1767,14 +1767,14 @@ namespace Emberdelve.EditorTools
                 Check(_authority.TryGetExpectedComboStep(_rig.CombatId, out int expectedAfter) && expectedAfter == 0, "A-B-A rig: the chain is gone although the sword is in hand again");
                 _rig.TryGetAimPose(out _, out yaw, out pitch);
                 MeleeSwingIntent forged = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 1, 1, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
-                Check(!_authority.TryBeginMeleeSwing(forged, out _, out why) && why.Contains("weapon changed"), $"A-B-A rig: step 2 is refused ({why})");
+                Check(!_authority.TryBeginMeleeSwingAsOwner(forged, out _, out why) && why.Contains("weapon changed"), $"A-B-A rig: step 2 is refused ({why})");
 
                 // and mid swing (forced path, the player swap itself is locked)
                 _clock += 3f;
                 _authority.StepSwings();
                 _rig.TryGetAimPose(out _, out yaw, out pitch);
                 MeleeSwingIntent midIntent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
-                Check(_authority.TryBeginMeleeSwing(midIntent, out int midId, out why), $"A-B-A rig mid-swing: a swing begins ({why})");
+                Check(_authority.TryBeginMeleeSwingAsOwner(midIntent, out int midId, out why), $"A-B-A rig mid-swing: a swing begins ({why})");
                 _clock += 0.1f;
                 Check(loadout.ForceSwitchToSlot(1) && loadout.ForceSwitchToSlot(0) && _rig.ActiveWeapon == _sword, "A-B-A rig mid-swing: forced away and back");
                 _clock += 0.05f;
@@ -2085,7 +2085,7 @@ namespace Emberdelve.EditorTools
             _rig.TryGetAimPose(out _, out float yaw, out float pitch);
             float t0 = _clock;
             MeleeSwingIntent intent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
-            Check(_authority.TryBeginMeleeSwing(intent, out int swingId, out string why), $"follow-ups: a swing begins ({why})");
+            Check(_authority.TryBeginMeleeSwingAsOwner(intent, out int swingId, out string why), $"follow-ups: a swing begins ({why})");
             foreach (float at in new[] { 0.1f, 0.4f, 0.7f })
             {
                 _clock = t0 + at;
@@ -2165,7 +2165,7 @@ namespace Emberdelve.EditorTools
                     CombatRegistry.Register(attackerId, rangedAttacker);
                     intent = new AttackIntent(attackerId, EntityKind.Enemy, c.weapon, 1f, p, towardRig,
                         c.weapon.rangedRange, CombatRegistry.NextSequence(attackerId), 0f);
-                    accepted = _authority.LaunchProjectile(intent);
+                    accepted = _authority.LaunchProjectileAsOwner(intent);
                     why = _authority.LastAttackRejectReason;
                     if (accepted) _authority.AdvanceProjectiles(1f);
                 }
@@ -2177,7 +2177,7 @@ namespace Emberdelve.EditorTools
                     CombatRegistry.Register(attackerId, meleeAttacker);
                     intent = new AttackIntent(attackerId, EntityKind.Enemy, c.weapon, 1f, p, towardRig,
                         c.weapon.reach + c.weapon.hitSphereRadius, CombatRegistry.NextSequence(attackerId), 0f);
-                    accepted = _authority.SubmitAttack(intent, new HitCandidate(_rig.CombatId, _rig.CombatCenter, false), out why);
+                    accepted = _authority.SubmitAttackAsOwner(intent, new HitCandidate(_rig.CombatId, _rig.CombatCenter, false), out why);
                 }
                 CombatRegistry.Unregister(attackerId, attacker);
 
@@ -2363,7 +2363,7 @@ namespace Emberdelve.EditorTools
                 float chase = agent.EffectiveChaseSpeed;
                 _clock += 3f;
                 int id;
-                bool ok = _authority.TryBeginMeleeSwing(Intent(s.Who, 0, 0), out id, out string why);
+                bool ok = _authority.TryBeginMeleeSwingAsOwner(Intent(s.Who, 0, 0), out id, out string why);
                 Check(ok, $"chase: swing accepted ({why})");
                 if (ok) Finish(id);
                 Near(chase * 0.9f, agent.EffectiveChaseSpeed, 1e-4f, "chase: the enemy's chase speed is x0.9 after a sword hit (hit slow works on enemies)");

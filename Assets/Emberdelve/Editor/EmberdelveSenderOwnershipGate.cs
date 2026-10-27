@@ -527,11 +527,13 @@ namespace Emberdelve.EditorTools
             Forged("replayed skill arrow sent by P1", _p2.CombatId, (out string r) => _authority.LaunchSkillProjectile(_s1, launch, 0, out r));
             Check(_authority.CompleteSkillCast(_s2, _p2.CombatId, act), "the owner completes the cast");
 
-            // legacy sender-less overload still serves the rig's own id (local trusted path)
+            // R1c3: the sender-less overload no longer serves a player-owned id (it stays the trusted path for unowned ids only)
             yield return new WaitForSeconds(1.0f);
             Refresh();
+            int senderlessRefusals = _authority.SenderRefusalCount;
             bool legacy = _authority.TryBeginSkillCast(_p2.CombatId, _multi.skillId, out int legacyAct, out reason);
-            Check(legacy && legacyAct > 0 && _authority.CompleteSkillCast(_p2.CombatId, legacyAct), "the sender-less overload keeps working for the rig's own id: " + reason);
+            Check(!legacy && legacyAct == 0 && reason.Contains("no sender") && _authority.SenderRefusalCount == senderlessRefusals + 1,
+                "the sender-less overload is refused for the rig's own id (R1c3; was: kept working): " + reason);
 
             // the real SkillCaster sends as its rig (Piercing Shot's stamp is spent, Multi-shot's local cooldown is separate)
             yield return new WaitForSeconds(Mathf.Max(_multi.EffectiveCooldown, _pierce.EffectiveCooldown) + 0.5f);

@@ -73,6 +73,21 @@ namespace Emberdelve.Combat
             public readonly HashSet<int> Targets = new HashSet<int>();
             public bool SelfStatusApplied;
             public bool Completed;
+
+            // R1c3: the authority closes a cast on its own clock. CompleteBy is the authority time after which
+            // a cast nobody completed is completed for the caster (self buff applied once, activation closed).
+            public float CompleteBy;
+            public bool AutoCompleted;
+
+            // R1c3: dash tracking. The client moves; these are what the authority validates the report against.
+            public bool DashTracked;
+            public bool DashReported;
+            public bool DashExpired;
+            public Vector3 DashStart;
+            public float DashMeters;
+            public float DashSeconds;
+            public float DashSpeed;
+            public int DashEpoch;
         }
 
         private struct SkillStamp
@@ -170,6 +185,7 @@ namespace Emberdelve.Combat
         {
             reason = string.Empty;
             LastAttackRejectReason = string.Empty;
+            if (!LegacyAllowed(intent.InstigatorCombatId, "attack", false, out reason)) return false;
 
             if (!CombatRegistry.TryGet(intent.InstigatorCombatId, out ICombatEntity instigator)) return Reject(intent, "unknown instigator id", out reason);
             if (instigator.IsDead) return Reject(intent, "instigator is dead", out reason);
@@ -334,6 +350,8 @@ namespace Emberdelve.Combat
             activationId = 0;
             reason = string.Empty;
             LastSkillRejectReason = string.Empty;
+            if (!LegacyAllowed(casterCombatId, "skill cast", true, out reason)) return false;
+            ExpireActivations();
             PurgeExpiredActivations();
 
             if (!CombatRegistry.TryGet(casterCombatId, out ICombatEntity caster)) return RejectCast(casterCombatId, skillId, "unknown instigator id", out reason);
@@ -422,6 +440,10 @@ namespace Emberdelve.Combat
                 Budget = skill.HitBudget,
             };
             _activations[activation.Id] = activation;
+            activation.CompleteBy = now + (skill.effect == SkillEffectKind.Dash
+                ? Mathf.Max(skillActivationWindow, DashSecondsFor(skill, scale) + DashReportGrace)
+                : skillActivationWindow);
+            BeginMovementTracking(activation, skill, caster, scale);
             stamps[skillId] = new SkillStamp { Time = now, Epoch = kitAccess.Epoch };
             kitAccess.NoteCast(activation.Id);
 
@@ -431,9 +453,24 @@ namespace Emberdelve.Combat
 
         public bool CompleteSkillCast(int casterCombatId, int activationId)
         {
+            if (!LegacyAllowed(casterCombatId, "skill complete", true, out _)) return false;
+            ExpireActivations();
             if (!_activations.TryGetValue(activationId, out SkillActivation activation)) return false;
             if (activation.CasterId != casterCombatId || activation.Completed) return false;
             if (!CombatRegistry.TryGet(casterCombatId, out ICombatEntity caster) || caster.IsDead) return false;
+
+            return CompleteActivation(activation, caster);
+        }
+
+        /// <summary>
+        /// Closes one activation and applies the skill's own self status once. Shared by the caster's prompt
+        /// <see cref="CompleteSkillCast"/> and the authority's own expiry (<see cref="ExpireActivations"/>), so the
+        /// two cannot drift apart and a cast completes exactly once either way.
+        /// </summary>
+        private bool CompleteActivation(SkillActivation activation, ICombatEntity caster)
+        {
+            int casterCombatId = activation.CasterId;
+            int activationId = activation.Id;
 
             // Closed: no further hit can ride on this activation.
             activation.Completed = true;
@@ -443,7 +480,7 @@ namespace Emberdelve.Combat
             // when the cast opened). It lands even when the burst hit nothing, and it lands AFTER the hits,
             // so a cry does not empower its own damage - the same order the behavior always had.
             SkillData skill = activation.Skill;
-            if (skill.affectsSelf && caster is IStatusTarget self)
+            if (skill.affectsSelf && !activation.SelfStatusApplied && caster is IStatusTarget self)
             {
                 StatusSpec selfStatus = ScaleStatus(skill.SelfStatusSpec, activation.Scale);
                 if (!selfStatus.IsNone)
@@ -470,6 +507,7 @@ namespace Emberdelve.Combat
         {
             reason = string.Empty;
             LastSkillRejectReason = string.Empty;
+            if (!LegacyAllowed(intent.InstigatorCombatId, "skill hit", true, out reason)) return false;
 
             if (!CombatRegistry.TryGet(intent.InstigatorCombatId, out ICombatEntity instigator)) return RejectSkill(intent, "unknown instigator id", out reason);
             if (instigator.IsDead) return RejectSkill(intent, "instigator is dead", out reason);

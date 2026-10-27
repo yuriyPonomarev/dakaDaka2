@@ -235,9 +235,10 @@ namespace Emberdelve.Movement
         /// and nothing here moves the transform: Move() feeds the dash through the controller, which is what
         /// makes walls and ledges real obstacles instead of suggestions.
         /// </summary>
-        public bool TryStartDash(Vector3 direction, float distance, float duration)
+        public bool TryStartDash(Vector3 direction, float distance, float duration, int activationId = 0)
         {
             if (controller == null || _class == null) return false;
+            _dashActivationId = activationId;
 
             Vector3 flat = new Vector3(direction.x, 0f, direction.z);
             if (flat.sqrMagnitude < 0.0001f) flat = FlatForward(transform.forward);
@@ -261,6 +262,46 @@ namespace Emberdelve.Movement
         public void CancelDash()
         {
             _dashTimeRemaining = 0f;
+            _dashActivationId = 0;
+        }
+
+        // ---- R1c3: the client moves, the authority validates ------------------------------------------------------
+
+        /// <summary>
+        /// Raised once when a dash that was started for an authority activation ends (time ran out or a wall stopped it),
+        /// with the activation id and where the character actually is. The rig forwards it to the authority, which
+        /// validates it and rolls the position back when it is dishonest. A cancelled dash (death) raises nothing.
+        /// </summary>
+        public event Action<int, Vector3> DashEnded;
+
+        private int _dashActivationId;
+
+        /// <summary>Offset from the transform to the middle of the capsule, in world units.</summary>
+        public Vector3 CapsuleCenterOffset => controller != null ? Vector3.Scale(controller.center, transform.lossyScale) : Vector3.up;
+
+        public float CapsuleRadius => controller != null ? controller.radius * Mathf.Max(transform.lossyScale.x, transform.lossyScale.z) : 0.34f;
+
+        /// <summary>
+        /// The authority's rollback: puts the character at <paramref name="position"/> and ends any dash. The controller is
+        /// switched off around the write because a CharacterController overrides a transform assignment otherwise.
+        /// </summary>
+        public void TeleportTo(Vector3 position)
+        {
+            CancelDash();
+            _horizontalSpeed = 0f;
+            _verticalVelocity = 0f;
+            bool wasEnabled = controller != null && controller.enabled;
+            if (wasEnabled) controller.enabled = false;
+            transform.position = position;
+            if (wasEnabled) controller.enabled = true;
+            Physics.SyncTransforms();
+        }
+
+        private void FinishDash()
+        {
+            int id = _dashActivationId;
+            _dashActivationId = 0;
+            if (id != 0) DashEnded?.Invoke(id, transform.position);
         }
 
         private static Vector3 FlatForward(Vector3 forward)
@@ -398,6 +439,8 @@ namespace Emberdelve.Movement
                 _dashTimeRemaining = 0f;
                 _horizontalSpeed = 0f;
             }
+
+            if (_dashTimeRemaining <= 0f) FinishDash();
         }
 
         /// <summary>

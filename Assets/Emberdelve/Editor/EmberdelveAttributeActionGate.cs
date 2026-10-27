@@ -668,7 +668,7 @@ namespace Emberdelve.EditorTools
                     hitPoint - origin, _claw.reach + _claw.hitSphereRadius,
                     CombatRegistry.NextSequence(enemy.CombatId), _clock);
 
-                bool accepted = _authority.SubmitAttack(intent, new HitCandidate(rig.CombatId, hitPoint, false));
+                bool accepted = _authority.SubmitAttackAsOwner(intent, new HitCandidate(rig.CombatId, hitPoint, false));
 
                 Check(accepted, "the authority accepted the enemy's claw attack against the player");
                 Check(_authority.AcceptedCount == acceptedBefore + 1, "the enemy attack counted as one accepted attack");
@@ -758,7 +758,7 @@ namespace Emberdelve.EditorTools
                 AttackIntent launch = new AttackIntent(rig.CombatId, rig.Kind, weapon, 1f, muzzle, direction,
                     maxRange, CombatRegistry.NextSequence(rig.CombatId), _clock);
                 float healthBefore = _target.CurrentHealth;
-                bool accepted = _authority.LaunchProjectile(launch);
+                bool accepted = _authority.LaunchProjectileAsOwner(launch);
                 Check(accepted, $"{label}: valid projectile launch accepted ({_authority.LastAttackRejectReason})");
                 if (accepted)
                 {
@@ -824,7 +824,7 @@ namespace Emberdelve.EditorTools
                         expectedDamage, independentDamage, $"muzzle distance {contactDistance:F3} m after body/projectile radii");
                     AttackIntent launch = new AttackIntent(rig.CombatId, rig.Kind, weapon, charge,
                         muzzle, direction, maxRange, CombatRegistry.NextSequence(rig.CombatId), _clock);
-                    bool launched = _authority.LaunchProjectile(launch);
+                    bool launched = _authority.LaunchProjectileAsOwner(launch);
                     Check(launched, $"{label}: authority accepted the real projectile launch ({_authority.LastAttackRejectReason})");
                     if (launched)
                     {
@@ -845,7 +845,7 @@ namespace Emberdelve.EditorTools
                     return;
                 }
 
-                bool accepted = _authority.SubmitAttack(intent, new HitCandidate(_target.CombatId, hitPoint, false));
+                bool accepted = _authority.SubmitAttackAsOwner(intent, new HitCandidate(_target.CombatId, hitPoint, false));
                 LastDelta = healthBefore - _target.CurrentHealth;
 
                 Check(accepted == expectAccepted,

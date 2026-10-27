@@ -277,7 +277,7 @@ namespace Emberdelve.EditorTools
         private bool Begin(Scenario s, int pattern, out int swingId, out string reason)
         {
             MeleeSwingIntent intent = Intent(s.Who, pattern);
-            return _authority.TryBeginMeleeSwing(intent, out swingId, out reason);
+            return _authority.TryBeginMeleeSwingAsOwner(intent, out swingId, out reason);
         }
 
         /// <summary>Begins a swing and steps the authority clock through it. Returns the final status.</summary>
@@ -1221,7 +1221,7 @@ namespace Emberdelve.EditorTools
             Dummy t = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.3f);
             Swinger who = s.Who;
 
-            bool Try(MeleeSwingIntent intent, out string reason) => _authority.TryBeginMeleeSwing(intent, out _, out reason);
+            bool Try(MeleeSwingIntent intent, out string reason) => _authority.TryBeginMeleeSwingAsOwner(intent, out _, out reason);
             int rejectedBefore = _authority.RejectedCount;
             int startedAtStart = _authority.SwingsStarted;
 
@@ -1314,21 +1314,21 @@ namespace Emberdelve.EditorTools
             // weapons that cannot swing at all
             {
                 Scenario crossbow = NewScenario(_crossbow);
-                Check(!_authority.TryBeginMeleeSwing(Intent(crossbow.Who, 0), out _, out r) && r.Contains("no swing patterns"), "a ranged weapon cannot begin a melee swing (" + r + ")");
+                Check(!_authority.TryBeginMeleeSwingAsOwner(Intent(crossbow.Who, 0), out _, out r) && r.Contains("no swing patterns"), "a ranged weapon cannot begin a melee swing (" + r + ")");
                 // far from every other fixture of this section, so the empty-air claw swing below can only hit what it is given (nothing)
                 Scenario claw = NewScenario(_claw, new Vector3(500f, 1.8f, 500f));
-                Check(_authority.TryBeginMeleeSwing(Intent(claw.Who, 0), out int clawSwing, out r), "D1c4: the enemy claw now has a swept swing (" + r + ")");
+                Check(_authority.TryBeginMeleeSwingAsOwner(Intent(claw.Who, 0), out int clawSwing, out r), "D1c4: the enemy claw now has a swept swing (" + r + ")");
                 _clock += 1.0f; _authority.StepSwings();
                 Check(_authority.TryGetMeleeSwingStatus(clawSwing, out MeleeSwingStatus clawStatus) && clawStatus.Finished && clawStatus.Hits.Count == 0, "and a claw swing at nothing runs to its end without a hit");
                 Cooldown(2f);
                 Scenario rapier = NewScenario(_rapier);
-                Check(!_authority.TryBeginMeleeSwing(Intent(rapier.Who, 1), out _, out r) && r.Contains("not allowed"), "the rapier has no pattern 1 (a sword pattern index does not carry over) (" + r + ")");
-                Check(!_authority.TryBeginMeleeSwing(Intent(rapier.Who, 0, weaponId: "ashen_short_sword"), out _, out r) && r.Contains("not the equipped weapon"), "claiming the sword while holding the rapier is rejected");
+                Check(!_authority.TryBeginMeleeSwingAsOwner(Intent(rapier.Who, 1), out _, out r) && r.Contains("not allowed"), "the rapier has no pattern 1 (a sword pattern index does not carry over) (" + r + ")");
+                Check(!_authority.TryBeginMeleeSwingAsOwner(Intent(rapier.Who, 0, weaponId: "ashen_short_sword"), out _, out r) && r.Contains("not the equipped weapon"), "claiming the sword while holding the rapier is rejected");
                 PoselessAttacker poseless = new PoselessAttacker { CombatId = CombatRegistry.AllocateId(), Weapon = _sword };
                 CombatRegistry.Register(poseless.CombatId, poseless);
                 s.Registered.Add(poseless);
                 MeleeSwingIntent pi = new MeleeSwingIntent(poseless.CombatId, _sword.weaponId, 0, 0, 0f, 0f, CombatRegistry.NextSequence(poseless.CombatId));
-                Check(!_authority.TryBeginMeleeSwing(pi, out _, out r) && r.Contains("aim pose"), "an entity with no authoritative aim pose cannot swing (" + r + ")");
+                Check(!_authority.TryBeginMeleeSwingAsOwner(pi, out _, out r) && r.Contains("aim pose"), "an entity with no authoritative aim pose cannot swing (" + r + ")");
                 who.HasPose = false;
                 Check(!Try(Intent(who, 0), out r) && r.Contains("aim pose"), "a pose that cannot be read is rejected (" + r + ")");
                 who.HasPose = true;
@@ -1342,7 +1342,7 @@ namespace Emberdelve.EditorTools
                 Dummy rightSide = AddBody(p, new Vector3(1.8f, 1.5f, 0f), 0.3f);
                 // the client claims it looks 8 degrees right (within tolerance), the authority holds yaw 0
                 MeleeSwingIntent claim = Intent(p.Who, 0, yaw: 8f);
-                Check(_authority.TryBeginMeleeSwing(claim, out int id, out r), "a slightly different claim is accepted");
+                Check(_authority.TryBeginMeleeSwingAsOwner(claim, out int id, out r), "a slightly different claim is accepted");
                 for (int i = 0; i < 300; i++) { _clock += 0.005f; _authority.StepSwings(); }
                 _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus st);
                 Check(WasHit(st, straight) && !WasHit(st, rightSide), "the sweep used the authoritative pose (yaw 0): the forward target is hit and the one 90 degrees right is not");
@@ -1392,7 +1392,7 @@ namespace Emberdelve.EditorTools
                 Dummy t = AddBody(s, new Vector3(0f, 1.5f, 1.5f), 0.3f);
                 AttackIntent forged = new AttackIntent(s.Who.CombatId, EntityKind.LocalPlayer, _sword, 1f, s.Who.CombatCenter,
                     Vector3.forward, 2.9f, CombatRegistry.NextSequence(s.Who.CombatId), 0f);
-                Check(!_authority.SubmitAttack(forged, new HitCandidate(t.CombatId, t.Center, true), out string reason) && reason.Contains("swept swing"),
+                Check(!_authority.SubmitAttackAsOwner(forged, new HitCandidate(t.CombatId, t.Center, true), out string reason) && reason.Contains("swept swing"),
                     "a melee SubmitAttack from an entity with a swing pose is refused (" + reason + ")");
                 Check(t.Received.Count == 0, "and deals nothing (a forged 4 m reach cannot bypass the sweep)");
 
@@ -1403,7 +1403,7 @@ namespace Emberdelve.EditorTools
                 AttackIntent clawIntent = new AttackIntent(claw.CombatId, EntityKind.Enemy, _claw, 1f, claw.Point,
                     victimCenter - claw.Point, _claw.reach + 0.4f, CombatRegistry.NextSequence(claw.CombatId), 0f);
                 float takenBefore = s.Who.Taken;
-                bool ok = _authority.SubmitAttack(clawIntent, new HitCandidate(s.Who.CombatId, victimCenter, false), out reason);
+                bool ok = _authority.SubmitAttackAsOwner(clawIntent, new HitCandidate(s.Who.CombatId, victimCenter, false), out reason);
                 Check(ok && Mathf.Abs((s.Who.Taken - takenBefore) - _claw.baseDamage) < 1e-3f, $"the legacy path for a pose-less claw holder (a fake with no swing pose) is unchanged: 15 damage ({s.Who.Taken - takenBefore:F2}; {reason})");
                 Check(s.Who.Taken > 0f, "the claw hit reached the player-side entity");
 
@@ -1413,7 +1413,7 @@ namespace Emberdelve.EditorTools
                 float victimBefore = s.Who.Taken;
                 AttackIntent poseIntent = new AttackIntent(poseClaw.Who.CombatId, EntityKind.Enemy, _claw, 1f, poseClaw.Who.CombatCenter,
                     victimCenter - poseClaw.Who.CombatCenter, _claw.reach + 0.4f, CombatRegistry.NextSequence(poseClaw.Who.CombatId), 0f);
-                Check(!_authority.SubmitAttack(poseIntent, new HitCandidate(s.Who.CombatId, victimCenter, false), out reason) && reason.Contains("swept swing"),
+                Check(!_authority.SubmitAttackAsOwner(poseIntent, new HitCandidate(s.Who.CombatId, victimCenter, false), out reason) && reason.Contains("swept swing"),
                     "D1c4: a claw SubmitAttack from an entity with a swing pose is refused (" + reason + ")");
                 Check(Mathf.Abs(s.Who.Taken - victimBefore) < 1e-4f, "and deals nothing");
                 Cooldown(2f);
@@ -1448,9 +1448,9 @@ namespace Emberdelve.EditorTools
                 {
                     Scenario s = NewScenario(_sword);
                     AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
-                    bool ok = _authority.TryBeginMeleeSwing(Intent(s.Who, Overhead), out int id, out string why);
+                    bool ok = _authority.TryBeginMeleeSwingAsOwner(Intent(s.Who, Overhead), out int id, out string why);
                     Check(!ok && id == 0 && why.Contains("chain"), $"production: the overhead is refused at combo step 0 ({why})");
-                    ok = _authority.TryBeginMeleeSwing(Intent(s.Who, SlashBack), out id, out why);
+                    ok = _authority.TryBeginMeleeSwingAsOwner(Intent(s.Who, SlashBack), out id, out why);
                     Check(!ok && why.Contains("chain"), $"production: the back slash is refused at combo step 0 ({why})");
                     Cooldown(3f);
                     s.Dispose();
@@ -1465,7 +1465,7 @@ namespace Emberdelve.EditorTools
                     for (int i = 0; i < 3; i++)
                     {
                         d.Received.Clear();
-                        bool ok = _authority.TryBeginMeleeSwing(Intent(s.Who, pattern[i], null, null, i), out int id, out string why);
+                        bool ok = _authority.TryBeginMeleeSwingAsOwner(Intent(s.Who, pattern[i], null, null, i), out int id, out string why);
                         Check(ok, $"production: chain step {i + 1} is accepted with its own pattern ({why})");
                         if (!ok) break;
                         float simulated = 0f;
@@ -1568,7 +1568,7 @@ namespace Emberdelve.EditorTools
             // the crossbow cannot begin a melee swing and the swapped-away swing cannot be resumed by a later begin id
             {
                 Scenario s = NewScenario(_crossbow);
-                Check(!_authority.TryBeginMeleeSwing(Intent(s.Who, 0), out _, out string reason) && reason.Contains("no swing patterns"), "the crossbow in hand cannot begin a melee swing");
+                Check(!_authority.TryBeginMeleeSwingAsOwner(Intent(s.Who, 0), out _, out string reason) && reason.Contains("no swing patterns"), "the crossbow in hand cannot begin a melee swing");
                 s.Dispose();
             }
 

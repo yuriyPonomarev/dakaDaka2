@@ -198,6 +198,7 @@ namespace Emberdelve.Combat
             swingId = 0;
             reason = string.Empty;
             LastAttackRejectReason = string.Empty;
+            if (!LegacyAllowed(intent.InstigatorCombatId, "swing", false, out reason)) return false;
 
             if (!CombatRegistry.TryGet(intent.InstigatorCombatId, out ICombatEntity instigator)) return RejectSwing(intent, "unknown instigator id", out reason);
             if (instigator.IsDead)

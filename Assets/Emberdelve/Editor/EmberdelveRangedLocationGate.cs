@@ -177,7 +177,7 @@ namespace Emberdelve.EditorTools
             {
                 AttackIntent intent = new AttackIntent(shooter.CombatId, shooter.Kind, _bow, 1f, from, shooter.AimDirection,
                     _bow.rangedRange, CombatRegistry.NextSequence(shooter.CombatId), _clock);
-                bool launched = _authority.LaunchProjectile(intent);
+                bool launched = _authority.LaunchProjectileAsOwner(intent);
                 reason = _authority.LastAttackRejectReason;
                 if (launched) _authority.AdvanceProjectiles(2f);
                 return launched;
@@ -358,7 +358,7 @@ namespace Emberdelve.EditorTools
                 AttackIntent intent = new AttackIntent(claimant.CombatId, claimant.Kind, _bow, 1f, claimant.AimOrigin, Vector3.forward,
                     _bow.rangedRange, CombatRegistry.NextSequence(claimant.CombatId), _clock);
                 float before = human.Taken;
-                bool accepted = _authority.SubmitAttack(intent, new HitCandidate(human.CombatId, Origin + new Vector3(0f, 1.68f, 0f), true), out string reason);
+                bool accepted = _authority.SubmitAttackAsOwner(intent, new HitCandidate(human.CombatId, Origin + new Vector3(0f, 1.68f, 0f), true), out string reason);
                 Check(!accepted && human.Taken == before && reason != null && reason.Contains("must launch"),
                     "a hit-only ranged claim with the head flag set applies nothing (" + reason + ")");
             }

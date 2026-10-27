@@ -141,6 +141,7 @@ namespace Emberdelve.Combat
 
         private void AdvanceKits(float dt)
         {
+            ExpireActivations();
             if (_kits.Count == 0) return;
 
             _kitScratch.Clear();

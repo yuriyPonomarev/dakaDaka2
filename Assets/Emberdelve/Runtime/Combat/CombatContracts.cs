@@ -317,8 +317,10 @@ namespace Emberdelve.Combat
         /// <summary>
         /// The caster reports that the effect finished. The authority closes the activation (no later hit can
         /// ride on it) and applies the skill's own self status, taken from the skill asset and scaled by the
-        /// caster's own effect scale, after the hits so a cry does not empower itself. Skipping this call only
-        /// costs the caster its buff; calling it early only closes the activation early.
+        /// caster's own effect scale, after the hits so a cry does not empower itself. R1c3: the authority also
+        /// completes a cast nobody completed, once its window is over, on its own clock (the same code path, the buff
+        /// lands exactly once), so skipping this call neither keeps the activation open nor costs the caster its buff;
+        /// calling it early only closes the activation early.
         /// </summary>
         bool CompleteSkillCast(int casterCombatId, int activationId);
 
@@ -367,6 +369,13 @@ namespace Emberdelve.Combat
 
         /// <summary>A shot the authority refused still costs the round it fired (the old client-side penalty), applied to the record.</summary>
         bool TryForfeitRound(CombatSenderId sender, int combatId);
+
+        // ---- R1c3: movement abilities are validated, not executed ------------------------------------------------
+        // The client runs the dash through its own controller. When it ends it reports where it stopped; the authority checks
+        // that against the skill data (distance), its own clock (timing) and the level (no passing through geometry), and
+        // puts the entity back at the furthest honest point when the report is not true. True = accepted untouched.
+
+        bool ReportDashResult(CombatSenderId sender, int casterCombatId, int activationId, Vector3 endPosition, out string reason);
     }
 
     /// <summary>
@@ -382,6 +391,19 @@ namespace Emberdelve.Combat
         ManaComponent Mana { get; }
         float AbilityEffectScale { get; }
         int KitEpoch { get; }
+    }
+
+    /// <summary>
+    /// R1c3: what the authority needs to validate and, when a client lied about it, undo a movement ability: where the
+    /// entity is, where its collision capsule sits, and a way to put it back. Implemented by the player rig; an enemy
+    /// has none (its movement already is server-side).
+    /// </summary>
+    public interface IMovementRollback
+    {
+        Vector3 MovementPosition { get; }
+        Vector3 MovementCenterOffset { get; }
+        float MovementRadius { get; }
+        void RollbackTo(Vector3 position);
     }
 
     /// <summary>

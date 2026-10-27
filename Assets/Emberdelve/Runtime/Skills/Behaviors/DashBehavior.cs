@@ -48,7 +48,7 @@ namespace Emberdelve.Skills
             float scale = context.EffectScale;
 
             return context.Rig.Movement.TryStartDash(direction,
-                context.Skill.dashDistance * scale, context.Skill.dashDuration * scale);
+                context.Skill.dashDistance * scale, context.Skill.dashDuration * scale, context.ActivationId);
         }
     }
 }

@@ -8,7 +8,7 @@ namespace Emberdelve.Combat
     ///
     /// The sender-less overloads (<c>SubmitAttack(intent, hit)</c>, <c>TryBeginSkillCast(casterId, ...)</c>, ...) are
     /// the local trusted path kept for fixtures, tools and enemies; player code goes through these overloads with
-    /// <c>PlayerRig.CombatSender</c>. Closing the sender-less path for player-owned ids is R1c3.
+    /// <c>PlayerRig.CombatSender</c>. R1c3 closed the sender-less path for player-owned ids (see LegacyAllowed); it stays trusted for unowned ids only.
     /// </summary>
     public sealed partial class LocalCombatAuthority
     {
@@ -41,20 +41,27 @@ namespace Emberdelve.Combat
         public bool SubmitAttack(CombatSenderId sender, AttackIntent intent, HitCandidate hit, out string reason)
         {
             if (!AuthorizeSender(sender, intent.InstigatorCombatId, "attack", false, out reason)) return false;
-            return SubmitAttack(intent, hit, out reason);
+            _senderBound = true;
+            try { return SubmitAttack(intent, hit, out reason); }
+            finally { _senderBound = false; }
         }
 
         public bool TryBeginMeleeSwing(CombatSenderId sender, in MeleeSwingIntent intent, out int swingId, out string reason)
         {
             swingId = 0;
             if (!AuthorizeSender(sender, intent.InstigatorCombatId, "swing", false, out reason)) return false;
-            return TryBeginMeleeSwing(in intent, out swingId, out reason);
+            _senderBound = true;
+            try { return TryBeginMeleeSwing(in intent, out swingId, out reason); }
+            finally { _senderBound = false; }
         }
 
         public bool LaunchProjectile(CombatSenderId sender, AttackIntent intent, out string reason)
         {
             if (!AuthorizeSender(sender, intent.InstigatorCombatId, "projectile", false, out reason)) return false;
-            bool launched = LaunchProjectile(intent);
+            _senderBound = true;
+            bool launched;
+            try { launched = LaunchProjectile(intent); }
+            finally { _senderBound = false; }
             reason = launched ? string.Empty : LastAttackRejectReason;
             return launched;
         }
@@ -63,25 +70,34 @@ namespace Emberdelve.Combat
         {
             activationId = 0;
             if (!AuthorizeSender(sender, casterCombatId, "skill cast", true, out reason)) return false;
-            return TryBeginSkillCast(casterCombatId, skillId, out activationId, out reason);
+            _senderBound = true;
+            try { return TryBeginSkillCast(casterCombatId, skillId, out activationId, out reason); }
+            finally { _senderBound = false; }
         }
 
         public bool CompleteSkillCast(CombatSenderId sender, int casterCombatId, int activationId)
         {
-            return AuthorizeSender(sender, casterCombatId, "skill complete", true, out _)
-                   && CompleteSkillCast(casterCombatId, activationId);
+            if (!AuthorizeSender(sender, casterCombatId, "skill complete", true, out _)) return false;
+            _senderBound = true;
+            try { return CompleteSkillCast(casterCombatId, activationId); }
+            finally { _senderBound = false; }
         }
 
         public bool SubmitSkill(CombatSenderId sender, SkillIntent intent, HitCandidate hit, out string reason)
         {
             if (!AuthorizeSender(sender, intent.InstigatorCombatId, "skill hit", true, out reason)) return false;
-            return SubmitSkill(intent, hit, out reason);
+            _senderBound = true;
+            try { return SubmitSkill(intent, hit, out reason); }
+            finally { _senderBound = false; }
         }
 
         public bool LaunchSkillProjectile(CombatSenderId sender, SkillIntent intent, int projectileIndex, out string reason)
         {
             if (!AuthorizeSender(sender, intent.InstigatorCombatId, "skill projectile", true, out reason)) return false;
-            bool launched = LaunchSkillProjectile(intent, projectileIndex);
+            _senderBound = true;
+            bool launched;
+            try { launched = LaunchSkillProjectile(intent, projectileIndex); }
+            finally { _senderBound = false; }
             reason = launched ? string.Empty : LastSkillRejectReason;
             return launched;
         }

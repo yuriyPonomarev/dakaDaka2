@@ -462,7 +462,7 @@ namespace Emberdelve.EditorTools
                     AttackIntent legacyDefault = new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, weapon, 1f,
                         _rig.CombatCenter, enemy.CombatCenter - _rig.CombatCenter, weapon.reach, refusedSequence, Time.time);
                     float legacyHealth = enemy.CurrentHealth;
-                    bool legacyAccepted = _authority.SubmitAttack(legacyDefault, new HitCandidate(enemy.CombatId, enemy.CombatCenter, false));
+                    bool legacyAccepted = _authority.SubmitAttackAsOwner(legacyDefault, new HitCandidate(enemy.CombatId, enemy.CombatCenter, false));
                     Check(!legacyAccepted && enemy.CurrentHealth == legacyHealth && _localAuthority.LastAttackRejectReason.Contains("swept swing"),
                         "D1a: the default authority refuses a player melee SubmitAttack (" + _localAuthority.LastAttackRejectReason + ")");
                     _localAuthority.AllowLegacyMeleeAttacks = true;
@@ -473,7 +473,7 @@ namespace Emberdelve.EditorTools
                 int consumedBeforeTooFar = _localAuthority != null ? _localAuthority.LastSequenceFor(_rig.CombatId) : -1;
                 AttackIntent tooFar = new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, weapon, 1f,
                     _rig.CombatCenter, Vector3.forward, weapon.reach, tooFarSequence, Time.time);
-                bool farAccepted = _authority.SubmitAttack(tooFar,
+                bool farAccepted = _authority.SubmitAttackAsOwner(tooFar,
                     new HitCandidate(enemy.CombatId, _rig.CombatCenter + Vector3.forward * 40f, false));
                 Check(!farAccepted, "authority rejects a hit point claimed 40 m from the target (hit-point rule; real melee reach rejection is in EmberdelveCombatAuthorityGate)");
                 Check(_localAuthority != null && _localAuthority.LastAttackRejectReason.Contains("not on the target"),
@@ -489,7 +489,7 @@ namespace Emberdelve.EditorTools
 
                 AttackIntent replay = new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, weapon, 1f,
                     _rig.CombatCenter, Vector3.forward, weapon.reach, tooFarSequence, Time.time);
-                bool replayAccepted = _authority.SubmitAttack(replay, new HitCandidate(enemy.CombatId, enemy.CombatCenter, false));
+                bool replayAccepted = _authority.SubmitAttackAsOwner(replay, new HitCandidate(enemy.CombatId, enemy.CombatCenter, false));
                 Check(!replayAccepted, "authority rejects a repeated command sequence");
                 Check(_localAuthority != null && _localAuthority.LastAttackRejectReason.Contains("sequence"),
                     "the replay is rejected by the sequence rule (" + (_localAuthority != null ? _localAuthority.LastAttackRejectReason : "n/a") + ")");
@@ -505,7 +505,7 @@ namespace Emberdelve.EditorTools
                 Vector3 firstOrigin = _rig.CombatCenter;
                 AttackIntent first = new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, weapon, 1f,
                     firstOrigin, (enemy.CombatCenter - firstOrigin).normalized, weapon.reach + weapon.hitSphereRadius, firstSequence, Time.time);
-                bool firstAccepted = _authority.SubmitAttack(first, new HitCandidate(enemy.CombatId, enemy.CombatCenter, false));
+                bool firstAccepted = _authority.SubmitAttackAsOwner(first, new HitCandidate(enemy.CombatId, enemy.CombatCenter, false));
                 Check(firstAccepted, "authority accepts a legitimate attack once the cooldown has expired (" + (_localAuthority != null ? _localAuthority.LastAttackRejectReason : "n/a") + ")");
 
                 // The legitimate attack can kill a weakened target; the cooldown rule precedes every geometry
@@ -519,7 +519,7 @@ namespace Emberdelve.EditorTools
                     $"the cooldown intent claims a fresh sequence ({firstSequence} -> {spamSequence})");
                 AttackIntent spam = new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, weapon, 1f,
                     firstOrigin, (enemy.CombatCenter - firstOrigin).normalized, weapon.reach + weapon.hitSphereRadius, spamSequence, Time.time + 100f);
-                bool spamAccepted = _authority.SubmitAttack(spam, new HitCandidate(spamTarget.CombatId, spamTarget.CombatCenter, false));
+                bool spamAccepted = _authority.SubmitAttackAsOwner(spam, new HitCandidate(spamTarget.CombatId, spamTarget.CombatCenter, false));
                 Check(!spamAccepted, "authority rejects attacks faster than the weapon cooldown");
                 Check(_localAuthority != null && _localAuthority.LastAttackRejectReason.Contains("cooldown"),
                     "the spam is rejected by the cooldown rule even with a far-future timestamp (" + (_localAuthority != null ? _localAuthority.LastAttackRejectReason : "n/a") + ")");
@@ -547,7 +547,7 @@ namespace Emberdelve.EditorTools
                     AttackIntent intent = new AttackIntent(_rig.CombatId, EntityKind.LocalPlayer, weapon, 1f,
                         origin, direction, weapon.reach + weapon.hitSphereRadius, freshSequence, Time.time);
 
-                    if (_authority.SubmitAttack(intent, new HitCandidate(enemy.CombatId, enemy.CombatCenter, false))) accepted++;
+                    if (_authority.SubmitAttackAsOwner(intent, new HitCandidate(enemy.CombatId, enemy.CombatCenter, false))) accepted++;
                     else SequenceDiag($"validAttack[{i}] consumedBefore={consumedBefore}", _rig.CombatId, freshSequence);
                     yield return WaitFrames(1);
                 }
@@ -1073,7 +1073,7 @@ namespace Emberdelve.EditorTools
                 float before = _rig.CurrentHealth;
                 _capturedValid = false;
                 int frontSequence = CombatRegistry.NextSequence(enemy.CombatId);
-                bool frontAccepted = _authority.SubmitAttack(
+                bool frontAccepted = _authority.SubmitAttackAsOwner(
                     new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f, origin, toSource, maxRange, frontSequence, Time.time),
                     new HitCandidate(_rig.CombatId, _rig.CombatCenter, false));
                 float blockedDamage = before - _rig.CurrentHealth;
@@ -1098,7 +1098,7 @@ namespace Emberdelve.EditorTools
                 before = _rig.CurrentHealth;
                 _capturedValid = false;
                 int behindSequence = CombatRegistry.NextSequence(enemy.CombatId);
-                bool behindAccepted = _authority.SubmitAttack(
+                bool behindAccepted = _authority.SubmitAttackAsOwner(
                     new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f, origin, toSource, maxRange, behindSequence, Time.time),
                     new HitCandidate(_rig.CombatId, _rig.CombatCenter, false));
                 float behindDamage = before - _rig.CurrentHealth;
@@ -1119,7 +1119,7 @@ namespace Emberdelve.EditorTools
                 before = _rig.CurrentHealth;
                 _capturedValid = false;
                 int sideSequence = CombatRegistry.NextSequence(enemy.CombatId);
-                bool sideAccepted = _authority.SubmitAttack(
+                bool sideAccepted = _authority.SubmitAttackAsOwner(
                     new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f, origin, toSource, maxRange, sideSequence, Time.time),
                     new HitCandidate(_rig.CombatId, _rig.CombatCenter, false));
                 float sideDamage = before - _rig.CurrentHealth;
@@ -1602,7 +1602,7 @@ namespace Emberdelve.EditorTools
                     AttackIntent intent = new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f,
                         origin, direction, claw.reach + claw.hitSphereRadius, freshSequence, Time.time);
 
-                    if (_authority.SubmitAttack(intent, new HitCandidate(_rig.CombatId, _rig.CombatCenter, false))) accepted++;
+                    if (_authority.SubmitAttackAsOwner(intent, new HitCandidate(_rig.CombatId, _rig.CombatCenter, false))) accepted++;
                     else if (freshSequence <= consumedBefore) SequenceDiag($"deathAttack[{i}] consumedBefore={consumedBefore}", enemy.CombatId, freshSequence);
                     yield return WaitFrames(2);
                 }
@@ -4300,7 +4300,7 @@ namespace Emberdelve.EditorTools
                 // only through the explicit opt-in (restored right after the one submission).
                 bool legacyWasAllowed = _localAuthority != null && _localAuthority.AllowLegacyMeleeAttacks;
                 if (_localAuthority != null) _localAuthority.AllowLegacyMeleeAttacks = true;
-                result.accepted = _authority.SubmitAttack(
+                result.accepted = _authority.SubmitAttackAsOwner(
                     new AttackIntent(enemy.CombatId, EntityKind.Enemy, claw, 1f, origin, travel, result.maxRange,
                         sequence, Time.time),
                     new HitCandidate(_rig.CombatId, hitPoint, false));
@@ -5477,14 +5477,14 @@ namespace Emberdelve.EditorTools
                                 pierce.TargetStatusSpec, 987654321);
 
                             int acceptedBeforeForged = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
-                            bool forgedAccepted = _authority.SubmitSkill(forged, new HitCandidate(lineC.CombatId, lineC.CombatCenter, false));
+                            bool forgedAccepted = _authority.SubmitSkillAsOwner(forged, new HitCandidate(lineC.CombatId, lineC.CombatCenter, false));
 
                             // R1b: the old fixture minted a fresh activation id client side (CombatRegistry.NextActivationId)
                             // and expected the cooldown to refuse it. Ids are now allocated by the authority, so the two
                             // halves of that claim are asserted separately: an id the authority never issued carries no
                             // hit, and a genuine new cast request (TryBeginSkillCast) is refused by the cooldown.
                             Check(!forgedAccepted, "the authority refuses a hit that carries an activation id it never issued");
-                            bool beginAgain = _authority.TryBeginSkillCast(_rig.CombatId, pierce.skillId, out int _, out string beginReason);
+                            bool beginAgain = _authority.TryBeginSkillCastAsOwner(_rig.CombatId, pierce.skillId, out int _, out string beginReason);
                             Check(!beginAgain && beginReason != null && beginReason.ToLower().Contains("cooldown"),
                                 $"the authority refuses a new activation of the same skill while its cooldown runs ({beginReason})");
                             Check(_localAuthority != null && _localAuthority.AcceptedCount == acceptedBeforeForged,

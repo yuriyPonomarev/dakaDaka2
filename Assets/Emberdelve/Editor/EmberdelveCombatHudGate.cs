@@ -199,7 +199,7 @@ namespace Emberdelve.EditorTools
 
         private MeleeSwingStatus Swing(Swinger who, int step, out bool accepted, out int id)
         {
-            accepted = _authority.TryBeginMeleeSwing(Intent(who, step), out id, out _);
+            accepted = _authority.TryBeginMeleeSwingAsOwner(Intent(who, step), out id, out _);
             return accepted ? Finish(id) : default;
         }
 
@@ -310,7 +310,7 @@ namespace Emberdelve.EditorTools
             Check(source.TryGetComboState(who.CombatId, out int step, out int total, out float window) && step == 0 && total == 3 && window == 0f,
                 $"idle sword: step 0 of 3, no window ({step}/{total}, {window:F3})");
 
-            Check(_authority.TryBeginMeleeSwing(Intent(who, 0), out int id0, out _), "step 1 begins");
+            Check(_authority.TryBeginMeleeSwingAsOwner(Intent(who, 0), out int id0, out _), "step 1 begins");
             Check(source.TryGetComboState(who.CombatId, out step, out total, out window) && step == 1 && total == 3 && window > 0f,
                 $"step 1 running: pip 1 of 3, window counting ({step}/{total}, {window:F3})");
             Finish(id0);
@@ -329,12 +329,12 @@ namespace Emberdelve.EditorTools
                 $"after the window: back to 0 of 3 ({step}/{total}, {window:F3})");
 
             // full chain
-            Check(_authority.TryBeginMeleeSwing(Intent(who, 0), out id0, out _), "chain restarts at step 1");
+            Check(_authority.TryBeginMeleeSwingAsOwner(Intent(who, 0), out id0, out _), "chain restarts at step 1");
             Finish(id0);
-            Check(_authority.TryBeginMeleeSwing(Intent(who, 1), out int id1, out _), "step 2 begins inside the window");
+            Check(_authority.TryBeginMeleeSwingAsOwner(Intent(who, 1), out int id1, out _), "step 2 begins inside the window");
             Check(source.TryGetComboState(who.CombatId, out step, out total, out _) && step == 2 && total == 3, $"step 2 running: 2 of 3 ({step}/{total})");
             Finish(id1);
-            Check(_authority.TryBeginMeleeSwing(Intent(who, 2), out int id2, out _), "step 3 (finisher) begins");
+            Check(_authority.TryBeginMeleeSwingAsOwner(Intent(who, 2), out int id2, out _), "step 3 (finisher) begins");
             Check(source.TryGetComboState(who.CombatId, out step, out total, out window) && step == 3 && total == 3 && window == 0f,
                 $"finisher running: 3 of 3, no window ({step}/{total}, {window:F3})");
             Finish(id2);
@@ -348,7 +348,7 @@ namespace Emberdelve.EditorTools
 
             // a weapon swap drops the chain
             _clock += 3f;
-            Check(_authority.TryBeginMeleeSwing(Intent(who, 0), out id0, out _), "chain starts again before the swap");
+            Check(_authority.TryBeginMeleeSwingAsOwner(Intent(who, 0), out id0, out _), "chain starts again before the swap");
             Finish(id0);
             who.Weapon = _crossbow;
             who.WeaponChangeCount++;

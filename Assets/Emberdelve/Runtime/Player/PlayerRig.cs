@@ -20,7 +20,7 @@ namespace Emberdelve.Player
     [RequireComponent(typeof(PlayerMovement))]
     [RequireComponent(typeof(PlayerLook))]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, IWeaponChangeSource, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IGuardStateSource, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback, IKitSeedSource, IKitView
+    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, IWeaponChangeSource, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IGuardStateSource, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback, IKitSeedSource, IKitView, IMovementRollback
     {
         [Header("Components")]
         [SerializeField] private EmberdelveInput input;
@@ -398,6 +398,7 @@ namespace Emberdelve.Player
             }
 
             if (mana != null) mana.Changed += OnManaChanged;
+            if (movement != null) movement.DashEnded += OnDashEnded;
 
             _wired = true;
         }
@@ -560,8 +561,29 @@ namespace Emberdelve.Player
             }
 
             if (mana != null) mana.Changed -= OnManaChanged;
+            if (movement != null) movement.DashEnded -= OnDashEnded;
 
             CombatRegistry.Unregister(_combatId, this);
+        }
+
+        // ---- R1c3: dash result reporting / rollback ----
+
+        private void OnDashEnded(int activationId, Vector3 endPosition)
+        {
+            if (GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority))
+            {
+                authority.ReportDashResult(CombatSender, _combatId, activationId, endPosition, out _);
+            }
+        }
+
+        Vector3 IMovementRollback.MovementPosition => transform.position;
+        Vector3 IMovementRollback.MovementCenterOffset => movement != null ? movement.CapsuleCenterOffset : Vector3.up;
+        float IMovementRollback.MovementRadius => movement != null ? movement.CapsuleRadius : 0.34f;
+
+        void IMovementRollback.RollbackTo(Vector3 position)
+        {
+            if (movement != null) movement.TeleportTo(position);
+            else transform.position = position;
         }
 
         public void ApplyClass(CharacterClassData data, GameConfig config)

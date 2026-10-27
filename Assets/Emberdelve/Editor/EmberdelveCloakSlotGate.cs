@@ -230,7 +230,7 @@ namespace Emberdelve.EditorTools
             Action<DamageInfo> receive = d => captured = d;
             rig.Health.Damaged += receive;
             bool ok;
-            try { ok = authority.SubmitAttack(intent, new HitCandidate(rig.CombatId, rig.CombatCenter, false)); }
+            try { ok = authority.SubmitAttackAsOwner(intent, new HitCandidate(rig.CombatId, rig.CombatCenter, false)); }
             finally { rig.Health.Damaged -= receive; }
 
             Check(ok, label + " accepted");

@@ -248,7 +248,7 @@ namespace Emberdelve.EditorTools
 
         private bool Begin(Caster c, string skillId, out int activation, out string reason)
         {
-            return _auth.TryBeginSkillCast(c.CombatId, skillId, out activation, out reason);
+            return _auth.TryBeginSkillCastAsOwner(c.CombatId, skillId, out activation, out reason);
         }
 
         private struct Outcome
@@ -280,7 +280,7 @@ namespace Emberdelve.EditorTools
                 Vector3 slotDirection = Quaternion.AngleAxis(lane, Vector3.up) * baseDirection;
                 SkillIntent intent = new SkillIntent(id, EntityKind.LocalPlayer, claimedSkill, claimedWeapon, c.Point,
                     slotDirection, maxRange, seq, timestamp, status, activation, scale);
-                ok = _auth.LaunchSkillProjectile(intent, slot);
+                ok = _auth.LaunchSkillProjectileAsOwner(intent, slot);
                 reason = _auth.LastSkillRejectReason;
                 if (ok)
                 {
@@ -293,7 +293,7 @@ namespace Emberdelve.EditorTools
             {
                 SkillIntent intent = new SkillIntent(id, EntityKind.LocalPlayer, claimedSkill, claimedWeapon, c.Point,
                     point - c.Point, maxRange, seq, timestamp, status, activation, scale);
-                ok = _auth.SubmitSkill(intent, new HitCandidate(t.CombatId, point, headFlag), out reason);
+                ok = _auth.SubmitSkillAsOwner(intent, new HitCandidate(t.CombatId, point, headFlag), out reason);
             }
             return new Outcome { Accepted = ok, Reason = reason ?? string.Empty, Damage = t.Taken - before, Info = t.Last };
         }
@@ -387,7 +387,7 @@ namespace Emberdelve.EditorTools
             noKit.Kit = null;
             b = Begin(noKit, _cry.skillId, out act, out reason);
             Check(!b && Has(reason, "not in the caster's kit"), "a caster with no kit casts nothing (" + reason + ")");
-            b = _auth.TryBeginSkillCast(987654, _cry.skillId, out act, out reason);
+            b = _auth.TryBeginSkillCastAsOwner(987654, _cry.skillId, out act, out reason);
             Check(!b && Has(reason, "unknown instigator"), "an unknown caster id is rejected (" + reason + ")");
 
             // The authority spends from the caster's own pool: a kit skill with the caster's mana too low.
@@ -470,11 +470,11 @@ namespace Emberdelve.EditorTools
             Check(!fifthHit.Accepted && Has(fifthHit.Reason, "hit budget") && fifthHit.Damage == 0f && fifth.Statuses.Count == 0,
                 "a fifth target is past the activation's hit budget (" + fifthHit.Reason + ")");
             StatusSpec expectedSelf = LocalCombatAuthority.ScaleStatus(_cry.SelfStatusSpec, 1f);
-            Check(_auth.CompleteSkillCast(w.CombatId, cryAct), "the caster completes the cast");
+            Check(_auth.CompleteSkillCastAsOwner(w.CombatId, cryAct), "the caster completes the cast");
             Check(w.Applied.Count == 1 && w.Applied[0].Kind == expectedSelf.Kind
                   && Mathf.Abs(w.Applied[0].Magnitude - expectedSelf.Magnitude) < 0.0001f && Mathf.Abs(w.Applied[0].Duration - expectedSelf.Duration) < 0.0001f,
                 "the self buff is the asset's Empowered spec, applied once by the authority at completion");
-            Check(!_auth.CompleteSkillCast(w.CombatId, cryAct) && w.Applied.Count == 1, "a second completion applies nothing (no stacked buff)");
+            Check(!_auth.CompleteSkillCastAsOwner(w.CombatId, cryAct) && w.Applied.Count == 1, "a second completion applies nothing (no stacked buff)");
             Outcome afterClose = HonestCryHit(w, cryAct, NewTarget(w.Point + new Vector3(0f, 0f, 2.5f)));
             Check(!afterClose.Accepted && Has(afterClose.Reason, "closed") && afterClose.Damage == 0f, "a completed activation takes no further hit (" + afterClose.Reason + ")");
 
@@ -487,7 +487,7 @@ namespace Emberdelve.EditorTools
             SkillIntent hitOnlyMulti = new SkillIntent(archer.CombatId, archer.Kind, _multi, _bow,
                 archer.Point, Vector3.forward, _bow.rangedRange, CombatRegistry.NextSequence(archer.CombatId),
                 _clock, default, multiAct, archer.Scale);
-            Check(!_auth.SubmitSkill(hitOnlyMulti, new HitCandidate(arrowTargets[0].CombatId, arrowTargets[0].Point, false), out string hitOnlyReason)
+            Check(!_auth.SubmitSkillAsOwner(hitOnlyMulti, new HitCandidate(arrowTargets[0].CombatId, arrowTargets[0].Point, false), out string hitOnlyReason)
                   && Has(hitOnlyReason, "projectile skills must launch") && arrowTargets[0].Taken == 0f,
                 "a client-selected projectile skill hit cannot bypass the authority flight queue");
             for (int i = 0; i < 3; i++)
@@ -588,18 +588,18 @@ namespace Emberdelve.EditorTools
                 "no CancelSkillCast on the authority surface: nothing a caller can invoke gives mana, ammo or cooldown back");
             Caster missed = NewCaster(_bow, 100, 6, _multi);
             Check(Begin(missed, _multi.skillId, out int missAct, out reason), "a volley opens");
-            Check(_auth.CompleteSkillCast(missed.CombatId, missAct), "and completes with no accepted hit (every arrow missed)");
+            Check(_auth.CompleteSkillCastAsOwner(missed.CombatId, missAct), "and completes with no accepted hit (every arrow missed)");
             Check(missed.Magazine == 3 && missed.Spent == 3 && Mathf.Abs(missed.ManaPool.CurrentMana - (100 - _multi.EffectiveManaCost)) < 0.001f,
                 "the missed volley still spent its 3 rounds and its mana");
             b = Begin(missed, _multi.skillId, out act, out reason);
             Check(!b && Has(reason, "cooldown") && missed.Magazine == 3, "and its cooldown still runs: no free recast (" + reason + ")");
             Caster dashNoRefund = NewCaster(_sword, 100, 0, _dash);
             Check(Begin(dashNoRefund, _dash.skillId, out int dashNoRefundAct, out reason), "dash opens");
-            Check(_auth.CompleteSkillCast(dashNoRefund.CombatId, dashNoRefundAct), "dash completes (it has no hits to observe)");
+            Check(_auth.CompleteSkillCastAsOwner(dashNoRefund.CombatId, dashNoRefundAct), "dash completes (it has no hits to observe)");
             b = Begin(dashNoRefund, _dash.skillId, out act, out reason);
             Check(!b && Has(reason, "cooldown") && Mathf.Abs(dashNoRefund.ManaPool.CurrentMana - (100 - _dash.EffectiveManaCost)) < 0.001f,
                 "a dash costs its mana and cooldown, however it was used (" + reason + ")");
-            Check(!_auth.CompleteSkillCast(dashNoRefund.CombatId + 999, dashNoRefundAct), "another entity cannot complete someone else's activation");
+            Check(!_auth.CompleteSkillCastAsOwner(dashNoRefund.CombatId + 999, dashNoRefundAct), "another entity cannot complete someone else's activation");
 
             // ================= 10. forged effect scale / status / geometry on skill hits =================
             Caster scaled = NewCaster(_bow, 1000, 100, _pierce);
@@ -638,14 +638,14 @@ namespace Emberdelve.EditorTools
             Outcome selfHit = Hit(cha, chaAct, _cry, _sword, new Target { CombatId = cha.CombatId, Point = cha.Point }, cha.Point, _cry.radius, status: forgedStatus);
             Check(!selfHit.Accepted && cha.Applied.Count == 0, "a hit aimed at the caster itself (to smuggle a self status) is rejected and adds no status (" + selfHit.Reason + ")");
             StatusSpec scaledSelf = LocalCombatAuthority.ScaleStatus(_cry.SelfStatusSpec, 1.2f);
-            Check(_auth.CompleteSkillCast(cha.CombatId, chaAct), "scaled cast completes");
+            Check(_auth.CompleteSkillCastAsOwner(cha.CombatId, chaAct), "scaled cast completes");
             Check(cha.Applied.Count == 1 && Mathf.Abs(cha.Applied[0].Magnitude - scaledSelf.Magnitude) < 0.0001f && Mathf.Abs(cha.Applied[0].Duration - scaledSelf.Duration) < 0.0001f,
                 "the self buff uses the caster's own scale 1.2 (" + (cha.Applied.Count > 0 ? cha.Applied[0].ToString() : "none") + ")");
             Caster dasher = NewCaster(_sword, 100, 0, _dash);
             Check(Begin(dasher, _dash.skillId, out int dashAct2, out reason), "dash opens");
             Target dashVictim = NewTarget(dasher.Point + Vector3.forward * 2f);
             Hit(dasher, dashAct2, _dash, _sword, dashVictim, dashVictim.Point, 3f, status: forgedStatus);
-            Check(_auth.CompleteSkillCast(dasher.CombatId, dashAct2), "dash completes");
+            Check(_auth.CompleteSkillCastAsOwner(dasher.CombatId, dashAct2), "dash completes");
             Check(dasher.Applied.Count == 0 && dashVictim.Statuses.Count == 0, "forged statuses on a Dash activation applied nothing anywhere");
 
             // Geometry on skill hits (R1a rules, reused through the shared helper).
@@ -750,7 +750,7 @@ namespace Emberdelve.EditorTools
             Check(Mathf.Abs((mana0 - rig.Mana.CurrentMana) - _dash.EffectiveManaCost) < 0.6f, $"Dash spent its mana exactly once, by the authority ({mana0:F1} -> {rig.Mana.CurrentMana:F1})");
             Check(_auth.OpenActivationCount == open0 + 1, "one activation was opened");
             Check(!caster.TryCastSlot(0), "a second immediate Dash is refused");
-            bool again = _auth.TryBeginSkillCast(rig.CombatId, _dash.skillId, out int _, out string againReason);
+            bool again = _auth.TryBeginSkillCastAsOwner(rig.CombatId, _dash.skillId, out int _, out string againReason);
             Check(!again && Has(againReason, "cooldown"), "and the authority independently refuses it on cooldown (" + againReason + ")");
 
             // A real Battle Cry on a real body.
@@ -800,7 +800,7 @@ namespace Emberdelve.EditorTools
             AdvanceClock(10f);
             float beforeLaunch = body.Taken;
             AttackIntent firstIntent = bowIntent(body.CombatCenter);
-            bool shot = _auth.LaunchProjectile(firstIntent);
+            bool shot = _auth.LaunchProjectileAsOwner(firstIntent);
             string shotReason = _auth.LastAttackRejectReason;
             Check(shot && ranged.Magazine == magazine - 1 && Mathf.Abs(body.Taken - beforeLaunch) < 0.001f,
                 $"an accepted bow launch spends one round and delays damage until flight impact ({magazine} -> {ranged.Magazine}; {shotReason})");
@@ -810,7 +810,7 @@ namespace Emberdelve.EditorTools
             Check(EmberdelveKitFixtures.ConsumeAmmo(ranged, ranged.Magazine) && ranged.Magazine == 0, "magazine emptied");
             AdvanceClock(10f);
             float before = body.Taken;
-            shot = _auth.LaunchProjectile(bowIntent(body.CombatCenter));
+            shot = _auth.LaunchProjectileAsOwner(bowIntent(body.CombatCenter));
             shotReason = _auth.LastAttackRejectReason;
             Check(!shot && Has(shotReason, "ammunition") && body.Taken == before && ranged.Magazine == 0,
                 "a projectile launch with an empty magazine is rejected, deals no damage and spends nothing (" + shotReason + ")");

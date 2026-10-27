@@ -626,7 +626,7 @@ namespace Emberdelve.EditorTools
             AttackIntent intent = new AttackIntent(shooter.CombatId, shooter.Kind, weapon, 1f,
                 shooter.GetMuzzlePosition(), shooter.AimDirection, weapon.rangedRange,
                 CombatRegistry.NextSequence(shooter.CombatId), Time.time);
-            bool launched = _authority.LaunchProjectile(intent);
+            bool launched = _authority.LaunchProjectileAsOwner(intent);
             Check(launched, label + " launches through LocalCombatAuthority: " + _authority.LastAttackRejectReason);
             if (launched)
             {

@@ -325,7 +325,7 @@ namespace Emberdelve.EditorTools
             CombatRegistry.Register(forgedOrigin.CombatId, forgedOrigin);
             AttackIntent forgedLaunch = new AttackIntent(forgedOrigin.CombatId, forgedOrigin.Kind, _bow, 1f,
                 _defender.GetMuzzlePosition(), _defender.AimDirection, _bow.rangedRange, 1, _clock);
-            Check(!_authority.LaunchProjectile(forgedLaunch),
+            Check(!_authority.LaunchProjectileAsOwner(forgedLaunch),
                 "an armed entity without authoritative aim cannot forge its muzzle origin to launch an arrow");
             CombatRegistry.Unregister(forgedOrigin.CombatId, forgedOrigin);
 
@@ -548,7 +548,7 @@ namespace Emberdelve.EditorTools
                 // D1c5: a swing cannot begin while the guard is up, so the guard is lowered for the begin and raised again
                 // afterwards (a client that raises it mid swing): the blade must still be unavailable throughout the swing.
                 _defender.SetGuardHeld(false);
-                bool began = _authority.TryBeginMeleeSwing(swing, out _, out string swingReason);
+                bool began = _authority.TryBeginMeleeSwingAsOwner(swing, out _, out string swingReason);
                 Check(began, "authoritative swing starts for live guard eligibility test (" + swingReason + ")");
                 _defender.SetGuardHeld(true);
                 if (began)
@@ -614,7 +614,7 @@ namespace Emberdelve.EditorTools
                 int activationId = 0;
                 string castReason = multiShot == null ? "missing skill asset" : string.Empty;
                 if (multiShot != null)
-                    castBegan = _authority.TryBeginSkillCast(_defender.CombatId, multiShot.skillId,
+                    castBegan = _authority.TryBeginSkillCastAsOwner(_defender.CombatId, multiShot.skillId,
                         out activationId, out castReason);
                 Check(castBegan, "MultiShot activation opens for projectile-slot replay test (" + castReason + ")");
                 if (castBegan)
@@ -628,7 +628,7 @@ namespace Emberdelve.EditorTools
                         _defender.ActiveWeapon, muzzle, aim, _defender.ActiveWeapon.rangedRange,
                         CombatRegistry.NextSequence(_defender.CombatId), _clock, default, activationId,
                         _defender.AbilityEffectScale);
-                    bool bypassAccepted = _authority.SubmitSkill(hitOnlyBypass,
+                    bool bypassAccepted = _authority.SubmitSkillAsOwner(hitOnlyBypass,
                         new HitCandidate(hostileCandidate.CombatId, hostileCandidate.CombatCenter, false), out string bypassReason);
                     Check(!bypassAccepted && hostileCandidate.CurrentHealth == healthBeforeHitOnlySubmit
                           && bypassReason.Contains("projectile skills must launch"),
@@ -645,7 +645,7 @@ namespace Emberdelve.EditorTools
                             _defender.ActiveWeapon, muzzle, direction, _defender.ActiveWeapon.rangedRange,
                             CombatRegistry.NextSequence(_defender.CombatId), _clock, default, activationId,
                             _defender.AbilityEffectScale);
-                        allAccepted &= _authority.LaunchSkillProjectile(shot, i);
+                        allAccepted &= _authority.LaunchSkillProjectileAsOwner(shot, i);
                     }
                     Check(allAccepted, "each canonical MultiShot spread slot launches once");
                     _authority.AdvanceProjectiles(1f);
@@ -653,9 +653,9 @@ namespace Emberdelve.EditorTools
                         _defender.ActiveWeapon, muzzle, aim, _defender.ActiveWeapon.rangedRange,
                         CombatRegistry.NextSequence(_defender.CombatId), _clock, default, activationId,
                         _defender.AbilityEffectScale);
-                    Check(!_authority.LaunchSkillProjectile(replay, 0),
+                    Check(!_authority.LaunchSkillProjectileAsOwner(replay, 0),
                         "finished flights do not reopen launched spread slots while activation remains open");
-                    Check(_authority.CompleteSkillCast(_defender.CombatId, activationId),
+                    Check(_authority.CompleteSkillCastAsOwner(_defender.CombatId, activationId),
                         "MultiShot activation closes after replay assertion");
                     _authority.AdvanceProjectiles(0f);
                 }
@@ -678,7 +678,7 @@ namespace Emberdelve.EditorTools
         {
             AttackIntent intent = new AttackIntent(shooter.CombatId, shooter.Kind, shooter.ActiveWeapon, 1f,
                 shooter.AimOrigin, shooter.AimDirection, shooter.ActiveWeapon.rangedRange, sequence, _clock);
-            return _authority.LaunchProjectile(intent);
+            return _authority.LaunchProjectileAsOwner(intent);
         }
 
         private void ResetHealth() => _defender.Health.Configure(100000, 0f, 0f);
