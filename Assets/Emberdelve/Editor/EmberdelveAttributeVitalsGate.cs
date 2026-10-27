@@ -32,11 +32,11 @@ namespace Emberdelve.EditorTools
     ///
     /// It builds a real PlayerRig (the same components the scene rig carries), applies a real class asset
     /// through the real ClassLoadout, then drives real Inventory/Equipment transfers and asserts on the
-    /// real HealthComponent/ManaComponent/StaminaComponent pools:
+    /// real HealthComponent/ManaComponent pools:
     /// - both authored class baselines and their derived pools, filled once by class application;
     /// - damage/spend, then equip + unequip + re-equip leaving the CURRENT pools untouched except for the
     ///   clamp a shrinking ceiling forces;
-    /// - CON+2 raising the health/stamina ceilings without healing, INT+2 raising the mana ceiling without
+    /// - CON+2 raising the health ceiling without healing, INT+2 raising the mana ceiling without
     ///   a refill;
     /// - the authored +1 gear bonuses producing one exact effective snapshot, with no stacking and the
     ///   class/item assets identical afterwards;
@@ -48,7 +48,7 @@ namespace Emberdelve.EditorTools
     /// Every assertion helper matches the type the live API actually reports: HealthComponent reports its
     /// ceiling and every pool reports its current value as float, so those go through CheckClose with the
     /// gate's 0.011 tolerance and are never rounded or truncated to int; ManaComponent.MaxMana,
-    /// StaminaComponent.MaxStamina, the attribute-derived ceilings and the authored class fields really are
+    /// the attribute-derived ceilings and the authored class fields really are
     /// int, so those stay CheckInt. Only the single summary line is counted as PASS/FAIL; each individual
     /// assertion logs checked/mismatch.
     ///
@@ -214,8 +214,8 @@ namespace Emberdelve.EditorTools
                     WeaponData bow = LoadAsset<WeaponData>(EmberdelvePaths.Data + "/Weapon_HollowBow.asset", "Weapon_HollowBow");
                     GameConfig config = LoadAsset<GameConfig>(EmberdelvePaths.Data + "/EmberdelveGameConfig.asset", "EmberdelveGameConfig");
 
-                    CheckAuthoredBases(warrior, 100, 75, 3f, 90, 5f, "warrior authored bases");
-                    CheckAuthoredBases(archer, 80, 90, 3.5f, 95, 5f, "archer authored bases");
+                    CheckAuthoredBases(warrior, 100, 75, 3f, "warrior authored bases");
+                    CheckAuthoredBases(archer, 80, 90, 3.5f, "archer authored bases");
 
                     RunWarrior(warrior, cuirass, boots, config);
                     RunArcher(archer, cuirass, bow, config);
@@ -281,8 +281,6 @@ namespace Emberdelve.EditorTools
                 CheckClose("warrior health filled to 120", 120f, rig.Health.CurrentHealth, "a new run starts full");
                 CheckInt("warrior max mana 70 (75 + 5*-1)", 70, rig.Mana.MaxMana, "INT modifier -1");
                 CheckClose("warrior mana filled to 70", 70f, rig.Mana.CurrentMana, "a new run starts full");
-                CheckInt("warrior max stamina 100 (90 + 5*2)", 100, rig.Stamina.MaxStamina, "CON modifier 2");
-                CheckClose("warrior stamina filled to 100", 100f, rig.Stamina.CurrentStamina, "a new run starts full");
 
                 // 2. Effective scores and modifiers, derived from the pristine class scores.
                 CheckAttributes(rig.AttributeStats, new[] { 16, 10, 14, 8, 10, 10 }, "warrior effective scores (no gear)");
@@ -291,7 +289,6 @@ namespace Emberdelve.EditorTools
                 // 3. Derived regeneration rates are the numbers the live pools are actually configured with.
                 CheckClose("warrior health regen 1.5 (class authored)", 1.5f, rig.Health.RegenPerSecond, "no attribute rule for health regen yet");
                 CheckClose("warrior mana regen 3.0 (3 + 0.25*0)", 3f, rig.Mana.RegenPerSecond, "WIS modifier 0");
-                CheckClose("warrior stamina regen 6.0 (5 + 0.5*2)", 6f, rig.Stamina.RegenPerSecond, "CON modifier 2");
                 EffectiveStatsSnapshot warriorSnapshot = rig.EffectiveStats;
                 CheckClose("health regen is configured from the snapshot", warriorSnapshot.HealthRegenPerSecond, rig.Health.RegenPerSecond, "same normalized rate");
                 CheckClose("health delay matches the snapshot", warriorSnapshot.HealthRegenDelay, ReadFloatField(rig.Health, "regenDelay"), "private pool configuration parity");
@@ -312,8 +309,6 @@ namespace Emberdelve.EditorTools
                 CheckClose("warrior damaged to 80/120", 80f, rig.Health.CurrentHealth, "40 damage");
                 Check(rig.Mana.TrySpend(30), "warrior spent 30 mana");
                 CheckClose("warrior mana at 40/70", 40f, rig.Mana.CurrentMana, "30 spent");
-                Check(rig.Stamina.TrySpend(25), "warrior spent 25 stamina");
-                CheckClose("warrior stamina at 75/100", 75f, rig.Stamina.CurrentStamina, "25 spent");
 
                 CarryItem(rig, cuirass);
                 CarryItem(rig, boots);
@@ -334,8 +329,6 @@ namespace Emberdelve.EditorTools
                 CheckClose("post-refresh mana delay still matches the snapshot", refreshedVitals.ManaRegenDelay, ReadFloatField(rig.Mana, "regenDelay"), "equipment refresh uses captured delay");
                 CheckClose("health regen clock is not restarted by refresh", healthClockBeforeRefresh, ReadFloatField(rig.Health, "_timeSinceDamage"), "SetMax leaves the damage clock intact");
                 CheckClose("mana regen clock is not restarted by refresh", manaClockBeforeRefresh, ReadFloatField(rig.Mana, "_timeSinceSpend"), "SetRegen leaves the spend clock intact");
-                CheckInt("warrior stamina ceiling still 100 with cuirass", 100, rig.Stamina.MaxStamina, "CON +1 keeps the modifier at 2");
-                CheckClose("warrior current stamina still 75 after equipping", 75f, rig.Stamina.CurrentStamina, "no refill");
 
                 Unequip(rig, EquipmentSlot.Chest);
                 CheckClose("warrior ceiling back to 120 without cuirass", 120f, rig.Health.MaxHealth, "gear contribution removed exactly");
@@ -395,8 +388,6 @@ namespace Emberdelve.EditorTools
                 Equip(rig, conGem);
                 CheckClose("CON+2 raises the health ceiling to 130 (100 + 10*3)", 130f, rig.Health.MaxHealth, "CON 16 is modifier 3");
                 CheckClose("CON+2 did not heal: current health still 90", 90f, rig.Health.CurrentHealth, "no free healing");
-                CheckInt("CON+2 raises the stamina ceiling to 105 (90 + 5*3)", 105, rig.Stamina.MaxStamina, "same CON modifier");
-                CheckClose("CON+2 did not refill stamina: still 75", 75f, rig.Stamina.CurrentStamina, "no free refill");
                 Check(_equipmentNotifications == 1, $"one equipment notification for the CON equip ({_equipmentNotifications})");
                 CheckClose("from inside the notification the derived health was 130", 130f, _notifyRigDerivedHealth,
                     "observed from inside the equipment notification");
@@ -478,14 +469,11 @@ namespace Emberdelve.EditorTools
                 CheckClose("archer health filled to 90", 90f, rig.Health.CurrentHealth, "a new run starts full");
                 CheckInt("archer max mana 90 (90 + 5*0)", 90, rig.Mana.MaxMana, "INT modifier 0");
                 CheckClose("archer mana filled to 90", 90f, rig.Mana.CurrentMana, "a new run starts full");
-                CheckInt("archer max stamina 100 (95 + 5*1)", 100, rig.Stamina.MaxStamina, "CON modifier 1");
-                CheckClose("archer stamina filled to 100", 100f, rig.Stamina.CurrentStamina, "a new run starts full");
 
                 CheckAttributes(rig.AttributeStats, new[] { 10, 16, 12, 10, 14, 8 }, "archer effective scores (no gear)");
                 CheckModifiers(rig.AttributeStats, new[] { 0, 3, 1, 0, 2, -1 }, "archer modifiers (no gear)");
 
                 CheckClose("archer mana regen 4.0 (3.5 + 0.25*2)", 4f, rig.Mana.RegenPerSecond, "WIS modifier 2");
-                CheckClose("archer stamina regen 5.5 (5 + 0.5*1)", 5.5f, rig.Stamina.RegenPerSecond, "CON modifier 1");
                 CheckClose("archer health regen 2.0 (class authored)", 2f, rig.Health.RegenPerSecond, "no attribute rule for health regen yet");
 
                 // U2A8 fixture migration of the same two numbers to the migrated authored 4.3. The query is
@@ -512,11 +500,6 @@ namespace Emberdelve.EditorTools
 
                 Check(rig.Mana.TrySpend(40), "archer spent 40 mana");
                 CheckClose("archer mana at 50/90", 50f, rig.Mana.CurrentMana, "40 spent");
-                Check(rig.Stamina.TrySpend(30), "archer spent 30 stamina");
-                // Fixture correction, not a gameplay change: the archer's ceiling is asserted as 100 two
-                // blocks above and 30 stamina is spent here, so the pool lands on 70. R1 carried 75f, which
-                // contradicted its own label and was never reached because the edit-mode rig threw first.
-                CheckClose("archer stamina at 70/100", 70f, rig.Stamina.CurrentStamina, "30 spent");
 
                 Debug.Log($"{Tag} archer end snapshot: {rig.AttributeStats.Describe()}");
             }
@@ -527,7 +510,7 @@ namespace Emberdelve.EditorTools
             /// A real rig, built the way the scene rig is wired, and built inside play mode so every
             /// component's real Awake runs: RequireComponent pulls in EmberdelveInput, PlayerMovement
             /// (+CharacterController), PlayerLook and HealthComponent, and WireRig performs the same Ensure
-            /// pass Awake performs for mana, stamina, status, equipment, skills and the attribute component.
+            /// pass Awake performs for mana, status, equipment, skills and the attribute component.
             /// Inventory and ClassLoadout are the two the rig does not create for itself. No Awake is
             /// called by hand and no private field is injected.
             /// </summary>
@@ -596,7 +579,7 @@ namespace Emberdelve.EditorTools
             }
 
             private void CheckAuthoredBases(CharacterClassData data, int maxHealth, int maxMana,
-                float manaRegen, int maxStamina, float staminaRegen, string label)
+                float manaRegen, string label)
             {
                 Check(data != null, label + ": class asset present");
                 if (data == null) return;
@@ -604,15 +587,11 @@ namespace Emberdelve.EditorTools
                 CheckInt(label + " maxHealth", maxHealth, data.maxHealth, "authored base");
                 CheckInt(label + " maxMana", maxMana, data.maxMana, "authored base");
                 CheckClose(label + " manaRegenPerSecond", manaRegen, data.manaRegenPerSecond, "authored base");
-                CheckInt(label + " maxStamina", maxStamina, data.maxStamina, "authored base");
-                CheckClose(label + " staminaRegenPerSecond", staminaRegen, data.staminaRegenPerSecond, "authored prototype tuning");
 
                 DerivedStatBases bases = data.AttributeBases;
                 CheckInt(label + " bases handed to the rules: health", maxHealth, bases.MaxHealth, "pristine");
                 CheckInt(label + " bases handed to the rules: mana", maxMana, bases.MaxMana, "pristine");
-                CheckInt(label + " bases handed to the rules: stamina", maxStamina, bases.MaxStamina, "pristine");
                 CheckClose(label + " bases handed to the rules: mana regen", manaRegen, bases.ManaRegen, "pristine");
-                CheckClose(label + " bases handed to the rules: stamina regen", staminaRegen, bases.StaminaRegen, "pristine");
             }
 
             private void CheckAttributes(StatsComponent stats, int[] expected, string label)

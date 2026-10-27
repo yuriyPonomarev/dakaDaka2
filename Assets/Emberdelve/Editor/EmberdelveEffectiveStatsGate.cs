@@ -71,9 +71,9 @@ namespace Emberdelve.EditorTools
                 // independently of AttributeRules/StatsComponent/CharacterStatStack query helpers.
                 Check(first.IsReady && first.AttributesReady, "warrior capture readiness");
                 Check(first.Attributes.Effective.Strength == 16 && first.Attributes.Effective.Constitution == 14
-                    && first.MaxHealth == 120 && first.MaxMana == 70 && first.MaxStamina == 100
+                    && first.MaxHealth == 120 && first.MaxMana == 70
                     && Mathf.Approximately(first.ManaRegenPerSecond, 3f),
-                    "warrior literals: STR16 CON14 => HP120, INT8 => mana70, stamina100");
+                    "warrior literals: STR16 CON14 => HP120, INT8 => mana70");
                 Check(Mathf.Approximately(first.GetOutgoingDamageMultiplier(rapier), 1.344f)
                     && Mathf.Approximately(first.GetOutgoingDamageMultiplier(bow), 1f),
                     "warrior literals: rapier finesse 1.12 x Ashen Might 1.2; bow DEX/passive neutral");
@@ -91,9 +91,8 @@ namespace Emberdelve.EditorTools
                 Check(archerSnapshot.Attributes.Effective.Dexterity == 16
                     && archerSnapshot.Attributes.Effective.Wisdom == 14
                     && archerSnapshot.MaxHealth == 90 && archerSnapshot.MaxMana == 90
-                    && Mathf.Approximately(archerSnapshot.ManaRegenPerSecond, 4f)
-                    && archerSnapshot.MaxStamina == 100,
-                    "archer literals: DEX16 WIS14 CON12 => HP90, mana90, regen4, stamina100");
+                    && Mathf.Approximately(archerSnapshot.ManaRegenPerSecond, 4f),
+                    "archer literals: DEX16 WIS14 CON12 => HP90, mana90, regen4");
                 Check(Mathf.Approximately(archerSnapshot.GetOutgoingDamageMultiplier(bow), 1.3216f)
                     && Mathf.Approximately(archerSnapshot.GetOutgoingDamageMultiplier(rapier), 1.12f)
                     && Mathf.Approximately(archerSnapshot.WalkSpeed, 5.315875f)

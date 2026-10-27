@@ -342,15 +342,13 @@ namespace Emberdelve.EditorTools
             // the builder Ensures the same way instead of adding its own copies: whether or not Awake already
             // ran on this GameObject, each one exists once and builder, rig and caster end up holding the same
             // pool, status set and caster. In an edit-mode build Awake has not run, so Ensure is also what
-            // puts all five on the GameObject - stamina included - for the wiring below to serialize.
+            // puts all four on the GameObject for the wiring below to serialize.
             ManaComponent mana = ManaComponent.Ensure(rigGo);
-            StaminaComponent stamina = StaminaComponent.Ensure(rigGo);
             StatusComponent status = StatusComponent.Ensure(rigGo);
             Equipment equipment = Equipment.Ensure(rigGo);
             SkillCaster skills = rigGo.GetComponent<SkillCaster>();
             if (skills == null) skills = rigGo.AddComponent<SkillCaster>();
             mana.name = "Mana";
-            stamina.name = "Stamina";
             status.name = "Status";
             skills.name = "SkillCaster";
             equipment.name = "Equipment";
@@ -399,7 +397,6 @@ namespace Emberdelve.EditorTools
             SetReference(rig, "look", look);
             SetReference(rig, "health", health);
             SetReference(rig, "mana", mana);
-            SetReference(rig, "stamina", stamina);
             SetReference(rig, "status", status);
             SetReference(rig, "skills", skills);
             SetReference(rig, "inventory", inventory);

@@ -80,9 +80,7 @@ namespace Emberdelve.Stats
 
         public int MaxHealth => _derived.MaxHealth;
         public int MaxMana => _derived.MaxMana;
-        public int MaxStamina => _derived.MaxStamina;
         public float ManaRegen => _derived.ManaRegen;
-        public float StaminaRegen => _derived.StaminaRegen;
 
         /// <summary>
         /// The attribute-only walking number (passive multiplier 1, gear flat 0). It is the amendment's

@@ -160,7 +160,7 @@ namespace Emberdelve.Movement
             speed *= _speedPenalty;
             speed *= StatusSpeedMultiplier();
 
-            // D1b: fighting penalties (held weapon, swing phase, guard stagger) - authority-side state, no stamina.
+            // D1b: fighting penalties (held weapon, swing phase, guard stagger) - authority-side state.
             if (_flow != null) speed *= Mathf.Clamp(_flow.GetMoveFlowFactor(), 0.05f, 1f);
 
             return Mathf.Max(0f, speed);

@@ -31,15 +31,15 @@ var testCatalog=ItemCatalog.CreateForTest(new[]{boots},defs);cleanup.Add(testCat
 Check(rig.AttributeStats.GetAttribute(Emberdelve.Stats.SixAttribute.Constitution)==14&&rig.MaxHealth==120&&rig.Mana.MaxMana==70,"bare warrior baseline");
 string classBefore=EditorJsonUtility.ToJson(rig.Class),bootsBefore=EditorJsonUtility.ToJson(boots);
 ItemInstance rare;Check(ItemInstance.TryCreateNew(boots,1,AffixRarity.Rare,new[]{new AffixRecord("stat_2",AffixStatKey.Constitution,3),new AffixRecord("stat_3",AffixStatKey.Intelligence,3)},auth,out rare,out reason),"rare CON INT gear");
-Check(bag.TryAddInstance(rare,out reason),"carry rare gear");rig.Mana.TrySpend(20);rig.Stamina.TrySpend(20);
-float hp=rig.CurrentHealth,mp=rig.Mana.CurrentMana,sp=rig.Stamina.CurrentStamina;int minted=bag.MintedInstanceCount;
+Check(bag.TryAddInstance(rare,out reason),"carry rare gear");rig.Mana.TrySpend(20);
+float hp=rig.CurrentHealth,mp=rig.Mana.CurrentMana;int minted=bag.MintedInstanceCount;
 for(int cycle=0;cycle<3;cycle++){
 Check(gear.TryEquipFromInventory(bag.IndexOfInstance(rare.Uid),out reason),"equip rare cycle"+cycle);
 Check(rig.AttributeStats.GetAttribute(Emberdelve.Stats.SixAttribute.Constitution)==17&&rig.AttributeStats.GetAttribute(Emberdelve.Stats.SixAttribute.Intelligence)==11&&rig.AttributeStats.GetAttribute(Emberdelve.Stats.SixAttribute.Dexterity)==11,"fixed and rolled scores once");
-Check(rig.MaxHealth==130&&rig.Mana.MaxMana==75&&rig.Stamina.MaxStamina==105,"actual pools derive rolled scores");
-Check(rig.CurrentHealth==hp&&rig.Mana.CurrentMana==mp&&rig.Stamina.CurrentStamina==sp,"larger ceilings do not refill");
+Check(rig.MaxHealth==130&&rig.Mana.MaxMana==75,"actual pools derive rolled scores");
+Check(rig.CurrentHealth==hp&&rig.Mana.CurrentMana==mp,"larger ceilings do not refill");
 rig.RefreshEquipmentStats();rig.RefreshEquipmentStats();Check(rig.MaxHealth==130&&rig.Mana.MaxMana==75,"refresh no accumulation");
-Check(gear.TryUnequip(EquipmentSlot.Legs,out reason)&&rig.MaxHealth==120&&rig.Mana.MaxMana==70&&rig.Stamina.MaxStamina==100,"unequip exact restore");
+Check(gear.TryUnequip(EquipmentSlot.Legs,out reason)&&rig.MaxHealth==120&&rig.Mana.MaxMana==70,"unequip exact restore");
 }
 for(int i=0;i<6;i++){
 ItemInstance single;Check(ItemInstance.TryCreateNew(boots,1,AffixRarity.Uncommon,new[]{new AffixRecord("stat_"+i,(AffixStatKey)i,3)},auth,out single,out reason),"create attribute variant"+i);

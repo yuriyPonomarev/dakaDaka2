@@ -275,26 +275,22 @@ namespace Emberdelve.Stats
 
     /// <summary>
     /// The caller-supplied BASE numbers ATTRIBUTES.md says a class definition owns after the
-    /// amendment (max health/mana/stamina, mana/stamina regeneration, move speed). The rules never
+    /// amendment (max health/mana, mana regeneration, move speed). The rules never
     /// look up a class asset or guess a class: every derivation takes these values as arguments.
     /// </summary>
     public readonly struct DerivedStatBases
     {
         public readonly int MaxHealth;
         public readonly int MaxMana;
-        public readonly int MaxStamina;
         public readonly float ManaRegen;
-        public readonly float StaminaRegen;
         public readonly float MoveSpeed;
 
-        public DerivedStatBases(int maxHealth, int maxMana, int maxStamina,
-            float manaRegen, float staminaRegen, float moveSpeed)
+        public DerivedStatBases(int maxHealth, int maxMana,
+            float manaRegen, float moveSpeed)
         {
             MaxHealth = maxHealth;
             MaxMana = maxMana;
-            MaxStamina = maxStamina;
             ManaRegen = manaRegen;
-            StaminaRegen = staminaRegen;
             MoveSpeed = moveSpeed;
         }
     }
@@ -305,20 +301,16 @@ namespace Emberdelve.Stats
         public readonly AttributeScores Effective;
         public readonly int MaxHealth;
         public readonly int MaxMana;
-        public readonly int MaxStamina;
         public readonly float ManaRegen;
-        public readonly float StaminaRegen;
         public readonly float MoveSpeed;
 
-        public DerivedStats(AttributeScores effective, int maxHealth, int maxMana, int maxStamina,
-            float manaRegen, float staminaRegen, float moveSpeed)
+        public DerivedStats(AttributeScores effective, int maxHealth, int maxMana,
+            float manaRegen, float moveSpeed)
         {
             Effective = effective;
             MaxHealth = maxHealth;
             MaxMana = maxMana;
-            MaxStamina = maxStamina;
             ManaRegen = manaRegen;
-            StaminaRegen = staminaRegen;
             MoveSpeed = moveSpeed;
         }
 
@@ -329,9 +321,8 @@ namespace Emberdelve.Stats
 
         public string Describe()
         {
-            return "hp=" + MaxHealth + " mana=" + MaxMana + " stamina=" + MaxStamina +
+            return "hp=" + MaxHealth + " mana=" + MaxMana +
                    " manaRegen=" + ManaRegen.ToString("0.###") +
-                   " staminaRegen=" + StaminaRegen.ToString("0.###") +
                    " moveSpeed=" + MoveSpeed.ToString("0.####");
         }
     }
@@ -343,7 +334,7 @@ namespace Emberdelve.Stats
     /// server can run the identical code the client displays.
     ///
     /// Later work, deliberately NOT invented here: sprint/crouch/guard speed multipliers feeding
-    /// MoveSpeed's passive multiplier, item flat move-speed from gear, stamina drain while sprinting,
+    /// MoveSpeed's passive multiplier, item flat move-speed from gear,
     /// current-pool clamping on equip, and the StatsComponent/item-definition plumbing that supplies
     /// these base values from CharacterClassData/ItemData.
     /// </summary>
@@ -353,19 +344,15 @@ namespace Emberdelve.Stats
 
         // Derived-pool floors from ATTRIBUTES.md.
         public const int MinDerivedHealth = 25;
-        public const int MinDerivedStamina = 25;
         public const int MinDerivedMana = 10;
         public const float MinManaRegen = 0.1f;
-        public const float MinStaminaRegen = 1f;
         public const float MinMoveSpeed = 2f;
         public const float MaxMoveSpeed = 8f;
         public const float MinMoveSpeedFactor = 0.5f;
         public const float MoveSpeedPerModifier = 0.025f;
         public const int HealthPerConstitutionModifier = 10;
-        public const int StaminaPerConstitutionModifier = 5;
         public const int ManaPerIntelligenceModifier = 5;
         public const float ManaRegenPerWisdomModifier = 0.25f;
-        public const float StaminaRegenPerConstitutionModifier = 0.5f;
         public const float DamagePerModifier = 0.04f;
         public const float MinDamageFactor = 0.2f;
         public const float EffectScalePerCharismaModifier = 0.04f;
@@ -400,11 +387,6 @@ namespace Emberdelve.Stats
             return Math.Max(MinDerivedHealth, baseMaxHealth + HealthPerConstitutionModifier * constitutionModifier);
         }
 
-        public static int MaxStamina(int baseMaxStamina, int constitutionModifier)
-        {
-            return Math.Max(MinDerivedStamina, baseMaxStamina + StaminaPerConstitutionModifier * constitutionModifier);
-        }
-
         public static int MaxMana(int baseMaxMana, int intelligenceModifier)
         {
             return Math.Max(MinDerivedMana, baseMaxMana + ManaPerIntelligenceModifier * intelligenceModifier);
@@ -413,11 +395,6 @@ namespace Emberdelve.Stats
         public static float ManaRegen(float baseManaRegen, int wisdomModifier)
         {
             return Math.Max(MinManaRegen, baseManaRegen + ManaRegenPerWisdomModifier * wisdomModifier);
-        }
-
-        public static float StaminaRegen(float baseStaminaRegen, int constitutionModifier)
-        {
-            return Math.Max(MinStaminaRegen, baseStaminaRegen + StaminaRegenPerConstitutionModifier * constitutionModifier);
         }
 
         /// <summary>
@@ -516,9 +493,7 @@ namespace Emberdelve.Stats
                 effective,
                 MaxHealth(bases.MaxHealth, effective.Modifier(SixAttribute.Constitution)),
                 MaxMana(bases.MaxMana, effective.Modifier(SixAttribute.Intelligence)),
-                MaxStamina(bases.MaxStamina, effective.Modifier(SixAttribute.Constitution)),
                 ManaRegen(bases.ManaRegen, effective.Modifier(SixAttribute.Wisdom)),
-                StaminaRegen(bases.StaminaRegen, effective.Modifier(SixAttribute.Constitution)),
                 MoveSpeed(bases.MoveSpeed, effective.Modifier(SixAttribute.Dexterity)));
         }
 

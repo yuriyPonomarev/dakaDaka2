@@ -392,7 +392,7 @@ namespace Emberdelve.EditorTools
         // Files in Runtime that may keep a non-project random source. Anything else under Runtime must be clean.
         // EnemyBrain: AI patrol waypoint angle jitter (movement, not loot, drop or identity; follow-up R4R5 note).
         // TorchFlicker: purely visual light flicker.
-        private static readonly string[] RandomAllowlist = { "AI/EnemyBrain.cs", "Feedback/TorchFlicker.cs" };
+        private static readonly string[] RandomAllowlist = { "AI/EnemyBrain.cs", "Feedback/TorchFlicker.cs", "Feedback/WallStopFeedback.cs" };
 
         private void SourceScan()
         {

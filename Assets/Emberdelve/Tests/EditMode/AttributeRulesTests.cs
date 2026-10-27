@@ -52,14 +52,12 @@ namespace Emberdelve.Rules.Tests
         public void Derive_AppliesLiteralPoolRegenAndSpeedValues()
         {
             AttributeScores scores = new AttributeScores(10, 14, 8, 12, 16, 10);
-            DerivedStatBases bases = new DerivedStatBases(100, 50, 80, 3f, 2f, 4f);
+            DerivedStatBases bases = new DerivedStatBases(100, 50, 3f, 4f);
             DerivedStats result = AttributeRules.Derive(scores, bases);
 
             Assert.That(result.MaxHealth, Is.EqualTo(90));
             Assert.That(result.MaxMana, Is.EqualTo(55));
-            Assert.That(result.MaxStamina, Is.EqualTo(75));
             Assert.That(result.ManaRegen, Is.EqualTo(3.75f).Within(0.0001f));
-            Assert.That(result.StaminaRegen, Is.EqualTo(1.5f).Within(0.0001f));
             Assert.That(result.MoveSpeed, Is.EqualTo(4.2f).Within(0.0001f));
         }
 

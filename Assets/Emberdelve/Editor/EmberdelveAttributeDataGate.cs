@@ -18,9 +18,9 @@ public static class EmberdelveAttributeDataGate {
  // U2A3 corrected this fixture: ATTRIBUTES.md now authors warrior 100/75/3 and archer 80/90/3.5 as the
  // pristine BASES the six attributes derive from, and U2A3 migrated those numbers in the builder and in the
  // saved class assets. Asserting the pre-amendment 150/120 and 100/100 would now assert wrong data; the
- // coverage is preserved as exact authored values and extended with the new stamina pair.
- Check(w.maxHealth==100&&w.maxMana==75&&Mathf.Approximately(w.manaRegenPerSecond,3f)&&w.maxStamina==90&&Mathf.Approximately(w.staminaRegenPerSecond,5f),"warrior amended base vitals");
- Check(a.maxHealth==80&&a.maxMana==90&&Mathf.Approximately(a.manaRegenPerSecond,3.5f)&&a.maxStamina==95&&Mathf.Approximately(a.staminaRegenPerSecond,5f),"archer amended base vitals");
+ // coverage is preserved as exact authored values and extended with the new mana pair.
+ Check(w.maxHealth==100&&w.maxMana==75&&Mathf.Approximately(w.manaRegenPerSecond,3f),"warrior amended base vitals");
+ Check(a.maxHealth==80&&a.maxMana==90&&Mathf.Approximately(a.manaRegenPerSecond,3.5f),"archer amended base vitals");
  Check(b.AttributeBonusTotals.Total(SixAttribute.Dexterity)==1,"boots DEX1");Check(c.AttributeBonusTotals.Total(SixAttribute.Constitution)==1,"cuirass CON1");
  custom=ScriptableObject.CreateInstance<CharacterClassData>();custom.strength=-9;custom.charisma=99;Check(custom.BaseAttributes.Strength==1&&custom.BaseAttributes.Charisma==30,"programmatic score clamp");Check(custom.strength==-9&&custom.charisma==99,"snapshot does not mutate class");
  temp=ScriptableObject.CreateInstance<ItemData>();Check(temp.AttributeBonusTotals.IsEmpty,"null bonus");temp.attributeBonuses=new AttributeBonusEntry[0];Check(temp.AttributeBonusTotals.IsEmpty,"empty bonus");

@@ -48,11 +48,6 @@ namespace Emberdelve.UI
         private Text _manaLabel;
         private Image _manaFill;
         private RectTransform _manaFillRect;
-        private Text _staminaLabel;
-        private Image _staminaFill;
-        private RectTransform _staminaFillRect;
-        private int _staminaShownCurrent = -1;
-        private int _staminaShownMax = -1;
         private Text _kitLabel;
         private readonly SkillSlotWidget[] _skillSlots = new SkillSlotWidget[Skills.SkillCaster.ActiveSlotCapacity];
         private Text _promptLabel;
@@ -101,25 +96,6 @@ namespace Emberdelve.UI
         private const float BarHeight = 20f;
         private const float ManaBarHeight = 14f;
         private const float SkillRejectFlash = 1.6f;
-
-        /// <summary>
-        /// DEPRECATED (D1b, user decision): stamina no longer gates or drains block or sprint, so its bar is not built.
-        /// The pool, its derived stats and the bar code below stay (dormant) so existing data and gates keep their
-        /// meaning; set this true only to bring the bar back.
-        /// </summary>
-        public const bool ShowStaminaBar = false;
-
-        // The stamina bar is the mana bar's shape in the free band to the right of the mana readout, so the
-        // three pools read as one stack of bars. Measured in the same 1280x720 image coordinates the hotbar
-        // comment below uses: mana bar x 24..364 y 695..709, mana label x 378..598 y 695..715, hotbar chips
-        // x 430..850 y 648..692, ammo fill x 1036..1256 y 667..677, ammo label x 932..1252 y 632..660.
-        // Stamina bar x 610..830 y 695..709 and label x 844..1034 y 695..715 sit in the empty stretch of that
-        // bottom row: 12px right of the mana label, 3px below the hotbar chips, 22px left of the ammo fill,
-        // and every one of them is corner-anchored with a fixed inset, so the same clearances hold at 1920x1080
-        // (bar x 930..1150, label x 1164..1354, against chips that start at x 1250 and an ammo fill at x 1676).
-        private const float StaminaBarWidth = 220f;
-        private const float StaminaBarLeft = 610f;
-        private const float StaminaLabelWidth = 190f;
 
         // The raid hotbar. HotbarController.Update uses the StackId bound to key N (Inventory.Hotbar, R6c2), so the
         // strip draws the live stack behind each of the four bindings, and an empty chip for a slot with no
@@ -229,7 +205,6 @@ namespace Emberdelve.UI
             }
 
             UpdateInventoryScreen();
-            UpdateStamina();
             UpdateComboPips();
         }
 
@@ -396,28 +371,6 @@ namespace Emberdelve.UI
             _manaLabel = UiFactory.CreateText(_root, "ManaLabel", "0 / 0", 14, dim, TextAnchor.MiddleLeft);
             UiFactory.SetRect(_manaLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
                 new Vector2(220f, 20f), new Vector2(24f + BarWidth + 14f, 15f), new Vector2(0f, 0.5f));
-
-            // Stamina, drawn the way health and mana are drawn: a dark back, a filled bar that shrinks from
-            // the left, and a current / maximum line beside it. The colour is the one the kit already reads
-            // as "endurance" - a green against the red health bar and the blue mana bar - and the numbers
-            // come from the live pool, not from a ceiling the HUD invented.
-            if (ShowStaminaBar)
-            {
-                UiFactory.CreateImage(_root, "StaminaBack", new Color(0.06f, 0.085f, 0.07f, 0.85f),
-                    new Vector2(StaminaBarWidth, ManaBarHeight), new Vector2(StaminaBarLeft + StaminaBarWidth * 0.5f, 18f),
-                    new Vector2(0f, 0f), new Vector2(0f, 0f));
-
-                _staminaFill = UiFactory.CreateImage(_root, "StaminaFill", new Color(0.34f, 0.62f, 0.36f, 1f),
-                    new Vector2(StaminaBarWidth, ManaBarHeight), new Vector2(StaminaBarLeft, 18f),
-                    new Vector2(0f, 0f), new Vector2(0f, 0f));
-                _staminaFill.rectTransform.pivot = new Vector2(0f, 0.5f);
-                _staminaFillRect = _staminaFill.rectTransform;
-
-                _staminaLabel = UiFactory.CreateText(_root, "StaminaLabel", "", 14, dim, TextAnchor.MiddleLeft);
-                UiFactory.SetRect(_staminaLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
-                    new Vector2(StaminaLabelWidth, 20f), new Vector2(StaminaBarLeft + StaminaBarWidth + 14f, 15f),
-                    new Vector2(0f, 0.5f));
-            }
 
             BuildSkillBar(ink, dim);
             BuildPassiveReadout(dim);
@@ -873,47 +826,6 @@ namespace Emberdelve.UI
             if (_manaLabel != null) _manaLabel.text = $"Mana  {Mathf.RoundToInt(current)} / {Mathf.RoundToInt(max)}";
         }
 
-        /// <summary>
-        /// The stamina read-out, re-read from the live pool. Stamina regenerates on its own clock and its
-        /// ceiling moves with gear, so the bar is refreshed from the pool rather than remembered from an
-        /// event; the label is only rewritten when a number the player can actually see has changed. This
-        /// reads the pool - it never spends stamina, never changes a ceiling and never refills anything.
-        /// </summary>
-        private void UpdateStamina()
-        {
-            if (_staminaFill == null || _staminaFillRect == null) return;
-
-            PlayerRig rig = _director != null ? _director.Player : null;
-            StaminaComponent stamina = rig != null ? rig.Stamina : null;
-
-            if (stamina == null)
-            {
-                _staminaFill.gameObject.SetActive(false);
-                if (_staminaLabel != null) _staminaLabel.gameObject.SetActive(false);
-                _staminaShownCurrent = -1;
-                _staminaShownMax = -1;
-                return;
-            }
-
-            _staminaFill.gameObject.SetActive(true);
-            if (_staminaLabel != null) _staminaLabel.gameObject.SetActive(true);
-
-            float current = stamina.CurrentStamina;
-            float max = stamina.MaxStamina;
-            int shownCurrent = Mathf.RoundToInt(current);
-            int shownMax = Mathf.RoundToInt(max);
-
-            if (shownCurrent == _staminaShownCurrent && shownMax == _staminaShownMax) return;
-
-            _staminaShownCurrent = shownCurrent;
-            _staminaShownMax = shownMax;
-
-            float fraction = max > 0f ? Mathf.Clamp01(current / max) : 0f;
-            _staminaFillRect.sizeDelta = new Vector2(StaminaBarWidth * fraction, ManaBarHeight);
-
-            if (_staminaLabel != null) _staminaLabel.text = $"Stamina  {shownCurrent} / {shownMax}";
-        }
-
         private void OnSkillState(int playerId, SkillSnapshot snapshot)
         {
             if (!PlayerView.Shows(playerId)) return;
@@ -1077,13 +989,6 @@ namespace Emberdelve.UI
 
                     ApplyPlayerMana(_director.Player.Mana != null ? _director.Player.Mana.CurrentMana : 0f,
                         _director.Player.Mana != null ? _director.Player.Mana.MaxMana : 0f);
-
-                    // Stamina has no GameEvents channel yet (the pool only raises its own Changed), and the
-                    // run layer is not the place to invent one for a bar. Seeding from the live pool here is
-                    // the same seed the health and mana bars get, and Update keeps it current from there.
-                    _staminaShownCurrent = -1;
-                    _staminaShownMax = -1;
-                    UpdateStamina();
 
                     SkillCaster caster = _director.Player.Skills;
                     if (caster != null)

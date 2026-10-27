@@ -379,21 +379,19 @@ namespace Emberdelve.EditorTools
 
         /// <summary>
         /// Idempotent pass that writes the BASE vitals the attribute amendment authors on a class
-        /// (Docs/Design/ATTRIBUTES.md): warrior 100 health / 75 mana / 3 mana regen / 90 stamina /
-        /// 5 stamina regen, archer 80 / 90 / 3.5 / 95 / 5. These are the pristine numbers the six
+        /// (Docs/Design/ATTRIBUTES.md): warrior 100 health / 75 mana / 3 mana regen,
+        /// archer 80 / 90 / 3.5. These are the pristine numbers the six
         /// attributes are derived from, so they are authored here and nowhere else; the runtime never
         /// writes them back. LoadOrCreate only configures a brand new asset, so without this pass a rebuild
         /// over an existing project would keep the pre-amendment 150/120 and 100/100 pools.
         ///
-        /// The stamina pair is explicit prototype tuning: the amendment fixes max_stamina 90/95 but leaves
-        /// base stamina regeneration unspecified, so both classes author 5/sec and the derived values
-        /// become 6 and 5.5. Move speed is authored by ApplyAttributeActionBases; sprint/crouch stay as
+        /// Move speed is authored by ApplyAttributeActionBases; sprint/crouch stay as
         /// BuildClasses authored them.
         /// </summary>
         private static void ApplyAttributeVitalBases()
         {
-            SetVitalBases(Warrior, 100, 75, 3f, 90, 5f);
-            SetVitalBases(Archer, 80, 90, 3.5f, 95, 5f);
+            SetVitalBases(Warrior, 100, 75, 3f);
+            SetVitalBases(Archer, 80, 90, 3.5f);
 
             AssetDatabase.SaveAssets();
         }
@@ -403,7 +401,7 @@ namespace Emberdelve.EditorTools
         /// (Docs/Design/ATTRIBUTES.md): both classes author move_speed 4.3, and the rapier is the one
         /// definition marked finesse. Like the other Apply* passes it repairs assets that existed before the
         /// fields existed, and it writes authored data only - the DEX term itself is derived at runtime from
-        /// the class scores, never baked into an asset. Sprint/crouch authored speeds, stamina costs and the
+        /// the class scores, never baked into an asset. Sprint/crouch authored speeds and the
         /// damage numbers of every weapon are left exactly as authored.
         /// </summary>
         private static void ApplyAttributeActionBases()
@@ -439,21 +437,17 @@ namespace Emberdelve.EditorTools
         }
 
         private static void SetVitalBases(CharacterClassData data, int maxHealth, int maxMana,
-            float manaRegen, int maxStamina, float staminaRegen)
+            float manaRegen)
         {
             if (data == null) return;
 
             if (data.maxHealth != maxHealth
                 || data.maxMana != maxMana
-                || !Mathf.Approximately(data.manaRegenPerSecond, manaRegen)
-                || data.maxStamina != maxStamina
-                || !Mathf.Approximately(data.staminaRegenPerSecond, staminaRegen))
+                || !Mathf.Approximately(data.manaRegenPerSecond, manaRegen))
             {
                 data.maxHealth = maxHealth;
                 data.maxMana = maxMana;
                 data.manaRegenPerSecond = manaRegen;
-                data.maxStamina = maxStamina;
-                data.staminaRegenPerSecond = staminaRegen;
                 EditorUtility.SetDirty(data);
             }
         }
@@ -1259,8 +1253,6 @@ namespace Emberdelve.EditorTools
                 c.maxMana = 75;
                 c.manaRegenPerSecond = 3f;
                 c.manaRegenDelay = 3.5f;
-                c.maxStamina = 90;
-                c.staminaRegenPerSecond = 5f;
                 c.moveSpeed = 4.3f;
                 c.sprintSpeed = 5.2f;
                 c.crouchSpeed = 1.7f;
@@ -1296,8 +1288,6 @@ namespace Emberdelve.EditorTools
                 c.maxMana = 90;
                 c.manaRegenPerSecond = 3.5f;
                 c.manaRegenDelay = 3f;
-                c.maxStamina = 95;
-                c.staminaRegenPerSecond = 5f;
                 c.moveSpeed = 4.3f;
                 c.sprintSpeed = 6.4f;
                 c.crouchSpeed = 2.1f;

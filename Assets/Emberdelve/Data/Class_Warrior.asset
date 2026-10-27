@@ -29,8 +29,6 @@ MonoBehaviour:
   maxMana: 75
   manaRegenPerSecond: 3
   manaRegenDelay: 3.5
-  maxStamina: 90
-  staminaRegenPerSecond: 5
   moveSpeed: 4.3
   sprintSpeed: 5.2
   crouchSpeed: 1.7

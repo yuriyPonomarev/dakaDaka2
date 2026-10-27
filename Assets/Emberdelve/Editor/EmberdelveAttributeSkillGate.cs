@@ -577,7 +577,7 @@ namespace Emberdelve.EditorTools
             /// The rig the level builder builds, minus the UI/interaction pieces this slice does not touch:
             /// real components, real serialized wiring, real Awake. PlayerRig is added after the components it
             /// requires so Unity cannot add an unwired one implicitly, and every component PlayerRig's own
-            /// Awake/WireRig owns (mana, stamina, status, equipment, SkillCaster) is then taken from the body
+            /// Awake/WireRig owns (mana, status, equipment, SkillCaster) is then taken from the body
             /// with Ensure/GetComponent, so each one exists exactly once and rig, caster and assertions share
             /// it. The finished rig lands in _builtRig because an iterator method cannot take an out
             /// parameter.
@@ -606,7 +606,7 @@ namespace Emberdelve.EditorTools
                 ClassLoadout loadout = body.AddComponent<ClassLoadout>();
 
                 // PlayerRig is the composition root and its real Awake runs WireRig, which Ensures the
-                // ManaComponent, StaminaComponent and StatusComponent, the Equipment component and the
+                // ManaComponent and StatusComponent, the Equipment component and the
                 // SkillCaster - and SkillCaster.Awake then Ensures that very same ManaComponent. Everything
                 // the rig owns is therefore taken from the body afterwards instead of being added a second
                 // time: the duplicate AddComponent calls this replaces created a second pool and a second
@@ -618,7 +618,6 @@ namespace Emberdelve.EditorTools
                 RangedCombat ranged = body.AddComponent<RangedCombat>();
 
                 ManaComponent mana = ManaComponent.Ensure(body);
-                StaminaComponent stamina = StaminaComponent.Ensure(body);
                 StatusComponent status = StatusComponent.Ensure(body);
                 Equipment equipment = Equipment.Ensure(body);
                 SkillCaster skills = body.GetComponent<SkillCaster>();
@@ -651,7 +650,6 @@ namespace Emberdelve.EditorTools
                 SetReference(rig, "look", look);
                 SetReference(rig, "health", health);
                 SetReference(rig, "mana", mana);
-                SetReference(rig, "stamina", stamina);
                 SetReference(rig, "status", status);
                 SetReference(rig, "skills", skills);
                 SetReference(rig, "inventory", inventory);
@@ -1504,7 +1502,6 @@ namespace Emberdelve.EditorTools
                 CheckExactlyOne<MeleeCombat>(body, $"{label} MeleeCombat");
                 CheckExactlyOne<RangedCombat>(body, $"{label} RangedCombat");
                 CheckExactlyOne<ManaComponent>(body, $"{label} ManaComponent");
-                CheckExactlyOne<StaminaComponent>(body, $"{label} StaminaComponent");
                 CheckExactlyOne<StatusComponent>(body, $"{label} StatusComponent");
                 CheckExactlyOne<SkillCaster>(body, $"{label} SkillCaster");
                 CheckExactlyOne<Equipment>(body, $"{label} Equipment");

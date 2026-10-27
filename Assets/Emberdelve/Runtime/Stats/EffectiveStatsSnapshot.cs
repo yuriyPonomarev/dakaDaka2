@@ -25,8 +25,6 @@ namespace Emberdelve.Stats
         public readonly int MaxMana;
         public readonly float ManaRegenPerSecond;
         public readonly float ManaRegenDelay;
-        public readonly int MaxStamina;
-        public readonly float StaminaRegenPerSecond;
         public readonly float WalkSpeed;
         public readonly float SprintSpeed;
         public readonly float CrouchSpeed;
@@ -41,8 +39,8 @@ namespace Emberdelve.Stats
 
         internal EffectiveStatsSnapshot(bool isReady, bool attributesReady, AttributeSnapshot attributes, DerivedStats derived,
             DefenseProfile defense, int maxHealth, float healthRegenPerSecond, float healthRegenDelay,
-            int maxMana, float manaRegenPerSecond, float manaRegenDelay, int maxStamina,
-            float staminaRegenPerSecond, float walkSpeed, float sprintSpeed, float crouchSpeed,
+            int maxMana, float manaRegenPerSecond, float manaRegenDelay,
+            float walkSpeed, float sprintSpeed, float crouchSpeed,
             float armorRating, float meleeDamageMultiplier, float rangedDamageMultiplier,
             float meleeFlatDamageBonus, float projectileFlatDamageBonus, float abilityEffectScale, float statusSpeedMultiplier,
             float statusOutgoingDamageMultiplier)
@@ -58,8 +56,6 @@ namespace Emberdelve.Stats
             MaxMana = maxMana;
             ManaRegenPerSecond = manaRegenPerSecond;
             ManaRegenDelay = manaRegenDelay;
-            MaxStamina = maxStamina;
-            StaminaRegenPerSecond = staminaRegenPerSecond;
             WalkSpeed = walkSpeed;
             SprintSpeed = sprintSpeed;
             CrouchSpeed = crouchSpeed;
@@ -118,15 +114,11 @@ namespace Emberdelve.Stats
             int baseHealth = Mathf.Max(1, classData.maxHealth);
             int baseMana = Mathf.Max(1, classData.EffectiveMaxMana);
             float baseManaRegen = Mathf.Max(0f, classData.manaRegenPerSecond);
-            int maxStamina = Mathf.Max(1, classData.maxStamina);
-            float staminaRegen = Mathf.Max(0f, classData.staminaRegenPerSecond);
             if (attributesReady)
             {
                 baseHealth = attributes.MaxHealth;
                 baseMana = attributes.MaxMana;
                 baseManaRegen = attributes.ManaRegen;
-                maxStamina = attributes.MaxStamina;
-                staminaRegen = attributes.StaminaRegen;
             }
 
             int maxHealth = modifiers != null
@@ -163,7 +155,7 @@ namespace Emberdelve.Stats
 
             return new EffectiveStatsSnapshot(true, attributesReady, attributeSnapshot, derived, defense,
                 maxHealth, Mathf.Max(0f, classData.healthRegenPerSecond), Mathf.Max(0f, classData.regenDelay),
-                maxMana, manaRegen, Mathf.Max(0f, classData.manaRegenDelay), maxStamina, staminaRegen,
+                maxMana, manaRegen, Mathf.Max(0f, classData.manaRegenDelay),
                 walkSpeed, sprintSpeed, crouchSpeed, armor, meleeMultiplier, rangedMultiplier,
                 WeaponData.SanitizeBaseDamageBonus(meleeFlatBonus),
                 WeaponData.SanitizeBaseDamageBonus(projectileFlatBonus),

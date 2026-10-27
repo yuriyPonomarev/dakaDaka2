@@ -22,8 +22,8 @@ namespace Emberdelve.EditorTools
     /// <summary>
     /// D1b gate: the combat FLOW on top of the D1a swept melee. Everything authority-side runs on a real
     /// LocalCombatAuthority with an INJECTED clock stepped by hand (no wall-clock sleeps), against plain fake entities
-    /// and, where the real thing matters (guard, movement speed, stamina, HUD), the real PlayerRig in the Level01 scene.
-    /// Only the hit-slow walking distance and the stamina measurement run in real time, because they measure real
+    /// and, where the real thing matters (guard, movement speed, HUD), the real PlayerRig in the Level01 scene.
+    /// Only the hit-slow walking distance and the sprint/guard measurement run in real time, because they measure real
     /// frames of the real PlayerMovement / StatusComponent.
     ///
     /// Run: Unity -batchmode -nographics -projectPath . -logFile Logs/d1b_combatflow.log
@@ -1273,7 +1273,7 @@ namespace Emberdelve.EditorTools
         }
 
         // ------------------------------------------------------------------------------------------------
-        // 8. real rig: movement phases, guard, hit slow on players, stamina, HUD
+        // 8. real rig: movement phases, guard, hit slow on players, no-stamina scan, HUD
         // ------------------------------------------------------------------------------------------------
 
         private PlayerRig _rig;
@@ -1318,7 +1318,7 @@ namespace Emberdelve.EditorTools
                 GuardBreak();
                 GuardExclusion();
                 EnemyClawAgainstTheRig();
-                StaminaSource();
+                NoStaminaSource();
                 HudSection();
             }
 
@@ -1328,7 +1328,7 @@ namespace Emberdelve.EditorTools
 
             // real time: hit slow on the player, measured distance
             yield return HitSlowDistance();
-            yield return StaminaMeasured();
+            yield return SprintGuardMeasured();
 
             GameEvents.PlayerDamaged -= OnPlayerDamaged;
             GameEvents.ToastRaised -= OnToast;
@@ -2205,14 +2205,16 @@ namespace Emberdelve.EditorTools
             }
         }
 
-        // ---- stamina: no drain anywhere, source scan ----------------------------------------------------
+        // ---- stamina: the concept is gone (B3) ----------------------------------------------------------
+        // D1b made stamina inert; B3 removed it. Replaces "nothing spends or drains stamina": any code (non-comment)
+        // that still names stamina is an offender, and the data types may not carry it either.
 
-        private void StaminaSource()
+        private void NoStaminaSource()
         {
             string runtime = Path.Combine(Application.dataPath, "Emberdelve", "Runtime");
             int offenders = 0;
             string offenderList = string.Empty;
-            Regex spend = new Regex(@"[Ss]tamina\w*\s*(\?\.|\.)\s*(TrySpend|Spend|Drain)\b", RegexOptions.Compiled);
+            Regex spend = new Regex(@"[Ss]tamina", RegexOptions.Compiled);
             foreach (string file in Directory.GetFiles(runtime, "*.cs", SearchOption.AllDirectories))
             {
                 if (Path.GetFileName(file) == "StaminaComponent.cs") continue;
@@ -2225,17 +2227,20 @@ namespace Emberdelve.EditorTools
                 }
             }
 
-            Check(offenders == 0, $"no runtime code spends or drains stamina ({offenderList})");
-            Check(typeof(PlayerRig).GetField("StaminaRegenDelay", BindingFlags.Public | BindingFlags.Static) != null, "the deprecated stamina data is still there (nothing deleted)");
+            Check(offenders == 0, $"no runtime code names stamina outside comments ({offenderList})");
+
+            const BindingFlags all = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+            int members = 0;
+            foreach (Type type in new[] { typeof(PlayerRig), typeof(CharacterClassData), typeof(HudController), typeof(Emberdelve.Stats.EffectiveStatsSnapshot) })
+                foreach (MemberInfo member in type.GetMembers(all))
+                    if (member.Name.IndexOf("stamina", StringComparison.OrdinalIgnoreCase) >= 0) members++;
+            Check(members == 0, $"PlayerRig, CharacterClassData, HudController and EffectiveStatsSnapshot have no stamina member ({members})");
         }
 
         // ---- HUD ----------------------------------------------------------------------------------------
 
         private void HudSection()
         {
-            FieldInfo flag = typeof(HudController).GetField("ShowStaminaBar", BindingFlags.Public | BindingFlags.Static);
-            Check(flag != null && flag.IsLiteral && (bool)flag.GetRawConstantValue() == false, "HudController.ShowStaminaBar is a constant false (deprecated)");
-
             HudController hud = FindFirstObjectByType<HudController>();
             Check(hud != null, "a HudController is live in the scene");
 
@@ -2369,50 +2374,28 @@ namespace Emberdelve.EditorTools
             }
         }
 
-        // ---- real time: stamina ----------------------------------------------------------------------------
+        // ---- real time: sprint and guard ----------------------------------------------------------------------------
 
-        private IEnumerator StaminaMeasured()
+        private IEnumerator SprintGuardMeasured()
         {
             _rig.Status.ClearStatuses();
             Teleport(WalkOrigin);
             yield return new WaitForSeconds(0.3f);
 
-            StaminaComponent stamina = _rig.Stamina;
-            Check(stamina != null, "stamina: the deprecated pool still exists on the rig");
-            if (stamina == null) yield break;
-
-            stamina.RefillToMax();
-            stamina.SetRegenerationActive(false);
-            Check(stamina.TrySpend(30), "stamina: the pool is set to 70 by hand (data still works)");
-            float before = stamina.CurrentStamina;
             float walkSpeed = _rig.Movement.ResolveWalkSpeed();
 
-            // sprint for 0.6 s: it really moves faster than walking (not a vacuous test) and drains nothing
+            // sprint for 0.6 s: it really moves faster than walking (not a vacuous test)
             float fastest = 0f;
             yield return Hold(0.6f, new[] { Key.W, Key.LeftShift }, false, _ => fastest = Mathf.Max(fastest, new Vector3(_rig.Movement.Velocity.x, 0f, _rig.Movement.Velocity.z).magnitude));
             Debug.Log($"{Tag} sprint measured: fastest {fastest:F2} m/s against walk {walkSpeed:F2}");
-            Check(fastest > walkSpeed * 1.05f, $"stamina: the sprint was real ({fastest:F2} m/s above the walk speed {walkSpeed:F2})");
-            Near(before, stamina.CurrentStamina, 1e-5f, "stamina: sprinting drained nothing");
+            Check(fastest > walkSpeed * 1.05f, $"sprint was real ({fastest:F2} m/s above the walk speed {walkSpeed:F2})");
             yield return new WaitForSeconds(0.4f);
 
-            // block for 0.6 s: the guard is really up and drains nothing
+            // block for 0.6 s: the guard is really up
             bool guardSeen = false;
             yield return Hold(0.6f, new Key[0], true, _ => guardSeen |= _rig.IsGuarding);
-            Check(guardSeen, "stamina: the guard really went up while the button was held");
-            Near(before, stamina.CurrentStamina, 1e-5f, "stamina: blocking drained nothing");
-
-            // being hit while blocking drains nothing either (guard break replaces stamina-gated defense)
-            _rig.SetGuardHeld(true);
-            WeaponData heavy = UnityEngine.Object.Instantiate(_sword);
-            _cleanup.Add(heavy);
-            heavy.impactPower = 30f;
-            SwingAtRig(heavy, true);
+            Check(guardSeen, "the guard really went up while the button was held");
             _rig.SetGuardHeld(false);
-            Near(before, stamina.CurrentStamina, 1e-5f, "stamina: a guard break drained nothing");
-
-            stamina.SetRegenerationActive(true);
-            stamina.RefillToMax();
-
         }
     }
 }

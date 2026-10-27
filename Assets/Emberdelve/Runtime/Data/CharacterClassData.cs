@@ -41,15 +41,6 @@ namespace Emberdelve.Data
         [Tooltip("Seconds after spending mana before regeneration resumes.")]
         public float manaRegenDelay = 3f;
 
-        [Header("Stamina")]
-        [Tooltip("BASE stamina pool, before constitution. Docs/Design/ATTRIBUTES.md: warrior 90, archer 95. " +
-                 "Derived max = max(25, base + 5 * constitution modifier).")]
-        public int maxStamina = 90;
-        [Tooltip("BASE stamina restored per second, before constitution. Prototype tuning: the amendment leaves " +
-                 "base stamina regeneration unspecified, so both classes author 5/sec and the derived values " +
-                 "(max(1, base + 0.5 * constitution modifier)) become 6 and 5.5. Sprint/guard drain is U3.")]
-        public float staminaRegenPerSecond = 5f;
-
         [Header("Movement")]
         public float moveSpeed = 3.6f;
         public float sprintSpeed = 5.4f;
@@ -122,9 +113,7 @@ namespace Emberdelve.Data
                 return new DerivedStatBases(
                     Mathf.Max(1, maxHealth),
                     EffectiveMaxMana,
-                    Mathf.Max(1, maxStamina),
                     Mathf.Max(0f, manaRegenPerSecond),
-                    Mathf.Max(0f, staminaRegenPerSecond),
                     moveSpeed);
             }
         }
@@ -209,8 +198,6 @@ namespace Emberdelve.Data
             manaRegenDelay = Mathf.Max(0f, manaRegenDelay);
 
             maxHealth = Mathf.Max(1, maxHealth);
-            maxStamina = Mathf.Max(1, maxStamina);
-            staminaRegenPerSecond = Mathf.Max(0f, staminaRegenPerSecond);
 
             strength = AttributeRules.ClampScore(strength);
             dexterity = AttributeRules.ClampScore(dexterity);

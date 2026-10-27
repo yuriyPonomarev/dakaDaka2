@@ -28,7 +28,6 @@ namespace Emberdelve.Player
         [SerializeField] private PlayerLook look;
         [SerializeField] private HealthComponent health;
         [SerializeField] private ManaComponent mana;
-        [SerializeField] private StaminaComponent stamina;
         [SerializeField] private StatusComponent status;
         [SerializeField] private SkillCaster skills;
         [SerializeField] private Inventory inventory;
@@ -55,13 +54,6 @@ namespace Emberdelve.Player
         private Equipment _effectiveStatsSnapshotEquipment;
         private StatusComponent _effectiveStatsSnapshotStatus;
         private CharacterStatStack _effectiveStatsSnapshotModifiers;
-
-        /// <summary>
-        /// DEPRECATED (D1b): stamina no longer gates or drains anything in combat or movement (user decision:
-        /// guard break replaces stamina-gated defense; sprint is free). The pool, its derived stats and this
-        /// constant stay as data for existing gates and a possible later use; nothing spends it.
-        /// </summary>
-        public const float StaminaRegenDelay = 0f;
 
         [Header("Identity (R7)")]
         [Tooltip("True when THIS process drives the rig (input, camera, HUD). It selects EntityKind.LocalPlayer vs RemotePlayer and nothing else: no gameplay rule reads it.")]
@@ -221,7 +213,6 @@ namespace Emberdelve.Player
         public PlayerLook Look => look;
         public HealthComponent Health => health;
         public ManaComponent Mana => mana;
-        public StaminaComponent Stamina => stamina;
         public StatusComponent Status => status;
         public SkillCaster Skills => skills;
         public Inventory Inventory => inventory;
@@ -306,11 +297,10 @@ namespace Emberdelve.Player
             if (loadout == null) loadout = GetComponent<ClassLoadout>();
             if (movement != null) movement.SetFlowSource(this);
 
-            // Mana, stamina, status state and the skill kit are created here rather than required in the
+            // Mana, status state and the skill kit are created here rather than required in the
             // scene, so a rig built before this milestone still gets them, and a rebuilt scene simply has
             // them already.
             if (mana == null) mana = ManaComponent.Ensure(gameObject);
-            if (stamina == null) stamina = StaminaComponent.Ensure(gameObject);
             if (status == null) status = StatusComponent.Ensure(gameObject);
             if (equipment == null) equipment = Equipment.Ensure(gameObject);
             if (skills == null)
@@ -385,12 +375,6 @@ namespace Emberdelve.Player
                 mana.SetRegen(limits.ManaRegen, limits.ManaRegenDelay);
             }
 
-            if (stamina != null)
-            {
-                stamina.SetMax(limits.MaxStamina);
-                stamina.SetRegen(limits.StaminaRegen, StaminaRegenDelay);
-            }
-
             if (movement != null) PushMovementStatSources();
 
             _defense = ResolveDefense(_mainHand);
@@ -425,9 +409,7 @@ namespace Emberdelve.Player
                 ManaRegen = _class != null ? Mathf.Max(0f, _class.manaRegenPerSecond) : 0f,
                 HealthRegenPerSecond = _class != null ? Mathf.Max(0f, _class.healthRegenPerSecond) : 0f,
                 HealthRegenDelay = _class != null ? Mathf.Max(0f, _class.regenDelay) : 0f,
-                ManaRegenDelay = _class != null ? Mathf.Max(0f, _class.manaRegenDelay) : 0f,
-                MaxStamina = Mathf.Max(1, _class != null ? _class.maxStamina : 1),
-                StaminaRegen = _class != null ? Mathf.Max(0f, _class.staminaRegenPerSecond) : 0f
+                ManaRegenDelay = _class != null ? Mathf.Max(0f, _class.manaRegenDelay) : 0f
             };
 
             if (_class == null) return limits;
@@ -439,11 +421,6 @@ namespace Emberdelve.Player
             limits.HealthRegenPerSecond = snapshot.HealthRegenPerSecond;
             limits.HealthRegenDelay = snapshot.HealthRegenDelay;
             limits.ManaRegenDelay = snapshot.ManaRegenDelay;
-            limits.MaxStamina = snapshot.MaxStamina;
-            limits.StaminaRegen = snapshot.StaminaRegenPerSecond;
-
-            // Stamina has no StatModifier vocabulary in the legacy stack yet (no passive or gear declares
-            // it), so its ceiling is the attribute-derived number alone until U3 gives it a drain rule.
             return limits;
         }
 
@@ -460,7 +437,6 @@ namespace Emberdelve.Player
 
             if (health != null) health.Configure(limits.MaxHealth, limits.HealthRegenPerSecond, limits.HealthRegenDelay);
             if (mana != null) mana.Configure(limits.MaxMana, limits.ManaRegen, limits.ManaRegenDelay);
-            if (stamina != null) stamina.Configure(limits.MaxStamina, limits.StaminaRegen, StaminaRegenDelay);
         }
 
         /// <summary>One resolved set of pool ceilings/rates. Plain values, so any consumer can log or assert them.</summary>
@@ -472,8 +448,6 @@ namespace Emberdelve.Player
             public float HealthRegenPerSecond;
             public float HealthRegenDelay;
             public float ManaRegenDelay;
-            public int MaxStamina;
-            public float StaminaRegen;
         }
 
         /// <summary>
@@ -500,7 +474,6 @@ namespace Emberdelve.Player
             if (skills != null) skills.HandleDeath();
             if (movement != null) movement.CancelDash();
             if (status != null) status.ClearStatuses();
-            if (stamina != null) stamina.SetRegenerationActive(false);
             SetGuardHeld(false);
         }
 
@@ -769,7 +742,7 @@ namespace Emberdelve.Player
         /// D1b guard: the same frontal-arc rule as before (a hit from behind is never blocked, shields never parry),
         /// then the impact check. A hit whose impact power reaches the kit's impact resist BREAKS the guard: only
         /// <c>guardBreakReductionScale</c> of the normal mitigation applies and the authority staggers the guard. No
-        /// stamina is read or spent anywhere in this path.
+        /// stamina concept exists anywhere in this path.
         /// </summary>
         public bool TryResolveGuard(in DamageInfo incoming, CombatFlowTuning tuning, out GuardResult result)
         {

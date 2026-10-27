@@ -192,13 +192,11 @@ namespace Emberdelve.EditorTools
                 new AttributeSnapshot(zeroed, new AttributeBonuses(0, 0, -5, 0, 0, 0)).Effective.Constitution, "1-5=-4 -> 1");
 
             // Derivation from a default snapshot runs on the legal score 1 (modifier -5) end to end.
-            DerivedStatBases bases = new DerivedStatBases(100, 75, 90, 3f, 20f, 4.3f);
+            DerivedStatBases bases = new DerivedStatBases(100, 75, 3f, 4.3f);
             DerivedStats zeroedStats = AttributeRules.Derive(zeroedSnapshot, bases);
             CheckInt("default snapshot max health", 50, zeroedStats.MaxHealth, "100+10*(-5)=50");
             CheckInt("default snapshot max mana", 50, zeroedStats.MaxMana, "75+5*(-5)=50");
-            CheckInt("default snapshot max stamina", 65, zeroedStats.MaxStamina, "90+5*(-5)=65");
             CheckClose("default snapshot mana regen", 1.75f, zeroedStats.ManaRegen, "3+0.25*(-5)=1.75");
-            CheckClose("default snapshot stamina regen", 17.5f, zeroedStats.StaminaRegen, "20+0.5*(-5)=17.5");
             CheckClose("default snapshot move speed", 3.7625f, zeroedStats.MoveSpeed, "4.3*max(0.5,1-0.125)=4.3*0.875=3.7625");
             CheckTrue("derived effective scores legal", zeroedStats.Effective.Strength == 1 &&
                 zeroedStats.Effective.Dexterity == 1 && zeroedStats.Effective.Constitution == 1 &&
@@ -230,25 +228,20 @@ namespace Emberdelve.EditorTools
                 "hand-written expected string for 2/3/4/5/6/30");
         }
 
-        /// <summary>Warrior 16/10/14/8/10/10 over bases 100HP/75mana/90stamina -> 120/70/100.</summary>
+        /// <summary>Warrior 16/10/14/8/10/10 over bases 100HP/75mana -> 120/70.</summary>
         private static void CheckWarriorBaseline()
         {
             AttributeScores warrior = new AttributeScores(16, 10, 14, 8, 10, 10);
-            // Explicit base values from the ATTRIBUTES.md amendment. staminaRegen 20 is a test
-            // input only: no authored base_stamina_regen exists in the project yet.
-            DerivedStatBases bases = new DerivedStatBases(100, 75, 90, 3f, 20f, 4.3f);
+            // Explicit base values from the ATTRIBUTES.md amendment.
+            DerivedStatBases bases = new DerivedStatBases(100, 75, 3f, 4.3f);
             DerivedStats stats = AttributeRules.Derive(new AttributeSnapshot(warrior), bases);
 
             // CON 14 -> (14-10)/2 = 2; 100 + 10*2 = 120
             CheckInt("warrior max health", 120, stats.MaxHealth, "100+10*2=120");
             // INT 8 -> (8-10)/2 = -1; 75 + 5*(-1) = 70
             CheckInt("warrior max mana", 70, stats.MaxMana, "75+5*(-1)=70");
-            // CON 14 -> 2; 90 + 5*2 = 100
-            CheckInt("warrior max stamina", 100, stats.MaxStamina, "90+5*2=100");
             // WIS 10 -> 0; 3 + 0.25*0 = 3
             CheckClose("warrior mana regen", 3f, stats.ManaRegen, "3+0.25*0=3");
-            // CON 14 -> 2; 20 + 0.5*2 = 21
-            CheckClose("warrior stamina regen", 21f, stats.StaminaRegen, "20+0.5*2=21");
             // DEX 10 -> 0; 4.3 * max(0.5, 1+0.025*0) * 1 + 0 = 4.3
             CheckClose("warrior move speed", 4.3f, stats.MoveSpeed, "4.3*1.0=4.3");
             CheckTrue("warrior effective scores unchanged",
@@ -258,23 +251,19 @@ namespace Emberdelve.EditorTools
                 "no bonuses applied, effective == base 16/10/14/8/10/10");
         }
 
-        /// <summary>Archer 10/16/12/10/14/8 over bases 80HP/90mana/95stamina -> 90/90/100.</summary>
+        /// <summary>Archer 10/16/12/10/14/8 over bases 80HP/90mana -> 90/90.</summary>
         private static void CheckArcherBaseline()
         {
             AttributeScores archer = new AttributeScores(10, 16, 12, 10, 14, 8);
-            DerivedStatBases bases = new DerivedStatBases(80, 90, 95, 3.5f, 20f, 4.3f);
+            DerivedStatBases bases = new DerivedStatBases(80, 90, 3.5f, 4.3f);
             DerivedStats stats = AttributeRules.Derive(new AttributeSnapshot(archer), bases);
 
             // CON 12 -> (12-10)/2 = 1; 80 + 10*1 = 90
             CheckInt("archer max health", 90, stats.MaxHealth, "80+10*1=90");
             // INT 10 -> 0; 90 + 5*0 = 90
             CheckInt("archer max mana", 90, stats.MaxMana, "90+5*0=90");
-            // CON 12 -> 1; 95 + 5*1 = 100
-            CheckInt("archer max stamina", 100, stats.MaxStamina, "95+5*1=100");
             // WIS 14 -> (14-10)/2 = 2; 3.5 + 0.25*2 = 4.0
             CheckClose("archer mana regen", 4f, stats.ManaRegen, "3.5+0.25*2=4.0");
-            // CON 12 -> 1; 20 + 0.5*1 = 20.5
-            CheckClose("archer stamina regen", 20.5f, stats.StaminaRegen, "20+0.5*1=20.5");
             // DEX 16 -> 3; 4.3 * (1 + 0.025*3) = 4.3 * 1.075 = 4.6225
             CheckClose("archer move speed", 4.6225f, stats.MoveSpeed, "4.3*1.075=4.6225");
         }
@@ -286,18 +275,13 @@ namespace Emberdelve.EditorTools
 
             // 30 + 10*(-5) = -20 -> floor 25
             CheckInt("max health floor", 25, AttributeRules.MaxHealth(30, worst), "30-50=-20 -> 25");
-            // 25 + 5*(-5) = 0 -> floor 25
-            CheckInt("max stamina floor", 25, AttributeRules.MaxStamina(25, worst), "25-25=0 -> 25");
             // 10 + 5*(-5) = -15 -> floor 10
             CheckInt("max mana floor", 10, AttributeRules.MaxMana(10, worst), "10-25=-15 -> 10");
             // 0.1 + 0.25*(-5) = -1.15 -> floor 0.1
             CheckClose("mana regen floor", 0.1f, AttributeRules.ManaRegen(0.1f, worst), "0.1-1.25=-1.15 -> 0.1");
-            // 1 + 0.5*(-5) = -1.5 -> floor 1
-            CheckClose("stamina regen floor", 1f, AttributeRules.StaminaRegen(1f, worst), "1-2.5=-1.5 -> 1");
             // Unusual negative odds beyond any legal score (modifier -25) must still respect the floors.
             CheckInt("max health floor at modifier -25", 25, AttributeRules.MaxHealth(100, -25), "100-250=-150 -> 25");
             CheckClose("mana regen floor at modifier -25", 0.1f, AttributeRules.ManaRegen(3f, -25), "3-6.25=-3.25 -> 0.1");
-            CheckClose("stamina regen floor at modifier -25", 1f, AttributeRules.StaminaRegen(1f, -25), "1+0.5*(-25)=-11.5 -> 1");
         }
 
         private static void CheckMoveSpeedClamps()
@@ -390,7 +374,7 @@ namespace Emberdelve.EditorTools
         private static void CheckBonusesRecomputeFromPristineBase()
         {
             AttributeScores warriorBase = new AttributeScores(16, 10, 14, 8, 10, 10);
-            DerivedStatBases bases = new DerivedStatBases(100, 75, 90, 3f, 20f, 4.3f);
+            DerivedStatBases bases = new DerivedStatBases(100, 75, 3f, 4.3f);
 
             AttributeBonuses cuirass = new AttributeBonuses(0, 0, 2, 0, 0, 0);   // +2 CON
             AttributeBonuses twoPieces = new AttributeBonuses(0, 0, 1, 0, 0, 0); // +1 CON each, summed
