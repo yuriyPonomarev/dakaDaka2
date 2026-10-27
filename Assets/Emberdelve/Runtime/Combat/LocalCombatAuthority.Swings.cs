@@ -30,7 +30,7 @@ namespace Emberdelve.Combat
     // recovery), impact zones (the contact parameter along the segment comes from the sweep), hit slow and guard
     // break (statuses and the stagger come from weapon data, never from an intent) and the move-speed factor of the
     // swing phase (ICombatFlowState).
-    public sealed partial class LocalCombatAuthority : ICombatFlowState
+    public sealed partial class LocalCombatAuthority : ICombatFlowState, IComboStateSource
     {
         [Header("Swept melee (D1a)")]
         [Tooltip("Largest angle (degrees) between the aim a client claims when it begins a swing and the pose the authority holds.")]
@@ -90,6 +90,9 @@ namespace Emberdelve.Combat
             public bool Stopped;
             public float StopTs;
             public int WallSample = -1;
+            public Vector3 WallPoint;
+            public Vector3 WallNormal;
+            public bool HasWallPoint;
             public readonly HashSet<int> Hit = new HashSet<int>();
             public readonly List<Contact> Pending = new List<Contact>(4);
             public readonly List<MeleeSwingHit> Hits = new List<MeleeSwingHit>(4);
@@ -367,7 +370,35 @@ namespace Emberdelve.Combat
             if (r.HitsView == null) r.HitsView = r.Hits.AsReadOnly();
             status = new MeleeSwingStatus(r.Id, r.InstigatorId, r.Phase, r.EndReason, elapsed,
                 Mathf.Min(r.NextSample, r.SampleCount + 1), r.SampleCount, r.WallSample, r.HitsView,
-                r.ComboStep, r.StepMultiplier, r.Timing, r.TurnClamped);
+                r.ComboStep, r.StepMultiplier, r.Timing, r.TurnClamped, r.WallPoint, r.WallNormal, r.HasWallPoint);
+            return true;
+        }
+
+        /// <summary>
+        /// B2: read-only combo state for the HUD (see <see cref="IComboStateSource"/>). Uses the same liveness rule as
+        /// <see cref="TryGetExpectedComboStep"/>; never mutates the chain.
+        /// </summary>
+        public bool TryGetComboState(int instigatorCombatId, out int step, out int total, out float windowRemaining)
+        {
+            step = 0;
+            total = 0;
+            windowRemaining = 0f;
+            if (!CombatRegistry.TryGet(instigatorCombatId, out ICombatEntity instigator)) return false;
+            if (!(instigator is IActiveWeaponProvider holder) || holder.ActiveWeapon == null || !holder.ActiveWeapon.HasComboChain) return false;
+
+            WeaponData weapon = holder.ActiveWeapon;
+            total = weapon.ComboLength;
+            if (_chains.TryGetValue(instigatorCombatId, out ChainState chain) && ChainIsLive(chain, instigator) && chain.Weapon == weapon)
+            {
+                step = Mathf.Clamp(chain.NextStep, 0, total);
+                windowRemaining = Mathf.Max(0f, chain.WindowEnd - Now);
+            }
+            else if (_swingByInstigator.TryGetValue(instigatorCombatId, out SwingRecord running) && running.Phase != SwingPhase.Finished
+                     && running.Weapon == weapon && running.ComboStep >= total - 1)
+            {
+                step = total;   // the finisher is being swung: the chain is complete until it ends
+            }
+
             return true;
         }
 
@@ -689,21 +720,32 @@ namespace Emberdelve.Combat
             // the segment to nothing and always stops the swing.
             float clip = length;
             bool wall = false;
+            Vector3 wallPoint = default;
+            Vector3 wallNormal = default;
             LayerMask mask = SwingBlockerMask;
             if (mask.value != 0)
             {
                 // The line from the eye to the hand is tested too: a swing cannot start around an outside corner
                 // (hand on the far side of a wall edge the eye cannot see past). Treated like a buried base.
-                if (Physics.Linecast(frame.Eye, bladeBase, mask, QueryTriggerInteraction.Ignore)
-                    || Physics.CheckSphere(bladeBase, pattern.sweepRadius * 0.5f, mask, QueryTriggerInteraction.Ignore))
+                if (Physics.Linecast(frame.Eye, bladeBase, out RaycastHit handHit, mask, QueryTriggerInteraction.Ignore))
                 {
                     clip = 0f;
                     wall = true;
+                    wallPoint = handHit.point;
+                    wallNormal = handHit.normal;
+                }
+                else if (Physics.CheckSphere(bladeBase, pattern.sweepRadius * 0.5f, mask, QueryTriggerInteraction.Ignore))
+                {
+                    clip = 0f;
+                    wall = true;
+                    wallPoint = bladeBase;
                 }
                 else if (Physics.Linecast(bladeBase, bladeTip, out RaycastHit wallHit, mask, QueryTriggerInteraction.Ignore))
                 {
                     clip = Mathf.Min(length, wallHit.distance);
                     wall = MovesIntoSurface(rec, sample, frame, clip, wallHit.normal);
+                    wallPoint = wallHit.point;
+                    wallNormal = wallHit.normal;
                 }
             }
 
@@ -811,6 +853,9 @@ namespace Emberdelve.Combat
                     kept.WindowEnd = rec.StartTime + sampleTime + rec.Timing.WallRecoil + Mathf.Max(0.05f, rec.Weapon.comboWindow);
                 }
                 rec.WallSample = sample;
+                rec.WallPoint = wallPoint;
+                rec.WallNormal = wallNormal;
+                rec.HasWallPoint = true;
                 rec.EndReason = SwingEndReason.WallStop;
             }
         }
@@ -894,7 +939,7 @@ namespace Emberdelve.Combat
             ApplyHitEffects(target, damage, rec.Weapon);
 
             HitFeedback feedback = new HitFeedback(contact.Point, damage.Amount, damage.Blocked, damage.Headshot,
-                target.IsDead, target.Kind);
+                target.IsDead, target.Kind, damage.Location);
 
             PublishCombatFeedback(instigator, target, feedback, damage);
         }

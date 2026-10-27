@@ -24,6 +24,12 @@ namespace Emberdelve.UI
         private const float HitMarkerDuration = 0.28f;
         private const float VignetteDuration = 0.55f;
 
+        // B2: combo pips and hit-marker variants. Names are used by the HUD gates.
+        internal const int MaxComboPips = 5;
+        private const float ComboPipSize = 10f;
+        private const float ComboPipPitch = 16f;
+        private const float ComboWindowQuantum = 32f;
+
         private Canvas _canvas;
         private RectTransform _root;
         private RectTransform _inventoryRow;
@@ -57,6 +63,17 @@ namespace Emberdelve.UI
         private Text _pauseLabel;
         private Image _vignette;
         private RectTransform _hitMarker;
+        private Image _hitSlashA;
+        private Image _hitSlashB;
+        private HitLocation _lastHitLocation = HitLocation.Unspecified;
+
+        // B2 combo pips: one pip per step of the held weapon's chain, under the crosshair, plus a thin window bar.
+        private RectTransform _comboPips;
+        private readonly Image[] _comboPipImages = new Image[MaxComboPips];
+        private Image _comboWindowBar;
+        private int _pipsStep = -1;
+        private int _pipsTotal = -1;
+        private int _pipsWindowQ = -1;
         private RectTransform _crosshair;
 
         private float _toastTimer;
@@ -213,7 +230,92 @@ namespace Emberdelve.UI
 
             UpdateInventoryScreen();
             UpdateStamina();
+            UpdateComboPips();
         }
+
+        /// <summary>
+        /// B2: reads the authority's chain state (read-only) for the held weapon and shows it as pips. Hidden for any
+        /// weapon without a combo chain (ranged, shield, single pattern) and when no authority reports a chain.
+        /// </summary>
+        private void UpdateComboPips()
+        {
+            if (_comboPips == null) return;
+
+            if (_director == null) GameServices.TryGet<RunDirector>(out _director);
+            PlayerRig rig = _director != null ? _director.Player : null;
+            WeaponData weapon = rig != null ? rig.ActiveWeapon : null;
+
+            if (weapon != null && weapon.HasComboChain
+                && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) && authority is IComboStateSource source
+                && source.TryGetComboState(rig.CombatId, out int step, out int total, out float remaining))
+            {
+                float fraction = remaining <= 0f ? 0f : Mathf.Clamp01(remaining / Mathf.Max(0.05f, weapon.comboWindow));
+                ApplyComboPips(step, total, fraction);
+                return;
+            }
+
+            ApplyComboPips(0, 0, 0f);
+        }
+
+        /// <summary>
+        /// B2: draws the pips. <paramref name="total"/> below 2 hides the whole group (no chain). Pips below
+        /// <paramref name="step"/> are lit; the window bar shows <paramref name="windowFraction"/> of the combo window
+        /// left while a continuation is still possible (step between 1 and total - 1). Only writes UI when something changed.
+        /// </summary>
+        internal void ApplyComboPips(int step, int total, float windowFraction)
+        {
+            if (_comboPips == null) return;
+
+            total = Mathf.Clamp(total, 0, MaxComboPips);
+            step = Mathf.Clamp(step, 0, total);
+            bool show = total >= 2;
+            bool windowOpen = show && step > 0 && step < total && windowFraction > 0f;
+            int windowQ = windowOpen ? Mathf.Clamp(Mathf.CeilToInt(windowFraction * ComboWindowQuantum), 1, (int)ComboWindowQuantum) : 0;
+            if (!show) { step = 0; total = 0; }
+
+            if (step == _pipsStep && total == _pipsTotal && windowQ == _pipsWindowQ) return;
+            _pipsStep = step;
+            _pipsTotal = total;
+            _pipsWindowQ = windowQ;
+
+            if (_comboPips.gameObject.activeSelf != show) _comboPips.gameObject.SetActive(show);
+            if (!show) return;
+
+            Color unlit = new Color(0.25f, 0.23f, 0.2f, 0.55f);
+            Color lit = windowOpen ? new Color(0.95f, 0.78f, 0.35f, 1f) : new Color(0.7f, 0.55f, 0.3f, 0.9f);
+            for (int i = 0; i < _comboPipImages.Length; i++)
+            {
+                Image pip = _comboPipImages[i];
+                if (pip == null) continue;
+
+                bool exists = i < total;
+                if (pip.gameObject.activeSelf != exists) pip.gameObject.SetActive(exists);
+                if (!exists) continue;
+
+                pip.rectTransform.anchoredPosition = new Vector2((i - (total - 1) * 0.5f) * ComboPipPitch, 0f);
+                pip.color = i < step ? lit : unlit;
+            }
+
+            if (_comboWindowBar != null)
+            {
+                if (_comboWindowBar.gameObject.activeSelf != windowOpen) _comboWindowBar.gameObject.SetActive(windowOpen);
+                if (windowOpen)
+                {
+                    float full = total * ComboPipPitch - (ComboPipPitch - ComboPipSize);
+                    _comboWindowBar.rectTransform.sizeDelta = new Vector2(full * (windowQ / ComboWindowQuantum), 2f);
+                }
+            }
+        }
+
+        // B2 test surface (the HUD gates read these; the widgets are also found by name under Crosshair / ComboPips).
+        internal bool ComboPipsVisible => _comboPips != null && _comboPips.gameObject.activeSelf;
+        internal int ComboPipsShown => _pipsTotal;
+        internal int ComboPipsLit => _pipsStep;
+        internal bool ComboWindowOpen => _comboWindowBar != null && _comboWindowBar.gameObject.activeSelf;
+        internal Color HitMarkerColor => _hitSlashA != null ? _hitSlashA.color : default;
+        internal float HitMarkerScale => _hitMarker != null ? _hitMarker.localScale.x : 0f;
+        internal bool HitMarkerVisible => _hitMarker != null && _hitMarker.gameObject.activeSelf;
+        internal HitLocation LastHitMarkerLocation => _lastHitLocation;
 
         private void UpdateInventoryScreen()
         {
@@ -391,11 +493,33 @@ namespace Emberdelve.UI
                 new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
 
             _hitMarker = UiFactory.CreateGroup(_crosshair, "HitMarker");
-            UiFactory.CreateImage(_hitMarker, "SlashA", new Color(1f, 0.35f, 0.3f, 1f), new Vector2(2f, 18f), Vector2.zero,
-                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f)).rectTransform.localEulerAngles = new Vector3(0f, 0f, 45f);
-            UiFactory.CreateImage(_hitMarker, "SlashB", new Color(1f, 0.35f, 0.3f, 1f), new Vector2(2f, 18f), Vector2.zero,
-                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f)).rectTransform.localEulerAngles = new Vector3(0f, 0f, -45f);
+            _hitSlashA = UiFactory.CreateImage(_hitMarker, "SlashA", HitMarkerBody.Color, new Vector2(2f, 18f), Vector2.zero,
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+            _hitSlashA.rectTransform.localEulerAngles = new Vector3(0f, 0f, 45f);
+            _hitSlashB = UiFactory.CreateImage(_hitMarker, "SlashB", HitMarkerBody.Color, new Vector2(2f, 18f), Vector2.zero,
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+            _hitSlashB.rectTransform.localEulerAngles = new Vector3(0f, 0f, -45f);
             _hitMarker.gameObject.SetActive(false);
+
+            BuildComboPips();
+        }
+
+        /// <summary>B2: the combo pips under the crosshair (hidden until a chain weapon is held).</summary>
+        private void BuildComboPips()
+        {
+            _comboPips = UiFactory.CreateGroup(_crosshair, "ComboPips");
+            UiFactory.SetRect(_comboPips, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(0f, -40f));
+
+            for (int i = 0; i < MaxComboPips; i++)
+            {
+                _comboPipImages[i] = UiFactory.CreateImage(_comboPips, "ComboPip" + i, new Color(0.25f, 0.23f, 0.2f, 0.55f),
+                    new Vector2(ComboPipSize, ComboPipSize), new Vector2(i * ComboPipPitch, 0f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+            }
+
+            _comboWindowBar = UiFactory.CreateImage(_comboPips, "ComboWindow", new Color(0.95f, 0.78f, 0.35f, 0.9f),
+                new Vector2(ComboPipPitch * 3f, 2f), new Vector2(0f, -10f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+            _comboWindowBar.gameObject.SetActive(false);
+            _comboPips.gameObject.SetActive(false);
         }
 
         /// <summary>
@@ -643,8 +767,49 @@ namespace Emberdelve.UI
             if (!PlayerView.Shows(playerId)) return;
             if (_hitMarker != null)
             {
+                // B2: the marker's look follows the authority's hit location of a hit the local player dealt.
+                HitMarkerStyle style = HitMarkerStyleFor(feedback.Location, feedback.Headshot);
+                _lastHitLocation = feedback.Location;
+                if (_hitSlashA != null) _hitSlashA.color = style.Color;
+                if (_hitSlashB != null) _hitSlashB.color = style.Color;
+                _hitMarker.localScale = new Vector3(style.Scale, style.Scale, 1f);
                 _hitMarker.gameObject.SetActive(true);
-                _hitMarkerTimer = HitMarkerDuration;
+                _hitMarkerTimer = style.Duration;
+            }
+        }
+
+        /// <summary>B2: look of the hit marker for one hit location. Body (and an unknown location) is the original marker.</summary>
+        internal readonly struct HitMarkerStyle
+        {
+            public readonly Color Color;
+            public readonly float Scale;
+            public readonly float Duration;
+
+            public HitMarkerStyle(Color color, float scale, float duration)
+            {
+                Color = color; Scale = scale; Duration = duration;
+            }
+        }
+
+        private static readonly HitMarkerStyle HitMarkerBody = new HitMarkerStyle(new Color(1f, 0.35f, 0.3f, 1f), 1f, HitMarkerDuration);
+        private static readonly HitMarkerStyle HitMarkerHead = new HitMarkerStyle(new Color(1f, 0.86f, 0.2f, 1f), 1.45f, 0.38f);
+        private static readonly HitMarkerStyle HitMarkerArms = new HitMarkerStyle(new Color(1f, 0.5f, 0.42f, 0.8f), 0.85f, HitMarkerDuration);
+        private static readonly HitMarkerStyle HitMarkerLegs = new HitMarkerStyle(new Color(0.95f, 0.58f, 0.5f, 0.7f), 0.75f, HitMarkerDuration);
+
+        /// <summary>Head (or any hit flagged as a headshot) gets the distinct gold, larger marker; arms / hands and legs / feet a smaller, subtler one.</summary>
+        internal static HitMarkerStyle HitMarkerStyleFor(HitLocation location, bool headshot)
+        {
+            if (headshot || location == HitLocation.Head) return HitMarkerHead;
+            switch (location)
+            {
+                case HitLocation.Arms:
+                case HitLocation.Hands:
+                    return HitMarkerArms;
+                case HitLocation.Legs:
+                case HitLocation.Feet:
+                    return HitMarkerLegs;
+                default:
+                    return HitMarkerBody;
             }
         }
 

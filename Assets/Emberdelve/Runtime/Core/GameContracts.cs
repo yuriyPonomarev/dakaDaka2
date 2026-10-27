@@ -114,10 +114,14 @@ namespace Emberdelve.Core
         public readonly bool TargetKilled;
         public readonly EntityKind TargetKind;
 
-        public HitFeedback(Vector3 point, float damage, bool blocked, bool headshot, bool targetKilled, EntityKind targetKind)
+        /// <summary>B2: the authority's hit location of this hit (Unspecified when the source has none); drives the hit-marker variant.</summary>
+        public readonly HitLocation Location;
+
+        public HitFeedback(Vector3 point, float damage, bool blocked, bool headshot, bool targetKilled, EntityKind targetKind,
+            HitLocation location = HitLocation.Unspecified)
         {
             Point = point; Damage = damage; Blocked = blocked; Headshot = headshot;
-            TargetKilled = targetKilled; TargetKind = targetKind;
+            TargetKilled = targetKilled; TargetKind = targetKind; Location = location;
         }
     }
 

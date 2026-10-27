@@ -49,6 +49,12 @@ namespace Emberdelve.Combat
         /// <summary>Raised when the authority accepted a swing; carries the plain-data request that was sent.</summary>
         public event Action<MeleeSwingIntent> AttackStarted;
 
+        /// <summary>
+        /// B2: raised exactly once per swing, on the frame the client sees the authority's wall stop (the same moment it
+        /// starts its recoil). Carries the authority's status, including the wall contact point. Presentation hooks only.
+        /// </summary>
+        public event Action<MeleeSwingStatus> WallStopped;
+
         public WeaponData Weapon => _weapon;
         public bool IsSwinging => _phase != Phase.Idle;
 
@@ -283,6 +289,7 @@ namespace Emberdelve.Combat
             float stopTime = _timing.Windup + _timing.Active * status.WallContactSample / Mathf.Max(1, status.SampleCount);
             _phaseTimer = Mathf.Max(0.05f, stopTime + _timing.WallRecoil - status.Elapsed);
             rig.PlaySwingRecoil();
+            WallStopped?.Invoke(status);
             CombatDiagnostics.Log("melee-wall", $"[MeleeCombat] swing {_swingId} stopped by level geometry at sample {status.WallContactSample}/{status.SampleCount} with {status.Hits.Count} hit(s)", this);
         }
 

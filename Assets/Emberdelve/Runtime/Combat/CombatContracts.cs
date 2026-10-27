@@ -223,11 +223,23 @@ namespace Emberdelve.Combat
         /// </summary>
         public readonly float TurnClampedDegrees;
 
+        /// <summary>
+        /// B2: where the blade met level geometry when the swing was wall-stopped (world space, the authority's own
+        /// geometry), the surface normal there (zero when the contact has none, e.g. a buried hand), and whether the
+        /// point is valid. Presentation only: spark and camera kick read it, nothing in damage does.
+        /// </summary>
+        public readonly Vector3 WallPoint;
+        public readonly Vector3 WallNormal;
+        public readonly bool HasWallPoint;
+
         public MeleeSwingStatus(int swingId, int instigatorCombatId, SwingPhase phase, SwingEndReason endReason,
             float elapsed, int samplesProcessed, int sampleCount, int wallContactSample, IReadOnlyList<MeleeSwingHit> hits,
             int comboStep = 0, float stepMultiplier = 1f, Emberdelve.Data.SwingTiming timing = default,
-            float turnClampedDegrees = 0f)
+            float turnClampedDegrees = 0f, Vector3 wallPoint = default, Vector3 wallNormal = default, bool hasWallPoint = false)
         {
+            WallPoint = wallPoint;
+            WallNormal = wallNormal;
+            HasWallPoint = hasWallPoint;
             TurnClampedDegrees = turnClampedDegrees;
             ComboStep = comboStep;
             StepMultiplier = stepMultiplier;
@@ -245,6 +257,22 @@ namespace Emberdelve.Combat
 
         public bool Finished => Phase == SwingPhase.Finished;
         public bool WallStopped => EndReason == SwingEndReason.WallStop;
+    }
+
+    /// <summary>
+    /// B2: read-only view of an instigator's melee combo chain for the HUD pips. Implemented by the authority next to
+    /// <see cref="ICombatAuthority.TryGetExpectedComboStep"/>; it changes nothing.
+    /// </summary>
+    public interface IComboStateSource
+    {
+        /// <summary>
+        /// False when the instigator is unknown or its held weapon has no combo chain (ranged, shield, single pattern).
+        /// Otherwise <paramref name="total"/> is the chain length, <paramref name="step"/> the number of chain steps
+        /// already started in the live chain (0 = no live chain; the finisher in progress counts as <paramref name="total"/>),
+        /// and <paramref name="windowRemaining"/> the seconds left before the live chain would reset on the authority
+        /// clock (0 when none; while a swing is still running it also includes the time until its recovery begins).
+        /// </summary>
+        bool TryGetComboState(int instigatorCombatId, out int step, out int total, out float windowRemaining);
     }
 
     public interface ICombatAuthority

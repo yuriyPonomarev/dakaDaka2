@@ -706,7 +706,7 @@ namespace Emberdelve.Combat
             Vector3 point, DamageInfo damage)
         {
             HitFeedback feedback = new HitFeedback(point, damage.Amount, damage.Blocked, damage.Headshot,
-                target.IsDead, target.Kind);
+                target.IsDead, target.Kind, damage.Location);
             PublishCombatFeedback(instigator, target, feedback, damage);
         }
 

@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Emberdelve.Combat;
+using Emberdelve.Core;
 using Emberdelve.Data;
 
 namespace Emberdelve.Player
@@ -28,6 +30,8 @@ namespace Emberdelve.Player
         private SwingPatternData _pattern;
         private SwingTiming _timing;
         private float _bladeLength;
+        private float _visibleLength;
+        private int _clipMask;
         private float _swingStart;
         private bool _swinging;
         private bool _recoiling;
@@ -47,13 +51,33 @@ namespace Emberdelve.Player
         public bool IsRanged => _isRanged;
         public bool IsSwinging => _swinging || _recoiling;
         public float BladeLength => _bladeLength;
+
+        /// <summary>B2: the length of the bar / ribbon actually drawn: the blade clipped where it meets level geometry (visual only; the authority clips its own segment).</summary>
+        public float VisibleBladeLength => _visibleLength;
         public SwingPatternData Pattern => _pattern;
+
+        /// <summary>
+        /// B2: the blade length that may be drawn from <paramref name="bladeBase"/> along <paramref name="direction"/>: the
+        /// distance to the first collider in <paramref name="mask"/> (triggers ignored), 0 when the hand itself is buried in
+        /// one, else the full length. Mirrors the authority's own wall clip (same mask) so the bar and ribbon end where the
+        /// damage segment ends. Allocation free; mask 0 disables it.
+        /// </summary>
+        public static float ClipBladeLength(Vector3 bladeBase, Vector3 direction, float length, int mask)
+        {
+            if (mask == 0 || length <= 0f) return length;
+            if (Physics.CheckSphere(bladeBase, 0.03f, mask, QueryTriggerInteraction.Ignore)) return 0f;
+            return Physics.Raycast(bladeBase, direction, out RaycastHit hit, length, mask, QueryTriggerInteraction.Ignore)
+                ? Mathf.Min(length, hit.distance)
+                : length;
+        }
 
         /// <summary>World position of the weapon segment's base (the hand) while the pattern drives this rig.</summary>
         public Vector3 BladeBase => transform.position;
 
         /// <summary>World position of the weapon segment's tip: the same point the authority sweeps.</summary>
         public Vector3 BladeTip => transform.position + transform.forward * _bladeLength;
+
+        private Vector3 VisibleTip => transform.position + transform.forward * _visibleLength;
 
         public void Configure(Transform muzzle, Transform arrow, Transform bowString, bool isRanged)
         {
@@ -126,6 +150,10 @@ namespace Emberdelve.Player
             _pattern = pattern;
             _timing = timing;
             _bladeLength = pattern.BladeLength(weapon);
+            _visibleLength = _bladeLength;
+            _clipMask = GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) && authority is LocalCombatAuthority local
+                ? local.SwingBlockerMask.value
+                : 0;
             _swingStart = Time.time;
             _swinging = true;
             _recoiling = false;
@@ -177,7 +205,13 @@ namespace Emberdelve.Player
             {
                 // The damage-segment bar only exists while the segment can hurt (the active phase).
                 if (_edge.gameObject.activeSelf != active) _edge.gameObject.SetActive(active);
-                _edge.localScale = new Vector3(0.02f, 0.02f, _bladeLength);
+
+                // B2: the bar (and the ribbon below) stops where the blade meets level geometry, like the damage segment.
+                _visibleLength = active
+                    ? ClipBladeLength(transform.position, transform.forward, _bladeLength, _clipMask)
+                    : _bladeLength;
+                _edge.localPosition = new Vector3(0f, 0f, _visibleLength * 0.5f);
+                _edge.localScale = new Vector3(0.02f, 0.02f, Mathf.Max(0.001f, _visibleLength));
             }
         }
 
@@ -205,7 +239,7 @@ namespace Emberdelve.Player
                 {
                     // The ribbon is drawn along the outer third of the segment (the striking edge): the whole blade
                     // fan seen edge-on from the eye would fill the lower screen.
-                    if (_trail != null) _trail.Add(Vector3.Lerp(BladeBase, BladeTip, TrailInnerFraction), BladeTip);
+                    if (_trail != null) _trail.Add(Vector3.Lerp(BladeBase, VisibleTip, TrailInnerFraction), VisibleTip);
                 }
                 else if (t > activeEnd && _trail != null)
                 {

@@ -252,7 +252,7 @@ namespace Emberdelve.Combat
             ApplyHitEffects(target, damage, weapon);
 
             HitFeedback feedback = new HitFeedback(authoritativePoint, damage.Amount, damage.Blocked, damage.Headshot,
-                target.IsDead, target.Kind);
+                target.IsDead, target.Kind, damage.Location);
 
             PublishCombatFeedback(instigator, target, feedback, damage);
 
@@ -560,7 +560,7 @@ namespace Emberdelve.Combat
             AcceptedCount++;
 
             HitFeedback feedback = new HitFeedback(authoritativePoint, damage.Amount, damage.Blocked, damage.Headshot,
-                target.IsDead, target.Kind);
+                target.IsDead, target.Kind, damage.Location);
 
             PublishCombatFeedback(instigator, target, feedback, damage);
 

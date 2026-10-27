@@ -39,6 +39,7 @@ namespace Emberdelve.Feedback
         private PlayerRig _player;
         private MeleeCombat _melee;
         private RangedCombat _ranged;
+        private WallStopFeedback _wallFeedback;
         private bool _subscribedToPlayer;
 
         private void Awake()
@@ -93,12 +94,21 @@ namespace Emberdelve.Feedback
             _melee = player.GetComponent<MeleeCombat>();
             _ranged = player.GetComponent<RangedCombat>();
 
-            if (_melee != null) _melee.AttackStarted += OnMeleeSwingStarted;
+            if (_melee != null)
+            {
+                _melee.AttackStarted += OnMeleeSwingStarted;
+                _melee.WallStopped += OnMeleeWallStopped;
+            }
+
             if (_ranged != null)
             {
                 _ranged.AttackStarted += OnAttackStarted;
                 _ranged.ShotFired += OnShotFired;
             }
+
+            // B2: wall-stop spark and camera kick for the local player's own swings (visual only).
+            if (_wallFeedback == null) _wallFeedback = gameObject.AddComponent<WallStopFeedback>();
+            _wallFeedback.Configure(player.Look != null ? player.Look.AimTransform : null);
 
             _subscribedToPlayer = true;
         }
@@ -107,7 +117,12 @@ namespace Emberdelve.Feedback
         {
             if (!_subscribedToPlayer) return;
 
-            if (_melee != null) _melee.AttackStarted -= OnMeleeSwingStarted;
+            if (_melee != null)
+            {
+                _melee.AttackStarted -= OnMeleeSwingStarted;
+                _melee.WallStopped -= OnMeleeWallStopped;
+            }
+
             if (_ranged != null)
             {
                 _ranged.AttackStarted -= OnAttackStarted;
@@ -118,6 +133,11 @@ namespace Emberdelve.Feedback
         }
 
         private void OnMeleeSwingStarted(MeleeSwingIntent intent) => Play(_swing);
+
+        private void OnMeleeWallStopped(MeleeSwingStatus status)
+        {
+            if (_wallFeedback != null) _wallFeedback.Play(status);
+        }
 
         private void OnAttackStarted(AttackIntent intent)
         {
