@@ -1738,10 +1738,11 @@ namespace Emberdelve.EditorTools
                 EditorUtility.SetDirty(ClawElite);
             }
 
-            // Ranged kit: no held penalty yet (D3), so the archer's movement numbers keep their baselines.
-            // Arrows and bolts carry no impact power: they never break a guard.
-            if (Bow != null) { Bow.heldMoveSpeedPenalty = 0f; Bow.impactPower = 0f; EditorUtility.SetDirty(Bow); }
-            if (Crossbow != null) { Crossbow.heldMoveSpeedPenalty = 0f; Crossbow.impactPower = 0f; EditorUtility.SetDirty(Crossbow); }
+            // Ranged kit (B1): the same held-penalty rule as melee (1 - points / 300), light bow, heavier crossbow
+            // (sword 10, rapier 5 are the scale). Bow x0.9867, crossbow x0.96. Arrows and bolts carry no impact power:
+            // they never break a guard.
+            if (Bow != null) { Bow.heldMoveSpeedPenalty = 4f; Bow.impactPower = 0f; EditorUtility.SetDirty(Bow); }
+            if (Crossbow != null) { Crossbow.heldMoveSpeedPenalty = 12f; Crossbow.impactPower = 0f; EditorUtility.SetDirty(Crossbow); }
 
             // Blocking walks at x0.65 (was 0.45); it is class data, applied by PlayerMovement.ResolveGroundSpeed.
             if (Warrior != null && !Mathf.Approximately(Warrior.guardSpeedMultiplier, 0.65f))

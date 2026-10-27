@@ -131,12 +131,18 @@ namespace Emberdelve.Player
 
         /// <summary>
         /// D1b: true while the wielder is in the action phase of an attack: a melee swing running on the authority
-        /// (windup, active, recovery) or a ranged draw. A player swap is refused during it.
+        /// (windup, active, recovery) or a ranged draw. B1: also while the ranged weapon in hand is reloading.
+        /// A player swap is refused during it.
         /// </summary>
         public bool IsActionLocked =>
             (_rig != null && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
                 && authority is ICombatFlowState flow && flow.IsSwingInProgress(_rig.CombatId))
-            || (rangedCombat != null && rangedCombat.enabled && rangedCombat.IsDrawing);
+            || (rangedCombat != null && rangedCombat.enabled && (rangedCombat.IsDrawing || rangedCombat.IsReloading));
+
+        /// <summary>B1: true while the ranged weapon in hand is reloading (the part of <see cref="IsActionLocked"/> that is not a swing or a draw).</summary>
+        public bool IsReloadLocked => rangedCombat != null && rangedCombat.enabled && rangedCombat.IsReloading;
+
+        public string ActionLockMessage => IsReloadLocked ? "Cannot swap weapons while reloading" : "Cannot swap weapons during an attack";
 
         public bool SwitchToSlot(int slot)
         {
@@ -147,7 +153,7 @@ namespace Emberdelve.Player
             if (IsActionLocked)
             {
                 // Refused with no state change and nothing queued: the swap input is only read on the frame it is pressed.
-                GameEvents.RaiseToast(OwnerId, "Cannot swap weapons during an attack");
+                GameEvents.RaiseToast(OwnerId, ActionLockMessage);
                 return false;
             }
 
@@ -184,7 +190,7 @@ namespace Emberdelve.Player
             // last line): refused mid-attack with no state change.
             if (slot == _activeSlot && IsActionLocked)
             {
-                GameEvents.RaiseToast(OwnerId, "Cannot swap weapons during an attack");
+                GameEvents.RaiseToast(OwnerId, ActionLockMessage);
                 return null;
             }
 

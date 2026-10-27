@@ -73,40 +73,97 @@ namespace Emberdelve.Combat
             }
         }
 
+        /// <summary>
+        /// Seconds the status is still carried: the longest remaining entry of that kind. For Slow this is NOT the time the
+        /// current (strongest) magnitude lasts - a weaker, longer slow can outlast it (B1) - see <see cref="SpeedMultiplier"/>.
+        /// </summary>
         public float RemainingOf(StatusKind kind)
         {
-            int index = Find(kind);
-            return index >= 0 ? _entries[index].Remaining : 0f;
+            float remaining = 0f;
+            for (int i = 0; i < _entries.Count; i++)
+            {
+                if (_entries[i].Kind == kind && _entries[i].Remaining > remaining) remaining = _entries[i].Remaining;
+            }
+            return remaining;
         }
+
+        /// <summary>Upper bound of simultaneous slow entries (distinct, non-dominated slows); the shortest one goes first.</summary>
+        private const int MaxSlowEntries = 8;
 
         public void ApplyStatus(StatusSpec spec, int sourceCombatId)
         {
             if (spec.IsNone) return;
 
-            int index = Find(spec.Kind);
-            if (index >= 0)
+            if (spec.Kind == StatusKind.Slow)
             {
-                // Refreshing the same status extends it and takes the stronger magnitude, so two
-                // casts of the same skill cannot stack into an unbounded multiplier.
-                Entry entry = _entries[index];
-                entry.Remaining = Mathf.Max(entry.Remaining, spec.Duration);
-                entry.Magnitude = spec.Kind == StatusKind.Slow
-                    ? Mathf.Min(entry.Magnitude, spec.Magnitude)
-                    : Mathf.Max(entry.Magnitude, spec.Magnitude);
-                _entries[index] = entry;
+                // B1: a slow keeps its OWN magnitude and duration. The effective slow is the strongest one active at any
+                // moment (SpeedMultiplier), every entry expires individually, so a weaker slow outlasting a stronger one still
+                // applies afterwards and a stronger slow is never stretched to a longer slow's time. "Refresh, not stack":
+                // an entry that is no stronger AND no longer than another is redundant and dropped, so the same slow applied
+                // again just refreshes (max duration) and a strictly weaker, shorter one disappears behind the stronger.
+                _entries.Add(new Entry { Kind = StatusKind.Slow, Remaining = spec.Duration, Magnitude = spec.Magnitude });
+                PruneDominatedSlows();
             }
             else
             {
-                _entries.Add(new Entry
+                int index = Find(spec.Kind);
+                if (index >= 0)
                 {
-                    Kind = spec.Kind,
-                    Remaining = spec.Duration,
-                    Magnitude = spec.Magnitude
-                });
+                    // Refreshing the same status extends it and takes the stronger magnitude, so two
+                    // casts of the same skill cannot stack into an unbounded multiplier.
+                    Entry entry = _entries[index];
+                    entry.Remaining = Mathf.Max(entry.Remaining, spec.Duration);
+                    entry.Magnitude = Mathf.Max(entry.Magnitude, spec.Magnitude);
+                    _entries[index] = entry;
+                }
+                else
+                {
+                    _entries.Add(new Entry
+                    {
+                        Kind = spec.Kind,
+                        Remaining = spec.Duration,
+                        Magnitude = spec.Magnitude
+                    });
+                }
             }
 
             Version++;
             GameEvents.RaiseStatusChanged(SelfCombatId(), spec.Kind, spec.Duration);
+        }
+
+        /// <summary>Drops every slow entry that another slow beats or equals in both strength and remaining time (the newest of two equal ones goes).</summary>
+        private void PruneDominatedSlows()
+        {
+            for (int i = _entries.Count - 1; i >= 0; i--)
+            {
+                if (_entries[i].Kind != StatusKind.Slow) continue;
+                for (int j = 0; j < _entries.Count; j++)
+                {
+                    if (j == i || _entries[j].Kind != StatusKind.Slow) continue;
+                    bool beats = _entries[j].Magnitude <= _entries[i].Magnitude && _entries[j].Remaining >= _entries[i].Remaining;
+                    bool equal = _entries[j].Magnitude == _entries[i].Magnitude && _entries[j].Remaining == _entries[i].Remaining;
+                    // equal entries: keep the lower index (older one), drop the higher
+                    if (beats && (!equal || j < i))
+                    {
+                        _entries.RemoveAt(i);
+                        break;
+                    }
+                }
+            }
+
+            int slows = 0;
+            for (int i = 0; i < _entries.Count; i++) if (_entries[i].Kind == StatusKind.Slow) slows++;
+            while (slows > MaxSlowEntries)
+            {
+                int shortest = -1;
+                for (int i = 0; i < _entries.Count; i++)
+                {
+                    if (_entries[i].Kind != StatusKind.Slow) continue;
+                    if (shortest < 0 || _entries[i].Remaining < _entries[shortest].Remaining) shortest = i;
+                }
+                _entries.RemoveAt(shortest);
+                slows--;
+            }
         }
 
         public void ClearStatuses()
@@ -125,16 +182,23 @@ namespace Emberdelve.Combat
 
         private void Update()
         {
+            Tick(Time.deltaTime);
+        }
+
+        /// <summary>Advances every entry by <paramref name="deltaTime"/> and expires the finished ones individually (internal so a gate can step time exactly).</summary>
+        internal void Tick(float deltaTime)
+        {
             for (int i = _entries.Count - 1; i >= 0; i--)
             {
                 Entry entry = _entries[i];
-                entry.Remaining -= Time.deltaTime;
+                entry.Remaining -= deltaTime;
 
                 if (entry.Remaining <= 0f)
                 {
                     _entries.RemoveAt(i);
                     Version++;
-                    GameEvents.RaiseStatusChanged(SelfCombatId(), entry.Kind, 0f);
+                    // "ended" is only news when no other entry of the kind (a longer, weaker slow) keeps it alive
+                    GameEvents.RaiseStatusChanged(SelfCombatId(), entry.Kind, Find(entry.Kind) >= 0 ? RemainingOf(entry.Kind) : 0f);
                 }
                 else
                 {

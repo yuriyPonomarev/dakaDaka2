@@ -290,6 +290,8 @@ namespace Emberdelve.Combat
         {
             if (rig != null) rig.SetGuardHeld(false);
             _phase = Phase.Idle;
+            // B1: a press buffered during a recovery must not outlive the weapon in hand (it would fire on the next melee swap-in).
+            _bufferedUntil = -1f;
         }
     }
 }

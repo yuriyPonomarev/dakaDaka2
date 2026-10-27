@@ -89,8 +89,11 @@ namespace Emberdelve.InputLayer
         public bool InteractHeld => InteractHeldOverride.HasValue
             ? InteractHeldOverride.Value && _playerMap != null && _playerMap.enabled
             : _interact != null && _interact.IsPressed();
-        public bool ReloadPressed => _reload != null && _reload.WasPressedThisFrame();
-        public bool SwapPressed => _swap != null && _swap.WasPressedThisFrame();
+        /// <summary>B1 test seams (same idea as the primary overrides): replace the real reload / swap edge for one frame. Never set in game code.</summary>
+        internal bool? ReloadPressedOverride { get; set; }
+        internal bool? SwapPressedOverride { get; set; }
+        public bool ReloadPressed => ReloadPressedOverride.HasValue ? ReloadPressedOverride.Value && OverrideLive : _reload != null && _reload.WasPressedThisFrame();
+        public bool SwapPressed => SwapPressedOverride.HasValue ? SwapPressedOverride.Value && OverrideLive : _swap != null && _swap.WasPressedThisFrame();
         public bool Skill1Pressed => _skill1 != null && _skill1.WasPressedThisFrame();
         public bool Skill2Pressed => _skill2 != null && _skill2.WasPressedThisFrame();
 

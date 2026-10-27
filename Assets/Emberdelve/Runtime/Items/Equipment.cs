@@ -310,7 +310,7 @@ namespace Emberdelve.Items
             if (item.GrantsWeapon && item.equipSlot != EquipmentSlot.OffHand && _rig.Loadout != null && _rig.Loadout.IsActionLocked)
             {
                 reason = "cannot change weapons during an attack";
-                GameEvents.RaiseToast(OwnerId, "Cannot swap weapons during an attack");
+                GameEvents.RaiseToast(OwnerId, _rig.Loadout.ActionLockMessage);
                 return false;
             }
 
@@ -710,7 +710,7 @@ namespace Emberdelve.Items
             if (item.GrantsWeapon && item.equipSlot != EquipmentSlot.OffHand && _rig.Loadout != null && _rig.Loadout.IsActionLocked)
             {
                 reason = "cannot change weapons during an attack";
-                GameEvents.RaiseToast(OwnerId, "Cannot swap weapons during an attack");
+                GameEvents.RaiseToast(OwnerId, _rig.Loadout.ActionLockMessage);
                 return false;
             }
 

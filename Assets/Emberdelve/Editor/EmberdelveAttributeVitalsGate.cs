@@ -492,7 +492,7 @@ namespace Emberdelve.EditorTools
                 // the bare attribute term 4.3 * (1 + 0.025 * 3) = 4.6225 (DEX 16 -> floor((16-10)/2) = 3), and
                 // the resolver is that same term with the class' Fleet Footing 1.15 on top:
                 // 4.6225 * 1.15 = 5.315875, i.e. DEX counted exactly once.
-                CheckClose("archer walk speed 4.3 * 1.075 * 1.15 Fleet Footing", 5.315875f, rig.Movement.ResolveGroundSpeed(false, false), "authored 4.3, DEX modifier 3, Fleet Footing 1.15");
+                CheckClose("archer walk speed 4.3 * 1.075 * 1.15 Fleet Footing x bow held factor", 5.315875f * (1f - bow.heldMoveSpeedPenalty / 300f), rig.Movement.ResolveGroundSpeed(false, false), "authored 4.3, DEX modifier 3, Fleet Footing 1.15, x B1 ranged held factor (bow 4 points of 300 = 0.98667)");
                 CheckClose("archer attribute move-speed query 4.3 * 1.075", 4.6225f, rig.AttributeStats.MoveSpeed, "DEX modifier 3, query only, no passive folded in");
                 CheckClose("archer ability effect scale 0.96 (1 + 0.04*-1)", 0.96f, rig.AttributeStats.GetAbilityEffectScale(), "CHA modifier -1, query only");
                 CheckClose("archer bow damage query 34 * 1.12", 38.08f, rig.AttributeStats.GetWeaponDamage(bow), "DEX modifier 3, attacks unchanged");

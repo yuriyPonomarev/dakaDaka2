@@ -71,6 +71,10 @@ namespace Emberdelve.Combat
 
             if (weapon == null || !weapon.IsRanged)
             {
+                // B1: a reload or draw that was running does not survive the weapon leaving the hand (nothing is refunded or
+                // granted: the magazine was already stored by the loadout, an unfinished reload adds no rounds).
+                _drawing = false;
+                _reloading = false;
                 enabled = false;
                 return;
             }

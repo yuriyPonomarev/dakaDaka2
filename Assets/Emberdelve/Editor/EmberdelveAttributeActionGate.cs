@@ -543,9 +543,9 @@ namespace Emberdelve.EditorTools
                 // 1. The bare attribute term (4.6225) and the same speed after Fleet Footing are separate numbers.
                 CheckClose("archer attribute move term 4.3 * 1.075 BEFORE Fleet Footing", 4.6225f, rig.AttributeStats.MoveSpeed, "DEX modifier 3, no passive folded in");
                 CheckClose("archer DEX locomotion factor 1 + 0.025*3", 1.075f, rig.AttributeStats.MoveSpeedFactor, "the amendment's DEX term");
-                CheckWalk("archer walking with Fleet Footing on top", rig, 5.315875f);
-                CheckClose("archer sprint 6.4 * 1.075 * 1.15", 7.912f, rig.Movement.ResolveGroundSpeed(true, false), "authored sprint base with its own passive term");
-                CheckClose("archer crouch 2.1 * 1.075", 2.2575f, rig.Movement.ResolveGroundSpeed(false, true), "DEX applies to crouch too, base retained");
+                CheckWalk("archer walking with Fleet Footing on top", rig, 5.315875f, ArcherHeld);
+                CheckClose("archer sprint 6.4 * 1.075 * 1.15", 7.912f * ArcherHeld, rig.Movement.ResolveGroundSpeed(true, false), "authored sprint base with its own passive term, x the ranged held factor (B1: bow 4 points of 300)");
+                CheckClose("archer crouch 2.1 * 1.075", 2.2575f * ArcherHeld, rig.Movement.ResolveGroundSpeed(false, true), "DEX applies to crouch too, base retained, x the ranged held factor");
                 Check(rig.Movement.ResolveGroundSpeed(true, false) > rig.Movement.ResolveGroundSpeed(false, false) + 0.1f,
                     "sprint is still faster than walking after the migration");
 
@@ -556,18 +556,18 @@ namespace Emberdelve.EditorTools
                 Equip(rig, dexCharm);
                 CheckInt("archer DEX+2 gives 18, modifier 4", 4, rig.AttributeStats.GetModifier(SixAttribute.Dexterity), "crossed one threshold");
                 CheckClose("archer attribute move term after the crossing 4.3 * 1.1", 4.73f, rig.AttributeStats.MoveSpeed, "before Fleet Footing again");
-                CheckWalk("archer walking after the crossing", rig, 5.4395f);
+                CheckWalk("archer walking after the crossing", rig, 5.4395f, ArcherHeld);
                 Unequip(rig, EquipmentSlot.Head);
-                CheckWalk("archer walking back to 5.315875 after unequipping", rig, 5.315875f);
+                CheckWalk("archer walking back to 5.315875 after unequipping", rig, 5.315875f, ArcherHeld);
 
                 // 3. Authored gear on top of the passive.
                 CarryItem(rig, _boots);
                 Equip(rig, _boots);
-                CheckWalk("archer walking with Fleet Footing and the boots", rig, 6.2727325f);
-                CheckClose("archer sprint with Fleet Footing and the boots", 8.86144f, rig.Movement.ResolveGroundSpeed(true, false),
+                CheckWalk("archer walking with Fleet Footing and the boots", rig, 6.2727325f, ArcherHeld);
+                CheckClose("archer sprint with Fleet Footing and the boots", 8.86144f * ArcherHeld, rig.Movement.ResolveGroundSpeed(true, false),
                     "sprint is not clamped into the walking band: its authored base and both gear terms are retained");
                 Unequip(rig, EquipmentSlot.Legs);
-                CheckWalk("archer walking back to 5.315875", rig, 5.315875f);
+                CheckWalk("archer walking back to 5.315875", rig, 5.315875f, ArcherHeld);
 
                 // 4. The amendment's order with a passive multiplier, a gear multiplier and a gear flat together.
                 ItemData orderCharm = MakeModifierItem("u2a4_archer_order_charm", "U2A4 Long Stride", EquipmentSlot.Head,
@@ -575,8 +575,8 @@ namespace Emberdelve.EditorTools
                                new StatModifier(SkillStat.MoveSpeed, SkillModifierMode.Flat, 1f) });
                 CarryItem(rig, orderCharm);
                 Equip(rig, orderCharm);
-                CheckWalk("archer with DEX+2, x1.2 and +1.0 flat", rig, 7.5274f);
-                float wrongOrder = (4.73f * 1.15f + 1f) * 1.2f;
+                CheckWalk("archer with DEX+2, x1.2 and +1.0 flat", rig, 7.5274f, ArcherHeld);
+                float wrongOrder = (4.73f * 1.15f + 1f) * 1.2f * ArcherHeld;
                 Check(Mathf.Abs(rig.Movement.ResolveGroundSpeed(false, false) - wrongOrder) > 0.15f,
                     $"the archer resolver is NOT (flat + base) * multiplier either ({wrongOrder:F3} would have been wrong)");
                 Unequip(rig, EquipmentSlot.Head);
@@ -865,8 +865,11 @@ namespace Emberdelve.EditorTools
             /// D1b fixture migration. The warrior holds the sword and carries the shield, and since D1b the resolved ground speed
             /// includes the held-weapon penalty (sword 10 + shield 8 points on a 300 base, Docs/Tasks/D1b.md). Every number in this
             /// gate is the ATTRIBUTE rule's number (authored base x DEX factor x passives + flat, clamped), which is unchanged, so the
-            /// warrior's resolved speeds are asserted as that rule number x this held factor. The archer holds the bow: no penalty.
+            /// warrior's resolved speeds are asserted as that rule number x this held factor. Since B1 the archer's bow carries a held penalty too (see ArcherHeld).
             /// </summary>
+            /// <summary>B1: ranged weapons use the same held rule (1 - points / 300, bow 4 points); the archer holds the bow, so its resolved speeds are the attribute rule's number x this factor.</summary>
+            private float ArcherHeld => 1f - _bow.heldMoveSpeedPenalty / 300f;
+
             private float WarriorHeld => 1f - (_sword.heldMoveSpeedPenalty + _shieldWeapon.heldMoveSpeedPenalty) / 300f;
 
             private void CheckWalk(string label, PlayerRig rig, float expected, float held = 1f)

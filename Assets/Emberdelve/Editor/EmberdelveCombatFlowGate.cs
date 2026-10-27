@@ -361,6 +361,7 @@ namespace Emberdelve.EditorTools
             Section("D1c1: review follow-ups (authority)", D1c1Authority);
             Section("D1c5: props do not stop swings", PropsDoNotBlock);
             Section("D1c5: display timing derives from the pattern", DisplayTimingFromPattern);
+            Section("B1: slow merge keeps each slow's own magnitude and duration", SlowMerge);
 
             foreach (IEnumerator part in new[] { RigSections() })
             {
@@ -476,7 +477,13 @@ namespace Emberdelve.EditorTools
             Near(10f, _sword.heldMoveSpeedPenalty, 1e-6f, "sword held penalty 10 points");
             Near(5f, _rapier.heldMoveSpeedPenalty, 1e-6f, "rapier held penalty 5 points");
             Near(8f, _shield.heldMoveSpeedPenalty, 1e-6f, "shield held penalty 8 points");
-            Near(0f, _bow.heldMoveSpeedPenalty + _crossbow.heldMoveSpeedPenalty, 1e-6f, "ranged weapons carry no held penalty yet");
+            // B1: ranged weapons use the same rule (1 - points / 300); authored in EmberdelveAssetLibrary.ApplyCombatFlow
+            Near(4f, _bow.heldMoveSpeedPenalty, 1e-6f, "B1: bow held penalty 4 points (light)");
+            Near(12f, _crossbow.heldMoveSpeedPenalty, 1e-6f, "B1: crossbow held penalty 12 points (heavier than the sword's 10)");
+            Check(_bow.heldMoveSpeedPenalty < _rapier.heldMoveSpeedPenalty && _crossbow.heldMoveSpeedPenalty > _sword.heldMoveSpeedPenalty, "B1: ordering bow < rapier < sword < crossbow");
+            Near(1f - 4f / 300f, CombatFlowRules.HeldFactor(_bow, null, false), 1e-6f, "B1: bow held factor 1 - 4/300 = 0.98667");
+            Near(1f - 12f / 300f, CombatFlowRules.HeldFactor(_crossbow, null, false), 1e-6f, "B1: crossbow held factor 1 - 12/300 = 0.96");
+            Near(1f - 12f / 300f, CombatFlowRules.HeldFactor(_crossbow, _shield, false), 1e-6f, "B1: a shield that does not contribute (two-handed crossbow) adds nothing");
             Near(10f, _sword.impactPower, 1e-6f, "sword impact power 10");
             Near(20f, _shield.impactResist, 1e-6f, "heater shield impact resist 20");
             Near(30f, _maul.impactPower, 1e-6f, "maul impact power 30");
@@ -1316,6 +1323,7 @@ namespace Emberdelve.EditorTools
             }
 
             yield return SwapLock();
+            yield return ReloadSwapLock();
             yield return ReviewFollowups();
 
             // real time: hit slow on the player, measured distance
@@ -1392,9 +1400,12 @@ namespace Emberdelve.EditorTools
             Near(walk * held * 0.65f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "blocking: walk x0.65 (and the held penalty)");
             _rig.SetGuardHeld(false);
 
-            // the crossbow: ranged weapons carry no penalty, a two-handed weapon leaves the shield out
+            // the crossbow (B1: ranged weapons use the held rule too): walk x (1 - 12/300), a two-handed weapon leaves the shield out
             Check(_rig.Loadout.SwitchToSlot(1) && _rig.ActiveWeapon == _crossbow, "move phases: swapped to the crossbow");
-            Near(_rig.Movement.ResolveWalkSpeed(), _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "crossbow: no held penalty and the shield adds none");
+            float crossbowHeld = 1f - _crossbow.heldMoveSpeedPenalty / 300f;
+            Near(_rig.Movement.ResolveWalkSpeed() * crossbowHeld, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "crossbow: walk = rule x (1 - 12/300) = x0.96 and the shield adds none");
+            Near(_rig.Movement.ResolveGroundSpeed(true, false) / _rig.Movement.ResolveGroundSpeed(false, false), 5.2f / 4.3f, 1e-3f, "crossbow: sprint/walk ratio unchanged by the held factor");
+            Near(_rig.GetMoveFlowFactor(), crossbowHeld, 1e-5f, "crossbow: the rig's move flow factor is the held factor (no swing)");
             Check(_rig.Loadout.SwitchToSlot(0) && _rig.ActiveWeapon == _sword, "move phases: back to the sword");
             _authority.StepSwings();
             Cooldown(3f);
@@ -1773,6 +1784,277 @@ namespace Emberdelve.EditorTools
                 _clock += 3f;
                 _authority.StepSwings();
             }
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // B1: slow merge (each slow keeps its own magnitude and duration; the strongest active one applies)
+        // ------------------------------------------------------------------------------------------------
+
+        private StatusComponent NewStatusHost(string name)
+        {
+            GameObject host = new GameObject(name);
+            _cleanup.Add(host);
+            StatusComponent status = host.AddComponent<StatusComponent>();
+            status.enabled = false;               // time is stepped by hand with Tick, real frames never touch it
+            return status;
+        }
+
+        private void SlowMerge()
+        {
+            // a longer, weaker slow, then a short strong one (the quirk case): the strong one must end on ITS time
+            {
+                StatusComponent st = NewStatusHost("B1_Slow_A");
+                st.ApplyStatus(new StatusSpec(StatusKind.Slow, 3f, 0.9f), 1);
+                st.ApplyStatus(new StatusSpec(StatusKind.Slow, 0.6f, 0.55f), 2);
+                Near(0.55f, st.SpeedMultiplier, 1e-5f, "merge A: the stronger slow applies while it lasts");
+                Check(st.ActiveCount == 2, $"merge A: two entries, each with its own duration ({st.ActiveCount})");
+                st.Tick(0.5f);
+                Near(0.55f, st.SpeedMultiplier, 1e-5f, "merge A: still the strong slow 0.5 s in");
+                st.Tick(0.2f);
+                Near(0.9f, st.SpeedMultiplier, 1e-5f, "merge A: the strong slow ended at its own 0.6 s, the weak one applies for its own remaining time");
+                Near(2.3f, st.RemainingOf(StatusKind.Slow), 1e-4f, "merge A: the weak slow has 3.0 - 0.7 = 2.3 s left");
+                Check(st.ActiveCount == 1, "merge A: the expired entry is gone");
+                st.Tick(2.4f);
+                Near(1f, st.SpeedMultiplier, 1e-6f, "merge A: all slows are over after 3.0 s");
+                Check(!st.HasStatus(StatusKind.Slow) && st.ActiveCount == 0, "merge A: nothing left");
+            }
+
+            // a stronger, longer slow then a short weak hit slow: the weak one is redundant, nothing is stretched or weakened
+            {
+                StatusComponent st = NewStatusHost("B1_Slow_B");
+                st.ApplyStatus(new StatusSpec(StatusKind.Slow, 3f, 0.55f), 1);
+                st.ApplyStatus(new StatusSpec(StatusKind.Slow, 0.6f, 0.9f), 2);
+                Near(0.55f, st.SpeedMultiplier, 1e-5f, "merge B: the strong slow stays");
+                Check(st.ActiveCount == 1, "merge B: the weaker, shorter slow adds no entry (refresh, not stack)");
+                Near(3f, st.RemainingOf(StatusKind.Slow), 1e-5f, "merge B: the strong slow keeps its own 3.0 s");
+                st.Tick(3.01f);
+                Near(1f, st.SpeedMultiplier, 1e-6f, "merge B: the strong slow ends at 3.0 s, nothing is carried over");
+            }
+
+            // a short strong slow first, then a longer weak one: the strong one does not get the long one's time
+            {
+                StatusComponent st = NewStatusHost("B1_Slow_C");
+                st.ApplyStatus(new StatusSpec(StatusKind.Slow, 0.6f, 0.55f), 1);
+                st.ApplyStatus(new StatusSpec(StatusKind.Slow, 3f, 0.9f), 2);
+                Near(0.55f, st.SpeedMultiplier, 1e-5f, "merge C: strong slow applies first");
+                Check(st.ActiveCount == 2, "merge C: two entries");
+                st.Tick(0.61f);
+                Near(0.9f, st.SpeedMultiplier, 1e-5f, "merge C: the strong magnitude was NOT extended to the longer slow's time");
+                Near(3f - 0.61f, st.RemainingOf(StatusKind.Slow), 1e-4f, "merge C: the weak slow runs its own full duration");
+            }
+
+            // refresh, not stack: the same slow again only refreshes the duration (max), the magnitude never multiplies
+            {
+                StatusComponent st = NewStatusHost("B1_Slow_D");
+                st.ApplyStatus(new StatusSpec(StatusKind.Slow, 0.6f, 0.9f), 1);
+                st.Tick(0.4f);
+                st.ApplyStatus(new StatusSpec(StatusKind.Slow, 0.6f, 0.9f), 1);
+                Check(st.ActiveCount == 1, "refresh: one entry after the same slow again");
+                Near(0.9f, st.SpeedMultiplier, 1e-6f, "refresh: x0.9, not x0.81");
+                Near(0.6f, st.RemainingOf(StatusKind.Slow), 1e-5f, "refresh: back to 0.6 s, not 0.2 + 0.6");
+                st.ApplyStatus(new StatusSpec(StatusKind.Slow, 0.3f, 0.9f), 1);
+                Near(0.6f, st.RemainingOf(StatusKind.Slow), 1e-5f, "refresh: a shorter repeat never shortens");
+                st.ApplyStatus(new StatusSpec(StatusKind.Slow, 2f, 0.9f), 1);
+                Check(st.ActiveCount == 1, "refresh: a longer repeat of the same magnitude replaces, one entry");
+                Near(2f, st.RemainingOf(StatusKind.Slow), 1e-5f, "refresh: the longer duration wins (max)");
+            }
+
+            // a stronger slow applied late: it only lasts its own duration
+            {
+                StatusComponent st = NewStatusHost("B1_Slow_E");
+                st.ApplyStatus(new StatusSpec(StatusKind.Slow, 3f, 0.9f), 1);
+                st.Tick(1f);
+                st.ApplyStatus(new StatusSpec(StatusKind.Slow, 0.5f, 0.6f), 2);
+                st.Tick(0.4f);
+                Near(0.6f, st.SpeedMultiplier, 1e-5f, "late strong slow: applies for 0.4 s of its 0.5 s");
+                st.Tick(0.2f);
+                Near(0.9f, st.SpeedMultiplier, 1e-5f, "late strong slow: ended on its own time, the weak slow has 1.4 s left");
+                Near(1.4f, st.RemainingOf(StatusKind.Slow), 1e-4f, "late strong slow: remaining of the weak slow");
+            }
+
+            // the list stays small and clear removes everything
+            {
+                StatusComponent st = NewStatusHost("B1_Slow_F");
+                for (int i = 0; i < 12; i++) st.ApplyStatus(new StatusSpec(StatusKind.Slow, 12f - i, 0.95f - 0.02f * i), i);   // each stronger and shorter: none dominates
+                Check(st.ActiveCount <= 8, $"bound: at most 8 slow entries ({st.ActiveCount})");
+                st.ClearStatuses();
+                Check(st.ActiveCount == 0 && st.SpeedMultiplier == 1f, "clear: every slow entry is gone");
+            }
+
+            // other kinds keep the old rule (refresh: max duration, strongest magnitude, one entry)
+            {
+                StatusComponent st = NewStatusHost("B1_Buff");
+                st.ApplyStatus(new StatusSpec(StatusKind.Empowered, 2f, 1.2f), 1);
+                st.ApplyStatus(new StatusSpec(StatusKind.Empowered, 1f, 1.5f), 1);
+                Check(st.ActiveCount == 1, "buff: Empowered still refreshes into one entry");
+                Near(1.5f, st.OutgoingDamageMultiplier, 1e-6f, "buff: strongest magnitude");
+                Near(2f, st.RemainingOf(StatusKind.Empowered), 1e-5f, "buff: longest duration");
+            }
+
+            // through the authority: a sword hit onto a longer, weaker slow
+            ZonesOff();
+            {
+                Scenario s = NewScenario(_sword);
+                Dummy d = AddSlowable(s, new Vector3(0f, 1.5f, 1.8f));
+                d.Status.enabled = false;
+                d.Status.ApplyStatus(new StatusSpec(StatusKind.Slow, 5f, 0.95f), 9);
+                SwingStep(s, 0, out _, out _);
+                Near(0.9f, d.Status.SpeedMultiplier, 1e-5f, "authority merge: the sword hit (x0.9) is stronger than the existing x0.95 and applies");
+                Check(d.Status.ActiveCount == 2, "authority merge: both slows are tracked");
+                d.Status.Tick(0.61f);
+                Near(0.95f, d.Status.SpeedMultiplier, 1e-5f, "authority merge: after the hit slow's 0.6 s the older x0.95 slow still applies");
+                Near(5f - 0.61f, d.Status.RemainingOf(StatusKind.Slow), 1e-4f, "authority merge: the older slow kept its own clock");
+                Cooldown(3f);
+                s.Dispose();
+            }
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // B1: reload swap lock, forced change cancels the reload, buffered press
+        // ------------------------------------------------------------------------------------------------
+
+        private IEnumerator ReloadSwapLock()
+        {
+            ZonesOff();
+            _authority.SetClock(() => _clock);
+            ClassLoadout loadout = _rig.Loadout;
+            RangedCombat ranged = _rig.GetComponent<RangedCombat>();
+            MeleeCombat melee = _rig.GetComponent<MeleeCombat>();
+            _rig.SetGuardHeld(false);
+            _clock += 3f;
+            _authority.StepSwings();
+
+            if (_rig.ActiveWeapon != _crossbow) Check(loadout.SwitchToSlot(1), "reload lock: switched to the crossbow");
+            Check(_rig.ActiveWeapon == _crossbow && ranged != null && ranged.enabled, "reload lock: the crossbow is live");
+            if (ranged == null || !ranged.enabled) yield break;
+
+            // 1. reload in hand: swap refused (both entry points and the input path), nothing changes, nothing queued
+            ranged.TryConsumeAmmo(1);
+            ranged.AddAmmo(3);
+            int magazine = ranged.Magazine, reserve = ranged.Reserve;
+            Check(magazine < _crossbow.magazineSize && reserve > 0, $"reload lock: a reload is possible (mag {magazine}/{_crossbow.magazineSize}, reserve {reserve})");
+            _rig.Input.ReloadPressedOverride = true;
+            yield return null;
+            _rig.Input.ReloadPressedOverride = null;
+            yield return null;
+            Check(ranged.IsReloading, "reload lock: the crossbow is reloading");
+            Check(loadout.IsActionLocked && loadout.IsReloadLocked, "reload lock: the loadout is action-locked by the reload");
+            _toasts.Clear();
+            Check(!loadout.SwitchToSlot(0) && !loadout.SwitchWeapon(), "reload lock: SwitchToSlot and SwitchWeapon are refused");
+            Check(_toasts.Exists(t => t.Contains("while reloading")), "reload lock: the player is told it is the reload");
+            WeaponData other = UnityEngine.Object.Instantiate(_sword);
+            _cleanup.Add(other);
+            Check(loadout.TryReplaceWeaponSlot(1, other) == null && _rig.ActiveWeapon == _crossbow && loadout.Secondary == _crossbow, "reload lock: replacing the weapon in hand is refused too");
+            _rig.Input.SwapPressedOverride = true;
+            yield return null;
+            _rig.Input.SwapPressedOverride = null;
+            yield return null;
+            Check(_rig.ActiveWeapon == _crossbow && ranged.IsReloading, "reload lock: the swap key press is refused, the reload is not disturbed");
+            Check(ranged.Magazine == magazine && ranged.Reserve == reserve, "reload lock: no ammo changed by the refusal");
+
+            // a primary press during the reload starts no draw and queues no shot
+            _rig.Input.PrimaryPressedOverride = true;
+            yield return null;
+            _rig.Input.PrimaryPressedOverride = null;
+            Check(!ranged.IsDrawing, "reload lock: a press during the reload starts no draw");
+
+            // the reload finishes: exact ammo, the swap works right after, and the refused swap was not queued
+            float waited = 0f;
+            while (ranged.IsReloading && waited < _crossbow.reloadTime + 2f) { waited += Time.deltaTime; yield return null; }
+            yield return null;
+            int taken = Mathf.Min(_crossbow.magazineSize - magazine, reserve);
+            Check(!ranged.IsReloading && ranged.Magazine == magazine + taken && ranged.Reserve == reserve - taken, $"reload lock: the reload finished with exactly {taken} round(s) moved");
+            Check(_rig.ActiveWeapon == _crossbow && !ranged.IsDrawing, "reload lock: the refused swap was not queued and the early press did not shoot");
+            Check(!loadout.IsActionLocked, "reload lock: no longer locked");
+            Check(loadout.SwitchToSlot(0) && _rig.ActiveWeapon == _sword, "reload lock: the swap works right after the reload");
+
+            // 2. forced change during a reload goes through and cancels it cleanly (no free ammo, nothing completes later)
+            Check(loadout.SwitchToSlot(1) && _rig.ActiveWeapon == _crossbow, "forced: back to the crossbow");
+            ranged.TryConsumeAmmo(2);
+            magazine = ranged.Magazine;
+            reserve = ranged.Reserve;
+            _rig.Input.ReloadPressedOverride = true;
+            yield return null;
+            _rig.Input.ReloadPressedOverride = null;
+            yield return null;
+            Check(ranged.IsReloading && reserve > 0, "forced: a reload is running");
+            Check(loadout.ForceSwitchToSlot(0) && _rig.ActiveWeapon == _sword, "forced: ForceSwitchToSlot goes through during the reload");
+            Check(!ranged.IsReloading && !ranged.enabled, "forced: the reload was cancelled and the ranged component is off");
+            LoadoutAmmoCheck(loadout, magazine, reserve, "forced: right after the cancel");
+            yield return new WaitForSeconds(_crossbow.reloadTime + 0.4f);
+            LoadoutAmmoCheck(loadout, magazine, reserve, "forced: the cancelled reload never completes in the background (no free ammo)");
+            Check(loadout.SwitchToSlot(1) && _rig.ActiveWeapon == _crossbow, "forced: swapping back works");
+            Check(!ranged.IsReloading && ranged.Magazine == magazine && ranged.Reserve == reserve && !loadout.IsActionLocked, "forced: back in hand the crossbow is not reloading and has exactly its old ammo");
+            // a forced change that goes sword -> crossbow -> sword -> crossbow, with a reload cancelled each time, still gains nothing
+            _rig.Input.ReloadPressedOverride = true;
+            yield return null;
+            _rig.Input.ReloadPressedOverride = null;
+            yield return null;
+            Check(ranged.IsReloading, "forced: reload again");
+            Check(loadout.ForceSwitchToSlot(0) && loadout.ForceSwitchToSlot(1), "forced: away and back within one frame");
+            Check(!ranged.IsReloading && ranged.Magazine == magazine && ranged.Reserve == reserve, "forced: away and back cancels the reload, ammo unchanged");
+            Check(loadout.SwitchToSlot(0) && _rig.ActiveWeapon == _sword, "forced: swap to the sword works (reload no longer running)");
+
+            // 3. buffered melee press: a refused swap neither drops nor redirects it
+            _clock += 5f;
+            _authority.StepSwings();
+            if (melee != null && melee.enabled)
+            {
+                yield return new WaitForSeconds(1.0f);
+                _clock += 5f;
+                _authority.StepSwings();
+                Check(melee.TryBeginSwing(), "buffer: a swing begins through the client");
+                float s0 = Time.realtimeSinceStartup;
+                int first = melee.LastSwingId;
+                while (Time.realtimeSinceStartup - s0 < 0.62f) yield return null;
+                _rig.Input.PrimaryPressedOverride = true;
+                yield return null;
+                _rig.Input.PrimaryPressedOverride = null;
+                Check(melee.BufferedPressRemaining > 0.2f, $"buffer: a press in the recovery is buffered ({melee.BufferedPressRemaining:F2} s)");
+                Check(loadout.IsActionLocked, "buffer: the swing is still running on the (frozen) authority clock");
+                _rig.Input.SwapPressedOverride = true;
+                yield return null;
+                _rig.Input.SwapPressedOverride = null;
+                Check(_rig.ActiveWeapon == _sword, "buffer: the swap key during the swing is refused");
+                Check(melee.BufferedPressRemaining > 0f, "buffer: the refusal did not touch the buffered press");
+                while (Time.realtimeSinceStartup - s0 < 0.97f) yield return null;   // the client's own swing is over, the press is still inside its 0.5 s
+                _clock += 5f;
+                yield return new WaitForSeconds(0.08f);
+                Check(melee.LastSwingId != first && _rig.ActiveWeapon == _sword, "buffer: the buffered press became the next SWORD swing; the refused swap was not queued");
+                _clock += 5f;
+                _authority.StepSwings();
+
+                // forced away and back (new weapon in hand) drops a buffered press: it never fires later by surprise
+                yield return new WaitForSeconds(1.0f);
+                _clock += 5f;
+                _authority.StepSwings();
+                Check(melee.TryBeginSwing(), "buffer 2: a swing begins");
+                s0 = Time.realtimeSinceStartup;
+                while (Time.realtimeSinceStartup - s0 < 0.62f) yield return null;
+                _rig.Input.PrimaryPressedOverride = true;
+                yield return null;
+                _rig.Input.PrimaryPressedOverride = null;
+                Check(melee.BufferedPressRemaining > 0.2f, "buffer 2: the press is buffered");
+                Check(loadout.ForceSwitchToSlot(1) && loadout.ForceSwitchToSlot(0) && _rig.ActiveWeapon == _sword, "buffer 2: forced away and back");
+                Check(melee.BufferedPressRemaining <= 0f, "buffer 2: the buffered press did not survive the weapon change");
+                int idAfter = melee.LastSwingId;
+                _clock += 5f;
+                _authority.StepSwings();
+                yield return new WaitForSeconds(0.3f);
+                Check(melee.LastSwingId == idAfter && !melee.IsSwinging, "buffer 2: no surprise swing fires afterwards");
+                _clock += 5f;
+                _authority.StepSwings();
+            }
+            else
+            {
+                Check(false, "buffer: the melee client is live with the sword");
+            }
+        }
+
+        private void LoadoutAmmoCheck(ClassLoadout loadout, int magazine, int reserve, string label)
+        {
+            ClassLoadout.RangedAmmoState state = loadout.GetAmmoState(_crossbow);
+            Check(state != null && state.magazine == magazine && state.reserve == reserve, $"{label} (stored {(state != null ? state.magazine + "/" + state.reserve : "none")}, expected {magazine}/{reserve})");
         }
 
         // ---- review follow-ups: replace-in-hand lock, buffered press, ranged impact ------------------------

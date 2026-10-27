@@ -32,7 +32,7 @@ MonoBehaviour:
   impactZones: []
   hitSlowMultiplier: 1
   hitSlowDuration: 0
-  heldMoveSpeedPenalty: 0
+  heldMoveSpeedPenalty: 12
   impactPower: 0
   impactResist: 15
   twoHanded: 1

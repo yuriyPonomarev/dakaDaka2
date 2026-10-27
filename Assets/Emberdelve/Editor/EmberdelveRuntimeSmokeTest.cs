@@ -5137,10 +5137,14 @@ namespace Emberdelve.EditorTools
                 // keeps its own authored 6.4 base with the same DEX factor. Archer DEX 16 ->
                 // floor((16-10)/2) = 3 -> factor 1.075, Fleet Footing 1.15: walk 4.3*1.075*1.15 = 5.315875,
                 // sprint 6.4*1.075*1.15 = 7.912.
-                Check(Mathf.Abs(walk - 5.315875f) < 0.06f,
-                    $"Fleet Footing sits on top of the DEX term ({walk:F4} against 4.3*1.075*1.15 = 5.315875)");
-                Check(Mathf.Abs(sprint - 7.912f) < 0.06f,
-                    $"sprint keeps its authored 6.4 base with the same factors ({sprint:F4} against 6.4*1.075*1.15 = 7.912)");
+                // B1 fixture migration: the bow now carries a held move penalty (4 points of 300), so the resolved speeds are
+                // the rule number x that factor (0.98667): walk 5.315875 -> 5.2450, sprint 7.912 -> 7.8065 (the 0.06 tolerance
+                // stays, it could not have absorbed the 0.07 / 0.105 difference).
+                float archerHeld = 1f - (bow != null ? bow.heldMoveSpeedPenalty : 0f) / 300f;
+                Check(Mathf.Abs(walk - 5.315875f * archerHeld) < 0.06f,
+                    $"Fleet Footing sits on top of the DEX term ({walk:F4} against 4.3*1.075*1.15 x held {archerHeld:F4} = {5.315875f * archerHeld:F4})");
+                Check(Mathf.Abs(sprint - 7.912f * archerHeld) < 0.06f,
+                    $"sprint keeps its authored 6.4 base with the same factors ({sprint:F4} against 6.4*1.075*1.15 x held {archerHeld:F4} = {7.912f * archerHeld:F4})");
                 Check(sprint > walk + 0.1f, $"the resolved speed rule still distinguishes sprint from walk ({sprint:F2} > {walk:F2})");
 
                 // ---- passive 2: Farshot
