@@ -5,6 +5,7 @@
     "Emberdelve.Rules",
     "Emberdelve.UI",
     "Emberdelve.Review",
+    "Emberdelve.NetRules",
     "Unity.InputSystem",
     "UnityEngine.UI"
   ],

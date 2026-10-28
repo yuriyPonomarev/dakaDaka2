@@ -1,0 +1,11 @@
+{
+  "name": "Emberdelve.NetRules",
+  "references": [],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "autoReferenced": true,
+  "versionDefines": [],
+  "noEngineReferences": true
+}

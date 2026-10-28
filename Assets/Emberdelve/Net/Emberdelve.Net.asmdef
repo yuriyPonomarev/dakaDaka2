@@ -1,0 +1,17 @@
+{
+  "name": "Emberdelve.Net",
+  "references": [
+    "Emberdelve.Runtime",
+    "Emberdelve.NetRules",
+    "Unity.Netcode.Runtime",
+    "Unity.Networking.Transport",
+    "Unity.Collections"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "autoReferenced": true,
+  "versionDefines": [],
+  "noEngineReferences": false
+}

@@ -118,6 +118,55 @@ namespace Emberdelve.EditorTools
         }
 
         /// <summary>
+        /// U3A1: builds the network proof Player (Development, Windows x64) from the single NetBoot scene
+        /// only, so a headless server/client starts without lobby or dungeon content. Does not touch the
+        /// editor build settings, other scenes or the existing BuildReview flow, and never exits the
+        /// Editor. Returns true only for BuildResult.Succeeded with the .exe present.
+        /// </summary>
+        internal static bool BuildNetProofPlayer(string exePath, out string error)
+        {
+            error = null;
+            try
+            {
+                if (!EmberdelveNetBuilder.EnsureNetBootScene(out string sceneError))
+                {
+                    error = "NetBoot scene unavailable: " + sceneError;
+                    return false;
+                }
+
+                string parent = Path.GetDirectoryName(exePath);
+                if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+
+                BuildPlayerOptions options = new BuildPlayerOptions
+                {
+                    scenes = new string[] { EmberdelveNetBuilder.NetBootScenePath },
+                    locationPathName = exePath,
+                    target = BuildTarget.StandaloneWindows64,
+                    options = BuildOptions.Development
+                };
+
+                Debug.Log(Tag + " net-proof start scenes=[" + EmberdelveNetBuilder.NetBootScenePath + "] output=" + exePath);
+                BuildReport report = BuildPipeline.BuildPlayer(options);
+                BuildSummary summary = report.summary;
+                Debug.Log(Tag + " net-proof report result=" + summary.result + " totalSize=" + summary.totalSize +
+                          " totalTime=" + summary.totalTime);
+
+                if (summary.result != BuildResult.Succeeded || !File.Exists(exePath))
+                {
+                    error = "build result=" + summary.result + " exeExists=" + File.Exists(exePath);
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception exception)
+            {
+                error = "exception: " + exception.Message;
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Reads and validates --ember-build-output. Returns null when the flag is absent or the path is
         /// unusable (relative, not an .exe, or inside Assets where a build output would be imported).
         /// </summary>
