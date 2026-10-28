@@ -1,0 +1,5 @@
+Textures in this folder are from ambientCG.com (creator: ambientCG / Lennart Demes),
+released under the Creative Commons CC0 1.0 Universal license (public domain dedication).
+License: https://docs.ambientcg.com/license/  (https://creativecommons.org/publicdomain/zero/1.0/)
+Sources: https://ambientcg.com/a/Bricks100 , PavingStones142 , Rock030 , Planks023A
+Files were resized/channel-packed for Unity use; see manifest.json. Attribution is not required but appreciated.

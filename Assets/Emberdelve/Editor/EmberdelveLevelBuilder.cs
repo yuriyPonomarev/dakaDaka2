@@ -35,6 +35,7 @@ namespace Emberdelve.EditorTools
             // Re-load every data asset and material now: creating a new scene unloads assets that
             // no loaded scene references yet, which can leave earlier references destroyed.
             EmberdelveAssetLibrary.BuildAll();
+            EmberdelveVisualSetup.ApplyRenderSettings();
 
             DungeonLayoutData layout = EmberdelveAssetLibrary.Layout;
             GameConfig config = EmberdelveAssetLibrary.Config;
@@ -51,6 +52,9 @@ namespace Emberdelve.EditorTools
             BuildEnemies(layout, config, director);
             BuildExtractionGate(layout, config, director);
 
+            // V1: material / mesh / volume-profile assets were created or modified through the AssetDatabase.
+            AssetDatabase.SaveAssets();
+
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, EmberdelvePaths.DungeonScenePath);
 
@@ -61,23 +65,26 @@ namespace Emberdelve.EditorTools
 
         private static void SetupEnvironment()
         {
+            // V1: an underground crypt. Near-black, slightly cool ambient; only the torches light it.
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-            RenderSettings.ambientLight = new Color(0.045f, 0.05f, 0.07f, 1f);
+            RenderSettings.ambientLight = new Color(0.02f, 0.023f, 0.032f, 1f);
             RenderSettings.ambientIntensity = 1f;
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.Exponential;
-            RenderSettings.fogColor = new Color(0.04f, 0.035f, 0.03f, 1f);
-            RenderSettings.fogDensity = 0.035f;
+            RenderSettings.fogColor = new Color(0.035f, 0.026f, 0.02f, 1f);
+            RenderSettings.fogDensity = 0.055f;
 
+            // The object stays (gates and tooling may look it up), but it is practically off: no sky underground.
             GameObject lightGo = new GameObject("Moon_Slit_Directional");
             lightGo.transform.rotation = Quaternion.Euler(58f, 32f, 0f);
             Light light = lightGo.AddComponent<Light>();
             light.type = LightType.Directional;
             light.color = new Color(0.42f, 0.52f, 0.78f, 1f);
-            light.intensity = 0.55f;
-            light.shadows = LightShadows.Soft;
-            light.shadowStrength = 0.55f;
+            light.intensity = 0.05f;
+            light.shadows = LightShadows.None;
             RenderSettings.sun = light;
+
+            EmberdelveVisualSetup.AddGlobalVolume("Post_Volume_Dungeon");
         }
 
         // ---------------------------------------------------------------- geometry
@@ -91,6 +98,8 @@ namespace Emberdelve.EditorTools
             Vector3 origin = layout.origin;
 
             GameObject levelRoot = new GameObject("Level_Blockout");
+            LastBoxes.Clear();
+            EmberdelveVisualSetup.BeginMeshPass();
             int levelLayer = LayerMask.NameToLayer(GameConfig.LevelLayerName);
 
             List<RectInt> patches = MergeRectangles(walkable);
@@ -100,11 +109,11 @@ namespace Emberdelve.EditorTools
                 RectInt patch = patches[i];
                 Vector3 min = origin + new Vector3(patch.xMin * cell, -layout.floorThickness, patch.yMin * cell);
                 Vector3 max = origin + new Vector3(patch.xMax * cell, 0f, patch.yMax * cell);
-                CreateBox(levelRoot.transform, "Floor_" + i, min, max, EmberdelveMaterials.StoneFloor, levelLayer);
+                CreateBox(levelRoot.transform, "Floor_" + i, min, max, EmberdelveMaterials.StoneFloor, levelLayer, FloorTile, FloorTile);
 
                 Vector3 ceilingMin = origin + new Vector3(patch.xMin * cell, layout.wallHeight, patch.yMin * cell);
                 Vector3 ceilingMax = origin + new Vector3(patch.xMax * cell, layout.wallHeight + layout.ceilingThickness, patch.yMax * cell);
-                CreateBox(levelRoot.transform, "Ceiling_" + i, ceilingMin, ceilingMax, EmberdelveMaterials.StoneCeiling, levelLayer);
+                CreateBox(levelRoot.transform, "Ceiling_" + i, ceilingMin, ceilingMax, EmberdelveMaterials.StoneCeiling, levelLayer, CeilingTile, CeilingTile);
             }
 
             bool[,] edgeZ = new bool[height + 1, width];
@@ -137,7 +146,7 @@ namespace Emberdelve.EditorTools
                     float z = origin.z + edge * cell;
                     Vector3 min = origin + new Vector3(start * cell - half, 0f, z - half);
                     Vector3 max = origin + new Vector3(x * cell + half, layout.wallHeight, z + half);
-                    CreateBox(levelRoot.transform, "Wall_Z" + edge + "_" + start, min, max, EmberdelveMaterials.StoneWall, levelLayer);
+                    CreateBox(levelRoot.transform, "Wall_Z" + edge + "_" + start, min, max, EmberdelveMaterials.StoneWall, levelLayer, WallTileU, WallTileV);
                 }
             }
 
@@ -154,11 +163,12 @@ namespace Emberdelve.EditorTools
                     float x = origin.x + edge * cell;
                     Vector3 min = origin + new Vector3(x - half, 0f, start * cell - half);
                     Vector3 max = origin + new Vector3(x + half, layout.wallHeight, y * cell + half);
-                    CreateBox(levelRoot.transform, "Wall_X" + edge + "_" + start, min, max, EmberdelveMaterials.StoneWall, levelLayer);
+                    CreateBox(levelRoot.transform, "Wall_X" + edge + "_" + start, min, max, EmberdelveMaterials.StoneWall, levelLayer, WallTileU, WallTileV);
                 }
             }
 
             BuildRoomMarkers(levelRoot.transform, layout);
+            EmberdelveVisualSetup.PruneMeshes(MeshPrefix);
         }
 
         private static void BuildRoomMarkers(Transform parent, DungeonLayoutData layout)
@@ -225,7 +235,17 @@ namespace Emberdelve.EditorTools
             return result;
         }
 
-        private static void CreateBox(Transform parent, string name, Vector3 min, Vector3 max, Material material, int layer)
+        // V1 world-scale UVs: one texture tile covers this many metres. Bricks100 is a 2:1 texture, so walls tile 2 m x 1 m.
+        private const string MeshPrefix = "Dungeon_";
+        private const float FloorTile = 2f;
+        private const float CeilingTile = 3f;
+        private const float WallTileU = 2f;
+        private const float WallTileV = 1f;
+
+        /// <summary>Min/max each level box was asked for (renderer-independent); the visual gate compares colliders to it.</summary>
+        internal static readonly Dictionary<string, Bounds> LastBoxes = new Dictionary<string, Bounds>();
+
+        private static void CreateBox(Transform parent, string name, Vector3 min, Vector3 max, Material material, int layer, float tileU, float tileV)
         {
             GameObject box = GameObject.CreatePrimitive(PrimitiveType.Cube);
             box.name = name;
@@ -237,6 +257,13 @@ namespace Emberdelve.EditorTools
 
             Renderer renderer = box.GetComponent<Renderer>();
             if (renderer != null && material != null) renderer.sharedMaterial = material;
+
+            Bounds bounds = new Bounds();
+            bounds.SetMinMax(min, max);
+            LastBoxes[name] = bounds;
+
+            // Same primitive, same transform scale, same BoxCollider; only the visible mesh gets world-metre UVs.
+            EmberdelveVisualSetup.ApplyWorldUv(box, MeshPrefix, tileU, tileV);
         }
 
         // ---------------------------------------------------------------- lights
@@ -254,24 +281,18 @@ namespace Emberdelve.EditorTools
                 torch.transform.SetParent(root.transform, false);
                 torch.transform.position = center + Vector3.up * spec.height;
 
-                GameObject sconce = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                sconce.name = "Sconce";
-                Collider collider = sconce.GetComponent<Collider>();
-                if (collider != null) UnityEngine.Object.DestroyImmediate(collider);
-                sconce.transform.SetParent(torch.transform, false);
-                sconce.transform.localPosition = Vector3.zero;
-                sconce.transform.localScale = new Vector3(0.18f, 0.42f, 0.18f);
-                Renderer renderer = sconce.GetComponent<Renderer>();
-                if (renderer != null) renderer.sharedMaterial = EmberdelveMaterials.TorchMat;
-
                 Light light = torch.AddComponent<Light>();
                 light.type = LightType.Point;
-                light.color = new Color(1f, 0.66f, 0.34f, 1f);
+                light.color = new Color(1f, 0.62f, 0.32f, 1f);
                 light.range = spec.range;
                 light.intensity = spec.intensity;
-                light.shadows = LightShadows.None;
+                light.shadows = LightShadows.Soft;
+                light.shadowStrength = 1f;
+                light.shadowNearPlane = 0.1f;
 
-                torch.AddComponent<TorchFlicker>();
+                // The sconce is a child called "Sconce" (TorchFlicker mounts it on the nearest wall at runtime).
+                TorchFlicker flicker = torch.AddComponent<TorchFlicker>();
+                EmberdelveTorchFactory.Build(torch, flicker);
             }
         }
 
@@ -367,10 +388,11 @@ namespace Emberdelve.EditorTools
             camera.nearClipPlane = 0.05f;
             camera.farClipPlane = 240f;
             camera.fieldOfView = config.fieldOfView;
+            EmberdelveVisualSetup.ConfigureCamera(camera);
 
             GameObject torchGo = new GameObject("Player_Torch");
             torchGo.transform.SetParent(cameraGo.transform, false);
-            torchGo.transform.localPosition = new Vector3(0.3f, -0.18f, 0.25f);
+            torchGo.transform.localPosition = new Vector3(0.08f, 0.10f, 0.05f);
 
             Light torchLight = torchGo.AddComponent<Light>();
             torchLight.type = LightType.Point;
@@ -514,17 +536,17 @@ namespace Emberdelve.EditorTools
             CreateBox(gate.transform, "Gate_Pillar_Left",
                 center + new Vector3(-width * 0.5f, 0f, -0.35f),
                 center + new Vector3(-width * 0.5f + 0.45f, height, 0.35f),
-                EmberdelveMaterials.StoneWall, interactLayer);
+                EmberdelveMaterials.StoneWall, interactLayer, 1.5f, 1.5f);
 
             CreateBox(gate.transform, "Gate_Pillar_Right",
                 center + new Vector3(width * 0.5f - 0.45f, 0f, -0.35f),
                 center + new Vector3(width * 0.5f, height, 0.35f),
-                EmberdelveMaterials.StoneWall, interactLayer);
+                EmberdelveMaterials.StoneWall, interactLayer, 1.5f, 1.5f);
 
             CreateBox(gate.transform, "Gate_Lintel",
                 center + new Vector3(-width * 0.5f, height, -0.35f),
                 center + new Vector3(width * 0.5f, height + 0.5f, 0.35f),
-                EmberdelveMaterials.StoneWall, interactLayer);
+                EmberdelveMaterials.StoneWall, interactLayer, 1.5f, 1.5f);
 
             GameObject portal = GameObject.CreatePrimitive(PrimitiveType.Cube);
             portal.name = "Gate_Portal";

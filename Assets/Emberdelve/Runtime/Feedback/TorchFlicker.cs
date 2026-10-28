@@ -16,10 +16,19 @@ namespace Emberdelve.Feedback
         [SerializeField] private bool affectRange = true;
         [SerializeField] private float rangeWobble = 0.06f;
 
+        // V1 (level sconces only; all off for the hand torch): once the sconce is mounted on a wall the light moves to the
+        // flame, and lightJitter (metres) wobbles it a little so the soft shadows breathe with the flame.
+        [SerializeField] private Transform flameAnchor;
+        [SerializeField] private bool lightFollowsFlame;
+        [SerializeField] private float lightJitter;
+
         private float _seed;
         private float _baseRange;
         private Camera _handCamera;
         private float _nearScale = 1f;
+        private Transform _mountedSconce;
+        private Vector3 _mountedSconcePosition;
+        private Vector3 _lightBasePosition;
 
         /// <summary>Intensity multiplier of the hand torch right now (1 = nothing close). Exposed for the gate.</summary>
         public float NearScale => _nearScale;
@@ -50,13 +59,27 @@ namespace Emberdelve.Feedback
         {
             // The level builder drops each sconce at its cell centre, i.e. floating in the middle of a corridor, where
             // the first-person camera walks through it and the near plane turns its emissive box into screen-filling
-            // quads (P4a/P4c). Move the visible sconce onto the nearest wall; the light stays where it is, so the
-            // lighting is unchanged. The sconce has no collider, so no combat or movement query is affected.
+            // quads (P4a/P4c). Move the visible sconce onto the nearest wall. Plain torches (and the lobby/hand torch)
+            // keep their light where it is; V1 level sconces opt in to lightFollowsFlame and the light moves to the flame
+            // (editor-time positions are unchanged). The sconce has no collider, so no combat or movement query is affected.
             Transform sconce = transform.Find("Sconce");
-            if (sconce != null) MountOnNearestWall(sconce);
+            if (sconce == null) return;
+
+            if (MountOnNearestWall(sconce) && lightFollowsFlame && flameAnchor != null)
+            {
+                // Move the light to the flame, keep the sconce where it was just mounted (it is a child of this object).
+                Vector3 sconcePosition = sconce.position;
+                Quaternion sconceRotation = sconce.rotation;
+                transform.position = flameAnchor.position;
+                sconce.SetPositionAndRotation(sconcePosition, sconceRotation);
+
+                _mountedSconce = sconce;
+                _mountedSconcePosition = sconcePosition;
+                _lightBasePosition = transform.position;
+            }
         }
 
-        private void MountOnNearestWall(Transform sconce)
+        private bool MountOnNearestWall(Transform sconce)
         {
             Vector3[] directions = { Vector3.forward, Vector3.back, Vector3.left, Vector3.right };
             float best = MaxWallDistance;
@@ -76,8 +99,11 @@ namespace Emberdelve.Feedback
                 found = true;
             }
 
-            if (!found) return;
+            if (!found) return false;
             sconce.position = bestPoint - bestDirection * (WallInset);
+            // Local +Z of the sconce points away from the wall into the room.
+            sconce.rotation = Quaternion.LookRotation(-bestDirection, Vector3.up);
+            return true;
         }
 
 
@@ -108,6 +134,13 @@ namespace Emberdelve.Feedback
             lightSource.intensity = baseIntensity * (1f + noise * flickerAmount) * _nearScale;
 
             if (affectRange) lightSource.range = _baseRange * (1f + noise * rangeWobble);
+
+            if (_mountedSconce != null && lightJitter > 0f)
+            {
+                Vector3 offset = new Vector3(Mathf.Sin(t * 1.7f), 0.6f * Mathf.Sin(t * 2.3f + 1.1f), Mathf.Sin(t * 1.3f + 2.2f)) * lightJitter;
+                transform.position = _lightBasePosition + offset;
+                _mountedSconce.position = _mountedSconcePosition; // the sconce is our child: pin it back
+            }
         }
     }
 }

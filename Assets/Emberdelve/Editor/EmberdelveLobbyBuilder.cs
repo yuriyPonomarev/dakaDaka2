@@ -19,6 +19,8 @@ namespace Emberdelve.EditorTools
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
             EmberdelveAssetLibrary.BuildAll();
+            EmberdelveVisualSetup.ApplyRenderSettings();
+            EmberdelveVisualSetup.BeginMeshPass();
 
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
             RenderSettings.ambientLight = new Color(0.07f, 0.06f, 0.05f, 1f);
@@ -31,22 +33,25 @@ namespace Emberdelve.EditorTools
             GameObject root = new GameObject("Lobby_Room");
 
             AddBox(root.transform, "Lobby_Floor", new Vector3(-11f, -0.5f, -8f), new Vector3(11f, 0f, 8f),
-                EmberdelveMaterials.LobbyFloor, levelLayer);
+                EmberdelveMaterials.LobbyFloor, levelLayer, 2f, 2f);
             AddBox(root.transform, "Lobby_Ceiling", new Vector3(-11f, 3.4f, -8f), new Vector3(11f, 3.9f, 8f),
-                EmberdelveMaterials.StoneCeiling, levelLayer);
+                EmberdelveMaterials.StoneCeiling, levelLayer, 3f, 3f);
             AddBox(root.transform, "Lobby_Wall_North", new Vector3(-11f, 0f, 8f), new Vector3(11f, 3.4f, 8.45f),
-                EmberdelveMaterials.StoneWall, levelLayer);
+                EmberdelveMaterials.StoneWall, levelLayer, 2f, 1f);
             AddBox(root.transform, "Lobby_Wall_South", new Vector3(-11f, 0f, -8.45f), new Vector3(11f, 3.4f, 0f),
-                EmberdelveMaterials.StoneWall, levelLayer);
+                EmberdelveMaterials.StoneWall, levelLayer, 2f, 1f);
             AddBox(root.transform, "Lobby_Wall_West", new Vector3(-11.45f, 0f, -8f), new Vector3(-11f, 3.4f, 8f),
-                EmberdelveMaterials.StoneWall, levelLayer);
+                EmberdelveMaterials.StoneWall, levelLayer, 2f, 1f);
             AddBox(root.transform, "Lobby_Wall_East", new Vector3(11f, 0f, -8f), new Vector3(11.45f, 3.4f, 8f),
-                EmberdelveMaterials.StoneWall, levelLayer);
+                EmberdelveMaterials.StoneWall, levelLayer, 2f, 1f);
 
             AddTorch(root.transform, new Vector3(-9f, 2.5f, 7f), 12f);
             AddTorch(root.transform, new Vector3(9f, 2.5f, 7f), 12f);
             AddTorch(root.transform, new Vector3(-9f, 2.5f, -7f), 10f);
             AddTorch(root.transform, new Vector3(9f, 2.5f, -7f), 10f);
+            EmberdelveVisualSetup.PruneMeshes(MeshPrefix);
+
+            EmberdelveVisualSetup.AddGlobalVolume("Post_Volume_Lobby");
 
             GameObject cameraGo = new GameObject("Lobby_Camera");
             cameraGo.tag = "MainCamera";
@@ -59,6 +64,7 @@ namespace Emberdelve.EditorTools
             camera.nearClipPlane = 0.05f;
             camera.farClipPlane = 200f;
             camera.fieldOfView = 62f;
+            EmberdelveVisualSetup.ConfigureCamera(camera);
 
             GameObject master = new GameObject("Lobby_Master");
             LobbyController lobby = master.AddComponent<LobbyController>();
@@ -68,13 +74,17 @@ namespace Emberdelve.EditorTools
             SetProperty(serialized, "classes", EmberdelveAssetLibrary.Classes);
             serialized.ApplyModifiedPropertiesWithoutUndo();
 
+            AssetDatabase.SaveAssets();
+
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, EmberdelvePaths.LobbyScenePath);
 
             return scene;
         }
 
-        private static void AddBox(Transform parent, string name, Vector3 min, Vector3 max, Material material, int layer)
+        private const string MeshPrefix = "Lobby_";
+
+        private static void AddBox(Transform parent, string name, Vector3 min, Vector3 max, Material material, int layer, float tileU, float tileV)
         {
             GameObject box = GameObject.CreatePrimitive(PrimitiveType.Cube);
             box.name = name;
@@ -85,6 +95,9 @@ namespace Emberdelve.EditorTools
 
             Renderer renderer = box.GetComponent<Renderer>();
             if (renderer != null && material != null) renderer.sharedMaterial = material;
+
+            // V1: world-metre UVs on a generated mesh asset; transform scale and BoxCollider stay as the primitive made them.
+            EmberdelveVisualSetup.ApplyWorldUv(box, MeshPrefix, tileU, tileV);
         }
 
         private static void AddTorch(Transform parent, Vector3 position, float intensity)
@@ -98,9 +111,10 @@ namespace Emberdelve.EditorTools
             light.color = new Color(1f, 0.66f, 0.34f, 1f);
             light.range = 12f;
             light.intensity = intensity;
-            light.shadows = LightShadows.None;
+            light.shadows = LightShadows.Soft;
 
-            torch.AddComponent<TorchFlicker>();
+            TorchFlicker flicker = torch.AddComponent<TorchFlicker>();
+            EmberdelveTorchFactory.Build(torch, flicker);
         }
 
         private static void SetProperty(SerializedObject serialized, string name, Object value)

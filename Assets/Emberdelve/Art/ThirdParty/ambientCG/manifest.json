@@ -1,0 +1,128 @@
+{
+  "assets": [
+    {
+      "id": "Bricks100",
+      "source": "https://ambientcg.com/a/Bricks100",
+      "creator": "ambientCG / Lennart Demes",
+      "license": "CC0-1.0",
+      "zip_sha256": "45a0543ef284ed1ccc2920c0bb08350140e150d0ed712ff4a1d84bb73a76bfb6",
+      "files": [
+        {
+          "file": "Bricks100_AO.jpg",
+          "sha256": "e81088580cd40596468acb8c1884cfd1f703cc3d92b9f4f659f5f74dde182a8d"
+        },
+        {
+          "file": "Bricks100_BaseColor.jpg",
+          "sha256": "7c495e7568f67ac0877f49f1e82109c55150da8e4e6d92732c3669456b2f7707"
+        },
+        {
+          "file": "Bricks100_MaskMS.png",
+          "sha256": "dd2dd45a5d1faea1ba34ad58a37e49a54adf984310fc1e64fee14300fa084cde"
+        },
+        {
+          "file": "Bricks100_Normal.png",
+          "sha256": "ea7430403441c17f0573bd40ba54a4c0e9d88cd9f25a25939e6ff249551b71a6"
+        }
+      ],
+      "modifications": [
+        "Color: saturation reduced by 40% (PIL ImageEnhance.Color 0.6), re-saved JPEG q92",
+        "NormalGL used as Unity normal map (PNG)",
+        "MaskMS: R=Metalness (or 0), G=B=0, A=1-Roughness",
+        "AO converted to grayscale JPG"
+      ]
+    },
+    {
+      "id": "PavingStones142",
+      "source": "https://ambientcg.com/a/PavingStones142",
+      "creator": "ambientCG / Lennart Demes",
+      "license": "CC0-1.0",
+      "zip_sha256": "fdead75f08d8bfa82e501b280fa5cff459d5d437b061a72ca221dd3bafd9c260",
+      "files": [
+        {
+          "file": "PavingStones142_AO.jpg",
+          "sha256": "174da269f047eb3109302bf5e628bc1f91f330d00e47496b8caabf3bac7f3cf0"
+        },
+        {
+          "file": "PavingStones142_BaseColor.jpg",
+          "sha256": "78a1bdee56bc3aabfdf16c99aaebd60030c1d9fbe46a55694820b94d64e6b15b"
+        },
+        {
+          "file": "PavingStones142_MaskMS.png",
+          "sha256": "a7eea57a1a1572473c24c138ef3bb4060d4ca108bd94ae2491eb7fc47bf4ffa1"
+        },
+        {
+          "file": "PavingStones142_Normal.png",
+          "sha256": "fa9120cc1d1841feff3836cb0bf0123f9619b5e7d8738a5360ff9b43bfabc4fd"
+        }
+      ],
+      "modifications": [
+        "Color copied",
+        "NormalGL used as Unity normal map (PNG)",
+        "MaskMS: R=Metalness (or 0), G=B=0, A=1-Roughness",
+        "AO converted to grayscale JPG"
+      ]
+    },
+    {
+      "id": "Rock030",
+      "source": "https://ambientcg.com/a/Rock030",
+      "creator": "ambientCG / Lennart Demes",
+      "license": "CC0-1.0",
+      "zip_sha256": "18992ddc09f8f0cc60eceb875243c0c2449666c662ab7fedbd8bdea4b3d15a99",
+      "files": [
+        {
+          "file": "Rock030_AO.jpg",
+          "sha256": "df33cac888947dad868f62274785dc7b5e85a34fcd75466d9b1b420a795dde30"
+        },
+        {
+          "file": "Rock030_BaseColor.jpg",
+          "sha256": "fbd82509a3256b151117ab60bbfdabc98a7875bc8295a8c011591dbd0121629e"
+        },
+        {
+          "file": "Rock030_MaskMS.png",
+          "sha256": "91adce73ec61343fa69f8365131a7f7caf4bd19b999712e8c534b80b34f59fe1"
+        },
+        {
+          "file": "Rock030_Normal.png",
+          "sha256": "fe99faabe13c2792bef1466410252344897fd02657b6b7b7322782bd9a41f265"
+        }
+      ],
+      "modifications": [
+        "Color copied and downscaled to 1024",
+        "NormalGL used as Unity normal map (PNG)",
+        "MaskMS: R=Metalness (or 0), G=B=0, A=1-Roughness",
+        "AO converted to grayscale JPG"
+      ]
+    },
+    {
+      "id": "Planks023A",
+      "source": "https://ambientcg.com/a/Planks023A",
+      "creator": "ambientCG / Lennart Demes",
+      "license": "CC0-1.0",
+      "zip_sha256": "7c9eed3084e7caca76f912dfe379c4614d3f737bfc16a137e2f884208cc7feec",
+      "files": [
+        {
+          "file": "Planks023A_AO.jpg",
+          "sha256": "168fe498f4ac2f88493052937910344f9183240196a05c4ac990f7766512b07c"
+        },
+        {
+          "file": "Planks023A_BaseColor.jpg",
+          "sha256": "a26b888384b443f7d214699d1fccf0f3e97ff066bf1e0486cf97dbb74879e03b"
+        },
+        {
+          "file": "Planks023A_MaskMS.png",
+          "sha256": "85e9fb1a2b46873f45a4fae70f6a523ed702bad13c90f31237bfe59ca1379ab9"
+        },
+        {
+          "file": "Planks023A_Normal.png",
+          "sha256": "cecac2ffc2a466c035a2b37b4ea01b22c4e05b79fdace859ab5fcbdb95b294ed"
+        }
+      ],
+      "modifications": [
+        "Color copied and downscaled to 1024",
+        "NormalGL used as Unity normal map (PNG)",
+        "MaskMS: R=Metalness (or 0), G=B=0, A=1-Roughness",
+        "AO converted to grayscale JPG"
+      ]
+    }
+  ]
+}
