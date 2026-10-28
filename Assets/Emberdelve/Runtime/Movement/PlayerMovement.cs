@@ -48,6 +48,19 @@ namespace Emberdelve.Movement
         private IMoveFlowSource _flow;
         private float _jumpCooldown;
 
+        // U3A4b: tick-deterministic Step state. The Step path seeds its acceleration ramp from this planar velocity (measured as
+        // the transform's own displacement over the dt that was passed in) instead of CharacterController.velocity, which Unity
+        // derives from the RENDER delta time. The offline Update path never reads or writes it.
+        private Vector2 _stepVelocity;
+
+        // U3A4b: when set (owning client of a networked player), the speeds and capsule numbers come from the server's resolved values
+        // instead of a class asset / attribute stack, so the client can run the same Step.
+        private bool _predictionActive;
+        private float _predWalk;
+        private float _predSprint;
+        private float _predCrouch;
+        private CharacterClassData _predictionClass;
+
         // Dash state. The dash is a movement mode, not a teleport: it goes through the same
         // CharacterController.Move call as walking, so walls stop it and the grounded check still applies.
         private Vector3 _dashDirection;
@@ -66,6 +79,9 @@ namespace Emberdelve.Movement
         public Vector3 Velocity => controller.velocity;
         public Vector3 DesiredMoveIntent { get; private set; }
         public float SpeedMultiplier { get; private set; } = 1f;
+
+        /// <summary>The layer mask the grounded check uses (a server publishes it so a predicting client checks the same ground).</summary>
+        public LayerMask GroundMask => groundMask;
 
         /// <summary>Seconds of dash the last cast asked for, kept for progress reporting only.</summary>
         private float _dashDurationHint = 0.22f;
@@ -143,6 +159,9 @@ namespace Emberdelve.Movement
         {
             if (_class == null) return 0f;
 
+            // U3A4b: a predicting client uses the numbers the server resolved (same precedence: crouch, then sprint, then walk).
+            if (_predictionActive) return crouched ? _predCrouch : (sprintHeld ? _predSprint : _predWalk);
+
             float speed;
             if (crouched)
             {
@@ -180,6 +199,7 @@ namespace Emberdelve.Movement
         public float ResolveWalkSpeed()
         {
             if (_class == null) return 0f;
+            if (_predictionActive) return _predWalk;
 
             if (_effectiveStatsSource != null)
             {
@@ -291,6 +311,108 @@ namespace Emberdelve.Movement
             CancelDash();
             _horizontalSpeed = 0f;
             _verticalVelocity = 0f;
+            _stepVelocity = Vector2.zero;
+            bool wasEnabled = controller != null && controller.enabled;
+            if (wasEnabled) controller.enabled = false;
+            transform.position = position;
+            if (wasEnabled) controller.enabled = true;
+            Physics.SyncTransforms();
+        }
+
+        // ---- U3A4b: owner prediction support ---------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// Owning client of a networked player: configures this movement from the server-resolved numbers so <see cref="Step"/> can run
+        /// here too. Creates a private, unsaved class instance carrying only the capsule and jump numbers (nothing else of a class is
+        /// used by Step), sets the ground mask and the three speeds. Safe to call again when the server sends new numbers (the step
+        /// state is kept). Refused (false) on a component that already has a real class, so the server / offline paths are never
+        /// touched.
+        /// </summary>
+        public bool ApplyPredictionParams(in MoveParamsData p)
+        {
+            if (!p.IsValid || controller == null) return false;
+            if (_class != null && _class != _predictionClass) return false;
+
+            bool first = _predictionClass == null;
+            if (first)
+            {
+                _predictionClass = ScriptableObject.CreateInstance<CharacterClassData>();
+                _predictionClass.hideFlags = HideFlags.HideAndDontSave;
+                _class = _predictionClass;
+            }
+
+            _predictionClass.standHeight = p.StandHeight;
+            _predictionClass.crouchHeight = p.CrouchHeight;
+            _predictionClass.jumpHeight = p.JumpHeight;
+            groundMask = p.GroundMask;
+
+            _predWalk = p.Walk;
+            _predSprint = p.Sprint;
+            _predCrouch = p.Crouch;
+            _predictionActive = true;
+
+            if (first)
+            {
+                _currentHeight = _crouched ? p.CrouchHeight : p.StandHeight;
+                controller.height = _currentHeight;
+                controller.radius = 0.34f;
+                controller.center = new Vector3(0f, _currentHeight * 0.5f, 0f);
+                groundedRadius = controller.radius;
+                ConfigureMoveThreshold();
+            }
+
+            return true;
+        }
+
+        private void OnDestroy()
+        {
+            if (_predictionClass != null) Destroy(_predictionClass);
+            _predictionClass = null;
+        }
+
+        /// <summary>The state the next <see cref="Step"/> depends on, plus the position (see <see cref="PredictedState"/>). Dash state is not part of it (the dash is offline-only until U3B).</summary>
+        public void CapturePredictionState(out PredictedState state)
+        {
+            Vector3 p = transform.position;
+            state = new PredictedState
+            {
+                X = p.x,
+                Y = p.y,
+                Z = p.z,
+                VerticalVelocity = _verticalVelocity,
+                PlanarVx = _stepVelocity.x,
+                PlanarVz = _stepVelocity.y,
+                JumpCooldown = _jumpCooldown,
+                CapsuleHeight = _currentHeight,
+                Crouched = _crouched
+            };
+        }
+
+        /// <summary>Restores everything <see cref="CapturePredictionState"/> captured EXCEPT the position (use <see cref="TeleportTo"/> first: it also clears the velocities this then sets).</summary>
+        public void RestorePredictionState(in PredictedState state)
+        {
+            _verticalVelocity = state.VerticalVelocity;
+            _stepVelocity = new Vector2(state.PlanarVx, state.PlanarVz);
+            _jumpCooldown = state.JumpCooldown;
+            _crouched = state.Crouched;
+            if (controller != null && state.CapsuleHeight > 0f)
+            {
+                _currentHeight = state.CapsuleHeight;
+                controller.height = _currentHeight;
+                controller.center = new Vector3(0f, _currentHeight * 0.5f, 0f);
+            }
+        }
+
+        /// <summary>A small correction through the controller (walls still stop it). Keeps every velocity.</summary>
+        public void NudgeBy(Vector3 delta)
+        {
+            if (controller == null || !controller.enabled || delta.sqrMagnitude <= 0f) return;
+            controller.Move(delta);
+        }
+
+        /// <summary>Writes the position without touching any step state (unlike <see cref="TeleportTo"/>). The controller is off around the write.</summary>
+        public void PlaceAt(Vector3 position)
+        {
             bool wasEnabled = controller != null && controller.enabled;
             if (wasEnabled) controller.enabled = false;
             transform.position = position;
@@ -366,12 +488,22 @@ namespace Emberdelve.Movement
 
         private void StepCore(in MoveInputFrame f, float dt, bool relativeToViewTransform)
         {
+            // U3A4b: the Step path records how far it actually moved over THIS dt; the next Step seeds its ramp from it. The offline
+            // Update path (relativeToViewTransform) skips this entirely and keeps seeding from controller.velocity.
+            Vector3 before = relativeToViewTransform ? Vector3.zero : transform.position;
+
             if (f.CrouchToggle) _crouched = !_crouched;
 
             UpdateCapsuleHeight(dt);
             GroundedCheck();
             JumpAndGravity(dt, f.Jump);
             Move(dt, in f, relativeToViewTransform);
+
+            if (!relativeToViewTransform)
+            {
+                Vector3 after = transform.position;
+                _stepVelocity = dt > 0f ? new Vector2((after.x - before.x) / dt, (after.z - before.z) / dt) : Vector2.zero;
+            }
         }
 
         private void UpdateCapsuleHeight(float dt)
@@ -428,7 +560,11 @@ namespace Emberdelve.Movement
                 targetSpeed = ResolveGroundSpeed(frame.Sprint, _crouched);
             }
 
-            float currentHorizontal = new Vector3(controller.velocity.x, 0f, controller.velocity.z).magnitude;
+            // Update path: the controller's own velocity, exactly as before. Step path (U3A4b): the dt-consistent planar velocity of the
+            // previous Step, so the ramp is a function of (state, frame, dt) only and does not depend on the render frame rate.
+            float currentHorizontal = relativeToViewTransform
+                ? new Vector3(controller.velocity.x, 0f, controller.velocity.z).magnitude
+                : _stepVelocity.magnitude;
             if (Mathf.Abs(currentHorizontal - targetSpeed) > 0.05f)
             {
                 _horizontalSpeed = Mathf.Lerp(currentHorizontal, targetSpeed, dt * speedChangeRate);

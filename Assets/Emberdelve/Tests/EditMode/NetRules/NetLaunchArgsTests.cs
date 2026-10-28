@@ -103,5 +103,46 @@ namespace Emberdelve.NetRules.Tests
             Assert.That(slot, Is.EqualTo("a_b"));
             Assert.That(cls.Length, Is.EqualTo(32));
         }
+
+        [Test]
+        public void UtpResetMitigations_DefaultOn_AndParse()
+        {
+            NetLaunchArgs d = NetLaunchArgs.Parse(new[] { "-ember-net", "server" });
+            Assert.That(d.UdpResetFix, Is.True);
+            Assert.That(d.ClientLingerMs, Is.EqualTo(NetTuning.DefaultClientLingerMs));
+
+            NetLaunchArgs off = NetLaunchArgs.Parse(new[] { "-ember-net", "client", "-ember-net-udp-reset-fix", "false", "-ember-net-client-linger-ms", "0" });
+            Assert.That(off.IsValid, Is.True);
+            Assert.That(off.UdpResetFix, Is.False);
+            Assert.That(off.ClientLingerMs, Is.EqualTo(0));
+
+            // a bare switch means true and must not swallow the next option
+            NetLaunchArgs bare = NetLaunchArgs.Parse(new[] { "-ember-net", "server", "-ember-net-udp-reset-fix", "-ember-port", "7801" });
+            Assert.That(bare.IsValid, Is.True);
+            Assert.That(bare.UdpResetFix, Is.True);
+            Assert.That(bare.Port, Is.EqualTo(7801));
+        }
+
+        [Test]
+        public void UdpPath_DefaultScan_ParsesAndWinsOverLegacyFlag()
+        {
+            Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "server" }).UdpPath, Is.EqualTo(NetUdpPath.Scan));
+            Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "server", "-ember-net-udp-path", "managed" }).UdpPath, Is.EqualTo(NetUdpPath.Managed));
+            Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "client", "-ember-net-udp-path", "ws" }).UdpPath, Is.EqualTo(NetUdpPath.WebSockets));
+            Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "client", "-ember-net-udp-path", "stock" }).UdpResetFix, Is.False);
+            // legacy false = stock, in either order; an explicit path wins
+            Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "server", "-ember-net-udp-reset-fix", "false" }).UdpPath, Is.EqualTo(NetUdpPath.Stock));
+            Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "server", "-ember-net-udp-reset-fix", "false", "-ember-net-udp-path", "ws" }).UdpPath, Is.EqualTo(NetUdpPath.WebSockets));
+            Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "server", "-ember-net-udp-path", "ws", "-ember-net-udp-reset-fix", "false" }).UdpPath, Is.EqualTo(NetUdpPath.WebSockets));
+            Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "server", "-ember-net-udp-path", "tcp" }).IsValid, Is.False);
+        }
+
+        [TestCase("-1")]
+        [TestCase("5001")]
+        [TestCase("abc")]
+        public void BadClientLinger_IsAnError(string value)
+        {
+            Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "client", "-ember-net-client-linger-ms", value }).IsValid, Is.False);
+        }
     }
 }

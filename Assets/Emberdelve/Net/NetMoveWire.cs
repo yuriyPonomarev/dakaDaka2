@@ -1,3 +1,4 @@
+using System;
 using Emberdelve.Net.Rules;
 using Unity.Netcode;
 
@@ -89,5 +90,137 @@ namespace Emberdelve.Net
             if (count > 2) batch.F2 = MoveFrameWire.From(in frames[2]);
             return batch;
         }
+    }
+
+    /// <summary>
+    /// U3A4b, server to owner (unreliable, every second network tick): the state the server reached after the newest input frame it
+    /// processed, so the owner can compare it with what it predicted for that sequence number. Position, vertical velocity and the
+    /// planar velocity of the ramp are the spec; jump cooldown, capsule height and the crouch bit complete the Step state so a snap
+    /// can replay exactly. No identity of any kind; it only ever goes to the object's owner.
+    /// </summary>
+    public struct MoveAckWire : INetworkSerializable
+    {
+        public uint LastProcessedSeq;
+        public uint ServerTick;
+        public float X;
+        public float Y;
+        public float Z;
+        public float VerticalVelocity;
+        public float PlanarVx;
+        public float PlanarVz;
+        public float JumpCooldown;
+        public float CapsuleHeight;
+        public byte StateFlags;
+
+        public const byte FlagCrouched = 1 << 0;
+
+        public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+        {
+            serializer.SerializeValue(ref LastProcessedSeq);
+            serializer.SerializeValue(ref ServerTick);
+            serializer.SerializeValue(ref X);
+            serializer.SerializeValue(ref Y);
+            serializer.SerializeValue(ref Z);
+            serializer.SerializeValue(ref VerticalVelocity);
+            serializer.SerializeValue(ref PlanarVx);
+            serializer.SerializeValue(ref PlanarVz);
+            serializer.SerializeValue(ref JumpCooldown);
+            serializer.SerializeValue(ref CapsuleHeight);
+            serializer.SerializeValue(ref StateFlags);
+        }
+
+        public static MoveAckWire From(uint seq, uint serverTick, in PredictedState state)
+        {
+            return new MoveAckWire
+            {
+                LastProcessedSeq = seq,
+                ServerTick = serverTick,
+                X = state.X,
+                Y = state.Y,
+                Z = state.Z,
+                VerticalVelocity = state.VerticalVelocity,
+                PlanarVx = state.PlanarVx,
+                PlanarVz = state.PlanarVz,
+                JumpCooldown = state.JumpCooldown,
+                CapsuleHeight = state.CapsuleHeight,
+                StateFlags = (byte)(state.Crouched ? FlagCrouched : 0)
+            };
+        }
+
+        public PredictedState ToState()
+        {
+            return new PredictedState
+            {
+                X = X,
+                Y = Y,
+                Z = Z,
+                VerticalVelocity = VerticalVelocity,
+                PlanarVx = PlanarVx,
+                PlanarVz = PlanarVz,
+                JumpCooldown = JumpCooldown,
+                CapsuleHeight = CapsuleHeight,
+                Crouched = (StateFlags & FlagCrouched) != 0
+            };
+        }
+    }
+
+    /// <summary>
+    /// U3A4b: the server-resolved movement numbers (owner-read NetworkVariable payload; see <see cref="MoveParamsData"/>). The
+    /// IEquatable implementation lets the variable's change detection compare values without touching the bytes.
+    /// </summary>
+    public struct MoveParamsWire : INetworkSerializable, IEquatable<MoveParamsWire>
+    {
+        public float Walk;
+        public float Sprint;
+        public float Crouch;
+        public float StandHeight;
+        public float CrouchHeight;
+        public float JumpHeight;
+        public int GroundMask;
+
+        public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+        {
+            serializer.SerializeValue(ref Walk);
+            serializer.SerializeValue(ref Sprint);
+            serializer.SerializeValue(ref Crouch);
+            serializer.SerializeValue(ref StandHeight);
+            serializer.SerializeValue(ref CrouchHeight);
+            serializer.SerializeValue(ref JumpHeight);
+            serializer.SerializeValue(ref GroundMask);
+        }
+
+        public static MoveParamsWire From(in MoveParamsData data)
+        {
+            return new MoveParamsWire
+            {
+                Walk = data.Walk,
+                Sprint = data.Sprint,
+                Crouch = data.Crouch,
+                StandHeight = data.StandHeight,
+                CrouchHeight = data.CrouchHeight,
+                JumpHeight = data.JumpHeight,
+                GroundMask = data.GroundMask
+            };
+        }
+
+        public MoveParamsData ToData()
+        {
+            return new MoveParamsData
+            {
+                Walk = Walk,
+                Sprint = Sprint,
+                Crouch = Crouch,
+                StandHeight = StandHeight,
+                CrouchHeight = CrouchHeight,
+                JumpHeight = JumpHeight,
+                GroundMask = GroundMask
+            };
+        }
+
+        public bool Equals(MoveParamsWire other) { return ToData().Equals(other.ToData()); }
+
+        public override bool Equals(object obj) { return obj is MoveParamsWire other && Equals(other); }
+
+        public override int GetHashCode() { return ToData().GetHashCode(); }
     }
 }

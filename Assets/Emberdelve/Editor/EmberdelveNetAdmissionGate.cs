@@ -208,6 +208,14 @@ namespace Emberdelve.EditorTools
                 "A settles on views=1 after B left");
             Check(!SafeHasExited(a) && !LogContains(logA, "disconnected unexpectedly"), "A stayed connected and running");
 
+            // U3A4b: the transport only drops A after the 4 s disconnect timeout, so "stayed connected" above can pass while the server has
+            // already stopped hearing A. A still being ACKED after B's removal proves the server's receive path is alive right now and,
+            // if it ever fails, names the real fault (server stopped receiving everybody, see Docs/Tasks/U3A4b.md) instead of the later
+            // symptoms (D not admitted, exit codes).
+            int ackAtRemoval = MaxPredictAck(logA);
+            Check(WaitForAckBeyond(logA, ackAtRemoval + 30, 20, a),
+                "A is still acked by the server after B's removal (ack > " + ackAtRemoval + "; a stall here is the server receive path dying, not the gate)");
+
             // ---- 8. D takes the freed seat -------------------------------------------------------
             string logD = Path.Combine(logs, "client_d.log");
             Process d = Launch(exe, logD, ClientArgs(port, "adm-d", "archer", Q(quitD), "") + " -ember-net-autoquit 300");
@@ -399,6 +407,29 @@ namespace Emberdelve.EditorTools
                     m = Regex.Match(ReadShared(path), pattern);
                     return m.Success ? m : null;
                 }
+                Thread.Sleep(200);
+            }
+        }
+
+        private static int MaxPredictAck(string path)
+        {
+            int max = 0;
+            foreach (Match m in Regex.Matches(ReadShared(path), @"\[client\] predict pos=\([^)]*\) seq=\d+ ack=(\d+)"))
+            {
+                int v;
+                if (int.TryParse(m.Groups[1].Value, out v) && v > max) max = v;
+            }
+            return max;
+        }
+
+        private static bool WaitForAckBeyond(string path, int ack, double seconds, Process owner)
+        {
+            DateTime end = DateTime.UtcNow.AddSeconds(seconds);
+            while (true)
+            {
+                if (MaxPredictAck(path) >= ack) return true;
+                if (DateTime.UtcNow >= end) return false;
+                if (owner != null && SafeHasExited(owner)) return MaxPredictAck(path) >= ack;
                 Thread.Sleep(200);
             }
         }

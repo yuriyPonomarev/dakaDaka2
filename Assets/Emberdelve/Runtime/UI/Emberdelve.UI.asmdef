@@ -3,6 +3,7 @@
   "references": [
     "Emberdelve.Runtime",
     "Emberdelve.Rules",
+    "Emberdelve.NetRules",
     "Unity.InputSystem",
     "UnityEngine.UI"
   ],

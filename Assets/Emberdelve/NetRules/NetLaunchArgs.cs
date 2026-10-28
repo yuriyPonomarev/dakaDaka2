@@ -12,6 +12,19 @@ namespace Emberdelve.Net.Rules
         Host = 3
     }
 
+    /// <summary>Which socket layer the transport runs on (Docs/Tasks/UTP_RESET.md).</summary>
+    public enum NetUdpPath
+    {
+        /// <summary>The package's own UDP socket, untouched (the control of the probe).</summary>
+        Stock = 0,
+        /// <summary>The package's own UDP socket, SIO_UDP_CONNRESET / SIO_UDP_NETRESET switched off after the fact (default).</summary>
+        Scan = 1,
+        /// <summary>A custom INetworkInterface over System.Net.Sockets (needs the EMBER_UTP_MANAGED_SOCKET define).</summary>
+        Managed = 2,
+        /// <summary>UnityTransport.UseWebSockets (TCP; no ICMP involved).</summary>
+        WebSockets = 3
+    }
+
     /// <summary>Shared constants of the network layer (no engine or package dependency).</summary>
     public static class NetTuning
     {
@@ -31,6 +44,9 @@ namespace Emberdelve.Net.Rules
 
         public const int DefaultMaxPlayers = 9;
         public const int DefaultConnectTimeoutSeconds = 15;
+
+        /// <summary>Client: wait after a requested shutdown finished, before the process quits (ms).</summary>
+        public const int DefaultClientLingerMs = 250;
 
         /// <summary>The class a client asks for when none is given (a server-approved id; the server resolves it).</summary>
         public const string DefaultClassId = "warrior";
@@ -72,6 +88,15 @@ namespace Emberdelve.Net.Rules
     ///                                        chain such as "walk-forward:3@90,sprint-forward:1.5@270,jump" (see NetScriptSpec)
     ///   -ember-net-script-start-file PATH    client: the script starts when this file exists (default: 1.5 s after the player spawned)
     ///   -ember-net-script-yaw DEGREES        client: view yaw for steps without @yaw (default: the yaw the server spawned the player with)
+    ///   -ember-net-dev-shove SLOT:YAW[:M]    server, development builds only (U3A4b proof): teleport the player of that dev slot once, M meters (default 2)
+    ///                                        along world yaw YAW, to force a prediction snap (see NetDevShove)
+    ///   -ember-net-dev-shove-file PATH       server: the shove happens when this file exists (default: never)
+    ///   -ember-net-udp-path stock|scan|managed|ws   socket layer of every role (default scan; see Docs/Tasks/UTP_RESET.md):
+    ///                                        scan = stock socket, then find it and turn off SIO_UDP_CONNRESET / SIO_UDP_NETRESET (Windows);
+    ///                                        managed = custom INetworkInterface over System.Net.Sockets; ws = WebSockets (TCP)
+    ///   -ember-net-udp-reset-fix [true|false] legacy spelling: true = scan, false = stock (an explicit -ember-net-udp-path wins)
+    ///   -ember-net-client-linger-ms MS       client: after a requested shutdown finished, wait this long before the process quits
+    ///                                        (default 250; 0 = quit at once)
     /// </summary>
     public sealed class NetLaunchArgs
     {
@@ -96,6 +121,16 @@ namespace Emberdelve.Net.Rules
         public string ScriptStartFile { get; private set; } = "";
         public bool HasScriptYaw { get; private set; }
         public float ScriptYaw { get; private set; }
+        /// <summary>U3A4b development shove (server); null when not given.</summary>
+        public NetDevShove DevShove { get; private set; }
+        public string DevShoveFile { get; private set; } = "";
+        /// <summary>The socket layer (default <see cref="NetUdpPath.Scan"/>).</summary>
+        public NetUdpPath UdpPath { get; private set; } = NetUdpPath.Scan;
+        private bool _udpPathExplicit;
+        /// <summary>True when the stock socket is kept and its connection-reset notifications are switched off (Windows).</summary>
+        public bool UdpResetFix { get { return UdpPath == NetUdpPath.Scan; } }
+        /// <summary>Client side: extra wait after a requested shutdown before the process quits (ms, default 250, 0 = off).</summary>
+        public int ClientLingerMs { get; private set; } = NetTuning.DefaultClientLingerMs;
 
         /// <summary>The client test scripts this build knows (empty = none).</summary>
         public const string ScriptForgeOwner = "forge-owner";
@@ -183,13 +218,18 @@ namespace Emberdelve.Net.Rules
                 case "ember-net-script":
                 case "ember-net-script-start-file":
                 case "ember-net-script-yaw":
+                case "ember-net-dev-shove":
+                case "ember-net-dev-shove-file":
+                case "ember-net-udp-reset-fix":
+                case "ember-net-udp-path":
+                case "ember-net-client-linger-ms":
                     return true;
                 default:
                     return false;
             }
         }
 
-        private static bool IsFlag(string name) { return name == "ember-net-no-enemies"; }
+        private static bool IsFlag(string name) { return name == "ember-net-no-enemies" || name == "ember-net-udp-reset-fix"; }
 
         private static bool IsBoolLiteral(string text)
         {
@@ -265,6 +305,28 @@ namespace Emberdelve.Net.Rules
                         else _errors.Add("invalid no-enemies '" + value + "' (true|false)");
                     }
                     break;
+                case "ember-net-udp-reset-fix":
+                    {
+                        string f = value.ToLowerInvariant();
+                        if (f == "true" || f == "1" || f == "") { if (!_udpPathExplicit) UdpPath = NetUdpPath.Scan; }
+                        else if (f == "false" || f == "0") { if (!_udpPathExplicit) UdpPath = NetUdpPath.Stock; }
+                        else _errors.Add("invalid udp-reset-fix '" + value + "' (true|false)");
+                    }
+                    break;
+                case "ember-net-udp-path":
+                    switch (value.ToLowerInvariant())
+                    {
+                        case "stock": case "off": UdpPath = NetUdpPath.Stock; _udpPathExplicit = true; break;
+                        case "scan": UdpPath = NetUdpPath.Scan; _udpPathExplicit = true; break;
+                        case "managed": UdpPath = NetUdpPath.Managed; _udpPathExplicit = true; break;
+                        case "ws": case "websockets": UdpPath = NetUdpPath.WebSockets; _udpPathExplicit = true; break;
+                        default: _errors.Add("invalid udp-path '" + value + "' (stock|scan|managed|ws)"); break;
+                    }
+                    break;
+                case "ember-net-client-linger-ms":
+                    if (TryInt(value, out int linger) && linger >= 0 && linger <= 5000) ClientLingerMs = linger;
+                    else _errors.Add("invalid client linger '" + value + "' (0..5000)");
+                    break;
                 case "ember-net-script":
                     {
                         string scriptText = value.Trim().ToLowerInvariant();
@@ -295,6 +357,13 @@ namespace Emberdelve.Net.Rules
                         ScriptYaw = MoveInputFrame.WrapDegrees(scriptYaw);
                     }
                     else _errors.Add("invalid script yaw '" + value + "' (degrees)");
+                    break;
+                case "ember-net-dev-shove":
+                    if (NetDevShove.TryParse(value, out NetDevShove shove, out string shoveError)) DevShove = shove;
+                    else _errors.Add("invalid dev shove '" + value + "': " + shoveError);
+                    break;
+                case "ember-net-dev-shove-file":
+                    DevShoveFile = value;
                     break;
                 case "ember-net-protocol-override":
                     if (TryInt(value, out int po) && po >= 0) ProtocolOverride = po;

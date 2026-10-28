@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using Emberdelve.Core;
 using Emberdelve.Net.Rules;
 using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
 using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 
 namespace Emberdelve.Net
 {
@@ -18,6 +21,11 @@ namespace Emberdelve.Net
     /// approval rules, spawn on connect, removal on disconnect, status lines) and NGO scene management is on, so the server
     /// loads the dungeon and clients follow. A client process also gets a NetClientProbe (view logging, optional test script).
     /// No gameplay input yet. Every line starts with "[Emberdelve][Net][role]".
+    ///
+    /// U3A5: the same code path can also be started from the lobby's Online panel (NetLobbyBridge, "interactive" mode): the role is
+    /// set when the player clicks Join/Host instead of at launch, the lobby shows the progress, and a refusal, a lost connection, a
+    /// cancel or Escape tears the session down and loads the lobby again instead of quitting the process. Quit-file / auto-quit
+    /// (tests) still end the process. A process started with -ember-net never becomes interactive.
     /// </summary>
     public sealed class NetBootstrap : MonoBehaviour
     {
@@ -41,9 +49,27 @@ namespace Emberdelve.Net
         private string _shutdownReason = "";
         private bool _quitIssued;
 
+        // UTP_RESET (Docs/Tasks/UTP_RESET.md)
+        private UnityTransport _transport;
+        private NetUdpPath _effectivePath = NetUdpPath.Stock;
+        private NetUdpResetGuard.ScanJob _scanJob;
+        private bool _scanReported;
+        private float _stoppedAt = -1f;
+
+        // U3A5 (lobby-started session)
+        private bool _interactive;
+        private bool _returnToLobby;
+        private NetLobbyPhase _endPhase = NetLobbyPhase.Left;
+        private string _endText = "";
+        private bool _cursorLocked;
+        private static NetBootstrap _lobbySession;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Entry()
         {
+            // Inert until the lobby's Online panel calls it: only stores two delegates (no object, no log, no NetworkManager).
+            NetLobbyBridge.Register(StartFromLobby, CancelFromLobby);
+
             NetLaunchArgs args = NetLaunchArgs.Parse(Environment.GetCommandLineArgs());
 
             if (!args.IsValid)
@@ -59,6 +85,54 @@ namespace Emberdelve.Net
             GameObject go = new GameObject("EmberdelveNetBootstrap");
             DontDestroyOnLoad(go);
             go.AddComponent<NetBootstrap>().Configure(args);
+        }
+
+        /// <summary>
+        /// U3A5: the lobby's Join / Host button. Builds the same argument list the command line would carry (the real command line
+        /// is appended last, so test switches such as a quit file, timeouts or an explicit slot still apply and win) and starts the
+        /// same bootstrap component. Returns "" on success, else the reason it could not start.
+        /// </summary>
+        private static string StartFromLobby(bool host, string address, int port, string classId, string slot)
+        {
+            if (_lobbySession != null) return "a session is already running";
+            if (NetRole.IsNetworked) return "this process already has a network role";
+
+            List<string> argv = new List<string>
+            {
+                "-ember-net", host ? "host" : "client",
+                "-ember-port", port.ToString(CultureInfo.InvariantCulture),
+                "-ember-slot", slot,
+                "-ember-class", classId,
+                "-ember-net-connect-timeout", "30"
+            };
+            if (!host)
+            {
+                argv.Add("-ember-address");
+                argv.Add(address);
+            }
+            else if (address == NetTuning.AnyListen)
+            {
+                argv.Add("-ember-listen");
+                argv.Add("any");
+            }
+
+            argv.AddRange(Environment.GetCommandLineArgs());
+            NetLaunchArgs args = NetLaunchArgs.Parse(argv.ToArray());
+            if (!args.IsValid) return "invalid arguments: " + string.Join("; ", args.Errors);
+            if (args.Mode == NetLaunchMode.Offline || args.Mode == NetLaunchMode.Server) return "this build was started with conflicting network arguments";
+
+            GameObject go = new GameObject("EmberdelveNetBootstrap");
+            DontDestroyOnLoad(go);
+            NetBootstrap bootstrap = go.AddComponent<NetBootstrap>();
+            bootstrap._interactive = true;
+            bootstrap.Configure(args);
+            _lobbySession = bootstrap;
+            return "";
+        }
+
+        private static void CancelFromLobby()
+        {
+            if (_lobbySession != null) _lobbySession.EndSession(NetLobbyPhase.Idle, "cancelled", "cancel");
         }
 
         /// <summary>The parsed command line of this process (null offline). Read by the client-side movement stream.</summary>
@@ -111,6 +185,10 @@ namespace Emberdelve.Net
             GameObject go = gameObject;
             _nm = go.AddComponent<NetworkManager>();
             UnityTransport transport = go.AddComponent<UnityTransport>();
+            _transport = transport;
+
+            // UTP_RESET: which socket layer this role runs on. Printed first so a log always says what it was testing.
+            Log("socket-path " + NetSocketPath.Apply(transport, _args.UdpPath, out _effectivePath));
 
             int protocol = _args.ProtocolOverride >= 0 ? _args.ProtocolOverride : NetTuning.ProtocolVersion;
 
@@ -150,7 +228,9 @@ namespace Emberdelve.Net
             transport.SetConnectionData(_args.Address, (ushort)_args.Port);
             Log("connecting address=" + _args.Address + " port=" + _args.Port + " timeout=" + _args.ConnectTimeoutSeconds + "s");
             gameObject.AddComponent<NetClientProbe>().Configure(_args);
-            return _nm.StartClient();
+            bool started = _nm.StartClient();
+            if (started) StartUdpResetFix(false);
+            return started;
         }
 
         /// <summary>
@@ -185,6 +265,9 @@ namespace Emberdelve.Net
         {
             _activeSince = Time.unscaledTime;
             Log("listening port=" + _args.Port + " address=" + _args.ListenAddress + " protocol=" + NetTuning.ProtocolVersion);
+            StartUdpResetFix(true);
+            if (_args.UdpPath == NetUdpPath.Managed) Log("socket-path managed detail " + NetSocketPath.ManagedDetail());
+            if (_interactive) NetLobbyBridge.Report(NetLobbyPhase.Connected, "hosting on " + _args.ListenAddress + ":" + _args.Port + " (Esc leaves)");
         }
 
         // ---- shared callbacks ------------------------------------------------------------------
@@ -202,6 +285,7 @@ namespace Emberdelve.Net
             _connectedOnce = true;
             _activeSince = Time.unscaledTime;
             Log("connected id=" + id);
+            if (_interactive) NetLobbyBridge.Report(NetLobbyPhase.Connected, "connected to " + _args.Address + ":" + _args.Port + " (Esc leaves)");
         }
 
         private void OnClientDisconnected(ulong id)
@@ -210,6 +294,7 @@ namespace Emberdelve.Net
             {
                 _remoteClients.Remove(id);
                 Log("client disconnected id=" + id + " total=" + _remoteClients.Count);
+                if (_args.UdpPath == NetUdpPath.Managed) Log("socket-path managed detail " + NetSocketPath.ManagedDetail());
                 if (_server != null) _server.OnClientDisconnected(id);
                 return;
             }
@@ -226,12 +311,14 @@ namespace Emberdelve.Net
             if (!_connectedOnce)
             {
                 Log("rejected reason='" + reason + "'");
-                Fail(NetExitCodes.ConnectFailed, "rejected");
+                Fail(NetExitCodes.ConnectFailed, "rejected", NetLobbyPhase.Refused,
+                    reason == "-" ? "could not connect to " + _args.Address + ":" + _args.Port : "refused: " + reason);
             }
             else
             {
                 Log("disconnected unexpectedly reason='" + reason + "'");
-                Fail(NetExitCodes.UnexpectedDisconnect, "connection lost");
+                Fail(NetExitCodes.UnexpectedDisconnect, "connection lost", NetLobbyPhase.Left,
+                    "disconnected from the server" + (reason == "-" ? "" : ": " + reason));
             }
         }
 
@@ -241,7 +328,7 @@ namespace Emberdelve.Net
             if (!_shuttingDown)
             {
                 Fail(_connectedOnce || _isServerSide ? NetExitCodes.TransportFailure : NetExitCodes.ConnectFailed,
-                    "transport failure");
+                    "transport failure", NetLobbyPhase.Failed, "network error (transport failure)");
             }
         }
 
@@ -251,10 +338,12 @@ namespace Emberdelve.Net
         {
             if (_args == null || _quitIssued) return;
             float now = Time.unscaledTime;
+            DrainScanLog();
 
             if (_shuttingDown)
             {
                 bool stopped = _nm == null || (!_nm.IsListening && !_nm.ShutdownInProgress);
+                if (stopped && ShouldLinger(now)) return;
                 if (stopped || now >= _shutdownDeadline)
                 {
                     if (!stopped && _exitCode == NetExitCodes.Ok) _exitCode = NetExitCodes.ShutdownTimeout;
@@ -262,6 +351,8 @@ namespace Emberdelve.Net
                 }
                 return;
             }
+
+            if (_interactive) InteractiveUpdate();
 
             if (_isServerSide)
             {
@@ -287,13 +378,64 @@ namespace Emberdelve.Net
                 if (now - _startedAt >= _args.ConnectTimeoutSeconds)
                 {
                     Log("connect timeout after " + _args.ConnectTimeoutSeconds + "s");
-                    Fail(NetExitCodes.ConnectFailed, "connect timeout");
+                    Fail(NetExitCodes.ConnectFailed, "connect timeout", NetLobbyPhase.Failed,
+                        "no answer from " + _args.Address + ":" + _args.Port + " (timeout)");
                 }
                 return;
             }
 
             if (_args.AutoQuitSeconds > 0f && now - _activeSince >= _args.AutoQuitSeconds)
                 BeginShutdown("autoquit");
+        }
+
+        // ---- UTP_RESET mitigations -------------------------------------------------------------
+
+        /// <summary>
+        /// Mitigation (b), client only: after a REQUESTED shutdown has finished (the process exits next), wait ClientLingerMs before
+        /// quitting, so the disconnect has left the machine and the server has had time to read it before this process is gone. Not
+        /// used for a lost connection (nothing to say to a server that already dropped us), nor for a lobby-started session that
+        /// returns to the lobby instead of quitting. Bounded by the shutdown deadline.
+        /// </summary>
+        private bool ShouldLinger(float now)
+        {
+            if (_isServerSide || _returnToLobby || _exitCode != NetExitCodes.Ok || _args.ClientLingerMs <= 0) return false;
+            if (now >= _shutdownDeadline) return false;
+            if (_stoppedAt < 0f)
+            {
+                _stoppedAt = now;
+                Log("linger ms=" + _args.ClientLingerMs + " reason=" + _shutdownReason);
+            }
+
+            return now - _stoppedAt < _args.ClientLingerMs / 1000f;
+        }
+
+        /// <summary>
+        /// Socket path "scan": switch off the Windows UDP connection-reset notifications on the transport's socket. The scan runs on a
+        /// background thread (NetUdpResetGuard); its log lines are drained from Update, the result is logged once.
+        /// </summary>
+        private void StartUdpResetFix(bool serverRole)
+        {
+            if (_effectivePath != NetUdpPath.Scan)
+            {
+                if (serverRole) Log("udp-connreset fix off (udp-path=" + _args.UdpPath + ")");
+                return;
+            }
+
+            if (_scanJob != null) return;
+            _scanJob = NetUdpResetGuard.StartAsync(serverRole ? _args.Port : 0, serverRole, 15000);
+        }
+
+        private void DrainScanLog()
+        {
+            if (_scanJob == null) return;
+            string line;
+            while (_scanJob.TryDequeue(out line)) Log(line);
+            if (_scanJob.Done && !_scanReported)
+            {
+                _scanReported = true;
+                Log(_scanJob.Result.Line);
+                if (_scanJob.Result.Detail.Length > 0) Log("udp-connreset detail " + _scanJob.Result.Detail);
+            }
         }
 
         private void PollQuitFile(float now)
@@ -305,9 +447,71 @@ namespace Emberdelve.Net
 
         private void Fail(int exitCode, string reason)
         {
+            Fail(exitCode, reason, NetLobbyPhase.Failed, reason);
+        }
+
+        private void Fail(int exitCode, string reason, NetLobbyPhase lobbyPhase, string lobbyText)
+        {
             if (_quitIssued) return;
             if (_exitCode == NetExitCodes.Ok) _exitCode = exitCode;
+            if (_interactive && !_returnToLobby)
+            {
+                _returnToLobby = true;
+                _endPhase = lobbyPhase;
+                _endText = lobbyText;
+            }
+
             BeginShutdown("fail: " + reason);
+        }
+
+        // ---- U3A5: lobby-started session -------------------------------------------------------
+
+        /// <summary>Per frame, lobby-started sessions only: grab the pointer once the player exists, and Escape leaves.</summary>
+        private void InteractiveUpdate()
+        {
+            if (_shuttingDown || _quitIssued) return;
+
+            if (!_cursorLocked && (_connectedOnce || _isServerSide) && HasOwnedRig())
+            {
+                _cursorLocked = true;
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+            }
+
+            Keyboard keyboard = Keyboard.current;
+            if ((_connectedOnce || _activeSince >= 0f) && keyboard != null && keyboard.escapeKey.wasPressedThisFrame)
+                EndSession(NetLobbyPhase.Left, "left the game", "leave");
+        }
+
+        private static bool HasOwnedRig()
+        {
+            IReadOnlyList<NetPlayerRig> rigs = NetPlayerRig.Spawned;
+            for (int i = 0; i < rigs.Count; i++)
+                if (rigs[i] != null && rigs[i].IsSpawned && rigs[i].IsOwner) return true;
+            return false;
+        }
+
+        /// <summary>User-requested end of a lobby-started session (Escape, Cancel): shut down, then back to the lobby with a message.</summary>
+        private void EndSession(NetLobbyPhase phase, string lobbyText, string why)
+        {
+            if (!_interactive || _shuttingDown || _quitIssued) return;
+            _returnToLobby = true;
+            _endPhase = phase;
+            _endText = lobbyText;
+            BeginShutdown(why);
+        }
+
+        private void ReturnToLobby()
+        {
+            Log("returning to the lobby: " + _endText);
+            if (_lobbySession == this) _lobbySession = null;
+            LaunchArgs = null;
+            NetRole.ResetToOffline();
+            NetLobbyBridge.Report(_endPhase, _endText);
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            SceneManager.LoadScene(GameConfig.DefaultLobbySceneName);
+            Destroy(gameObject);
         }
 
         private void BeginShutdown(string reason)
@@ -332,6 +536,12 @@ namespace Emberdelve.Net
                 _server.Dispose();
             }
             Log("shutdown complete clean=" + clean + " players=" + _remoteClients.Count + " exit=" + _exitCode);
+            if (_returnToLobby)
+            {
+                ReturnToLobby();
+                return;
+            }
+
             QuitProcess(_exitCode);
         }
 

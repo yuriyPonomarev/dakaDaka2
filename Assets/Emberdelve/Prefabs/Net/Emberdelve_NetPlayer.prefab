@@ -208,9 +208,9 @@ GameObject:
   - component: {fileID: 7475681328063114130}
   - component: {fileID: 361897507979071528}
   - component: {fileID: 2935099207612468179}
-  - component: {fileID: 7465656538702958081}
-  - component: {fileID: 6723773682561612150}
-  - component: {fileID: 8514772934645695068}
+  - component: {fileID: 643651435128500384}
+  - component: {fileID: 4687450699450283605}
+  - component: {fileID: 1106908752914621150}
   m_Layer: 15
   m_Name: Emberdelve_NetPlayer
   m_TagString: Untagged
@@ -496,7 +496,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Skills.SkillCaster
   rig: {fileID: 0}
---- !u!114 &7465656538702958081
+--- !u!114 &643651435128500384
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -521,7 +521,7 @@ MonoBehaviour:
   AutoObjectParentSync: 1
   SyncOwnerTransformWhenParented: 1
   AllowOwnerToParent: 0
---- !u!114 &6723773682561612150
+--- !u!114 &4687450699450283605
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -567,7 +567,7 @@ MonoBehaviour:
   SwitchTransformSpaceWhenParented: 0
   Interpolate: 1
   SlerpPosition: 0
---- !u!114 &8514772934645695068
+--- !u!114 &1106908752914621150
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}

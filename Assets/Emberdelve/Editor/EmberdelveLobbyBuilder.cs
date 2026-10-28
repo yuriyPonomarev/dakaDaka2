@@ -5,12 +5,13 @@ using UnityEngine.SceneManagement;
 using Emberdelve.Core;
 using Emberdelve.Feedback;
 using Emberdelve.Flow;
+using Emberdelve.UI;
 
 namespace Emberdelve.EditorTools
 {
     /// <summary>
     /// Safe-room scene: a small torch-lit stone room plus the class-select screen.
-    /// The UI itself is built at runtime by LobbyController/LobbyScreenView, so the scene stays tiny.
+    /// The UI itself is built at runtime by LobbyController/LobbyScreenView/LobbyOnlinePanel, so the scene stays tiny.
     /// </summary>
     internal static class EmberdelveLobbyBuilder
     {
@@ -68,6 +69,9 @@ namespace Emberdelve.EditorTools
 
             GameObject master = new GameObject("Lobby_Master");
             LobbyController lobby = master.AddComponent<LobbyController>();
+            // U3A5: the Online panel (Host / Join + address). Built at runtime by the component (UiFactory); it builds nothing when
+            // networking is not in the build, and LobbyController adds one itself for a scene saved before this existed.
+            master.AddComponent<LobbyOnlinePanel>();
 
             SerializedObject serialized = new SerializedObject(lobby);
             SetProperty(serialized, "config", EmberdelveAssetLibrary.Config);

@@ -58,6 +58,8 @@ namespace Emberdelve.Net
         private readonly List<Pending> _pending = new List<Pending>();
         private readonly List<ulong> _awaitingSpawn = new List<ulong>();
         private readonly List<ulong> _scratch = new List<ulong>();
+        // U3A5 rejoin policy: slot (lower case) -> the player id its last actor had. A returning slot is a NEW actor with a NEW id.
+        private readonly Dictionary<string, int> _lastRemovedBySlot = new Dictionary<string, int>();
 
         private NetMovementServer _movement;
         private RunDirector _director;
@@ -352,6 +354,12 @@ namespace Emberdelve.Net
             if (_movement != null) _movement.Register(row);
             _log("admitted client=" + clientId + " id=" + row.PlayerId + " party=" + row.PartyId + " slot=" + row.Slot +
                  " class=" + row.ClassId + " netId=" + netObject.NetworkObjectId + " " + CountsText());
+
+            if (_lastRemovedBySlot.TryGetValue(row.Slot.ToLowerInvariant(), out int previousId))
+            {
+                _log("rejoin slot=" + row.Slot + " newId=" + row.PlayerId + " previousId=" + previousId +
+                     " (admitted as a new actor; nothing carried over)");
+            }
         }
 
         private void RefuseAfterApproval(ulong clientId, string reason)
@@ -386,6 +394,7 @@ namespace Emberdelve.Net
                 UnityEngine.Object.Destroy(row.Rig.gameObject);
             }
 
+            if (reason != "shutdown") _lastRemovedBySlot[row.Slot.ToLowerInvariant()] = row.PlayerId;
             _log("removed client=" + row.ClientId + " id=" + row.PlayerId + " slot=" + row.Slot + " reason=" + reason + " " + CountsText());
         }
 

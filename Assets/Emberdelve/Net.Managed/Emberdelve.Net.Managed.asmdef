@@ -1,0 +1,18 @@
+{
+  "name": "Emberdelve.Net.Managed",
+  "references": [
+    "Unity.Netcode.Runtime",
+    "Unity.Networking.Transport",
+    "Unity.Collections"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": true,
+  "overrideReferences": false,
+  "autoReferenced": true,
+  "defineConstraints": [
+    "EMBER_UTP_MANAGED_SOCKET"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

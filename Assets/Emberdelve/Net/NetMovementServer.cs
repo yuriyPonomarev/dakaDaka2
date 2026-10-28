@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using Emberdelve.Movement;
 using Emberdelve.Net.Rules;
 using Emberdelve.Player;
@@ -29,6 +30,15 @@ namespace Emberdelve.Net
     ///        counts 1..3, powers of two, every 100th);
     ///   seg id=N ... one line per finished stretch of horizontal movement (distance, mean / peak speed, from / to);
     ///   air id=N ... one line per jump / fall of at least 4 airborne ticks.
+    ///
+    /// U3A4b adds the way back to the owner: after the step of a QUEUED frame (a real client frame, not a repeat or a neutral fill)
+    /// the state reached is remembered with that frame's sequence number, and every second tick the newest one goes to the owner as
+    /// an unreliable Ack (NetPlayerRig.AckRpc). The state is the one right after that frame, not the one after later repeated
+    /// steps, so the owner compares like with like. The server also publishes the movement numbers it resolved for the player
+    /// (NetPlayerRig.MoveParams, owner-read; re-checked every 15 ticks) so the owner predicts with the same speeds. Extra log lines:
+    ///   params id=N walk=.. sprint=.. crouch=.. stand=.. crouchH=.. jump=.. mask=..      (first publish and every change)
+    ///   dev-shove applied id=N slot=.. from=(..) to=(..) meters=..     (development builds: -ember-net-dev-shove, the gate's forced correction)
+    /// and the final line also carries acks=N (Acks sent) and shoves=N.
     /// </summary>
     internal sealed class NetMovementServer
     {
@@ -52,6 +62,20 @@ namespace Emberdelve.Net
 
             public int Forge;
             public int BadBatch;
+
+            public NetPlayerRig NetRig;
+            public bool AckDirty;
+            public uint AckSeq;
+            public PredictedState AckState;
+            public int AcksSent;
+            public int Shoves;
+            /// <summary>Server tick of the last real client frame (set at registration so a fresh player is not "quiet").</summary>
+            public long LastFrameTick;
+            public int AcksSuppressed;
+            public int ParamsSuppressed;
+            public long NextQuietLogTick;
+            public bool ParamsPublished;
+            public MoveParamsData LastParams;
 
             public Vector3 LastPos;
             public float VMax;
@@ -87,9 +111,23 @@ namespace Emberdelve.Net
         private readonly Dictionary<int, MoveState> _states = new Dictionary<int, MoveState>();
         private readonly List<MoveState> _order = new List<MoveState>();
 
+        private const int ParamsCheckTicks = 15;
+
+        /// <summary>
+        /// U3A4b fix: a player that has sent no real input frame for this many ticks (1 s) is treated as gone for SENDING: no Ack, no
+        /// params write. A hard-killed client is still "connected" until the transport timeout (4 s in the gates, 30 s by default); nothing
+        /// useful can be delivered to it, so the server does not keep feeding a dead UDP endpoint.
+        /// </summary>
+        private const int QuietSendTicks = 30;
+        private const int QuietLogTicks = 90;
+        private const int ShovePollTicks = 10;
+
         private bool _subscribed;
         private long _tick;
+        private float _lastTickRealtime = -1f;
+        private float _maxGapSinceQuietLog;
         private int _noPlayer;
+        private bool _shoveDone;
 
         public NetMovementServer(NetworkManager nm, NetIdentityTable table, Action<string> log, Action<string> logError)
         {
@@ -148,12 +186,15 @@ namespace Emberdelve.Net
                 Rig = row.Rig,
                 Object = row.Object,
                 LastPos = row.Rig.transform.position,
-                RestY = row.Rig.transform.position.y
+                RestY = row.Rig.transform.position.y,
+                LastFrameTick = _tick
             };
             state.LoggedPos = state.LastPos;
             state.NextLogTick = _tick;
+            state.NetRig = row.Object.GetComponent<NetPlayerRig>();
             _states[row.PlayerId] = state;
             _order.Add(state);
+            PublishParams(state);
 
             _log("movement registered id=" + row.PlayerId + " client=" + row.ClientId +
                  " walk=" + F(movement.ResolveGroundSpeed(false, false)) +
@@ -262,7 +303,15 @@ namespace Emberdelve.Net
         private void OnNetworkTick()
         {
             _tick++;
+            float realtime = Time.realtimeSinceStartup;
+            if (_lastTickRealtime >= 0f && realtime - _lastTickRealtime > _maxGapSinceQuietLog) _maxGapSinceQuietLog = realtime - _lastTickRealtime;
+            _lastTickRealtime = realtime;
             const float dt = NetTuning.TickSeconds;
+            bool ackTick = _tick % ReconcileRules.AckEveryTicks == 0;
+
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            MaybeShove();
+#endif
 
             for (int i = _order.Count - 1; i >= 0; i--)
             {
@@ -277,10 +326,16 @@ namespace Emberdelve.Net
                 }
 
                 StepPlayer(state, rig, dt);
+                if (ackTick) SendAck(state);
+                if ((_tick + state.PlayerId) % ParamsCheckTicks == 0) PublishParams(state);
             }
 
             // Oldest registration first for the log lines (the loop above runs backwards so removal is safe).
-            for (int i = 0; i < _order.Count; i++) MaybeLog(_order[i]);
+            for (int i = 0; i < _order.Count; i++)
+            {
+                MaybeLog(_order[i]);
+                MaybeLogQuiet(_order[i]);
+            }
         }
 
         private void StepPlayer(MoveState state, PlayerRig rig, float dt)
@@ -292,10 +347,19 @@ namespace Emberdelve.Net
 
             float fallbackYaw = MoveInputFrame.WrapDegrees(body.eulerAngles.y);
             float fallbackPitch = look != null ? look.Pitch : 0f;
-            state.Buffer.Next(fallbackYaw, fallbackPitch, out MoveInputFrame frame);
+            MoveFrameSource source = state.Buffer.Next(fallbackYaw, fallbackPitch, out MoveInputFrame frame);
 
             if (look != null) look.ApplyAimPose(frame.Yaw, frame.Pitch);
             movement.Step(in frame, dt);
+
+            // U3A4b: remember the state right after a real client frame, under that frame's sequence number (the Ack's content).
+            if (source == MoveFrameSource.Queued)
+            {
+                state.AckSeq = frame.Seq;
+                movement.CapturePredictionState(out state.AckState);
+                state.AckDirty = true;
+                state.LastFrameTick = _tick;
+            }
 
             Vector3 pos = body.position;
             float dx = pos.x - state.LastPos.x;
@@ -313,6 +377,109 @@ namespace Emberdelve.Net
 
             state.LastPos = pos;
         }
+
+        // ---- U3A4b: owner replication ----------------------------------------------------------------
+
+        /// <summary>
+        /// True when something may be sent to this player's owner: the object is spawned, its owner is still in the NetworkManager's
+        /// connected set, and the owner has delivered a real input frame within <see cref="QuietSendTicks"/>.
+        /// </summary>
+        private bool CanSendTo(MoveState state)
+        {
+            NetPlayerRig rig = state.NetRig;
+            if (rig == null || !rig.IsSpawned || _nm == null || !_nm.IsListening) return false;
+            if (_tick - state.LastFrameTick > QuietSendTicks) return false;
+
+            ulong owner = rig.OwnerClientId;
+            IReadOnlyList<ulong> ids = _nm.ConnectedClientsIds;
+            for (int i = 0; i < ids.Count; i++)
+                if (ids[i] == owner) return true;
+            return false;
+        }
+
+        private void SendAck(MoveState state)
+        {
+            if (!state.AckDirty || state.NetRig == null || !state.NetRig.IsSpawned) return;
+
+            if (!CanSendTo(state))
+            {
+                state.AckDirty = false;
+                state.AcksSuppressed++;
+                return;
+            }
+
+            state.AckDirty = false;
+            state.AcksSent++;
+            state.NetRig.AckRpc(MoveAckWire.From(state.AckSeq, (uint)_tick, in state.AckState));
+        }
+
+        /// <summary>Resolves the player's movement numbers and writes them to the owner-read variable when they changed.</summary>
+        private void PublishParams(MoveState state)
+        {
+            PlayerMovement movement = state.Rig != null ? state.Rig.Movement : null;
+            var cls = state.Rig != null ? state.Rig.Class : null;
+            if (movement == null || cls == null || state.NetRig == null || !state.NetRig.IsSpawned) return;
+
+            MoveParamsData data = new MoveParamsData
+            {
+                Walk = movement.ResolveGroundSpeed(false, false),
+                Sprint = movement.ResolveGroundSpeed(true, false),
+                Crouch = movement.ResolveGroundSpeed(false, true),
+                StandHeight = cls.standHeight,
+                CrouchHeight = cls.crouchHeight,
+                JumpHeight = cls.jumpHeight,
+                GroundMask = movement.GroundMask.value
+            };
+
+            if (state.ParamsPublished && data.Equals(state.LastParams)) return;
+
+            // Not published, not remembered as published: it goes out on the first check after the owner is heard from again.
+            if (state.ParamsPublished && !CanSendTo(state))
+            {
+                state.ParamsSuppressed++;
+                return;
+            }
+
+            state.ParamsPublished = true;
+            state.LastParams = data;
+            state.NetRig.MoveParams.Value = MoveParamsWire.From(in data);
+            _log("params id=" + state.PlayerId + " walk=" + F(data.Walk) + " sprint=" + F(data.Sprint) + " crouch=" + F(data.Crouch) +
+                 " stand=" + F(data.StandHeight) + " crouchH=" + F(data.CrouchHeight) + " jump=" + F(data.JumpHeight) +
+                 " mask=" + data.GroundMask + " tick=" + _tick);
+        }
+
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>
+        /// Development only (-ember-net-dev-shove SLOT:YAW[:M] with -ember-net-dev-shove-file PATH): once, when the file exists, the
+        /// named player is teleported M meters along YAW. Done between two steps, and the speed tracker is told, so the jump is not
+        /// counted as speed. The owner's prediction cannot know about it: the next Acks show a large error and the owner snaps.
+        /// </summary>
+        private void MaybeShove()
+        {
+            if (_shoveDone || _tick % ShovePollTicks != 0) return;
+            NetLaunchArgs args = NetBootstrap.LaunchArgs;
+            if (args == null || args.DevShove == null || string.IsNullOrEmpty(args.DevShoveFile) || !File.Exists(args.DevShoveFile)) return;
+
+            NetDevShove shove = args.DevShove;
+            MoveState target = null;
+            for (int i = 0; i < _order.Count; i++)
+            {
+                if (string.Equals(_order[i].Slot, shove.Slot, StringComparison.OrdinalIgnoreCase)) { target = _order[i]; break; }
+            }
+
+            if (target == null || target.Rig == null || target.Rig.Movement == null) return; // not here (yet): keep polling
+
+            _shoveDone = true;
+            Vector3 from = target.Rig.transform.position;
+            Vector3 to = from + new Vector3(shove.DirectionX, 0f, shove.DirectionZ) * shove.Meters;
+            if (target.Moving) EndSegment(target, false);
+            target.Rig.Movement.TeleportTo(to);
+            target.LastPos = target.Rig.transform.position;
+            target.Shoves++;
+            _log("dev-shove applied id=" + target.PlayerId + " slot=" + target.Slot + " from=" + P(from) + " to=" + P(target.LastPos) +
+                 " meters=" + F(shove.Meters) + " tick=" + _tick);
+        }
+#endif
 
         private void TrackSegment(MoveState state, Vector3 pos, float distance, float speed)
         {
@@ -415,6 +582,37 @@ namespace Emberdelve.Net
             WriteMoveLine(s, false, null);
         }
 
+        /// <summary>
+        /// Diagnostic for the intermittent CI loss of the whole server receive path (U3A4b.md): one line when a player goes quiet
+        /// (30 ticks), then every 90 ticks while it stays quiet. It lists who ELSE is still delivering frames and the longest
+        /// gap between two server ticks, so a stalled server process (gap) is told apart from a dead receive path (large gap absent,
+        /// every player quiet at the same tick).
+        /// </summary>
+        private void MaybeLogQuiet(MoveState s)
+        {
+            long quiet = _tick - s.LastFrameTick;
+            if (quiet < QuietSendTicks || _tick < s.NextQuietLogTick) return;
+            s.NextQuietLogTick = _tick + QuietLogTicks;
+
+            string others = "";
+            for (int i = 0; i < _order.Count; i++)
+            {
+                MoveState o = _order[i];
+                if (o == s) continue;
+                others += (others.Length > 0 ? "," : "") + o.PlayerId + ":" + (_tick - o.LastFrameTick);
+            }
+
+            IReadOnlyList<ulong> ids = _nm != null ? _nm.ConnectedClientsIds : null;
+            string connected = "";
+            if (ids != null)
+                for (int i = 0; i < ids.Count; i++) connected += (connected.Length > 0 ? "," : "") + ids[i];
+
+            _log("rx-quiet id=" + s.PlayerId + " client=" + s.ClientId + " quietTicks=" + quiet + " others=[" + others + "] connected=[" + connected +
+                 "] maxGapMs=" + (_maxGapSinceQuietLog * 1000f).ToString("F0", CultureInfo.InvariantCulture) +
+                 " acksSuppressed=" + s.AcksSuppressed + " paramsSuppressed=" + s.ParamsSuppressed + " tick=" + _tick);
+            _maxGapSinceQuietLog = 0f;
+        }
+
         private void WriteMoveLine(MoveState s, bool final, string reason)
         {
             InputSanitizer z = s.Sanitizer;
@@ -430,7 +628,8 @@ namespace Emberdelve.Net
                         " nan=" + z.InvalidNonFinite + " big=" + z.InvalidMagnitude + " seqj=" + z.InvalidSeqWindow +
                         " seq0=" + z.InvalidSeqZero + " flags=" + z.InvalidFlags + " badbatch=" + s.BadBatch +
                         " redundant=" + z.Redundant + " repeated=" + s.Buffer.RepeatedTicks + " neutral=" + s.Buffer.NeutralTicks +
-                        " noplayer=" + _noPlayer;
+                        " noplayer=" + _noPlayer + " acks=" + s.AcksSent + " shoves=" + s.Shoves +
+                        " acksSuppressed=" + s.AcksSuppressed + " paramsSuppressed=" + s.ParamsSuppressed;
             }
 
             _log(line);

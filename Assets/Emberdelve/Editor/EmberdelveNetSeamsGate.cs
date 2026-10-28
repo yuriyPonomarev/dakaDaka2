@@ -154,6 +154,7 @@ namespace Emberdelve.EditorTools
             yield return LayoutSpawns();
             yield return FrameHelpers();
             yield return StepParity();
+            yield return StepDeterminism();
             yield return PauseAndSceneFlow();
             yield return SceneRoles();
             yield return ClientView();
@@ -438,6 +439,128 @@ namespace Emberdelve.EditorTools
             mv.Step(in nan, -1f);
             Check(IsFinite(_p1.transform.position) && Flat(p, _p1.transform.position) < 0.01f, "a non-finite frame and non-finite dt leave a finite position");
             mv.ExternalDriven = false;
+
+            Time.captureDeltaTime = 0f;
+            BeginRun(mv, start, 0f);
+            mv.ExternalDriven = false;
+            yield return null;
+        }
+
+        // ---- 5b. U3A4b: Step is a function of (state, frame, dt) ---------------------------------------------------------------------
+
+        /// <summary>
+        /// The Step path no longer seeds its ramp from CharacterController.velocity (derived from the RENDER delta time): the same
+        /// frames stepped with the same tick dt give the same positions whether all of them run inside one render frame or one per
+        /// frame at a very different render dt. Also: capture / restore of the Step state reproduces a run (what a snap and replay
+        /// relies on), and the prediction parameters are refused on a component that already has a class and honoured on a bare one.
+        /// The offline Update path is covered by StepParity above (unchanged).
+        /// </summary>
+        private IEnumerator StepDeterminism()
+        {
+            PlayerMovement mv = _p1.Movement;
+            DungeonLayoutData layout = _director.Layout;
+            const int Frames = 150;
+            const float Yaw = 30f;
+            const float TickDt = NetTuning.TickSeconds;
+            const float Tolerance = 1e-5f;
+            Vector3 start = layout.CellCenterWorld(layout.playerStartCell) + Vector3.up * 0.15f;
+
+            _p1.SetInputEnabled(true);
+            mv.enabled = true;
+
+            // run 1: every Step inside this one render frame
+            Time.captureDeltaTime = 0f;
+            BeginRun(mv, start, Yaw);
+            List<Vector3> one = new List<Vector3>();
+            for (int i = 0; i < Frames; i++)
+            {
+                FrameSpec f = SpecAt(i);
+                MoveInputFrame frame = MoveInputFrame.Create((uint)(i + 1), f.X, f.Y, Yaw, 0f, f.Sprint, f.Jump, f.Crouch);
+                mv.Step(in frame, TickDt);
+                one.Add(_p1.transform.position);
+            }
+
+            // run 2: one Step per render frame, the render frame being four times longer than the tick dt
+            Time.captureDeltaTime = 1f / 7.5f;
+            BeginRun(mv, start, Yaw);
+            yield return null;
+            List<Vector3> two = new List<Vector3>();
+            for (int i = 0; i < Frames; i++)
+            {
+                FrameSpec f = SpecAt(i);
+                MoveInputFrame frame = MoveInputFrame.Create((uint)(i + 1), f.X, f.Y, Yaw, 0f, f.Sprint, f.Jump, f.Crouch);
+                mv.Step(in frame, TickDt);
+                two.Add(_p1.transform.position);
+                yield return null;
+            }
+
+            Time.captureDeltaTime = 0f;
+            float maxDiff = 0f;
+            for (int i = 0; i < Frames; i++) maxDiff = Mathf.Max(maxDiff, (one[i] - two[i]).magnitude);
+            Check(one.Count == Frames && two.Count == Frames, "both determinism runs recorded " + Frames + " Steps");
+            Check(maxDiff <= Tolerance, "Step is independent of the render dt: max position difference " + maxDiff.ToString("0.0000000") + " <= " + Tolerance);
+            Check(Flat(one[59], start) > 0.5f, "the determinism run travelled (" + Flat(one[59], start).ToString("0.00") + " m after 60 Steps)");
+
+            // capture / restore: rewinding to a captured state and stepping the same frames reproduces the run
+            BeginRun(mv, start, Yaw);
+            for (int i = 0; i < 40; i++)
+            {
+                FrameSpec f = SpecAt(i);
+                MoveInputFrame frame = MoveInputFrame.Create((uint)(i + 1), f.X, f.Y, Yaw, 0f, f.Sprint, f.Jump, f.Crouch);
+                mv.Step(in frame, TickDt);
+            }
+
+            mv.CapturePredictionState(out PredictedState captured);
+            List<Vector3> first = new List<Vector3>();
+            for (int i = 40; i < 115; i++)
+            {
+                FrameSpec f = SpecAt(i);
+                MoveInputFrame frame = MoveInputFrame.Create((uint)(i + 1), f.X, f.Y, Yaw, 0f, f.Sprint, f.Jump, f.Crouch);
+                mv.Step(in frame, TickDt);
+                first.Add(_p1.transform.position);
+            }
+
+            bool crouchedAfter = mv.IsCrouched;
+            mv.TeleportTo(new Vector3(captured.X, captured.Y, captured.Z));
+            mv.RestorePredictionState(in captured);
+            _p1.transform.rotation = Quaternion.Euler(0f, Yaw, 0f);
+            List<Vector3> again = new List<Vector3>();
+            for (int i = 40; i < 115; i++)
+            {
+                FrameSpec f = SpecAt(i);
+                MoveInputFrame frame = MoveInputFrame.Create((uint)(i + 1), f.X, f.Y, Yaw, 0f, f.Sprint, f.Jump, f.Crouch);
+                mv.Step(in frame, TickDt);
+                again.Add(_p1.transform.position);
+            }
+
+            float restoreDiff = 0f;
+            for (int i = 0; i < first.Count; i++) restoreDiff = Mathf.Max(restoreDiff, (first[i] - again[i]).magnitude);
+            Check(captured.IsFinite && captured.CapsuleHeight > 0.5f, "CapturePredictionState returns a finite state with a capsule height");
+            Check(restoreDiff <= Tolerance, "restoring a captured Step state and stepping the same frames reproduces the run: max difference " + restoreDiff.ToString("0.0000000"));
+            Check(crouchedAfter, "the replayed span (frames 40..114) included the crouch toggle at 90 (the restore covered the crouch bit)");
+
+            // prediction parameters: refused on a component that already has a class
+            MoveParamsData valid = new MoveParamsData { Walk = 4.2f, Sprint = 6.4f, Crouch = 2f, StandHeight = 1.8f, CrouchHeight = 1.15f, JumpHeight = 1.1f, GroundMask = 1 };
+            float walkBefore = mv.ResolveGroundSpeed(false, false);
+            Check(!mv.ApplyPredictionParams(in valid), "ApplyPredictionParams is refused on a movement that already has a class");
+            Check(Mathf.Approximately(mv.ResolveGroundSpeed(false, false), walkBefore), "and the resolved speeds of the real class are untouched");
+
+            // ... and honoured on a bare one (the owning client's view of itself)
+            GameObject bare = new GameObject("NetSeams_BarePredictionBody");
+            _temp.Add(bare);
+            bare.transform.position = start;
+            PlayerMovement bareMove = bare.AddComponent<PlayerMovement>();
+            Check(bareMove.ResolveGroundSpeed(false, false) == 0f, "a bare movement has no speed before the parameters arrive");
+            MoveParamsData bad = valid;
+            bad.Walk = float.NaN;
+            Check(!bareMove.ApplyPredictionParams(in bad), "NaN prediction parameters are refused");
+            Check(bareMove.ApplyPredictionParams(in valid), "valid prediction parameters are applied to a bare movement");
+            Check(Mathf.Approximately(bareMove.ResolveGroundSpeed(false, false), 4.2f) && Mathf.Approximately(bareMove.ResolveGroundSpeed(true, false), 6.4f) &&
+                  Mathf.Approximately(bareMove.ResolveGroundSpeed(false, true), 2f) && Mathf.Approximately(bareMove.ResolveGroundSpeed(true, true), 2f),
+                "the three resolved speeds come from the server numbers (crouch wins over sprint)");
+            valid.Sprint = 7f;
+            Check(bareMove.ApplyPredictionParams(in valid) && Mathf.Approximately(bareMove.ResolveGroundSpeed(true, false), 7f), "new server numbers replace the old ones");
+            Check(bareMove.GroundMask.value == 1, "the ground mask comes from the server numbers");
 
             Time.captureDeltaTime = 0f;
             BeginRun(mv, start, 0f);

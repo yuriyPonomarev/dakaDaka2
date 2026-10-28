@@ -182,6 +182,96 @@ namespace Emberdelve.EditorTools
         }
 
         /// <summary>
+        /// U3A5: batch entry for the playable network build (lobby first, then the dungeon, Development, with the network player
+        /// prefab and its catalog generated first when missing). The same exe is the offline game (no arguments), the dedicated
+        /// server (-ember-net server), a command-line client, and a client/host started from the lobby's Online panel.
+        ///
+        ///   Unity.exe -batchmode -nographics -quit -projectPath . -logFile Logs/net_playable_build.log
+        ///             -executeMethod Emberdelve.EditorTools.EmberdelveWindowsBuild.BuildNetPlayable
+        ///             --ember-build-output C:\absolute\path\EmberdelveNet.exe
+        /// </summary>
+        public static void BuildNetPlayable()
+        {
+            string location = null;
+            try
+            {
+                location = ResolveOutputPath(Environment.GetCommandLineArgs());
+                if (string.IsNullOrEmpty(location))
+                {
+                    Debug.LogError(Tag + " net-playable FAIL: missing or invalid " + OutputFlag + " <absolute path to the output .exe>.");
+                    EmberdelveGateExit.Exit(1);
+                    return;
+                }
+
+                bool ok = BuildNetFinalPlayer(location, out string error);
+                if (ok) Debug.Log(Tag + " net-playable PASS output=" + location);
+                else Debug.LogError(Tag + " net-playable FAIL " + error);
+                EmberdelveGateExit.Exit(ok ? 0 : 1);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError(Tag + " net-playable FAIL exception while building to '" + (location ?? "unresolved") + "': " + exception);
+                EmberdelveGateExit.Exit(1);
+            }
+        }
+
+        /// <summary>
+        /// U3A5: builds the Development Windows x64 player with scenes [Lobby, Level01] (the lobby-first game) plus everything the
+        /// network layer needs at run time (the generated player prefab and its Resources catalog; the Net assembly is auto-referenced).
+        /// Used by the final proof gate and by BuildNetPlayable. Does not touch the editor build settings and never exits the Editor.
+        /// </summary>
+        internal static bool BuildNetFinalPlayer(string exePath, out string error)
+        {
+            error = null;
+            try
+            {
+                string lobby = EmberdelvePaths.LobbyScenePath;
+                string dungeon = EmberdelvePaths.DungeonScenePath;
+                if (!File.Exists(lobby) || !File.Exists(dungeon))
+                {
+                    error = "saved scene(s) missing - lobby exists=" + File.Exists(lobby) + " dungeon exists=" + File.Exists(dungeon);
+                    return false;
+                }
+
+                if (!EmberdelveNetBuilder.EnsureNetPlayerPrefab(out string prefabError))
+                {
+                    error = "net player prefab unavailable: " + prefabError;
+                    return false;
+                }
+
+                string parent = Path.GetDirectoryName(exePath);
+                if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+
+                BuildPlayerOptions options = new BuildPlayerOptions
+                {
+                    scenes = new string[] { lobby, dungeon },
+                    locationPathName = exePath,
+                    target = BuildTarget.StandaloneWindows64,
+                    options = BuildOptions.Development
+                };
+
+                Debug.Log(Tag + " net-final start scenes=[" + lobby + ", " + dungeon + "] output=" + exePath);
+                BuildReport report = BuildPipeline.BuildPlayer(options);
+                BuildSummary summary = report.summary;
+                Debug.Log(Tag + " net-final report result=" + summary.result + " totalSize=" + summary.totalSize +
+                          " totalTime=" + summary.totalTime);
+
+                if (summary.result != BuildResult.Succeeded || !File.Exists(exePath))
+                {
+                    error = "build result=" + summary.result + " exeExists=" + File.Exists(exePath);
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception exception)
+            {
+                error = "exception: " + exception.Message;
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Reads and validates --ember-build-output. Returns null when the flag is absent or the path is
         /// unusable (relative, not an .exe, or inside Assets where a build output would be imported).
         /// </summary>

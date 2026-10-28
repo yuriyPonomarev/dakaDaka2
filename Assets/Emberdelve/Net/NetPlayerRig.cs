@@ -4,6 +4,7 @@ using Emberdelve.Core;
 using Emberdelve.Interaction;
 using Emberdelve.Items;
 using Emberdelve.Movement;
+using Emberdelve.Net.Rules;
 using Emberdelve.Player;
 using Unity.Collections;
 using Unity.Netcode;
@@ -45,6 +46,10 @@ namespace Emberdelve.Net
     /// delivered it (RpcParams.Receive.SenderClientId, never a payload field). A development-only twin,
     /// <c>ForgeMoveTestRpc</c>, has RequireOwnership off so a client can try to feed ANOTHER player's object; the same server path
     /// rejects and counts it. No movement RPC parameter names a player, combat or party id.
+    ///
+    /// U3A4b: the way back. The server tells the owner what it reached (<see cref="AckRpc"/>, unreliable, owner only, every second
+    /// tick) and publishes the movement numbers it resolved for this player (<see cref="MoveParams"/>, owner-read), and the owner
+    /// predicts with them (NetOwnerPrediction). Observers are unchanged: they interpolate the server's NetworkTransform.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(PlayerRig))]
@@ -59,6 +64,14 @@ namespace Emberdelve.Net
         /// <summary>The class the server admitted this player as (the id string only; the numbers stay the server's).</summary>
         public readonly NetworkVariable<FixedString32Bytes> ServerClassId = new NetworkVariable<FixedString32Bytes>(
             default(FixedString32Bytes), NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+
+        /// <summary>
+        /// U3A4b: the movement numbers the server resolved for this player (DEX, gear, status and flow folded in), readable by the owner
+        /// only, written by the server only. The owner's prediction runs on exactly these. NEW NGO usage (UNCERTAIN): a
+        /// NetworkVariable of an INetworkSerializable + IEquatable struct with Owner read permission.
+        /// </summary>
+        public readonly NetworkVariable<MoveParamsWire> MoveParams = new NetworkVariable<MoveParamsWire>(
+            default(MoveParamsWire), NetworkVariableReadPermission.Owner, NetworkVariableWritePermission.Server);
 
         private static readonly List<NetPlayerRig> SpawnedRigs = new List<NetPlayerRig>();
 
@@ -97,8 +110,18 @@ namespace Emberdelve.Net
             if (!SpawnedRigs.Contains(this)) SpawnedRigs.Add(this);
 
             // U3A4a: the owning client of a remote-simulated player streams its input (host's own player moves with its own Update).
-            if (Role == NetPlayerRole.Owner && GetComponent<NetInputSender>() == null)
-                gameObject.AddComponent<NetInputSender>().Configure(this, NetBootstrap.LaunchArgs);
+            // U3A4b: and predicts it locally (the prediction exists first so the sender can hand it every frame).
+            if (Role == NetPlayerRole.Owner)
+            {
+                if (GetComponent<NetOwnerPrediction>() == null)
+                {
+                    gameObject.AddComponent<NetOwnerPrediction>().Configure(this);
+                    MoveParams.OnValueChanged += OnMoveParamsChanged;
+                }
+
+                if (GetComponent<NetInputSender>() == null)
+                    gameObject.AddComponent<NetInputSender>().Configure(this, NetBootstrap.LaunchArgs);
+            }
 
             Debug.Log(Emberdelve.Net.Rules.NetTuning.LogPrefix + "[" + (IsServer ? (IsOwner ? "host" : "server") : "client") +
                       "] player object spawned role=" + Role + " netId=" + NetworkObjectId + " owner=" + OwnerClientId +
@@ -111,8 +134,17 @@ namespace Emberdelve.Net
             ServerPartyId.OnValueChanged -= OnServerPartyIdChanged;
             SpawnedRigs.Remove(this);
 
+            MoveParams.OnValueChanged -= OnMoveParamsChanged;
+
             NetInputSender sender = GetComponent<NetInputSender>();
             if (sender != null) Destroy(sender);
+
+            NetOwnerPrediction prediction = GetComponent<NetOwnerPrediction>();
+            if (prediction != null)
+            {
+                prediction.LogFinal();
+                Destroy(prediction);
+            }
 
             if (!IsServer)
             {
@@ -141,6 +173,26 @@ namespace Emberdelve.Net
             NetMovementServer movement = NetMovementServer.Current;
             if (movement == null) return;
             movement.Receive(this, rpcParams.Receive.SenderClientId, in batch);
+        }
+
+        /// <summary>
+        /// U3A4b, server to owner: the state the server reached after the newest input frame it processed (see MoveAckWire). Unreliable
+        /// (a lost Ack is replaced by the next), owner only, no identity parameter. NEW NGO usage (UNCERTAIN): SendTo.Owner together
+        /// with Delivery = Unreliable. Runs on the owning client; anywhere else it does nothing.
+        /// </summary>
+        [Rpc(SendTo.Owner, Delivery = RpcDelivery.Unreliable)]
+        public void AckRpc(MoveAckWire ack)
+        {
+            NetOwnerPrediction prediction = GetComponent<NetOwnerPrediction>();
+            if (prediction != null) prediction.OnAck(in ack);
+        }
+
+        private void OnMoveParamsChanged(MoveParamsWire previous, MoveParamsWire current)
+        {
+            NetOwnerPrediction prediction = GetComponent<NetOwnerPrediction>();
+            if (prediction == null) return;
+            MoveParamsData data = current.ToData();
+            if (data.IsValid) prediction.OnParamsChanged(in data);
         }
 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR

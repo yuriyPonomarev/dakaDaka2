@@ -19,6 +19,7 @@ namespace Emberdelve.EditorTools
 {
     /// <summary>
     /// U3A4a acceptance gate: server-simulated movement from client input frames, with real independent processes on loopback.
+    /// U3A4b extends it with owner prediction and reconciliation (sections 6b and 8b; every U3A4a check is kept).
     ///
     ///   Unity.exe -batchmode -nographics -projectPath . -logFile Logs/net_movement.log
     ///             -executeMethod Emberdelve.EditorTools.EmberdelveNetMovementGate.Run
@@ -41,6 +42,13 @@ namespace Emberdelve.EditorTools
     /// wall on the near side; no sampled server interval and no per-tick speed exceeds the resolved sprint speed x 1.15 for anyone.
     /// Negative checks: each cheat produces its own REJECT line and counter on B, B's position and the victim V's position do not
     /// change, honest clients (A, W, V) trip no replay / invalid / forge counter, and A's flood-run is not faster than one honest stream.
+    ///
+    /// U3A4b checks: the owner A predicts with the server-resolved speeds (its client log's "prediction started" numbers equal the
+    /// server's "params" line); through walk, sprint and jump A's own reconcile statistics show no snap, a mean error of at most
+    /// 0.05 m and no fight with the transform sync; A's predicted final position is within 0.15 m of the server's. Forced correction
+    /// (section 8b): the server (-ember-net-dev-shove, development build) teleports A 2 m once; A must snap at least once, replay,
+    /// and converge to the server position, and B's view of A follows too. A's flood-run (hostile traffic, extra frames are not
+    /// predicted) is outside the honest-movement statistics, which are read at the end of the jump step.
     /// Final line: [Emberdelve][NetMovement] PASS|FAIL checks=N failures=M
     /// </summary>
     public static class EmberdelveNetMovementGate
@@ -109,6 +117,46 @@ namespace Emberdelve.EditorTools
             public int Id, Ticks;
             public float Rest, YMax, Rise;
             public long Tick;
+        }
+
+        private sealed class Recon
+        {
+            public int Acks, Blends, Snaps, Replays, ReplayFrames, Missing, Stale, Fights;
+            public float MaxErr, MeanErr;
+            public string At = "";
+        }
+
+        private static List<Recon> ParseRecon(string clientText)
+        {
+            List<Recon> list = new List<Recon>();
+            foreach (Match m in Regex.Matches(clientText, @"\[client\] reconcile acks=(\d+) maxErr=" + Num + " meanErr=" + Num + @" blends=(\d+) snaps=(\d+) replays=(\d+) replayFrames=(\d+) missing=(\d+) stale=(\d+) fights=(\d+)(?: at=(\S+))?"))
+            {
+                list.Add(new Recon
+                {
+                    Acks = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture),
+                    MaxErr = Fl(m.Groups[2].Value),
+                    MeanErr = Fl(m.Groups[3].Value),
+                    Blends = int.Parse(m.Groups[4].Value, CultureInfo.InvariantCulture),
+                    Snaps = int.Parse(m.Groups[5].Value, CultureInfo.InvariantCulture),
+                    Replays = int.Parse(m.Groups[6].Value, CultureInfo.InvariantCulture),
+                    ReplayFrames = int.Parse(m.Groups[7].Value, CultureInfo.InvariantCulture),
+                    Missing = int.Parse(m.Groups[8].Value, CultureInfo.InvariantCulture),
+                    Stale = int.Parse(m.Groups[9].Value, CultureInfo.InvariantCulture),
+                    Fights = int.Parse(m.Groups[10].Value, CultureInfo.InvariantCulture),
+                    At = m.Groups[11].Success ? m.Groups[11].Value : ""
+                });
+            }
+
+            return list;
+        }
+
+        private static bool TryLastPredict(string clientText, out Vector3 pos)
+        {
+            pos = Vector3.zero;
+            MatchCollection matches = Regex.Matches(clientText, @"\[client\] predict pos=" + Vec);
+            if (matches.Count == 0) return false;
+            pos = V3(matches[matches.Count - 1], 1);
+            return true;
         }
 
         private static Vector3 V3(Match m, int first)
@@ -355,14 +403,16 @@ namespace Emberdelve.EditorTools
                 start[i] = Path.Combine(runDir, "client_" + names[i] + ".start");
             }
 
-            foreach (string f in new[] { quitServer, quit[0], quit[1], quit[2], quit[3], start[0], start[1], start[2], start[3] })
+            string shoveFile = Path.Combine(runDir, "server.shove");
+            foreach (string f in new[] { quitServer, shoveFile, quit[0], quit[1], quit[2], quit[3], start[0], start[1], start[2], start[3] })
                 if (File.Exists(f)) File.Delete(f);
 
             string serverLog = Path.Combine(logs, "server.log");
             Process server = Launch(exe, serverLog,
                 "-ember-net server -ember-port " + port + " -ember-net-quit-file " + Q(quitServer) +
                 " -ember-net-autoquit 600 -ember-net-disconnect-timeout-ms " + DisconnectTimeoutMs +
-                " -ember-net-max-players 4 -ember-net-no-enemies");
+                " -ember-net-max-players 4 -ember-net-no-enemies" +
+                " -ember-net-dev-shove mv-a:" + Yaw(yawBack) + ":2.0 -ember-net-dev-shove-file " + Q(shoveFile));
             Check(server != null, "server process started pid=" + (server != null ? server.Id.ToString() : "-"));
             if (server == null) return 1;
 
@@ -508,7 +558,38 @@ namespace Emberdelve.EditorTools
             Match aDone = Regex.Match(textA, @"script chain done steps=4 pos=" + Vec);
             MoveLine lastA = movesA.FindLast(m => !m.Final);
             Check(aDone.Success && lastA != null && Vector3.Distance(V3(aDone, 1), lastA.Pos) <= 0.3f,
-                "the owner A's own transform follows the server (4a has no prediction): within 0.3 m of the server position");
+                "the owner A's own position (predicted since U3A4b) at the end of its script is within 0.3 m of the server's final position");
+
+            // ---- 6b. U3A4b: the owner predicted, with the server's numbers, and agreed with the server ------------------------
+            Match paramsA = Regex.Match(serverText, @"params id=" + idA + " walk=" + Num + " sprint=" + Num + " crouch=" + Num);
+            Match startedA = Regex.Match(textA, @"\[client\] prediction started walk=" + Num + " sprint=" + Num + " crouch=" + Num);
+            Check(paramsA.Success && startedA.Success &&
+                  Mathf.Abs(Fl(paramsA.Groups[1].Value) - Fl(startedA.Groups[1].Value)) < 0.002f &&
+                  Mathf.Abs(Fl(paramsA.Groups[2].Value) - Fl(startedA.Groups[2].Value)) < 0.002f &&
+                  Mathf.Abs(Fl(paramsA.Groups[3].Value) - Fl(startedA.Groups[3].Value)) < 0.002f,
+                "A predicts with the server-resolved speeds (server params walk/sprint/crouch == the client's prediction numbers)");
+            Check(paramsA.Success && Mathf.Abs(Fl(paramsA.Groups[1].Value) - regA.Walk) < 0.002f && Mathf.Abs(Fl(paramsA.Groups[2].Value) - regA.Sprint) < 0.002f,
+                "the published params are the same resolved speeds the server registered (walk " + regA.Walk.ToString("F3", CultureInfo.InvariantCulture) + ")");
+
+            List<Recon> reconA = ParseRecon(textA);
+            Recon honest = reconA.Find(r => r.At == "step:jump");
+            Check(honest != null, "A logged its reconcile statistics at the end of the jump step (" + reconA.Count + " reconcile lines)");
+            if (honest != null)
+            {
+                Debug.Log(Tag + " A honest-phase " + C + "reconcile acks=" + honest.Acks + " maxErr=" + honest.MaxErr.ToString("F3", CultureInfo.InvariantCulture) +
+                          " meanErr=" + honest.MeanErr.ToString("F3", CultureInfo.InvariantCulture) + " blends=" + honest.Blends + " snaps=" + honest.Snaps +
+                          " replays=" + honest.Replays + " missing=" + honest.Missing + " stale=" + honest.Stale + " fights=" + honest.Fights);
+                Check(honest.Acks >= 30, "A compared at least 30 Acks with its prediction through walk, sprint and jump (" + honest.Acks + ")");
+                Check(honest.Snaps == 0 && honest.Replays == 0, "A had no snap (and no replay) during honest movement (snaps=" + honest.Snaps + " replays=" + honest.Replays + ")");
+                Check(honest.MeanErr <= 0.05f, "A's mean reconcile error is at most 0.05 m (" + honest.MeanErr.ToString("F3", CultureInfo.InvariantCulture) + ")");
+                Check(honest.Fights == 0, "the owner's NetworkTransform did not move the predicted body (fights=" + honest.Fights + ")");
+            }
+
+            Check(Regex.IsMatch(textA, @"\[client\] reconcile acks=\d+ .* at=script-end"), "A logged its reconcile statistics at the end of its script");
+            bool seenPredicted = TryLastPredict(textA, out Vector3 predictedA);
+            Check(seenPredicted && lastA != null && Vector3.Distance(predictedA, lastA.Pos) <= 0.15f,
+                "A's predicted final position is within 0.15 m of the server's final position (" +
+                (seenPredicted && lastA != null ? Vector3.Distance(predictedA, lastA.Pos).ToString("F3", CultureInfo.InvariantCulture) : "?") + " m)");
 
             // ---- 7. B's cheats: counters, REJECT lines, nothing moved ----------------------------------------
             foreach (string kind in new[] { "nan", "big-move", "seq-jump", "replay", "flood", "forge-move" })
@@ -556,6 +637,63 @@ namespace Emberdelve.EditorTools
                 Check(worstInterval <= bound, names[i].ToUpperInvariant() + ": fastest sampled server interval " + worstInterval.ToString("F2", CultureInfo.InvariantCulture) + " m/s <= " + bound.ToString("F2", CultureInfo.InvariantCulture));
             }
 
+            // ---- 8b. U3A4b: forced correction ---------------------------------------------------------
+            // The server teleports A once by 2 m along the lane (toward the spawn). A's prediction cannot know: it must snap, replay
+            // and end up where the server says. (Done after the speed checks so the teleport is not read as speed.)
+            {
+                string textBefore = ReadShared(clientLogs[1]);
+                List<Recon> reconBefore = ParseRecon(textBefore);
+                int snapsBefore = reconBefore.Count > 0 ? reconBefore[reconBefore.Count - 1].Snaps : 0;
+                int snapLinesBefore = Regex.Matches(textBefore, @"\[client\] reconcile SNAP ").Count;
+                Check(Regex.Matches(ReadShared(serverLog), @"dev-shove applied").Count == 0, "the dev shove has not happened before the gate asks for it");
+
+                File.WriteAllText(shoveFile, "go");
+                Match shoved = WaitForRegex(serverLog, @"dev-shove applied id=" + idA + @" slot=mv-a from=" + Vec + " to=" + Vec + " meters=" + Num, 30, server);
+                Check(shoved != null, "the server applied the dev shove to A");
+                if (shoved != null)
+                {
+                    Vector3 shoveFrom = V3(shoved, 1), shoveTo = V3(shoved, 4);
+                    Check(Mathf.Abs(Flat(shoveFrom, shoveTo) - 2f) < 0.05f, "the shove moved A " + Flat(shoveFrom, shoveTo).ToString("F2", CultureInfo.InvariantCulture) + " m (2 m asked)");
+
+                    bool snapped = false;
+                    DateTime snapDeadline = DateTime.UtcNow.AddSeconds(15);
+                    while (DateTime.UtcNow < snapDeadline && !snapped)
+                    {
+                        snapped = Regex.Matches(ReadShared(clientLogs[1]), @"\[client\] reconcile SNAP ").Count > snapLinesBefore;
+                        if (!snapped) Thread.Sleep(200);
+                    }
+
+                    Check(snapped, "A snapped after the server moved it (a SNAP line in A's log)");
+                    Thread.Sleep(3500); // let the replay, the blend of what follows and the observers settle
+
+                    string textAfter = ReadShared(clientLogs[1]);
+                    string serverAfter = ReadShared(serverLog);
+                    List<Recon> reconAfter = ParseRecon(textAfter);
+                    Recon last = reconAfter.Count > 0 ? reconAfter[reconAfter.Count - 1] : null;
+                    Check(last != null && last.Snaps >= snapsBefore + 1, "A's snap counter went up by at least one (" + snapsBefore + " -> " + (last != null ? last.Snaps : -1) + ")");
+                    Check(last != null && last.Replays >= snapsBefore + 1 && last.Replays == last.Snaps, "every snap replayed the unacknowledged frames (replays=" + (last != null ? last.Replays : -1) + ")");
+
+                    MatchCollection snapLines = Regex.Matches(textAfter, @"\[client\] reconcile SNAP error=" + Num);
+                    Check(snapLines.Count > snapLinesBefore && Fl(snapLines[snapLines.Count - 1].Groups[1].Value) > 1.0f && Fl(snapLines[snapLines.Count - 1].Groups[1].Value) < 3.0f,
+                        "the snap's measured error is about the 2 m shove (" + (snapLines.Count > 0 ? snapLines[snapLines.Count - 1].Groups[1].Value : "?") + " m)");
+
+                    List<MoveLine> movesAfter = ParseMoves(serverAfter, idA);
+                    MoveLine lastAfter = movesAfter.FindLast(m => !m.Final);
+                    Check(lastAfter != null && Vector3.Distance(lastAfter.Pos, shoveTo) <= 0.1f,
+                        "A stayed where it was shoved to on the server (" + (lastAfter != null ? Vector3.Distance(lastAfter.Pos, shoveTo).ToString("F3", CultureInfo.InvariantCulture) : "?") + " m from the target)");
+
+                    bool predictedAfter = TryLastPredict(textAfter, out Vector3 predictedPos);
+                    Check(predictedAfter && lastAfter != null && Vector3.Distance(predictedPos, lastAfter.Pos) <= 0.15f,
+                        "after the snap A converged to the server position: " + (predictedAfter && lastAfter != null ? Vector3.Distance(predictedPos, lastAfter.Pos).ToString("F3", CultureInfo.InvariantCulture) : "?") + " m <= 0.15 m");
+                    Check(predictedAfter && Vector3.Distance(predictedPos, shoveTo) <= 0.3f, "A's own position is at the shove target, not where it was predicted to be");
+
+                    bool seenByB = TryLastView(ReadShared(clientLogs[0]), idA, out Vector3 viewedAfter);
+                    Check(seenByB && lastAfter != null && Vector3.Distance(viewedAfter, lastAfter.Pos) <= 0.15f,
+                        "B's view of A follows the shove: " + (seenByB && lastAfter != null ? Vector3.Distance(viewedAfter, lastAfter.Pos).ToString("F3", CultureInfo.InvariantCulture) : "?") + " m from the server position");
+                    Debug.Log(Tag + " A after the forced correction: " + (last != null ? "snaps=" + last.Snaps + " replays=" + last.Replays + " blends=" + last.Blends + " acks=" + last.Acks : "no reconcile line"));
+                }
+            }
+
             // ---- 9. graceful end --------------------------------------------------------------------
             for (int i = 0; i < 4; i++) File.WriteAllText(quit[i], "quit");
             for (int i = 0; i < 4; i++)
@@ -598,6 +736,28 @@ namespace Emberdelve.EditorTools
                 }
             }
 
+            // ---- 9b. U3A4b: what the server sent back, and A's final statistics --------------------------
+            string textFinalA = ReadShared(clientLogs[1]);
+            Recon finalA = ParseRecon(textFinalA).Find(r => r.At == "final");
+            Check(finalA != null, "A logged its final reconcile statistics when it left");
+            if (finalA != null)
+            {
+                Debug.Log(Tag + " A final " + C + "reconcile acks=" + finalA.Acks + " maxErr=" + finalA.MaxErr.ToString("F3", CultureInfo.InvariantCulture) +
+                          " meanErr=" + finalA.MeanErr.ToString("F3", CultureInfo.InvariantCulture) + " blends=" + finalA.Blends + " snaps=" + finalA.Snaps +
+                          " replays=" + finalA.Replays + " missing=" + finalA.Missing + " stale=" + finalA.Stale + " fights=" + finalA.Fights);
+                Check(finalA.Acks >= 100 && finalA.Snaps >= 1 && finalA.Fights == 0,
+                    "A's final statistics: acks " + finalA.Acks + " >= 100, snaps " + finalA.Snaps + " >= 1 (the shove), fights " + finalA.Fights + " == 0");
+            }
+
+            for (int i = 0; i < 4; i++)
+            {
+                Match fin = Regex.Match(serverText, @"move id=" + ids[i] + @" .* final=1 .* acks=(\d+) shoves=(\d+)");
+                int acksSent = fin.Success ? int.Parse(fin.Groups[1].Value, CultureInfo.InvariantCulture) : -1;
+                int shoves = fin.Success ? int.Parse(fin.Groups[2].Value, CultureInfo.InvariantCulture) : -1;
+                Check(fin.Success && acksSent >= 100, names[i].ToUpperInvariant() + ": the server sent " + acksSent + " Acks to its owner (>= 100)");
+                Check(fin.Success && shoves == (i == 1 ? 1 : 0), names[i].ToUpperInvariant() + ": shoves applied " + shoves + " (only A, once)");
+            }
+
             File.WriteAllText(quitServer, "quit");
             bool sExited = WaitForExit(server, 30);
             Check(sExited, "server exited after the quit file");
@@ -630,7 +790,7 @@ namespace Emberdelve.EditorTools
             string dir = Path.Combine(projectRoot, "Assets", "Emberdelve", "Net");
             int rpcs = 0;
             int bad = 0;
-            bool submit = false, forge = false;
+            bool submit = false, forge = false, ack = false;
             if (Directory.Exists(dir))
             {
                 foreach (string file in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
@@ -650,6 +810,7 @@ namespace Emberdelve.EditorTools
                         string head = text.Substring(close, open - close);
                         if (head.Contains("SubmitMoveRpc")) submit = true;
                         if (head.Contains("ForgeMoveTestRpc")) forge = true;
+                        if (head.Contains("AckRpc")) ack = true;
                         string parameters = text.Substring(open, end - open + 1);
                         if (Regex.IsMatch(parameters, @"(?i)(player|combat|party|sender|actor)\s*_?id"))
                         {
@@ -660,7 +821,7 @@ namespace Emberdelve.EditorTools
                 }
             }
 
-            Check(rpcs >= 3 && submit && forge, "source scan found the movement RPCs (SubmitMoveRpc, ForgeMoveTestRpc) among " + rpcs + " [Rpc] methods");
+            Check(rpcs >= 4 && submit && forge && ack, "source scan found the movement RPCs (SubmitMoveRpc, ForgeMoveTestRpc, and U3A4b's AckRpc) among " + rpcs + " [Rpc] methods");
             Check(bad == 0, "no [Rpc] signature under Net/ carries a player/combat/party id parameter");
         }
 

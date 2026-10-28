@@ -16,8 +16,10 @@ namespace Emberdelve.Net
     ///   (no input, the spawn yaw).
     ///   network tick (NetworkTickSystem.Tick): ONE aggregated frame, sent with the previous two as one unreliable RPC.
     ///
-    /// There is no local simulation in 4a: the owner's PlayerMovement stays ExternalDriven and its transform follows the server
-    /// (NetworkTransform). The hostile script steps (flood / replay / NaN / big move / sequence jump / forged owner) only add
+    /// 4a had no local simulation. U3A4b: for every honest frame it flushes, this sender first hands the frame to the sibling
+    /// NetOwnerPrediction (which steps the owner's own PlayerMovement with it), then sends it. The extra frames of the flood steps
+    /// are NOT predicted (a hostile stream by definition; the server would not move more for them either), nor are the hostile
+    /// frames below. The hostile script steps (flood / replay / NaN / big move / sequence jump / forged owner) only add
     /// extra, deliberately bad frames on top of the idle honest stream; they exist so the server's counters can be proven, and
     /// the whole class is a test driver outside DEVELOPMENT_BUILD / the Editor (the hostile paths are compiled out there).
     /// </summary>
@@ -32,6 +34,7 @@ namespace Emberdelve.Net
         private const uint SeqJumpDistance = 100000u;
 
         private NetPlayerRig _owner;
+        private NetOwnerPrediction _prediction;
         private PlayerRig _rig;
         private NetworkManager _nm;
         private NetworkTickSystem _ticks;
@@ -61,6 +64,7 @@ namespace Emberdelve.Net
         public void Configure(NetPlayerRig owner, NetLaunchArgs args)
         {
             _owner = owner;
+            _prediction = owner.GetComponent<NetOwnerPrediction>();
             _rig = owner.Rig;
             _args = args;
             _nm = owner.NetworkManager;
@@ -117,7 +121,13 @@ namespace Emberdelve.Net
                 float multiplier = look.sqrMagnitude > 1f ? 1f : Time.deltaTime * GamepadTurnSpeed;
                 _yaw = MoveInputFrame.WrapDegrees(_yaw + look.x * LookScale * multiplier);
                 _pitch = MoveInputFrame.ClampPitch(_pitch - look.y * LookScale * multiplier);
-                if (_rig.Look != null) _rig.Look.ApplyPitch(_pitch); // own camera only; the body yaw follows the server in 4a
+                // U3A4b: the owner's own view is local (yaw and pitch), not a round trip; movement and the server use the same numbers
+                // from the frame. Before prediction exists (4a behaviour) only the pitch is applied and the body yaw follows the server.
+                if (_rig.Look != null)
+                {
+                    if (_prediction != null && _prediction.IsPredicting) _rig.Look.ApplyAimPose(_yaw, _pitch);
+                    else _rig.Look.ApplyPitch(_pitch);
+                }
             }
 
             Vector2 move = input.Move;
@@ -161,12 +171,14 @@ namespace Emberdelve.Net
                 NetScriptStep step = _spec.Steps[_scriptCompleted];
                 _scriptCompleted++;
                 Debug.Log(NetTuning.LogPrefix + "[client] script " + step.Name + " done pos=" + Pos(_owner.transform.position));
+                if (_prediction != null) _prediction.LogStats("step:" + step.Name);
             }
 
             if (intent.Done && !_scriptLoggedAll)
             {
                 _scriptLoggedAll = true;
                 Debug.Log(NetTuning.LogPrefix + "[client] script chain done steps=" + _spec.Steps.Count + " pos=" + Pos(_owner.transform.position));
+                if (_prediction != null) _prediction.LogStats("script-end");
             }
         }
 
@@ -193,7 +205,9 @@ namespace Emberdelve.Net
 #endif
             for (int i = 0; i < batches; i++)
             {
-                _aggregator.Flush();
+                MoveInputFrame flushed = _aggregator.Flush();
+                // Only the first (honest) frame of a tick is predicted; flood extras are not.
+                if (i == 0 && _prediction != null) _prediction.PredictFrame(in flushed);
                 int count = _aggregator.FillBatch(_batch);
                 _owner.SubmitMoveRpc(MoveBatchWire.From(_batch, count));
                 _sentBatches++;

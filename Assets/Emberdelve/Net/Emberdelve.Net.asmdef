@@ -5,7 +5,8 @@
     "Emberdelve.NetRules",
     "Unity.Netcode.Runtime",
     "Unity.Networking.Transport",
-    "Unity.Collections"
+    "Unity.Collections",
+    "Unity.InputSystem"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

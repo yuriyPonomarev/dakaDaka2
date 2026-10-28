@@ -416,13 +416,13 @@ namespace Emberdelve.EditorTools
 
             // Other non-reproducible or platform sources, and low-level identity minting, outside explicit allowlists.
             // Entropy (RaidSession seed default) lives in RunContext; ItemInstance.cs and Rules/ItemIdentityRules.cs own the default uid draw; the review bridge
-            // only stamps a log timestamp.
+            // only stamps a log timestamp; Net/NetLobbyBridge.cs mints the lobby dev session slot for online Join, not an item identity.
             (string pattern, string[] allowed)[] guarded =
             {
                 (@"Unity\.Mathematics\.Random|\bnew\s+Unity\.Mathematics", new string[0]),
                 (@"RandomNumberGenerator", new string[0]),
                 (@"Environment\.TickCount|Stopwatch\.GetTimestamp", new string[0]),
-                (@"Guid\.NewGuid\s*\(", new[] { "Core/RunContext.cs", "Items/ItemInstance.cs", "Rules/ItemIdentityRules.cs" }),
+                (@"Guid\.NewGuid\s*\(", new[] { "Core/RunContext.cs", "Items/ItemInstance.cs", "Rules/ItemIdentityRules.cs", "Net/NetLobbyBridge.cs" }),
                 (@"DateTime\.(Now|UtcNow)", new[] { "Core/RunContext.cs", "Review/EmberdelveReviewBridge.cs" }),
                 (@"\bTryCreateNew\s*\(", new[] { "Items/ItemInstance.cs" }),
                 (@"ItemIdentityRules\.TryMintUid\s*\(", new[] { "Items/ItemInstance.cs" }),

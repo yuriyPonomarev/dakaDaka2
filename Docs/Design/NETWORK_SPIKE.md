@@ -1,6 +1,8 @@
 # U3 network spike — implementation constraints
 
-Research/planning only, 23 October 2026. No networking package has been installed and no online acceptance is claimed.
+Status (U3A5, October 2026): slices 1-4 below are implemented with NGO 2.7.0 / Unity Transport 2.6.0 (details in Docs/Tasks/U3A1..U3A5.md; how to run: Docs/NETWORK_PLAY.md). Slice 4 includes a minimal lobby Join/Host panel. Slices 5-6 (server combat, contested inventory, extraction, persistence) are U3B/U4 and are not started. Online acceptance for U3A is the process gates (EmberdelveNetFinalGate and its predecessors); the windowed two-client screenshot pass is separate.
+
+Original note (23 October 2026): research/planning only; at that time no networking package had been installed.
 
 ## Requirements already decided
 
