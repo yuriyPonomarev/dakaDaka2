@@ -547,6 +547,7 @@ namespace Emberdelve.EditorTools
                 _objects.Add(authorityObject);
                 _authority = authorityObject.AddComponent<LocalCombatAuthority>();
                 SetReference(_authority, "config", _config);
+                _authority.SimulateBallistics = false;   // D2: this gate's literals assert straight-line geometry and the legacy range falloff; the ballistic sim has its own gate (EmberdelveProjectileSimGate).
             }
 
             /// <summary>

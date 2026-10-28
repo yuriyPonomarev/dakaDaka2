@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
+using Emberdelve.Ballistics;
 using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.Items;
@@ -78,6 +79,7 @@ namespace Emberdelve.EditorTools
             ApplyDefenseKit();
             ApplySwingPatterns();
             ApplyCombatFlow();
+            ApplyProjectileBallistics();
             ApplySkillKit();
             ApplyAttributeDefinitions();
             ApplyAttributeVitalBases();
@@ -1696,6 +1698,63 @@ namespace Emberdelve.EditorTools
         /// zones, hit slow, held-weapon move penalties, impact power / resist and the warrior's guard walk speed. Every
         /// number is our own tunable (Docs/Tasks/D1b.md has the table).
         /// </summary>
+        /// <summary>
+        /// D2: the authored ballistics of the two ranged weapons and the two projectile skills. Idempotent and unconditional,
+        /// like ApplyCombatFlow: LoadOrCreate only configures a brand-new asset, so this pass is what brings an existing
+        /// project's assets to the numbers below (the committed .asset files carry the same values). Muzzle speed
+        /// (projectileSpeed) and rangedRange are unchanged and stay in BuildWeapons.
+        ///
+        ///   Weapon     gravity m/s^2  max flight  air-time falloff (seconds -> scale)
+        ///   Hollow Bow     6.0          1.6 s     0 -> 1.00, 0.30 -> 1.00, 0.50 -> 0.70, 1.10 -> 0.45
+        ///   Ember Crossbow 3.0          1.2 s     0 -> 1.00, 0.30 -> 1.00, 0.50 -> 0.90, 0.90 -> 0.75
+        ///
+        /// The bow is the DnD recurve reference (about 0.7x after 0.5 s) and ends at the old range-falloff floor (0.45); the
+        /// crossbow is faster, flatter (half the gravity) and loses less. Multi-shot flies exactly like the weapon; Piercing
+        /// Shot is a heavier, flatter arrow (0.75 of the weapon's gravity). No drag by design.
+        /// </summary>
+        private static void ApplyProjectileBallistics()
+        {
+            if (Bow != null)
+            {
+                Bow.projectileGravity = 6f;
+                Bow.projectileMaxFlightTime = 1.6f;
+                Bow.projectileFalloff = new[]
+                {
+                    new ProjectileFalloffKey(0f, 1f), new ProjectileFalloffKey(0.30f, 1f),
+                    new ProjectileFalloffKey(0.50f, 0.70f), new ProjectileFalloffKey(1.10f, 0.45f)
+                };
+                EditorUtility.SetDirty(Bow);
+            }
+
+            if (Crossbow != null)
+            {
+                Crossbow.projectileGravity = 3f;
+                Crossbow.projectileMaxFlightTime = 1.2f;
+                Crossbow.projectileFalloff = new[]
+                {
+                    new ProjectileFalloffKey(0f, 1f), new ProjectileFalloffKey(0.30f, 1f),
+                    new ProjectileFalloffKey(0.50f, 0.90f), new ProjectileFalloffKey(0.90f, 0.75f)
+                };
+                EditorUtility.SetDirty(Crossbow);
+            }
+
+            if (ArcherMultiShot != null)
+            {
+                ArcherMultiShot.projectileSpeedMultiplier = 1f;
+                ArcherMultiShot.projectileGravityMultiplier = 1f;
+                EditorUtility.SetDirty(ArcherMultiShot);
+            }
+
+            if (ArcherPiercingShot != null)
+            {
+                ArcherPiercingShot.projectileSpeedMultiplier = 1f;
+                ArcherPiercingShot.projectileGravityMultiplier = 0.75f;
+                EditorUtility.SetDirty(ArcherPiercingShot);
+            }
+
+            AssetDatabase.SaveAssets();
+        }
+
         private static void ApplyCombatFlow()
         {
             if (Sword != null)

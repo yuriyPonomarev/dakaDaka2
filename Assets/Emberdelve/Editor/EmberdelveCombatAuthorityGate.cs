@@ -233,6 +233,7 @@ namespace Emberdelve.EditorTools
             _authority = go.AddComponent<LocalCombatAuthority>();
             typeof(LocalCombatAuthority).GetField("config", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(_authority, cfg);
             _authority.SetClock(() => _clock);
+            _authority.SimulateBallistics = false;   // D2: this gate's literals assert straight-line geometry and the legacy range falloff; the ballistic sim has its own gate (EmberdelveProjectileSimGate).
 
             GameObject headGo = new GameObject("CombatAuthorityGate_Head");
             _cleanup.Add(headGo);

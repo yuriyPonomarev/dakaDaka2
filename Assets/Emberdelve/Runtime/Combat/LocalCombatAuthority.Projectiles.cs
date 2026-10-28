@@ -1,13 +1,80 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Emberdelve.Ballistics;
 using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.Player;
 
 namespace Emberdelve.Combat
 {
+    /// <summary>How an authority-stepped projectile flight ended (D2 diagnostics and gates).</summary>
+    internal enum ProjectileEndReason
+    {
+        /// <summary>Flew its whole path-length range (Ranged Range) without touching anything.</summary>
+        RangeExhausted = 0,
+        /// <summary>Reached the weapon's maximum flight time.</summary>
+        TimeExpired = 1,
+        /// <summary>Stopped by level geometry: no hit through a wall.</summary>
+        Wall = 2,
+        /// <summary>Stopped by (or finished passing through) a body.</summary>
+        Body = 3,
+        /// <summary>Caught by a defender's guarding blade.</summary>
+        Blade = 4,
+    }
+
+    /// <summary>The end of one flight: where it stopped, why, and how long it was in the air (whole fixed steps).</summary>
+    internal readonly struct ProjectileEndReport
+    {
+        public readonly int Serial;
+        public readonly int InstigatorId;
+        public readonly ProjectileEndReason Reason;
+        public readonly int TargetId;
+        public readonly Vector3 Origin;
+        /// <summary>Last simulated position (the swept sphere's centre).</summary>
+        public readonly Vector3 Position;
+        /// <summary>Surface point of the contact for a wall, body or blade end; the last position otherwise.</summary>
+        public readonly Vector3 ImpactPoint;
+        public readonly int Steps;
+        public readonly float AirTime;
+        public readonly float Traveled;
+
+        public ProjectileEndReport(int serial, int instigatorId, ProjectileEndReason reason, int targetId, Vector3 origin,
+            Vector3 position, Vector3 impactPoint, int steps, float airTime, float traveled)
+        {
+            Serial = serial;
+            InstigatorId = instigatorId;
+            Reason = reason;
+            TargetId = targetId;
+            Origin = origin;
+            Position = position;
+            ImpactPoint = impactPoint;
+            Steps = steps;
+            AirTime = airTime;
+            Traveled = traveled;
+        }
+    }
+
     public sealed partial class LocalCombatAuthority
     {
+        /// <summary>
+        /// D2: when true (the default) new flights are ballistic: the weapon's gravity, maximum flight time and air-time
+        /// falloff table apply. When false a flight is the legacy straight line with range falloff (still stepped in fixed
+        /// substeps). Read once at launch, so toggling never changes a flight already in the air. Gates whose literals
+        /// assert straight-line geometry or the legacy range falloff turn it off; EmberdelveProjectileSimGate covers the rest.
+        /// </summary>
+        public bool SimulateBallistics { get; set; } = true;
+
+        private int _projectileSerial;
+
+        /// <summary>Fired after every non-final fixed step of every flight: (flight serial, instigator, step number, position, velocity).</summary>
+        internal event System.Action<int, int, int, Vector3, Vector3> ProjectileStepped;
+
+        /// <summary>Fired once when a flight ends (wall, body, blade, range or time).</summary>
+        internal event System.Action<ProjectileEndReport> ProjectileEnded;
+
+        /// <summary>Flights currently in the air.</summary>
+        internal int ActiveProjectileCount => _projectiles.Count;
+
         private readonly List<ProjectileFlight> _projectiles = new List<ProjectileFlight>(32);
         private readonly RaycastHit[] _projectileHits = new RaycastHit[64];
         private readonly List<HitShape> _projectileShapeBuffer = new List<HitShape>(16);
@@ -42,6 +109,18 @@ namespace Emberdelve.Combat
             public float Range;
             public float Traveled;
             public float Speed;
+            /// <summary>D2 simulated state: velocity (m/s) after the last step; Position is the matching point.</summary>
+            public Vector3 Velocity;
+            public Vector3 PreviousPosition;
+            public Vector3 ImpactPoint;
+            /// <summary>Gravity in m/s^2 (0 = straight line), maximum air time in seconds (0 = none) and whether the weapon's air-time table applies; fixed at launch.</summary>
+            public float Gravity;
+            public float MaxFlightTime;
+            public bool AirTimeFalloff;
+            /// <summary>Frame time not yet spent on a whole fixed step, and the number of fixed steps taken.</summary>
+            public float Pending;
+            public int Steps;
+            public int Serial;
             public float Radius;
             public float DamageMultiplier;
             public float FlatDamageBonus;
@@ -80,6 +159,8 @@ namespace Emberdelve.Combat
                 DamageMultiplier = OutgoingMultiplier(instigator, weapon),
                 FlatDamageBonus = FlatWeaponBonus(instigator, weapon),
             };
+
+            InitFlightBallistics(flight, weapon, null);
 
             KitAccess ammo = KitFor(instigator.CombatId, instigator, null, instigator as IAmmoSource);
             if (ammo.HasAmmoModel && !ammo.TryConsumeAmmo(1))
@@ -286,6 +367,7 @@ namespace Emberdelve.Combat
                 MaxTargets = Mathf.Max(1, activation.Skill.projectileMaxTargets),
                 Piercing = activation.Skill.projectileMaxTargets > 1,
             };
+            InitFlightBallistics(flight, weapon, activation.Skill);
             _projectiles.Add(flight);
             group.LaunchedSlots.Add(projectileIndex);
             group.PendingFlights++;
@@ -308,6 +390,28 @@ namespace Emberdelve.Combat
             radius = Mathf.Max(0.01f, weapon.projectileRadius * 0.5f);
         }
 
+        /// <summary>
+        /// D2: snapshots the ballistic parameters of a new flight. Velocity is the authoritative aim direction times the muzzle speed
+        /// (the weapon's, scaled by the skill's authored multiplier); gravity, maximum air time and the falloff switch come from
+        /// the weapon asset (gravity also scaled by the skill), or are zero when <see cref="SimulateBallistics"/> is off.
+        /// </summary>
+        private void InitFlightBallistics(ProjectileFlight flight, WeaponData weapon, SkillData skill)
+        {
+            flight.Serial = ++_projectileSerial;
+            float speedScale = skill != null ? Mathf.Clamp(SafeScalar(skill.projectileSpeedMultiplier, 1f), 0.25f, 4f) : 1f;
+            float gravityScale = skill != null ? Mathf.Clamp(SafeScalar(skill.projectileGravityMultiplier, 1f), 0f, 4f) : 1f;
+            flight.Speed = Mathf.Max(2f, flight.Speed * speedScale);
+            flight.Velocity = flight.Direction * flight.Speed;
+            flight.PreviousPosition = flight.Position;
+            flight.ImpactPoint = flight.Position;
+            bool ballistic = SimulateBallistics;
+            flight.Gravity = ballistic ? Mathf.Clamp(SafeScalar(weapon.projectileGravity, 0f), 0f, 100f) * gravityScale : 0f;
+            flight.MaxFlightTime = ballistic ? Mathf.Max(0f, SafeScalar(weapon.projectileMaxFlightTime, 0f)) : 0f;
+            flight.AirTimeFalloff = ballistic && weapon.HasAirTimeFalloff;
+        }
+
+        private static float SafeScalar(float value, float fallback) => IsFiniteScalar(value) ? value : fallback;
+
         private bool IsProjectileMuzzleClear(Vector3 eye, Vector3 origin, WeaponData weapon)
         {
             LayerMask levelMask = config != null ? config.levelMask : Physics.DefaultRaycastLayers;
@@ -323,6 +427,14 @@ namespace Emberdelve.Combat
                     levelMask, QueryTriggerInteraction.Ignore);
         }
 
+        /// <summary>
+        /// Advances every flight by <paramref name="deltaTime"/> seconds of game time. The delta is only an ACCUMULATOR: each
+        /// flight takes whole fixed substeps of <see cref="ProjectileBallistics.StepSeconds"/> (1/60 s) and keeps the
+        /// remainder for the next call, so a flight's states and contact tests depend on how many steps it has taken and
+        /// never on the caller's frame rate; a server that reruns the launch gets the same flight. Flights are processed one
+        /// after another; they share no geometry state, only the per-cast hit budget and target death.
+        /// The attached visual is a pure presentation of this state: it is placed between the last two simulated positions.
+        /// </summary>
         internal void AdvanceProjectiles(float deltaTime)
         {
             if (deltaTime <= 0f || _projectiles.Count == 0)
@@ -333,7 +445,10 @@ namespace Emberdelve.Combat
             for (int i = _projectiles.Count - 1; i >= 0; i--)
             {
                 ProjectileFlight flight = _projectiles[i];
-                bool finished = StepProjectile(flight, Mathf.Max(0f, flight.Speed * deltaTime));
+                flight.Pending += deltaTime;
+                int steps = ProjectileBallistics.ConsumeSteps(ref flight.Pending, ProjectileBallistics.MaxStepsPerAdvance);
+                bool finished = false;
+                for (int s = 0; s < steps && !finished; s++) finished = StepProjectile(flight);
                 if (finished)
                 {
                     if (flight.Visual != null) flight.Visual.FinishAuthoritative(flight.Position);
@@ -343,7 +458,11 @@ namespace Emberdelve.Combat
                         flight.SkillGroup.PendingFlights = Mathf.Max(0, flight.SkillGroup.PendingFlights - 1);
                     }
                 }
-                else if (flight.Visual != null) flight.Visual.MoveAuthoritative(flight.Position, flight.Direction);
+                else if (flight.Visual != null)
+                {
+                    float alpha = Mathf.Clamp01(flight.Pending / ProjectileBallistics.StepSeconds);
+                    flight.Visual.MoveAuthoritative(Vector3.Lerp(flight.PreviousPosition, flight.Position, alpha), flight.Direction);
+                }
             }
             PruneProjectileSkillGroups();
         }
@@ -363,35 +482,81 @@ namespace Emberdelve.Combat
             _projectileGroupCleanup.Clear();
         }
 
-        private bool StepProjectile(ProjectileFlight flight, float stepDistance)
+        /// <summary>
+        /// One fixed simulation step of one flight. The integrator (<see cref="ProjectileBallistics.Advance"/>, exact for constant
+        /// gravity) gives the end of the step; the straight chord from the step's start to its end (at most ~1 m at crossbow speed,
+        /// within 0.1 mm of the true arc) is then swept for level geometry, bodies and blades exactly as before, so a wall
+        /// stops the arrow, hit volumes decide the first-touch location, and nothing is hit through a wall. Returns true when
+        /// the flight is over.
+        /// </summary>
+        private bool StepProjectile(ProjectileFlight flight)
         {
-            if (flight.Traveled >= flight.Range) return true;
-            float remainingStep = Mathf.Min(stepDistance, flight.Range - flight.Traveled);
-            int safety = 8;
-            while (remainingStep > 0.0001f && safety-- > 0)
+            const float dt = ProjectileBallistics.StepSeconds;
+            if (flight.Traveled >= flight.Range)
             {
-                Vector3 start = flight.Position;
-                Vector3 end = start + flight.Direction * remainingStep;
-                float segmentLength = remainingStep;
-                if (!TryFindProjectileContact(flight, start, end, out ICombatEntity target,
+                EndProjectile(flight, ProjectileEndReason.RangeExhausted, -1);
+                return true;
+            }
+
+            int stepIndex = flight.Steps;
+            flight.Steps++;
+            Vector3 stepStart = flight.Position;
+            BallisticState advanced = ProjectileBallistics.Advance(
+                new BallisticState(stepStart.x, stepStart.y, stepStart.z, flight.Velocity.x, flight.Velocity.y, flight.Velocity.z),
+                flight.Gravity, dt);
+            Vector3 stepEnd = new Vector3(advanced.PX, advanced.PY, advanced.PZ);
+            flight.Velocity = new Vector3(advanced.VX, advanced.VY, advanced.VZ);
+            flight.PreviousPosition = stepStart;
+
+            Vector3 chord = stepEnd - stepStart;
+            float stepLength = chord.magnitude;
+            if (stepLength > 0.00001f) flight.Direction = chord / stepLength;
+            float remainingPath = flight.Range - flight.Traveled;
+            bool clipped = stepLength > remainingPath;
+            if (clipped)
+            {
+                stepLength = remainingPath;
+                stepEnd = stepStart + flight.Direction * stepLength;
+            }
+
+            Vector3 cursor = stepStart;
+            float remaining = stepLength;
+            float consumed = 0f;
+            int safety = 8;
+            while (remaining > 0.0001f && safety-- > 0)
+            {
+                Vector3 segmentStart = cursor;
+                Vector3 segmentEnd = consumed <= 0f ? stepEnd : segmentStart + flight.Direction * remaining;
+                float segmentLength = remaining;
+                if (!TryFindProjectileContact(flight, segmentStart, segmentEnd, out ICombatEntity target,
                         out Vector3 point, out float distance, out bool bladeContact, out bool wall))
                 {
-                    flight.Position = end;
-                    flight.Traveled += remainingStep;
-                    return flight.Traveled >= flight.Range;
+                    consumed += remaining;
+                    flight.Traveled += remaining;
+                    remaining = 0f;
+                    break;
                 }
 
-                flight.Position = start + flight.Direction * distance;
+                cursor = segmentStart + flight.Direction * distance;
+                flight.Position = cursor;
                 flight.Traveled += distance;
-                remainingStep -= distance;
-                if (wall || target == null) return true;
+                remaining -= distance;
+                consumed += distance;
+                if (wall || target == null)
+                {
+                    flight.ImpactPoint = point;
+                    EndProjectile(flight, ProjectileEndReason.Wall, -1);
+                    return true;
+                }
 
+                // Air time of the contact: whole steps flown plus the fraction of this step's chord covered.
+                float contactAirTime = (stepIndex + Mathf.Clamp01(stepLength > 0f ? consumed / stepLength : 1f)) * dt;
                 bool hasSource = CombatRegistry.TryGet(flight.InstigatorId, out ICombatEntity source);
                 bool canDamage = hasSource && !target.IsDead && CombatTeams.AreHostile(source, target);
                 bool alreadyHit = flight.SkillGroup != null && flight.SkillGroup.Targets.Contains(target.CombatId);
                 if (canDamage && !alreadyHit)
                 {
-                    ApplyProjectileImpact(flight, target, point, bladeContact, start, segmentLength);
+                    ApplyProjectileImpact(flight, target, point, bladeContact, segmentStart, segmentLength, contactAirTime);
                     if (flight.SkillGroup != null && !flight.SkillGroup.Targets.Contains(target.CombatId))
                         flight.SkillGroup.Targets.Add(target.CombatId);
                 }
@@ -399,16 +564,43 @@ namespace Emberdelve.Combat
 
                 if (bladeContact || !flight.Piercing || !canDamage || alreadyHit || flight.HitCount >= flight.MaxTargets
                     || flight.SkillGroup != null && flight.SkillGroup.Hits >= flight.SkillGroup.Budget)
+                {
+                    flight.ImpactPoint = point;
+                    EndProjectile(flight, bladeContact ? ProjectileEndReason.Blade : ProjectileEndReason.Body, target.CombatId);
                     return true;
+                }
 
-                // Continue past a pierced body in this same tick. The next search skips all targets this cast
+                // Continue past a pierced body in this same step. The next search skips all targets this cast
                 // already hit, so a body with several colliders cannot absorb the same arrow twice.
-                float advance = Mathf.Min(0.002f, remainingStep);
-                flight.Position += flight.Direction * advance;
+                float advance = Mathf.Min(0.002f, remaining);
+                cursor += flight.Direction * advance;
+                flight.Position = cursor;
                 flight.Traveled += advance;
-                remainingStep -= advance;
+                remaining -= advance;
+                consumed += advance;
             }
-            return flight.Traveled >= flight.Range;
+
+            flight.Position = stepEnd;
+            flight.ImpactPoint = stepEnd;
+            if (clipped || flight.Traveled >= flight.Range)
+            {
+                EndProjectile(flight, ProjectileEndReason.RangeExhausted, -1);
+                return true;
+            }
+            if (flight.MaxFlightTime > 0f && flight.Steps * dt >= flight.MaxFlightTime)
+            {
+                EndProjectile(flight, ProjectileEndReason.TimeExpired, -1);
+                return true;
+            }
+            ProjectileStepped?.Invoke(flight.Serial, flight.InstigatorId, flight.Steps, flight.Position, flight.Velocity);
+            return false;
+        }
+
+        private void EndProjectile(ProjectileFlight flight, ProjectileEndReason reason, int targetId)
+        {
+            ProjectileEnded?.Invoke(new ProjectileEndReport(flight.Serial, flight.InstigatorId, reason, targetId,
+                flight.Origin, flight.Position, flight.ImpactPoint, flight.Steps,
+                flight.Steps * ProjectileBallistics.StepSeconds, flight.Traveled));
         }
 
         private bool TryFindProjectileContact(ProjectileFlight flight, Vector3 start, Vector3 end,
@@ -658,7 +850,7 @@ namespace Emberdelve.Combat
         }
 
         private void ApplyProjectileImpact(ProjectileFlight flight, ICombatEntity target,
-            Vector3 point, bool bladeContact, Vector3 segmentStart, float segmentLength)
+            Vector3 point, bool bladeContact, Vector3 segmentStart, float segmentLength, float airTime)
         {
             if (!CombatRegistry.TryGet(flight.InstigatorId, out ICombatEntity instigator) || target.IsDead) return;
             // A blade contact is stopped by the guard before the body, so it has no body location (x1, the guard
@@ -667,6 +859,8 @@ namespace Emberdelve.Combat
                 ? HitLocation.Unspecified
                 : ResolveProjectileLocation(flight, target, segmentStart, segmentLength, point);
             float locationMultiplier = LocationTable.Multiplier(location);
+            // D2: the damage falloff is the weapon's table read at the AIR TIME of this contact (negative = legacy range falloff).
+            float airTimeFalloff = flight.AirTimeFalloff ? flight.Weapon.AirTimeFalloffScale(airTime) : -1f;
             HitCandidate hit = new HitCandidate(target.CombatId, point, location == HitLocation.Head);
             if (flight.SkillGroup == null)
             {
@@ -674,7 +868,7 @@ namespace Emberdelve.Combat
                     flight.Attack.Charge, flight.Origin, flight.Direction, flight.Range, flight.Attack.Sequence, Now);
                 DamageInfo damage = DamageResolver.Resolve(flight.Weapon, resolved, hit, target,
                     flight.DamageMultiplier, flight.FlatDamageBonus,
-                    FlowTuning, true, bladeContact, location, locationMultiplier);
+                    FlowTuning, true, bladeContact, location, locationMultiplier, airTimeFalloff);
                 if (!damage.IsValid) return;
                 target.ApplyDamage(damage);
                 ApplyHitEffects(target, damage, flight.Weapon);
@@ -691,7 +885,7 @@ namespace Emberdelve.Combat
             float scale = activation.Skill.UsesFlatDamage ? 1f : activation.Scale;
             DamageInfo skillDamage = DamageResolver.ResolveSkill(resolvedSkill, hit, target,
                 flight.DamageMultiplier, scale, flight.FlatDamageBonus,
-                true, bladeContact, location, locationMultiplier);
+                true, bladeContact, location, locationMultiplier, airTimeFalloff);
             if (!skillDamage.IsValid) return;
             target.ApplyDamage(skillDamage);
             StatusSpec status = ScaleStatus(activation.Skill.TargetStatusSpec, activation.Scale);

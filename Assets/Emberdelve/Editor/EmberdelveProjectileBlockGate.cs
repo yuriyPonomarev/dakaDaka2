@@ -189,6 +189,7 @@ namespace Emberdelve.EditorTools
                     _authority = authorityObject.AddComponent<LocalCombatAuthority>();
                     typeof(LocalCombatAuthority).GetField("config", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(_authority, config);
                     _authority.SetClock(() => _clock);
+                    _authority.SimulateBallistics = false; // D2: this gate's literals assert straight-line geometry and the legacy range falloff; the ballistic sim has its own gate (EmberdelveProjectileSimGate).
 
                     WeaponData slowDiagnosticBow = Instantiate(_bow);
                     slowDiagnosticBow.name = "ProjectileBlock_LiveDiagnosticBow";
@@ -316,6 +317,7 @@ namespace Emberdelve.EditorTools
             _authority = authorityObject.AddComponent<LocalCombatAuthority>();
             typeof(LocalCombatAuthority).GetField("config", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(_authority, config);
             _authority.SetClock(() => _clock);
+            _authority.SimulateBallistics = false; // D2: this gate's literals assert straight-line geometry and the legacy range falloff; the ballistic sim has its own gate (EmberdelveProjectileSimGate).
 
             AimlessShooter forgedOrigin = new AimlessShooter
             {

@@ -31,6 +31,8 @@ MonoBehaviour:
   projectileCount: 1
   spreadDegrees: 0
   projectileMaxTargets: 2
+  projectileSpeedMultiplier: 1
+  projectileGravityMultiplier: 0.75
   damageMultiplier: 1.35
   flatDamage: -1
   targetStatus: 0

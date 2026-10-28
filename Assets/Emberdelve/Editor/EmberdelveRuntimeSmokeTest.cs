@@ -278,6 +278,9 @@ namespace Emberdelve.EditorTools
                 bool hasAuthority = GameServices.TryGet<ICombatAuthority>(out ICombatAuthority resolved);
                 _authority = resolved;
                 _localAuthority = resolved as LocalCombatAuthority;
+                // D2: the smoke test places enemies on precomputed straight rays and asserts range-falloff literals; run it with the
+                // legacy straight-line flights. Ballistics (drop, air-time falloff, walls) are covered by EmberdelveProjectileSimGate.
+                if (_localAuthority != null) _localAuthority.SimulateBallistics = false;
                 Check(hasAuthority, "combat authority registered in GameServices");
                 Check(_authority != null, "combat authority resolved");
                 Check(_layout != null && _grid != null, "layout and nav grid loadable at runtime");

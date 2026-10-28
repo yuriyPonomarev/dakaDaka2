@@ -22,10 +22,17 @@ namespace Emberdelve.Combat
         public static DamageInfo Resolve(WeaponData weapon, in AttackIntent intent, in HitCandidate hit,
             ICombatEntity target, float instigatorMultiplier = 1f, float weaponBaseDamageBonus = 0f,
             CombatFlowTuning tuning = null, bool rangedProjectile = false, bool guardBladeContact = false,
-            HitLocation projectileLocation = HitLocation.Unspecified, float projectileLocationMultiplier = 1f)
+            HitLocation projectileLocation = HitLocation.Unspecified, float projectileLocationMultiplier = 1f,
+            float airTimeFalloff = -1f)
         {
+            // D2: a projectile that carries an air-time falloff scale (>= 0) is NOT range-attenuated here; its
+            // falloff multiplies the finished hit below, after location and the defender's guard/armor. A negative
+            // value (every other caller, and flights with no table or with ballistics off) keeps the legacy range falloff.
+            bool airTimeScaled = rangedProjectile && airTimeFalloff >= 0f;
             float distance = Vector3.Distance(intent.Origin, hit.HitPoint);
-            float amount = weapon.DamageAtRange(distance, weaponBaseDamageBonus);
+            float amount = airTimeScaled
+                ? weapon.BoostedBaseDamage(weaponBaseDamageBonus)
+                : weapon.DamageAtRange(distance, weaponBaseDamageBonus);
 
             if (weapon.IsRanged)
             {
@@ -41,10 +48,28 @@ namespace Emberdelve.Combat
             if (rangedProjectile) amount *= Mathf.Max(0f, projectileLocationMultiplier);
             else if (hit.Headshot) amount *= HeadshotMultiplier;
 
-            return Finalize(amount, weapon, intent.Direction, intent.Origin, intent.InstigatorCombatId,
+            DamageInfo resolved = Finalize(amount, weapon, intent.Direction, intent.Origin, intent.InstigatorCombatId,
                 intent.InstigatorKind, hit, target, null, rangedProjectile ? projectileLocation : HitLocation.Unspecified,
                 weapon != null ? weapon.impactPower : 0f, tuning, rangedProjectile, guardBladeContact,
                 locationAuthoritative: rangedProjectile);
+            return airTimeScaled ? ApplyProjectileFalloff(resolved, airTimeFalloff) : resolved;
+        }
+
+        /// <summary>
+        /// D2: multiplies a finished projectile hit by its air-time falloff scale. This is the last factor of the
+        /// weapon formula (base x charge x power, x hit location, x the defender's guard reduction and armor, x falloff),
+        /// matching Docs/Design/DND_PARITY.md. Every earlier step is a multiplication, so the order only matters for the
+        /// 1.0 damage floor, which is applied once more here so a heavily attenuated hit never rounds below 1. The hit
+        /// keeps its point, direction, source, type, block flags, location and impact power. A NaN or infinite amount is
+        /// returned untouched (an invalid hit still fails <see cref="DamageInfo.IsValid"/> in the authority).
+        /// </summary>
+        public static DamageInfo ApplyProjectileFalloff(in DamageInfo info, float scale)
+        {
+            if (float.IsNaN(info.Amount) || float.IsInfinity(info.Amount)) return info;
+            float s = float.IsNaN(scale) || scale < 0f ? 0f : scale;
+            return new DamageInfo(Mathf.Max(1f, info.Amount * s), info.Point, info.Direction, info.SourcePosition,
+                info.SourceCombatId, info.SourceKind, info.Type, info.Blocked, info.Headshot, info.BlockReduction,
+                info.Location, info.ImpactPower, info.GuardBroken, info.RangedProjectile, info.GuardBladeContact);
         }
 
         /// <summary>
@@ -90,11 +115,13 @@ namespace Emberdelve.Combat
         public static DamageInfo ResolveSkill(in SkillIntent intent, in HitCandidate hit, ICombatEntity target,
             float instigatorMultiplier = 1f, float effectScale = 1f, float weaponBaseDamageBonus = 0f,
             bool rangedProjectile = false, bool guardBladeContact = false,
-            HitLocation projectileLocation = HitLocation.Unspecified, float projectileLocationMultiplier = 1f)
+            HitLocation projectileLocation = HitLocation.Unspecified, float projectileLocationMultiplier = 1f,
+            float airTimeFalloff = -1f)
         {
             SkillData skill = intent.Skill;
             float distance = Vector3.Distance(intent.Origin, hit.HitPoint);
             float amount;
+            bool airTimeScaled = false;
 
             if (skill == null) return DamageInfo.Invalid;
 
@@ -107,7 +134,11 @@ namespace Emberdelve.Combat
                 WeaponData weapon = intent.Weapon;
                 if (weapon == null) return DamageInfo.Invalid;
 
-                amount = weapon.DamageAtRange(distance, weaponBaseDamageBonus);
+                // D2: see Resolve. Only a weapon-based projectile skill takes the air-time falloff; a flat-number skill never had one.
+                airTimeScaled = rangedProjectile && airTimeFalloff >= 0f;
+                amount = airTimeScaled
+                    ? weapon.BoostedBaseDamage(weaponBaseDamageBonus)
+                    : weapon.DamageAtRange(distance, weaponBaseDamageBonus);
                 if (weapon.IsRanged) amount *= Mathf.Lerp(weapon.minChargeDamageScale, 1f, 1f);
                 amount *= Mathf.Max(0.05f, skill.damageMultiplier);
             }
@@ -131,9 +162,10 @@ namespace Emberdelve.Combat
             WeaponData source = intent.Weapon;
             DamageType type = source != null ? source.damageType : skill.UsesFlatDamage ? DamageType.Holy : DamageType.Physical;
 
-            return Finalize(amount, source, intent.Direction, intent.Origin, intent.InstigatorCombatId,
+            DamageInfo resolved = Finalize(amount, source, intent.Direction, intent.Origin, intent.InstigatorCombatId,
                 intent.InstigatorKind, hit, target, type, location: location, rangedProjectile: rangedProjectile,
                 guardBladeContact: guardBladeContact, locationAuthoritative: rangedProjectile);
+            return airTimeScaled ? ApplyProjectileFalloff(resolved, airTimeFalloff) : resolved;
         }
 
         /// <summary>

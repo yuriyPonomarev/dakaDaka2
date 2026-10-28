@@ -303,6 +303,7 @@ namespace Emberdelve.EditorTools
                 // authority time deterministically instead of forging a timestamp inside the intent.
                 _clock = Time.time;
                 _authority.SetClock(() => _clock);
+                _authority.SimulateBallistics = false;   // D2: this gate's literals assert straight-line geometry and the legacy range falloff; the ballistic sim has its own gate (EmberdelveProjectileSimGate).
 
                 // D1a: this gate probes the range / line-of-sight / rate rules of SubmitAttack with the warrior's
                 // sword. The player's melee goes through the swept swing now, so the arc-less melee path is refused

@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using Emberdelve.Ballistics;
 using Emberdelve.Core;
 using Emberdelve.Stats;
 
@@ -127,9 +128,18 @@ namespace Emberdelve.Data
         [Range(0.1f, 1f)] public float minChargeDamageScale = 0.45f;
         public int magazineSize = 7;
         public float reloadTime = 1.7f;
+        [Tooltip("Legacy RANGE falloff (metres from the muzzle). A projectile uses it only when the weapon has no air-time table below, or when the authority runs with ballistics off.")]
         public float falloffStartRange = 16f;
         public float falloffEndRange = 42f;
         [Range(0.1f, 1f)] public float falloffMinScale = 0.45f;
+
+        [Header("Ballistics (D2)")]
+        [Tooltip("Gravity on this weapon's projectile in m/s^2, straight down (muzzle speed is Projectile Speed above). 0 = a flat, drop-free flight, which is also what every weapon asset without this field gets.")]
+        [Range(0f, 40f)] public float projectileGravity = 0f;
+        [Tooltip("Longest time in the air in seconds before the projectile is removed. 0 = no time limit beyond Ranged Range (the path-length cap).")]
+        [Range(0f, 10f)] public float projectileMaxFlightTime = 0f;
+        [Tooltip("Damage scale by AIR TIME (seconds since launch, not distance): keys ascend by time, linear between them, held at the first/last key outside. Applied after location and the defender's guard/armor. Empty = no air-time falloff (the legacy range falloff above applies). Reference: a recurve bow does about 0.7x after 0.5 s.")]
+        public ProjectileFalloffKey[] projectileFalloff = new ProjectileFalloffKey[0];
 
         [Header("Defense capability")]
         [Tooltip("Shield role hard-forbids Parry: a shield can only ever block.")]
@@ -147,6 +157,15 @@ namespace Emberdelve.Data
         public Material gripMaterial;
 
         public bool IsRanged => kind == WeaponKind.Ranged;
+
+        /// <summary>True when this weapon carries an authored air-time falloff table (D2).</summary>
+        public bool HasAirTimeFalloff => projectileFalloff != null && projectileFalloff.Length > 0;
+
+        /// <summary>
+        /// D2: the damage scale of one of this weapon's projectiles that has been airborne <paramref name="airTime"/> seconds,
+        /// read from the authored table by the shared pure rule (<see cref="ProjectileBallistics.FalloffScale"/>). 1 with no table.
+        /// </summary>
+        public float AirTimeFalloffScale(float airTime) => ProjectileBallistics.FalloffScale(projectileFalloff, airTime);
 
         /// <summary>True when a player/entity swings this weapon through the authority's swept-segment melee.</summary>
         public bool UsesSweptMelee => !IsRanged && swingPatterns != null && swingPatterns.Length > 0;

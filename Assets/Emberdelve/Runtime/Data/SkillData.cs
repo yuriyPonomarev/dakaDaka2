@@ -124,6 +124,10 @@ namespace Emberdelve.Data
         public float spreadDegrees = 24f;
         [Tooltip("PiercingShot/SpreadShot: how many valid targets one projectile may resolve.")]
         public int projectileMaxTargets = 1;
+        [Tooltip("PiercingShot/SpreadShot (D2): scales the weapon's muzzle speed for this skill's projectiles. 1 = the weapon's own speed.")]
+        [Range(0.25f, 4f)] public float projectileSpeedMultiplier = 1f;
+        [Tooltip("PiercingShot/SpreadShot (D2): scales the weapon's projectile gravity for this skill's projectiles (below 1 = a flatter, heavier shot). 1 = the weapon's own gravity.")]
+        [Range(0f, 4f)] public float projectileGravityMultiplier = 1f;
 
         [Header("Damage")]
         [Tooltip("Multiplies the weapon's own damage. Ignored when Flat Damage is used.")]
@@ -194,6 +198,8 @@ namespace Emberdelve.Data
             projectileCount = Mathf.Max(1, projectileCount);
             spreadDegrees = Mathf.Clamp(spreadDegrees, 0f, 170f);
             projectileMaxTargets = Mathf.Max(1, projectileMaxTargets);
+            projectileSpeedMultiplier = Mathf.Clamp(projectileSpeedMultiplier, 0.25f, 4f);
+            projectileGravityMultiplier = Mathf.Clamp(projectileGravityMultiplier, 0f, 4f);
             damageMultiplier = Mathf.Max(0.05f, damageMultiplier);
             targetStatusDuration = Mathf.Max(0f, targetStatusDuration);
             selfStatusDuration = Mathf.Max(0f, selfStatusDuration);

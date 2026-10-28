@@ -6,6 +6,10 @@ namespace Emberdelve.Combat
     /// <summary>
     /// Purely cosmetic arrow: a primitive that flies from muzzle to the resolved endpoint.
     /// It carries no damage. When real weapon/art prefabs replace it, only this class changes.
+    /// D2: an authority-driven arrow has NO ballistics of its own. The combat authority simulates the flight (fixed
+    /// steps, gravity, walls) and places the arrow every frame with <see cref="MoveAuthoritative"/>, between the last
+    /// two simulated positions, and ends it with <see cref="FinishAuthoritative"/>; the straight-line mover in Update is
+    /// only the legacy path for arrows spawned without an authority.
     /// </summary>
     public sealed class ProjectileVisual : MonoBehaviour
     {
@@ -46,6 +50,7 @@ namespace Emberdelve.Combat
             return visual;
         }
 
+        /// <summary>Places the arrow tip at a point of the authority's simulated flight, pointing along its direction of travel.</summary>
         public void MoveAuthoritative(Vector3 position, Vector3 direction)
         {
             SetTipPose(position, direction);

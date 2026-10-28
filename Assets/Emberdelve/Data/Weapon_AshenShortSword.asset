@@ -70,6 +70,9 @@ MonoBehaviour:
   falloffStartRange: 16
   falloffEndRange: 42
   falloffMinScale: 0.45
+  projectileGravity: 0
+  projectileMaxFlightTime: 0
+  projectileFalloff: []
   defenseRole: 1
   capabilities: 1
   blockReductionOverride: -1

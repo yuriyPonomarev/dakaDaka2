@@ -358,6 +358,7 @@ namespace Emberdelve.EditorTools
             _auth = go.AddComponent<LocalCombatAuthority>();
             typeof(LocalCombatAuthority).GetField("config", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(_auth, cfg);
             _auth.SetClock(() => _clock);
+            _auth.SimulateBallistics = false;   // D2: this gate's literals assert straight-line geometry and the legacy range falloff; the ballistic sim has its own gate (EmberdelveProjectileSimGate).
 
             // The API surface itself: no way left to hand the authority a status spec.
             Check(typeof(ICombatAuthority).GetMethod("ApplyStatus") == null && typeof(LocalCombatAuthority).GetMethod("ApplyStatus") == null,
