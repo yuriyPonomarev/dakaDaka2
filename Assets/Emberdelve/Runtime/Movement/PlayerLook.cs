@@ -33,6 +33,8 @@ namespace Emberdelve.Movement
         public Vector3 AimOrigin => cameraTransform != null ? cameraTransform.position : transform.position + Vector3.up * standEyeHeight;
         public Vector3 AimDirection => cameraTransform != null ? cameraTransform.forward : transform.forward;
         public float Pitch => _pitch;
+        public float MinPitch => minPitch;
+        public float MaxPitch => maxPitch;
 
         /// <summary>
         /// D1c3: how much of its standing height the body's hit volumes occupy right now: 1 standing, crouch eye
@@ -68,6 +70,30 @@ namespace Emberdelve.Movement
         }
 
         public void ConfigureSensitivity(float value) => sensitivity = Mathf.Max(0.05f, value);
+
+        /// <summary>
+        /// U3A4a: puts the character in an absolute aim pose, the way the server applies a client's view from an input frame:
+        /// yaw rotates the body, pitch (clamped to this component's limits) rotates the look pivot. Non-finite values are
+        /// ignored. Offline never calls this; LateUpdate (mouse look) is untouched and keeps its own yaw/pitch in step.
+        /// </summary>
+        public void ApplyAimPose(float yawDegrees, float pitchDegrees)
+        {
+            if (float.IsNaN(yawDegrees) || float.IsInfinity(yawDegrees) || float.IsNaN(pitchDegrees) || float.IsInfinity(pitchDegrees)) return;
+
+            _yaw = yawDegrees;
+            _pitch = Mathf.Clamp(pitchDegrees, minPitch, maxPitch);
+            transform.rotation = Quaternion.Euler(0f, _yaw, 0f);
+            if (lookPivot != null && lookPivot != transform) lookPivot.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
+        }
+
+        /// <summary>U3A4a: pitch only (the owning client's own camera; its body yaw follows the server). Same clamp as <see cref="ApplyAimPose"/>.</summary>
+        public void ApplyPitch(float pitchDegrees)
+        {
+            if (float.IsNaN(pitchDegrees) || float.IsInfinity(pitchDegrees)) return;
+
+            _pitch = Mathf.Clamp(pitchDegrees, minPitch, maxPitch);
+            if (lookPivot != null && lookPivot != transform) lookPivot.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
+        }
 
         private void LateUpdate()
         {

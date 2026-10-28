@@ -39,6 +39,12 @@ namespace Emberdelve.Net
     /// client probe, logs the owner / view lifecycle lines the admission gate reads, and (development builds and the Editor only)
     /// carries ONE test RPC that a hostile client can call on somebody else's object: the server rejects it because the sender
     /// connection is not the object's owner. The RPC takes an arbitrary probe number and no identity of any kind.
+    ///
+    /// U3A4a: carries the movement stream. The owning client (NetInputSender) calls <see cref="SubmitMoveRpc"/> once per network
+    /// tick with its last three input frames; the server hands the batch to NetMovementServer together with the connection that
+    /// delivered it (RpcParams.Receive.SenderClientId, never a payload field). A development-only twin,
+    /// <c>ForgeMoveTestRpc</c>, has RequireOwnership off so a client can try to feed ANOTHER player's object; the same server path
+    /// rejects and counts it. No movement RPC parameter names a player, combat or party id.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(PlayerRig))]
@@ -90,6 +96,10 @@ namespace Emberdelve.Net
 
             if (!SpawnedRigs.Contains(this)) SpawnedRigs.Add(this);
 
+            // U3A4a: the owning client of a remote-simulated player streams its input (host's own player moves with its own Update).
+            if (Role == NetPlayerRole.Owner && GetComponent<NetInputSender>() == null)
+                gameObject.AddComponent<NetInputSender>().Configure(this, NetBootstrap.LaunchArgs);
+
             Debug.Log(Emberdelve.Net.Rules.NetTuning.LogPrefix + "[" + (IsServer ? (IsOwner ? "host" : "server") : "client") +
                       "] player object spawned role=" + Role + " netId=" + NetworkObjectId + " owner=" + OwnerClientId +
                       " playerId=" + _rig.PlayerId + " party=" + _rig.PartyId + " class=" + ClassIdText);
@@ -100,6 +110,9 @@ namespace Emberdelve.Net
             ServerPlayerId.OnValueChanged -= OnServerPlayerIdChanged;
             ServerPartyId.OnValueChanged -= OnServerPartyIdChanged;
             SpawnedRigs.Remove(this);
+
+            NetInputSender sender = GetComponent<NetInputSender>();
+            if (sender != null) Destroy(sender);
 
             if (!IsServer)
             {
@@ -117,7 +130,33 @@ namespace Emberdelve.Net
             return id.Length > 24 ? id.Substring(0, 24) : id;
         }
 
+        /// <summary>
+        /// The movement stream (client to server, once per network tick, unreliable: the batch carries the last three frames so a
+        /// lost packet is covered by the next). RequireOwnership stays ON: only the owning connection may call it on this object,
+        /// and the server handler re-derives the sender from the connection anyway. No identity parameter exists.
+        /// </summary>
+        [Rpc(SendTo.Server, Delivery = RpcDelivery.Unreliable)]
+        public void SubmitMoveRpc(MoveBatchWire batch, RpcParams rpcParams = default)
+        {
+            NetMovementServer movement = NetMovementServer.Current;
+            if (movement == null) return;
+            movement.Receive(this, rpcParams.Receive.SenderClientId, in batch);
+        }
+
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>
+        /// DEVELOPMENT-ONLY forged-owner movement probe: the same payload and the same server path as <see cref="SubmitMoveRpc"/>,
+        /// but RequireOwnership is OFF, so a client that does NOT own this object can still deliver it. The server compares the
+        /// connection that delivered it with the object's owner and rejects, counts and logs the forgery.
+        /// </summary>
+        [Rpc(SendTo.Server, RequireOwnership = false, Delivery = RpcDelivery.Unreliable)]
+        public void ForgeMoveTestRpc(MoveBatchWire batch, RpcParams rpcParams = default)
+        {
+            NetMovementServer movement = NetMovementServer.Current;
+            if (movement == null) return;
+            movement.Receive(this, rpcParams.Receive.SenderClientId, in batch);
+        }
+
         /// <summary>Test state a legitimate owner call writes (and a forged call must never touch). Server side only.</summary>
         public int TestProbe { get; private set; }
 

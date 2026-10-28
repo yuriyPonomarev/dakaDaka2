@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using Emberdelve.Net.Rules;
 using UnityEngine;
@@ -14,6 +15,9 @@ namespace Emberdelve.Net
     ///  2. Runs the optional test script (--ember-net-script). "forge-owner" (development builds / Editor only): once another
     ///     player's view exists, call the dev-only test RPC on THAT player's object (2 times) and once on our own object. The server
     ///     must reject the first two (we are not that object's owner) and accept the last.
+    ///  3. U3A4a: every half second logs where it sees each OTHER player: "[client] view id=&lt;n&gt; pos=(x,y,z)" (written when the
+    ///     view moved, and as a heartbeat every two seconds), so a gate can compare an observer's picture with the server's. The
+    ///     movement stream and the movement scripts are NetInputSender's; the probe still only runs forge-owner.
     /// The probe sends no gameplay input and never decides anything; the server's replicated values are only read.
     /// </summary>
     public sealed class NetClientProbe : MonoBehaviour
@@ -26,6 +30,13 @@ namespace Emberdelve.Net
         private float _changedAt;
         private bool _scriptDone;
         private readonly List<int> _ids = new List<int>();
+        private readonly Dictionary<int, Vector3> _viewLogged = new Dictionary<int, Vector3>();
+        private readonly Dictionary<int, float> _viewLoggedAt = new Dictionary<int, float>();
+        private float _nextViewLog;
+
+        private const float ViewLogSeconds = 0.5f;
+        private const float ViewHeartbeatSeconds = 2f;
+        private const float ViewMoveEpsilon = 0.002f;
 
         public void Configure(NetLaunchArgs args)
         {
@@ -36,6 +47,8 @@ namespace Emberdelve.Net
         {
             IReadOnlyList<NetPlayerRig> rigs = NetPlayerRig.Spawned;
             if (rigs.Count == 0 && _lastKey.Length == 0) return;
+
+            LogViews(rigs);
 
             int total = 0;
             int owned = 0;
@@ -90,9 +103,38 @@ namespace Emberdelve.Net
             }
         }
 
+        private void LogViews(IReadOnlyList<NetPlayerRig> rigs)
+        {
+            float now = Time.unscaledTime;
+            if (now < _nextViewLog) return;
+            _nextViewLog = now + ViewLogSeconds;
+
+            for (int i = 0; i < rigs.Count; i++)
+            {
+                NetPlayerRig rig = rigs[i];
+                if (rig == null || !rig.IsSpawned || rig.IsOwner) continue;
+
+                int id = rig.ServerPlayerId.Value;
+                if (id <= 0) continue;
+
+                Vector3 pos = rig.transform.position;
+                bool known = _viewLogged.TryGetValue(id, out Vector3 last);
+                bool moved = !known || (pos - last).sqrMagnitude > ViewMoveEpsilon * ViewMoveEpsilon;
+                bool heartbeat = known && _viewLoggedAt.TryGetValue(id, out float at) && now - at >= ViewHeartbeatSeconds;
+                if (!moved && !heartbeat) continue;
+
+                _viewLogged[id] = pos;
+                _viewLoggedAt[id] = now;
+                Debug.Log(NetTuning.LogPrefix + "[client] view id=" + id + " pos=(" +
+                          pos.x.ToString("F3", CultureInfo.InvariantCulture) + "," +
+                          pos.y.ToString("F3", CultureInfo.InvariantCulture) + "," +
+                          pos.z.ToString("F3", CultureInfo.InvariantCulture) + ")");
+            }
+        }
+
         private void RunScript(NetPlayerRig ownedRig, IReadOnlyList<NetPlayerRig> rigs)
         {
-            if (_scriptDone || _script != NetLaunchArgs.ScriptForgeOwner) return;
+            if (_scriptDone || _script != NetLaunchArgs.ScriptForgeOwner) return; // movement scripts belong to NetInputSender
 
             NetPlayerRig victim = null;
             for (int i = 0; i < rigs.Count; i++)

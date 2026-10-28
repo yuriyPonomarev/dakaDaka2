@@ -21,7 +21,9 @@ namespace Emberdelve.Net
     ///   - OnClientConnected: RunDirector.TrySpawnNetworkPlayer (id, party, class, sender bound, registered) and only then
     ///     NetworkObject.SpawnAsPlayerObject(clientId): nothing is ever half-spawned;
     ///   - OnClientDisconnect: RunDirector.RemovePlayer (session, party seat, registry, sender) and despawn, immediately;
-    ///   - one status line every two seconds: "status players=N senders=N registry=N clients=N".
+    ///   - one status line every two seconds: "status players=N senders=N registry=N clients=N";
+    ///   - U3A4a: the authoritative movement simulation (NetMovementServer): every admitted remote player is registered after its
+    ///     spawn and stepped once per network tick from its sanitized input queue; unregistered (final counters logged) on removal.
     ///
     /// Everything a client says is data: the connect payload is a slot string and a class id string, nothing else.
     /// </summary>
@@ -57,6 +59,7 @@ namespace Emberdelve.Net
         private readonly List<ulong> _awaitingSpawn = new List<ulong>();
         private readonly List<ulong> _scratch = new List<ulong>();
 
+        private NetMovementServer _movement;
         private RunDirector _director;
         private bool _sceneRequested;
         private bool _sceneFailed;
@@ -84,6 +87,7 @@ namespace Emberdelve.Net
         {
             _nm.ConnectionApprovalCallback = Approve;
             NetIdentityTable.Current = _table;
+            _movement = new NetMovementServer(_nm, _table, _log, _logError);
         }
 
         /// <summary>Players / sender bindings / combat entities right now, in the status-line format.</summary>
@@ -99,6 +103,8 @@ namespace Emberdelve.Net
         public void Tick(float now)
         {
             if (_nm == null || !_nm.IsListening) return;
+
+            if (_movement != null) _movement.EnsureSubscribed();
 
             if (!_sceneRequested) RequestDungeonScene(now);
 
@@ -343,6 +349,7 @@ namespace Emberdelve.Net
             }
 
             _table.Add(row);
+            if (_movement != null) _movement.Register(row);
             _log("admitted client=" + clientId + " id=" + row.PlayerId + " party=" + row.PartyId + " slot=" + row.Slot +
                  " class=" + row.ClassId + " netId=" + netObject.NetworkObjectId + " " + CountsText());
         }
@@ -365,6 +372,7 @@ namespace Emberdelve.Net
 
         private void RemoveActor(NetIdentity row, string reason)
         {
+            if (_movement != null) _movement.Unregister(row.PlayerId, reason);
             if (_director != null) _director.RemovePlayer(row.PlayerId, reason, false);
 
             NetworkObject netObject = row.Object;
@@ -398,6 +406,12 @@ namespace Emberdelve.Net
 
         public void Dispose()
         {
+            if (_movement != null)
+            {
+                _movement.Dispose();
+                _movement = null;
+            }
+
             if (NetIdentityTable.Current == _table) NetIdentityTable.Current = null;
         }
     }

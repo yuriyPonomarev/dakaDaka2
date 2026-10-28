@@ -26,6 +26,9 @@ namespace Emberdelve.Net.Rules
         /// <summary>NGO network tick rate (user decision: 30 Hz).</summary>
         public const uint TickRate = 30;
 
+        /// <summary>The fixed step the server simulates one input frame with (1 / <see cref="TickRate"/>).</summary>
+        public const float TickSeconds = 1f / TickRate;
+
         public const int DefaultMaxPlayers = 9;
         public const int DefaultConnectTimeoutSeconds = 15;
 
@@ -65,7 +68,10 @@ namespace Emberdelve.Net.Rules
     ///   -ember-net-disconnect-timeout-ms MS  transport disconnect timeout (0 = transport default)
     ///   -ember-net-protocol-override N       test only: the client announces another protocol version
     ///   -ember-net-no-enemies [true|false]   server/host: the dungeon's enemies are not started (proof scenarios); a bare flag = true
-    ///   -ember-net-script NAME               client test driver (dev/proof): "" (none) or "forge-owner"
+    ///   -ember-net-script SPEC               client test driver (dev/proof): "" (none), "forge-owner", or a movement script / comma separated
+    ///                                        chain such as "walk-forward:3@90,sprint-forward:1.5@270,jump" (see NetScriptSpec)
+    ///   -ember-net-script-start-file PATH    client: the script starts when this file exists (default: 1.5 s after the player spawned)
+    ///   -ember-net-script-yaw DEGREES        client: view yaw for steps without @yaw (default: the yaw the server spawned the player with)
     /// </summary>
     public sealed class NetLaunchArgs
     {
@@ -85,6 +91,11 @@ namespace Emberdelve.Net.Rules
         public int ProtocolOverride { get; private set; } = -1;
         public bool NoEnemies { get; private set; }
         public string Script { get; private set; } = "";
+        /// <summary>The parsed script, null when none was given.</summary>
+        public NetScriptSpec ScriptSpec { get; private set; }
+        public string ScriptStartFile { get; private set; } = "";
+        public bool HasScriptYaw { get; private set; }
+        public float ScriptYaw { get; private set; }
 
         /// <summary>The client test scripts this build knows (empty = none).</summary>
         public const string ScriptForgeOwner = "forge-owner";
@@ -170,6 +181,8 @@ namespace Emberdelve.Net.Rules
                 case "ember-net-protocol-override":
                 case "ember-net-no-enemies":
                 case "ember-net-script":
+                case "ember-net-script-start-file":
+                case "ember-net-script-yaw":
                     return true;
                 default:
                     return false;
@@ -254,11 +267,34 @@ namespace Emberdelve.Net.Rules
                     break;
                 case "ember-net-script":
                     {
-                        string name2 = value.ToLowerInvariant();
-                        if (name2 == "" || name2 == "none") Script = "";
-                        else if (name2 == ScriptForgeOwner) Script = ScriptForgeOwner;
-                        else _errors.Add("unknown script '" + value + "' (forge-owner)");
+                        string scriptText = value.Trim().ToLowerInvariant();
+                        if (scriptText == "" || scriptText == "none")
+                        {
+                            Script = "";
+                            ScriptSpec = null;
+                        }
+                        else if (NetScriptSpec.TryParse(scriptText, out NetScriptSpec parsedSpec, out string scriptError))
+                        {
+                            Script = parsedSpec.Text;
+                            ScriptSpec = parsedSpec;
+                        }
+                        else
+                        {
+                            _errors.Add("invalid script '" + value + "': " + scriptError);
+                        }
                     }
+                    break;
+                case "ember-net-script-start-file":
+                    ScriptStartFile = value;
+                    break;
+                case "ember-net-script-yaw":
+                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float scriptYaw) &&
+                        !float.IsNaN(scriptYaw) && !float.IsInfinity(scriptYaw))
+                    {
+                        HasScriptYaw = true;
+                        ScriptYaw = MoveInputFrame.WrapDegrees(scriptYaw);
+                    }
+                    else _errors.Add("invalid script yaw '" + value + "' (degrees)");
                     break;
                 case "ember-net-protocol-override":
                     if (TryInt(value, out int po) && po >= 0) ProtocolOverride = po;

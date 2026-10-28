@@ -61,9 +61,13 @@ namespace Emberdelve.Net
             go.AddComponent<NetBootstrap>().Configure(args);
         }
 
+        /// <summary>The parsed command line of this process (null offline). Read by the client-side movement stream.</summary>
+        internal static NetLaunchArgs LaunchArgs { get; private set; }
+
         private void Configure(NetLaunchArgs args)
         {
             _args = args;
+            LaunchArgs = args;
             switch (args.Mode)
             {
                 case NetLaunchMode.Server: NetRole.Set(NetRoleKind.DedicatedServer); _tag = "server"; _isServerSide = true; break;
