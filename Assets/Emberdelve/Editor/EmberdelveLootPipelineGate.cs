@@ -95,7 +95,7 @@ namespace Emberdelve.EditorTools
             foreach (UnityEngine.Object x in _cleanup) if (x != null) Destroy(x);
 
             Debug.Log("[Emberdelve][LootPipeline] " + (_fail == 0 ? "PASS" : "FAIL") + " checks=" + _n + " failures=" + _fail);
-            EditorApplication.Exit(_fail == 0 ? 0 : 1);
+            EmberdelveGateExit.Exit(_fail == 0 ? 0 : 1);
         }
 
         private IEnumerator Everything()

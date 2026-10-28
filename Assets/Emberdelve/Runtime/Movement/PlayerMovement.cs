@@ -4,6 +4,7 @@ using Emberdelve.Core;
 using Emberdelve.Combat;
 using Emberdelve.Data;
 using Emberdelve.InputLayer;
+using Emberdelve.Net.Rules;
 using Emberdelve.Skills;
 using Emberdelve.Stats;
 
@@ -320,17 +321,57 @@ namespace Emberdelve.Movement
 
         public void SetCrouched(bool value) => _crouched = value;
 
+        /// <summary>
+        /// U3A2: true when something other than this component's own Update drives the character - the network layer
+        /// calls <see cref="Step"/> with input frames (the server for every player, later the owning client for
+        /// prediction). Update then does nothing. Default false: the offline game is driven by Update exactly as before.
+        /// </summary>
+        public bool ExternalDriven { get; set; }
+
         private void Update()
         {
+            if (ExternalDriven) return;
             if (_class == null || input == null) return;
 
-            float dt = Time.deltaTime;
-            if (input.CrouchPressed) _crouched = !_crouched;
+            // The offline path: this frame's device input and the render frame's delta time, as one input frame.
+            // Movement stays relative to the live view transform here (not to a yaw number), so this path is the
+            // same computation it was before Step existed.
+            Vector2 move = input.Move;
+            MoveInputFrame frame = new MoveInputFrame
+            {
+                MoveX = move.x,
+                MoveY = move.y, // Yaw stays 0: this path steers by the view transform, not by a yaw number
+                Flags = MoveInputFrame.MakeFlags(input.SprintHeld, input.JumpPressed, input.CrouchPressed)
+            };
+
+            StepCore(in frame, Time.deltaTime, true);
+        }
+
+        /// <summary>
+        /// U3A2: advances the character by ONE input frame of <paramref name="dt"/> seconds: crouch toggle edge, capsule
+        /// height, grounded check, jump and gravity, then ground movement or the dash, through the same
+        /// CharacterController.Move as before. This is the one entry point a server (or a predicting client) uses; the
+        /// frame carries intent only, and every number that matters (speeds, collision, position) is derived here.
+        ///
+        /// Movement is relative to <see cref="MoveInputFrame.Yaw"/>. Step does not rotate the body or the look pivot
+        /// (applying the aim pose from the frame is the caller's job and arrives with the movement stream, U3A4).
+        /// Non-finite axes are treated as no input. Does nothing before a class has been applied.
+        /// </summary>
+        public void Step(in MoveInputFrame frame, float dt)
+        {
+            if (_class == null || controller == null) return;
+            if (float.IsNaN(dt) || float.IsInfinity(dt) || dt < 0f) return;
+            StepCore(in frame, dt, false);
+        }
+
+        private void StepCore(in MoveInputFrame f, float dt, bool relativeToViewTransform)
+        {
+            if (f.CrouchToggle) _crouched = !_crouched;
 
             UpdateCapsuleHeight(dt);
             GroundedCheck();
-            JumpAndGravity(dt);
-            Move(dt);
+            JumpAndGravity(dt, f.Jump);
+            Move(dt, in f, relativeToViewTransform);
         }
 
         private void UpdateCapsuleHeight(float dt)
@@ -347,14 +388,14 @@ namespace Emberdelve.Movement
             IsGrounded = Physics.CheckSphere(sphere, groundedRadius, groundMask, QueryTriggerInteraction.Ignore);
         }
 
-        private void JumpAndGravity(float dt)
+        private void JumpAndGravity(float dt, bool jumpPressed)
         {
             if (IsGrounded)
             {
                 if (_verticalVelocity < 0f) _verticalVelocity = -2f;
                 _jumpCooldown -= dt;
 
-                if (input.JumpPressed && !_crouched && _jumpCooldown <= 0f)
+                if (jumpPressed && !_crouched && _jumpCooldown <= 0f)
                 {
                     _verticalVelocity = Mathf.Sqrt(_class.jumpHeight * -2f * gravity);
                     _jumpCooldown = 0.2f;
@@ -367,7 +408,7 @@ namespace Emberdelve.Movement
             }
         }
 
-        private void Move(float dt)
+        private void Move(float dt, in MoveInputFrame frame, bool relativeToViewTransform)
         {
             if (IsDashing)
             {
@@ -375,13 +416,16 @@ namespace Emberdelve.Movement
                 return;
             }
 
-            Vector2 raw = input.Move;
+            // Non-finite intent (a malformed network frame) is no intent; real device input is always finite.
+            Vector2 raw = MoveInputFrame.IsFinite(frame.MoveX) && MoveInputFrame.IsFinite(frame.MoveY)
+                ? new Vector2(frame.MoveX, frame.MoveY)
+                : Vector2.zero;
             if (raw.sqrMagnitude > 1f) raw = raw.normalized;
 
             float targetSpeed = 0f;
             if (raw.sqrMagnitude > 0.01f)
             {
-                targetSpeed = ResolveGroundSpeed(input.SprintHeld, _crouched);
+                targetSpeed = ResolveGroundSpeed(frame.Sprint, _crouched);
             }
 
             float currentHorizontal = new Vector3(controller.velocity.x, 0f, controller.velocity.z).magnitude;
@@ -408,7 +452,9 @@ namespace Emberdelve.Movement
             IsMoving = targetSpeed > 0.05f;
             SpeedMultiplier = BaseMoveSpeed > 0f ? _horizontalSpeed / BaseMoveSpeed : 0f;
 
-            Vector3 direction = ViewRelativeDirection(raw, viewTransform != null ? viewTransform : transform);
+            Vector3 direction = relativeToViewTransform
+                ? ViewRelativeDirection(raw, viewTransform != null ? viewTransform : transform)
+                : ViewRelativeDirection(raw, frame.Yaw);
             Vector3 desired = direction * _horizontalSpeed;
             DesiredMoveIntent = desired;
 
@@ -470,6 +516,26 @@ namespace Emberdelve.Movement
 
             forward.Normalize();
             right.Normalize();
+
+            Vector3 direction = right * raw.x + forward * raw.y;
+            return direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector3.zero;
+        }
+
+        /// <summary>
+        /// The same mapping as the Transform overload, from a view yaw in degrees (world Y rotation; 0 looks along +Z,
+        /// 90 along +X). This is what a server applies to a client's input frame: it has the number, not the camera.
+        /// For a view whose flattened forward is (sin yaw, 0, cos yaw) the two overloads agree.
+        /// </summary>
+        public static Vector3 ViewRelativeDirection(Vector2 raw, float yawDegrees)
+        {
+            if (raw.sqrMagnitude < 0.0001f) return Vector3.zero;
+
+            float radians = yawDegrees * Mathf.Deg2Rad;
+            float sin = Mathf.Sin(radians);
+            float cos = Mathf.Cos(radians);
+
+            Vector3 forward = new Vector3(sin, 0f, cos);
+            Vector3 right = new Vector3(cos, 0f, -sin);
 
             Vector3 direction = right * raw.x + forward * raw.y;
             return direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector3.zero;

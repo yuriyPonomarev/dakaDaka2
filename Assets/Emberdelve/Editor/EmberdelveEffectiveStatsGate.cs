@@ -34,7 +34,7 @@ namespace Emberdelve.EditorTools
             {
                 Debug.Log("[Emberdelve][EffectiveStats] " + (failures == 0 ? "PASS" : "FAIL")
                     + " checks=" + checks + " failures=" + failures);
-                if (Application.isBatchMode) EditorApplication.Exit(failures == 0 ? 0 : 1);
+                if (Application.isBatchMode) EmberdelveGateExit.Exit(failures == 0 ? 0 : 1);
             }
 
             try

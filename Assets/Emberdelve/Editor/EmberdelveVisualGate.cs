@@ -41,7 +41,7 @@ namespace Emberdelve.EditorTools
             string line = Tag + " " + verdict + " checks=" + _checks + " failures=" + _failures;
             if (_failures == 0) Debug.Log(line); else Debug.LogError(line);
 
-            if (Application.isBatchMode) EditorApplication.Exit(_failures == 0 ? 0 : 1);
+            if (Application.isBatchMode) EmberdelveGateExit.Exit(_failures == 0 ? 0 : 1);
         }
 
         private static void Execute()

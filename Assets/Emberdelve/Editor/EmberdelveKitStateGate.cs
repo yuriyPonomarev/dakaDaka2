@@ -89,7 +89,7 @@ namespace Emberdelve.EditorTools
 
             if (_authority != null) _authority.SetClock(null);
             Debug.Log("[Emberdelve][KitState] " + (_fail == 0 ? "PASS" : "FAIL") + " checks=" + _n + " failures=" + _fail);
-            EditorApplication.Exit(_fail == 0 ? 0 : 1);
+            EmberdelveGateExit.Exit(_fail == 0 ? 0 : 1);
         }
 
         private KitView View(PlayerRig rig)

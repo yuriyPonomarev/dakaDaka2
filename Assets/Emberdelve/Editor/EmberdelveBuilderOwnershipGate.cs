@@ -37,6 +37,6 @@ Check(rig.GetComponent<Camera>()==null && rig.GetComponentInChildren<Camera>()!=
 if(rig!=null)UnityEngine.Object.DestroyImmediate(rig.gameObject);
 if(layout!=null)UnityEngine.Object.DestroyImmediate(layout);if(config!=null)UnityEngine.Object.DestroyImmediate(config);
 }
-Debug.Log("[Emberdelve][BuilderOwnership] "+(failures==0?"PASS":"FAIL")+" checks="+checks+" failures="+failures);EditorApplication.Exit(failures==0?0:1);
+Debug.Log("[Emberdelve][BuilderOwnership] "+(failures==0?"PASS":"FAIL")+" checks="+checks+" failures="+failures);EmberdelveGateExit.Exit(failures==0?0:1);
 }
 }}

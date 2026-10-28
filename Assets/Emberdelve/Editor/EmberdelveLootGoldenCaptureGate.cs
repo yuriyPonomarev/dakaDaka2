@@ -199,7 +199,7 @@ namespace Emberdelve.EditorTools
 
             Debug.Log("[Emberdelve][LootGoldenCapture] " + (_failures == 0 ? "PASS" : "FAIL") +
                       " checks=" + _checks + " failures=" + _failures);
-            EditorApplication.Exit(_failures == 0 ? 0 : 1);
+            EmberdelveGateExit.Exit(_failures == 0 ? 0 : 1);
         }
 
         private static LootTable LoadTable(string fileName)

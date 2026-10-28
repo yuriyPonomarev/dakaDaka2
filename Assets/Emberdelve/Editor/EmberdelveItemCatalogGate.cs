@@ -51,7 +51,7 @@ namespace Emberdelve.EditorTools
             }
 
             Debug.Log("[Emberdelve][ItemCatalog] " + (_fail == 0 ? "PASS" : "FAIL") + " checks=" + _n + " failures=" + _fail);
-            EditorApplication.Exit(_fail == 0 ? 0 : 1);
+            EmberdelveGateExit.Exit(_fail == 0 ? 0 : 1);
         }
 
         private static T Make<T>() where T : ScriptableObject

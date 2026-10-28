@@ -61,6 +61,6 @@ Check(issuer.TryCreateInstance(coins,8,AffixRarity.Common,null,auth,out copy,out
 Check(ItemInstance.TryCreateWithUid(supplied,coins,8,AffixRarity.Common,null,auth,out copy,out reason)&&copy.Uid==supplied,"supplied UID preserved for trusted item");
 Check(!ItemInstance.TryCreateWithUid(Guid.Empty,coins,8,AffixRarity.Common,null,auth,out copy,out reason)&&copy==null,"empty supplied UID refused");
 }catch(Exception e){fail++;Debug.LogException(e);}finally{foreach(var a in cleanup)if(a!=null)UnityEngine.Object.DestroyImmediate(a);cleanup.Clear();}
-Debug.Log("[Emberdelve][ItemInstance] "+(fail==0?"PASS":"FAIL")+" checks="+n+" failures="+fail);EditorApplication.Exit(fail==0?0:1);
+Debug.Log("[Emberdelve][ItemInstance] "+(fail==0?"PASS":"FAIL")+" checks="+n+" failures="+fail);EmberdelveGateExit.Exit(fail==0?0:1);
 }
 }}

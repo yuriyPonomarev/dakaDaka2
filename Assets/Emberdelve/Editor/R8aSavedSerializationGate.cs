@@ -147,7 +147,7 @@ namespace Emberdelve.EditorTools
                 }
 
                 if (Application.isBatchMode)
-                    EditorApplication.Exit(failureCount == 0 ? 0 : 1);
+                    EmberdelveGateExit.Exit(failureCount == 0 ? 0 : 1);
             }
         }
 

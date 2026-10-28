@@ -49,6 +49,6 @@ Check(!AffixBandRules.IsIntegral(1000000000.5),"large fractional double not inte
 Check(AffixBandRules.TryValidateValue(AffixStatKey.MoveSpeed,.03f,.12f,.01f,.08f,out reason),"float-authored legal grid preserved");
 Check(!AffixBandRules.TryValidateValue(AffixStatKey.MoveSpeed,.03,.12,.0000001,.080000025,out reason),"fine-grid quarter-step rejected");
 } catch(Exception e){failures++;Debug.LogException(e);} finally{if(a!=null)UnityEngine.Object.DestroyImmediate(a);if(b!=null)UnityEngine.Object.DestroyImmediate(b);}
-Debug.Log("[Emberdelve][AffixDefinition] "+(failures==0?"PASS":"FAIL")+" checks="+checks+" failures="+failures);EditorApplication.Exit(failures==0?0:1);
+Debug.Log("[Emberdelve][AffixDefinition] "+(failures==0?"PASS":"FAIL")+" checks="+checks+" failures="+failures);EmberdelveGateExit.Exit(failures==0?0:1);
 }
 }}

@@ -19,7 +19,7 @@ int n,fail;readonly List<UnityEngine.Object> cleanup=new List<UnityEngine.Object
 void Check(bool ok,string text){n++;if(!ok){fail++;Debug.LogError("[NumericAffix] mismatch "+text);}}
 T Make<T>() where T:ScriptableObject {var x=ScriptableObject.CreateInstance<T>();cleanup.Add(x);return x;}
 IEnumerator Start(){yield return null;yield return null;try{Execute();}catch(Exception e){fail++;Debug.LogException(e);}finally{foreach(var x in cleanup)if(x!=null)Destroy(x);}
-Debug.Log("[Emberdelve][NumericAffix] "+(fail==0?"PASS":"FAIL")+" checks="+n+" failures="+fail);EditorApplication.Exit(fail==0?0:1);}
+Debug.Log("[Emberdelve][NumericAffix] "+(fail==0?"PASS":"FAIL")+" checks="+n+" failures="+fail);EmberdelveGateExit.Exit(fail==0?0:1);}
 void Execute(){
 var rig=FindFirstObjectByType<PlayerRig>();Check(rig!=null&&!rig.IsDead,"living scene rig");if(rig==null)return;var bag=rig.Inventory;var gear=rig.Equipment;gear.Clear();bag.Clear();bag.ConfigureGrid(10,4);
 var boots=AssetDatabase.LoadAssetAtPath<ItemData>("Assets/Emberdelve/Data/Item_FootpadBoots.asset");

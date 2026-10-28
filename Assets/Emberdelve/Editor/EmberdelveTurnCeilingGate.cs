@@ -206,7 +206,7 @@ namespace Emberdelve.EditorTools
             foreach (Scenario s in _scenarios) s.Dispose();
             foreach (UnityEngine.Object o in _cleanup) if (o != null) Destroy(o);
             Debug.Log($"{Tag} {(_failures == 0 ? "PASS" : "FAIL")} checks={_checks} failures={_failures}");
-            EditorApplication.Exit(_failures == 0 ? 0 : 1);
+            EmberdelveGateExit.Exit(_failures == 0 ? 0 : 1);
         }
 
         private void Section(string name, Action body)

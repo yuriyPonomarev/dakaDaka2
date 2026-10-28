@@ -147,7 +147,7 @@ namespace Emberdelve.EditorTools
                 foreach (UnityEngine.Object item in _cleanup) if (item != null) Destroy(item);
             }
             Debug.Log($"{Tag} {(_failures == 0 ? "PASS" : "FAIL")} checks={_checks} failures={_failures}");
-            EditorApplication.Exit(_failures == 0 ? 0 : 1);
+            EmberdelveGateExit.Exit(_failures == 0 ? 0 : 1);
         }
 
         private IEnumerator CaptureDiagnostic()
@@ -280,7 +280,7 @@ namespace Emberdelve.EditorTools
                 foreach (UnityEngine.Object item in _cleanup) if (item != null) Destroy(item);
                 if (_defender != null) _defender.SetGuardHeld(false);
             }
-            EditorApplication.Exit(success ? 0 : 1);
+            EmberdelveGateExit.Exit(success ? 0 : 1);
         }
 
         private static float DistanceToGuardBlade(Vector3 point, GuardBladeBox blade)

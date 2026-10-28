@@ -38,7 +38,7 @@ namespace Emberdelve.EditorTools
                                    " <absolute path to the output .exe>. Usage: -executeMethod " +
                                    typeof(EmberdelveWindowsBuild).FullName + ".BuildReview " + OutputFlag +
                                    " C:\\review\\EmberdelveReview.exe");
-                    EditorApplication.Exit(1);
+                    EmberdelveGateExit.Exit(1);
                     return;
                 }
 
@@ -51,7 +51,7 @@ namespace Emberdelve.EditorTools
                     Debug.LogError(Tag + " FAIL: saved scene(s) missing - lobby='" + lobby + "' exists=" + File.Exists(lobby) +
                                    " dungeon='" + dungeon + "' exists=" + File.Exists(dungeon) +
                                    ". Run the Emberdelve editor builders first; this task does not rebuild scenes.");
-                    EditorApplication.Exit(1);
+                    EmberdelveGateExit.Exit(1);
                     return;
                 }
 
@@ -97,7 +97,7 @@ namespace Emberdelve.EditorTools
                               " totalTime=" + summary.totalTime +
                               " (any build warnings above are the engine's own and were not suppressed)");
 
-                    EditorApplication.Exit(0);
+                    EmberdelveGateExit.Exit(0);
                     return;
                 }
 
@@ -108,18 +108,19 @@ namespace Emberdelve.EditorTools
                                " totalTime=" + summary.totalTime +
                                " - see the engine build errors above this line");
 
-                EditorApplication.Exit(1);
+                EmberdelveGateExit.Exit(1);
             }
             catch (Exception exception)
             {
                 Debug.LogError(Tag + " FAIL exception while building to '" + (location ?? "unresolved") + "': " + exception);
-                EditorApplication.Exit(1);
+                EmberdelveGateExit.Exit(1);
             }
         }
 
         /// <summary>
-        /// U3A1: builds the network proof Player (Development, Windows x64) from the single NetBoot scene
-        /// only, so a headless server/client starts without lobby or dungeon content. Does not touch the
+        /// U3A1: builds the network proof Player (Development, Windows x64) from the NetBoot scene (index 0)
+        /// and, since U3A3, the dungeon scene (index 1, loaded by the server through NGO scene management), without
+        /// the lobby. Does not touch the
         /// editor build settings, other scenes or the existing BuildReview flow, and never exits the
         /// Editor. Returns true only for BuildResult.Succeeded with the .exe present.
         /// </summary>
@@ -134,18 +135,32 @@ namespace Emberdelve.EditorTools
                     return false;
                 }
 
+                // U3A3: the server loads the dungeon through NGO scene management, so the dungeon scene ships in the proof
+                // player after the NetBoot scene, and the network player prefab + its catalog (Resources) must exist.
+                if (!File.Exists(EmberdelvePaths.DungeonScenePath))
+                {
+                    error = "dungeon scene missing: " + EmberdelvePaths.DungeonScenePath + " (build the vertical slice first)";
+                    return false;
+                }
+
+                if (!EmberdelveNetBuilder.EnsureNetPlayerPrefab(out string prefabError))
+                {
+                    error = "net player prefab unavailable: " + prefabError;
+                    return false;
+                }
+
                 string parent = Path.GetDirectoryName(exePath);
                 if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
 
                 BuildPlayerOptions options = new BuildPlayerOptions
                 {
-                    scenes = new string[] { EmberdelveNetBuilder.NetBootScenePath },
+                    scenes = new string[] { EmberdelveNetBuilder.NetBootScenePath, EmberdelvePaths.DungeonScenePath },
                     locationPathName = exePath,
                     target = BuildTarget.StandaloneWindows64,
                     options = BuildOptions.Development
                 };
 
-                Debug.Log(Tag + " net-proof start scenes=[" + EmberdelveNetBuilder.NetBootScenePath + "] output=" + exePath);
+                Debug.Log(Tag + " net-proof start scenes=[" + EmberdelveNetBuilder.NetBootScenePath + ", " + EmberdelvePaths.DungeonScenePath + "] output=" + exePath);
                 BuildReport report = BuildPipeline.BuildPlayer(options);
                 BuildSummary summary = report.summary;
                 Debug.Log(Tag + " net-proof report result=" + summary.result + " totalSize=" + summary.totalSize +

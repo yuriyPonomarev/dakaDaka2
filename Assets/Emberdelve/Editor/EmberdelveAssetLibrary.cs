@@ -1489,8 +1489,36 @@ namespace Emberdelve.EditorTools
                 l.torches.Add(new TorchSpec { cell = new Vector2Int(4, 7), height = 2.3f, range = 7f, intensity = 10f });
             });
 
+            ApplyPlayerSpawns();
+
             List<string> problems = Layout.Validate();
             for (int i = 0; i < problems.Count; i++) Debug.LogWarning("[Emberdelve][Layout] " + problems[i]);
+        }
+
+        /// <summary>
+        /// U3A2: the nine networked-player entry cells, written onto the layout asset. Fixed data (no randomness), so every
+        /// rebuild produces the same list, and idempotent like <see cref="ApplyChestSpawns"/>: an asset created before this
+        /// field existed gets it filled on the next BuildAll. Three groups of three (the auto-fill party order): Entry Hall,
+        /// Library, Armory. The first entry is the single-player start cell. Cells avoid every authored enemy, chest and
+        /// loot cell, are pairwise at least two cells apart, and all lie inside rooms (checked by DungeonLayoutData.Validate).
+        /// </summary>
+        private static void ApplyPlayerSpawns()
+        {
+            if (Layout == null) return;
+
+            Layout.playerSpawns.Clear();
+            Layout.playerSpawns.Add(Layout.playerStartCell);       // (4,3) Entry Hall, party 0
+            Layout.playerSpawns.Add(new Vector2Int(2, 2));
+            Layout.playerSpawns.Add(new Vector2Int(6, 3));
+            Layout.playerSpawns.Add(new Vector2Int(11, 2));        // Library, party 1
+            Layout.playerSpawns.Add(new Vector2Int(15, 3));
+            Layout.playerSpawns.Add(new Vector2Int(11, 5));
+            Layout.playerSpawns.Add(new Vector2Int(2, 9));         // Armory, party 2
+            Layout.playerSpawns.Add(new Vector2Int(6, 9));
+            Layout.playerSpawns.Add(new Vector2Int(6, 13));
+
+            EditorUtility.SetDirty(Layout);
+            AssetDatabase.SaveAssets();
         }
 
         private static void BuildNavGrid()

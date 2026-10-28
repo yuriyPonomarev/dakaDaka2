@@ -28,6 +28,9 @@ namespace Emberdelve.Net.Rules
 
         public const int DefaultMaxPlayers = 9;
         public const int DefaultConnectTimeoutSeconds = 15;
+
+        /// <summary>The class a client asks for when none is given (a server-approved id; the server resolves it).</summary>
+        public const string DefaultClassId = "warrior";
         public const string LogPrefix = "[Emberdelve][Net]";
     }
 
@@ -61,6 +64,8 @@ namespace Emberdelve.Net.Rules
     ///   -ember-net-connect-timeout SECONDS   client, default 15
     ///   -ember-net-disconnect-timeout-ms MS  transport disconnect timeout (0 = transport default)
     ///   -ember-net-protocol-override N       test only: the client announces another protocol version
+    ///   -ember-net-no-enemies [true|false]   server/host: the dungeon's enemies are not started (proof scenarios); a bare flag = true
+    ///   -ember-net-script NAME               client test driver (dev/proof): "" (none) or "forge-owner"
     /// </summary>
     public sealed class NetLaunchArgs
     {
@@ -78,6 +83,11 @@ namespace Emberdelve.Net.Rules
         public int ConnectTimeoutSeconds { get; private set; } = NetTuning.DefaultConnectTimeoutSeconds;
         public int DisconnectTimeoutMs { get; private set; }
         public int ProtocolOverride { get; private set; } = -1;
+        public bool NoEnemies { get; private set; }
+        public string Script { get; private set; } = "";
+
+        /// <summary>The client test scripts this build knows (empty = none).</summary>
+        public const string ScriptForgeOwner = "forge-owner";
 
         public IReadOnlyList<string> Errors => _errors;
         public bool IsValid => _errors.Count == 0;
@@ -105,6 +115,17 @@ namespace Emberdelve.Net.Rules
 
                 name = name.ToLowerInvariant();
                 if (!IsKnown(name)) continue;
+
+                if (value == null && IsFlag(name))
+                {
+                    // A switch: bare = true, optionally followed by an explicit true/false.
+                    value = "true";
+                    if (i + 1 < args.Length && IsBoolLiteral(args[i + 1]))
+                    {
+                        value = args[i + 1];
+                        i++;
+                    }
+                }
 
                 if (value == null)
                 {
@@ -147,10 +168,21 @@ namespace Emberdelve.Net.Rules
                 case "ember-net-connect-timeout":
                 case "ember-net-disconnect-timeout-ms":
                 case "ember-net-protocol-override":
+                case "ember-net-no-enemies":
+                case "ember-net-script":
                     return true;
                 default:
                     return false;
             }
+        }
+
+        private static bool IsFlag(string name) { return name == "ember-net-no-enemies"; }
+
+        private static bool IsBoolLiteral(string text)
+        {
+            if (text == null) return false;
+            string t = text.Trim().ToLowerInvariant();
+            return t == "true" || t == "false" || t == "1" || t == "0";
         }
 
         private void Apply(string name, string value)
@@ -211,6 +243,22 @@ namespace Emberdelve.Net.Rules
                 case "ember-net-disconnect-timeout-ms":
                     if (TryInt(value, out int dt) && dt >= 0 && dt <= 600000) DisconnectTimeoutMs = dt;
                     else _errors.Add("invalid disconnect timeout '" + value + "' (0..600000)");
+                    break;
+                case "ember-net-no-enemies":
+                    {
+                        string b = value.ToLowerInvariant();
+                        if (b == "true" || b == "1" || b == "") NoEnemies = true;
+                        else if (b == "false" || b == "0") NoEnemies = false;
+                        else _errors.Add("invalid no-enemies '" + value + "' (true|false)");
+                    }
+                    break;
+                case "ember-net-script":
+                    {
+                        string name2 = value.ToLowerInvariant();
+                        if (name2 == "" || name2 == "none") Script = "";
+                        else if (name2 == ScriptForgeOwner) Script = ScriptForgeOwner;
+                        else _errors.Add("unknown script '" + value + "' (forge-owner)");
+                    }
                     break;
                 case "ember-net-protocol-override":
                     if (TryInt(value, out int po) && po >= 0) ProtocolOverride = po;

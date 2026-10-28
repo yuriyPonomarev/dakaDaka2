@@ -54,11 +54,13 @@ namespace Emberdelve.EditorTools
             string line = Tag + " " + verdict + " checks=" + _checks + " failures=" + _failures;
             if (_failures == 0) Debug.Log(line); else Debug.LogError(line);
 
-            if (Application.isBatchMode) EditorApplication.Exit(_failures == 0 && exit == 0 ? 0 : 1);
+            if (Application.isBatchMode) EmberdelveGateExit.Exit(_failures == 0 && exit == 0 ? 0 : 1);
         }
 
         private static int Execute()
         {
+            // U3A3: the server now loads the dungeon scene and clients synchronise it before "connected", hence the longer
+            // connect windows below (client A, the refused client). The checks themselves are unchanged.
             string projectRoot = Directory.GetParent(Application.dataPath).FullName;
             string runDir = ArgValue("-ember-proof-dir");
             if (string.IsNullOrEmpty(runDir))
@@ -112,12 +114,12 @@ namespace Emberdelve.EditorTools
             string clientLog = Path.Combine(logs, "client_a.log");
             Process clientA = Launch(exe, clientLog,
                 "-ember-net client -ember-address 127.0.0.1 -ember-port " + port +
-                " -ember-slot proof-a -ember-class Warrior -ember-net-autoquit 3 -ember-net-connect-timeout 20" +
+                " -ember-slot proof-a -ember-class Warrior -ember-net-autoquit 3 -ember-net-connect-timeout 40" +
                 " -ember-net-disconnect-timeout-ms 4000");
             Check(clientA != null, "client A process started pid=" + (clientA != null ? clientA.Id.ToString() : "-"));
             if (clientA == null) return 1;
 
-            Check(WaitForLog(clientLog, ClientPrefix + "connected id=", 40, clientA), "client A logged 'connected id='");
+            Check(WaitForLog(clientLog, ClientPrefix + "connected id=", 60, clientA), "client A logged 'connected id='");
             Check(WaitForLog(serverLog, ServerPrefix + "client connected id=", 10, server), "server logged 'client connected'");
             Check(LogContains(serverLog, "approval id=") && LogContains(serverLog, "approved=True"),
                 "server approved client A (protocol " + NetTuning.ProtocolVersion + ")");
@@ -132,7 +134,7 @@ namespace Emberdelve.EditorTools
             string badLog = Path.Combine(logs, "client_bad.log");
             Process clientBad = Launch(exe, badLog,
                 "-ember-net client -ember-address 127.0.0.1 -ember-port " + port +
-                " -ember-slot proof-bad -ember-net-protocol-override 999 -ember-net-connect-timeout 20" +
+                " -ember-slot proof-bad -ember-net-protocol-override 999 -ember-net-connect-timeout 40" +
                 " -ember-net-disconnect-timeout-ms 4000");
             Check(clientBad != null, "client B (wrong protocol) started");
             if (clientBad != null)

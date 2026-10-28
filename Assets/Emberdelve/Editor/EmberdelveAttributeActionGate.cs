@@ -73,7 +73,7 @@ namespace Emberdelve.EditorTools
             if (EditorApplication.isPlayingOrWillChangePlaymode)
             {
                 Debug.LogError(Tag + " cannot request play mode from inside play mode");
-                EditorApplication.Exit(1);
+                EmberdelveGateExit.Exit(1);
                 return;
             }
 
@@ -109,7 +109,7 @@ namespace Emberdelve.EditorTools
                 SessionState.SetBool(PendingKey, false);
                 SessionState.SetInt(ExitCodeKey, 1);
                 Debug.LogError(Tag + " play mode never started - headless play mode is unavailable in this session.");
-                EditorApplication.Exit(1);
+                EmberdelveGateExit.Exit(1);
             }
         }
 
@@ -137,14 +137,14 @@ namespace Emberdelve.EditorTools
                     SessionState.SetBool(DoneKey, false);
                     SessionState.SetString(RequestKey, string.Empty);
                     Debug.Log(Tag + $" play mode finished, exiting with stored code {exitCode}");
-                    EditorApplication.delayCall += () => EditorApplication.Exit(exitCode);
+                    EditorApplication.delayCall += () => EmberdelveGateExit.Exit(exitCode);
                 }
                 else
                 {
                     Debug.LogError(Tag + " play mode ended before the pass finished its assertions - reporting failure");
                     SessionState.SetInt(ExitCodeKey, 1);
                     SessionState.SetString(RequestKey, string.Empty);
-                    EditorApplication.delayCall += () => EditorApplication.Exit(1);
+                    EditorApplication.delayCall += () => EmberdelveGateExit.Exit(1);
                 }
             }
         }

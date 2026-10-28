@@ -113,7 +113,7 @@ namespace Emberdelve.EditorTools
                 SessionState.SetString(ModeKey, string.Empty);
                 SessionState.SetInt(ExitCodeKey, 1);
                 Debug.LogError("[Emberdelve][Smoke] Play mode never started - headless play mode is unavailable in this session.");
-                EditorApplication.Exit(1);
+                EmberdelveGateExit.Exit(1);
             }
         }
 
@@ -138,7 +138,7 @@ namespace Emberdelve.EditorTools
                     SessionState.SetBool(DoneKey, false);
                     SessionState.SetString(ModeKey, string.Empty);
                     Debug.Log($"[Emberdelve][Smoke] Play mode finished, exiting with stored code {exitCode}");
-                    EditorApplication.delayCall += () => EditorApplication.Exit(exitCode);
+                    EditorApplication.delayCall += () => EmberdelveGateExit.Exit(exitCode);
                 }
                 else if (!string.IsNullOrEmpty(SessionState.GetString(ModeKey, string.Empty)))
                 {
@@ -147,7 +147,7 @@ namespace Emberdelve.EditorTools
                     Debug.LogError("[Emberdelve][Smoke] Play mode ended before the harness finished its pass - reporting failure");
                     SessionState.SetInt(ExitCodeKey, 1);
                     SessionState.SetString(ModeKey, string.Empty);
-                    EditorApplication.delayCall += () => EditorApplication.Exit(1);
+                    EditorApplication.delayCall += () => EmberdelveGateExit.Exit(1);
                 }
             }
         }

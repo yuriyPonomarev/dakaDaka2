@@ -47,6 +47,6 @@ public static class ManagerInventoryGeometryProbe
             Object.DestroyImmediate(blade);
             Object.DestroyImmediate(boots);
         }
-        EditorApplication.Exit(failures == 0 ? 0 : 1);
+        Emberdelve.EditorTools.EmberdelveGateExit.Exit(failures == 0 ? 0 : 1);
     }
 }

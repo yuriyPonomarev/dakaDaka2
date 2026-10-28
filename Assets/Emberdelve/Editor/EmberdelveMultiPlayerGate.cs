@@ -99,7 +99,7 @@ namespace Emberdelve.EditorTools
             foreach (GameObject g in _props) if (g != null) Destroy(g);
 
             Debug.Log("[Emberdelve][MultiPlayer] " + (_fail == 0 ? "PASS" : "FAIL") + " checks=" + _n + " failures=" + _fail);
-            EditorApplication.Exit(_fail == 0 ? 0 : 1);
+            EmberdelveGateExit.Exit(_fail == 0 ? 0 : 1);
         }
 
         // -------------------------------------------------------------------------------------- helpers

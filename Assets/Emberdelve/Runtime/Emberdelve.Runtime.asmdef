@@ -2,6 +2,7 @@
   "name": "Emberdelve.Runtime",
   "references": [
     "Emberdelve.Rules",
+    "Emberdelve.NetRules",
     "Unity.InputSystem"
   ],
   "includePlatforms": [],

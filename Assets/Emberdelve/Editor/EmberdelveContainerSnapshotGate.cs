@@ -86,7 +86,7 @@ namespace Emberdelve.EditorTools
             finally { foreach (var x in cleanup) if (x != null) Destroy(x); }
 
             Debug.Log("[Emberdelve][ContainerSnapshot] " + (fail == 0 ? "PASS" : "FAIL") + " checks=" + n + " failures=" + fail);
-            EditorApplication.Exit(fail == 0 ? 0 : 1);
+            EmberdelveGateExit.Exit(fail == 0 ? 0 : 1);
         }
 
         // ------------------------------------------------------------------ helpers

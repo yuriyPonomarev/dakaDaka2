@@ -49,10 +49,16 @@ namespace Emberdelve.InputLayer
         public Vector2 Move => MoveOverride.HasValue ? (_playerMap != null && _playerMap.enabled ? MoveOverride.Value : Vector2.zero)
             : _move != null ? _move.ReadValue<Vector2>() : Vector2.zero;
         public Vector2 Look => _look != null ? _look.ReadValue<Vector2>() : Vector2.zero;
-        public bool JumpPressed => _jump != null && _jump.WasPressedThisFrame();
+        /// <summary>U3A2 test seams (same idea as the other overrides): replace the jump / crouch edge for the frame they are held. Never set in game code.</summary>
+        internal bool? JumpPressedOverride { get; set; }
+        internal bool? CrouchPressedOverride { get; set; }
+
+        public bool JumpPressed => JumpPressedOverride.HasValue ? JumpPressedOverride.Value && OverrideLive
+            : _jump != null && _jump.WasPressedThisFrame();
         public bool SprintHeld => SprintHeldOverride.HasValue ? SprintHeldOverride.Value && _playerMap != null && _playerMap.enabled
             : _sprint != null && _sprint.IsPressed();
-        public bool CrouchPressed => _crouch != null && _crouch.WasPressedThisFrame();
+        public bool CrouchPressed => CrouchPressedOverride.HasValue ? CrouchPressedOverride.Value && OverrideLive
+            : _crouch != null && _crouch.WasPressedThisFrame();
         /// <summary>
         /// Test seam for batch-mode harnesses that have no pointer device (the same idea as
         /// <see cref="InteractHeldOverride"/>): when set, each replaces the real primary-attack reading for the

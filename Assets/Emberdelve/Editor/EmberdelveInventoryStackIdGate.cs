@@ -62,7 +62,7 @@ namespace Emberdelve.EditorTools
             catch (Exception e) { failures++; Debug.LogException(e); }
 
             Debug.Log("[Emberdelve][InventoryStackId] " + (failures == 0 ? "PASS" : "FAIL") + " checks=" + checks + " failures=" + failures);
-            EditorApplication.Exit(failures == 0 ? 0 : 1);
+            EmberdelveGateExit.Exit(failures == 0 ? 0 : 1);
         }
 
         private void Execute()

@@ -29,7 +29,7 @@ namespace Emberdelve.EditorTools
             try { Execute(); }
             catch (Exception e) { _fail++; Debug.LogException(e); }
             Debug.Log("[Emberdelve][AffixProfile] " + (_fail == 0 ? "PASS" : "FAIL") + " checks=" + _n + " failures=" + _fail);
-            EditorApplication.Exit(_fail == 0 ? 0 : 1);
+            EmberdelveGateExit.Exit(_fail == 0 ? 0 : 1);
         }
 
         static Dictionary<string, string> Guids()

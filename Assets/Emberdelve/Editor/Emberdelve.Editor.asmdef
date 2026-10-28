@@ -6,6 +6,8 @@
     "Emberdelve.UI",
     "Emberdelve.Review",
     "Emberdelve.NetRules",
+    "Emberdelve.Net",
+    "Unity.Netcode.Runtime",
     "Unity.InputSystem",
     "Unity.RenderPipelines.Core.Runtime",
     "Unity.RenderPipelines.Universal.Runtime",

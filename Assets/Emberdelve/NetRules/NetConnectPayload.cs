@@ -5,15 +5,15 @@ namespace Emberdelve.Net.Rules
 {
     /// <summary>
     /// Connection-approval payload sent by a client and the pure admission decision made by the server.
-    /// U3A1 is a stub: protocol version, size and capacity only. The slot and class strings are carried
-    /// but not trusted or validated yet (U3A3 validates them against the server's catalog; the slot is a
-    /// dev-scoped identity, not authentication).
+    /// The slot is a dev-scoped identity (not authentication); the class is only an id string that the server
+    /// resolves against its own approved catalog. Nothing in the payload is a number the server trusts.
     /// </summary>
     public static class NetConnectPayload
     {
         public const int MaxBytes = 256;
         private const string Magic = "EMB";
-        private const int MaxField = 32;
+        /// <summary>Longest slot / class id the server accepts (the encoder truncates to this).</summary>
+        public const int MaxField = 32;
 
         public static byte[] Encode(int protocolVersion, string slot, string classId)
         {
@@ -67,24 +67,67 @@ namespace Emberdelve.Net.Rules
         }
     }
 
+    /// <summary>
+    /// The pure admission rule. Reasons are short stable strings (the client logs them from its disconnect reason):
+    /// "bad payload", "protocol mismatch client=X server=Y", "unknown class", "duplicate slot", "server full".
+    /// Check order: payload, protocol, class, duplicate slot, capacity. A refusal that is about the REQUEST
+    /// (class, slot) therefore wins over a full server, so a full server still tells a bad client what is wrong with it.
+    /// </summary>
     public static class NetApproval
     {
+        public const string ReasonBadPayload = "bad payload";
+        public const string ReasonProtocolMismatch = "protocol mismatch";
+        public const string ReasonUnknownClass = "unknown class";
+        public const string ReasonDuplicateSlot = "duplicate slot";
+        public const string ReasonServerFull = "server full";
+
+        /// <summary>Capacity and protocol only (slot / class are not checked). Kept for the U3A1 callers and tests.</summary>
         /// <param name="connectedCount">Players already admitted (not counting the requester).</param>
         public static NetApprovalResult Evaluate(byte[] payload, int serverProtocol, int connectedCount, int maxPlayers)
         {
-            if (payload == null || payload.Length == 0)
-                return new NetApprovalResult(false, "payload missing", "", "");
-            if (payload.Length > NetConnectPayload.MaxBytes)
-                return new NetApprovalResult(false, "payload too large", "", "");
+            return Evaluate(payload, serverProtocol, connectedCount, maxPlayers, null, null);
+        }
+
+        /// <param name="connectedCount">Players already admitted or reserved (not counting the requester).</param>
+        /// <param name="isSlotInUse">True when another connection already holds this slot (null = not checked).</param>
+        /// <param name="isClassApproved">True when the server's catalog knows this class id (null = not checked).</param>
+        public static NetApprovalResult Evaluate(byte[] payload, int serverProtocol, int connectedCount, int maxPlayers,
+            Func<string, bool> isSlotInUse, Func<string, bool> isClassApproved)
+        {
+            if (payload == null || payload.Length == 0 || payload.Length > NetConnectPayload.MaxBytes)
+                return new NetApprovalResult(false, ReasonBadPayload, "", "");
             if (!NetConnectPayload.TryDecode(payload, out int protocol, out string slot, out string classId))
-                return new NetApprovalResult(false, "payload malformed", "", "");
+                return new NetApprovalResult(false, ReasonBadPayload, "", "");
+
+            // A hostile payload must not reach the logs or the tables as anything but a short printable token.
+            if (!IsCleanField(slot, true) || !IsCleanField(classId, false))
+                return new NetApprovalResult(false, ReasonBadPayload, "", "");
+
             if (protocol != serverProtocol)
                 return new NetApprovalResult(false,
-                    "protocol mismatch client=" + protocol + " server=" + serverProtocol, slot, classId);
+                    ReasonProtocolMismatch + " client=" + protocol + " server=" + serverProtocol, slot, classId);
+            if (isClassApproved != null && !isClassApproved(classId))
+                return new NetApprovalResult(false, ReasonUnknownClass, slot, classId);
+            if (isSlotInUse != null && isSlotInUse(slot))
+                return new NetApprovalResult(false, ReasonDuplicateSlot, slot, classId);
             if (connectedCount >= maxPlayers)
-                return new NetApprovalResult(false, "server full", slot, classId);
+                return new NetApprovalResult(false, ReasonServerFull, slot, classId);
 
             return new NetApprovalResult(true, "", slot, classId);
+        }
+
+        /// <summary>Printable ASCII, at most MaxField chars; the slot may not be empty (the class may: the class rule rejects it).</summary>
+        public static bool IsCleanField(string value, bool required)
+        {
+            if (string.IsNullOrEmpty(value)) return !required;
+            if (value.Length > NetConnectPayload.MaxField) return false;
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                if (c < 0x20 || c > 0x7E) return false;
+            }
+
+            return true;
         }
     }
 }

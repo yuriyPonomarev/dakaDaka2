@@ -51,6 +51,6 @@ dex.step=.5f;Check(!LootRoller.TryRoll(boots,1,AffixRarity.Rare,auth,new FixedRa
 Check(issuer.MintedCount==minted,"all refusals no mint");
 Check(before==EditorJsonUtility.ToJson(boots)+EditorJsonUtility.ToJson(dex)+EditorJsonUtility.ToJson(con)+EditorJsonUtility.ToJson(str),"definitions unchanged");
 }catch(Exception e){fail++;Debug.LogException(e);}finally{foreach(var x in clean)if(x!=null)UnityEngine.Object.DestroyImmediate(x);clean.Clear();}
-Debug.Log("[Emberdelve][LootRoller] "+(fail==0?"PASS":"FAIL")+" checks="+n+" failures="+fail);EditorApplication.Exit(fail==0?0:1);
+Debug.Log("[Emberdelve][LootRoller] "+(fail==0?"PASS":"FAIL")+" checks="+n+" failures="+fail);EmberdelveGateExit.Exit(fail==0?0:1);
 }
 }}

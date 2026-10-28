@@ -21,7 +21,7 @@ int n,fail;readonly List<UnityEngine.Object> cleanup=new List<UnityEngine.Object
 void Check(bool ok,string text){n++;if(!ok){fail++;Debug.LogError("[FlatDamageAffix] mismatch "+text);}}
 T Make<T>() where T:ScriptableObject {var x=ScriptableObject.CreateInstance<T>();cleanup.Add(x);return x;}
 IEnumerator Start(){yield return null;yield return null;try{Execute();}catch(Exception e){fail++;Debug.LogException(e);}finally{RestoreSceneEnemies();foreach(var x in cleanup)if(x!=null)Destroy(x);}
-Debug.Log("[Emberdelve][FlatDamageAffix] "+(fail==0?"PASS":"FAIL")+" checks="+n+" failures="+fail);EditorApplication.Exit(fail==0?0:1);}
+Debug.Log("[Emberdelve][FlatDamageAffix] "+(fail==0?"PASS":"FAIL")+" checks="+n+" failures="+fail);EmberdelveGateExit.Exit(fail==0?0:1);}
 sealed class Target:ICombatEntity {public HealthComponent Health;public Vector3 Point;public DamageInfo Last;public int CombatId{get;set;}public EntityKind Kind=>EntityKind.Enemy;public int TeamId=>1;public Vector3 CombatCenter=>Point;public Collider Head;public Collider HeadCollider=>Head;public bool IsDead=>Health.IsDead;public float CurrentHealth=>Health.CurrentHealth;public float MaxHealth=>Health.MaxHealth;public void ApplyDamage(DamageInfo d){Last=d;Health.ApplyDamage(d);}}
 float clock=100;Target target;LocalCombatAuthority authority;
 void Hit(PlayerRig rig,WeaponData weapon,float distance,float charge,bool head,float expected,string label){

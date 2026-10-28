@@ -58,6 +58,12 @@ namespace Emberdelve.Flow
         [Tooltip("The locally controlled player's rig (party 0). More players join through TryJoin / SpawnPlayer.")]
         [SerializeField] private PlayerRig playerRig;
 
+        [Header("Network (U3A2)")]
+        [Tooltip("The run is hosted for networked players: Start does not join the scene rig (players come from TrySpawnNetworkPlayer) and nothing here touches the pointer. Also implied by NetRole DedicatedServer / Host. Off for the offline game.")]
+        [SerializeField] private bool serverMode;
+        [Tooltip("Classes a network client may ask for by id (the server's approved catalog). The fallback class is always approved.")]
+        [SerializeField] private CharacterClassData[] approvedClasses;
+
         private RunState _state = RunState.Briefing;
         private float _startedAt;
         private bool _paused;
@@ -66,6 +72,7 @@ namespace Emberdelve.Flow
         private readonly Dictionary<int, PlayerSession> _byPlayerId = new Dictionary<int, PlayerSession>();
         private PlayerSession _local;
         private int _spawnedCount;
+        private int _networkSpawnCount;
 
         /// <summary>The run-wide state: Briefing, Running, Paused, and the final outcome once no player is left in the run.</summary>
         public RunState State => _state;
@@ -80,10 +87,27 @@ namespace Emberdelve.Flow
         /// gameplay rule: interactions, loot, extraction and combat all name their actor.
         /// </summary>
         public PlayerSession LocalSession => _local;
-        public int LocalPlayerId => _local != null ? _local.PlayerId : (playerRig != null ? playerRig.PlayerId : GameEvents.NoPlayer);
+        public int LocalPlayerId => _local != null ? _local.PlayerId : (!IsServerMode && playerRig != null ? playerRig.PlayerId : GameEvents.NoPlayer);
 
-        /// <summary>The locally controlled rig (presentation only).</summary>
-        public PlayerRig Player => _local != null ? _local.Rig : playerRig;
+        /// <summary>The locally controlled rig (presentation only). Null on a server with no local player.</summary>
+        public PlayerRig Player => _local != null ? _local.Rig : (IsServerMode ? null : playerRig);
+
+        /// <summary>
+        /// U3A2: this process hosts the run for networked players (dedicated server or host): the scene rig is not
+        /// joined, players enter through <see cref="TrySpawnNetworkPlayer(GameObject, string, out PlayerRig, out string)"/>, and
+        /// <see cref="Player"/> is whatever local player (host) was admitted, else null. False for the offline game.
+        /// </summary>
+        public bool IsServerMode =>
+            serverMode || NetRole.Current == NetRoleKind.DedicatedServer || NetRole.Current == NetRoleKind.Host;
+
+        /// <summary>Marks the run as server hosted. Only meaningful before Start (tools and gates).</summary>
+        public void SetServerMode(bool enabled) => serverMode = enabled;
+
+        /// <summary>
+        /// Restart and return-to-lobby load a scene, which would unload a network-synchronised one. Only the offline game
+        /// (NetRole Offline) may do it; online both calls are ignored until the network lifecycle (U3A5) owns them.
+        /// </summary>
+        public bool SceneFlowAllowed => NetRole.IsOffline;
 
         /// <summary>The local player's own run state (Running until they die or extract), not the run's.</summary>
         public RunState LocalPlayerState => _local != null ? _local.State : _state;
@@ -260,6 +284,12 @@ namespace Emberdelve.Flow
 
         private void Start()
         {
+            if (IsServerMode)
+            {
+                StartServerRun();
+                return;
+            }
+
             if (playerRig == null)
             {
                 Debug.LogError("[RunDirector] No PlayerRig assigned; the run cannot start.", this);
@@ -291,7 +321,55 @@ namespace Emberdelve.Flow
             Cursor.visible = false;
         }
 
+        /// <summary>
+        /// U3A2: the hosted run starts with nobody in it. No scene rig joins, the pointer and the pause clock are left
+        /// alone, and an empty run stays Running (late join is allowed): only a player's own death or extraction can end
+        /// it, never the absence of players.
+        /// </summary>
+        private void StartServerRun()
+        {
+            _startedAt = Time.unscaledTime;
+            _started = true;
+            GameEvents.DamageDealt += HandleDamageDealt;
+            SetState(RunState.Running);
+
+            Chests = ChestSpawner.Ensure(layout, config, this);
+            GameEvents.RaiseObjective(config != null ? config.objectiveText : "Survive and extract");
+            Debug.Log("[Emberdelve][RunDirector] server mode: running with 0 players (role " + NetRole.Current + ")");
+        }
+
         private CharacterClassData ClassFor(PlayerRig rig) => RunContext.GetSelectedClassOrDefault(fallbackClass);
+
+        /// <summary>
+        /// Resolves a class id string a network client asked for against the server's approved classes (case-insensitive).
+        /// The client only ever sends the id; the class data, and with it every number, is the server's.
+        /// </summary>
+        public bool TryResolveClass(string classId, out CharacterClassData data)
+        {
+            data = null;
+            if (string.IsNullOrWhiteSpace(classId)) return false;
+
+            if (approvedClasses != null)
+            {
+                for (int i = 0; i < approvedClasses.Length; i++)
+                {
+                    CharacterClassData candidate = approvedClasses[i];
+                    if (candidate != null && string.Equals(candidate.classId, classId, System.StringComparison.OrdinalIgnoreCase))
+                    {
+                        data = candidate;
+                        return true;
+                    }
+                }
+            }
+
+            if (fallbackClass != null && string.Equals(fallbackClass.classId, classId, System.StringComparison.OrdinalIgnoreCase))
+            {
+                data = fallbackClass;
+                return true;
+            }
+
+            return false;
+        }
 
         /// <summary>
         /// R7: admits a rig to the run as one player: assigns its party (the requested one, or the first party with room when
@@ -445,6 +523,186 @@ namespace Emberdelve.Flow
             return rig;
         }
 
+        // ---- U3A2: network seams. No networking types here: the Net assembly calls these and then spawns its NetworkObject. ----
+
+        /// <summary>Spawns and admits a remote-controlled player from <paramref name="prefab"/> with the approved class named by <paramref name="classId"/>.</summary>
+        public bool TrySpawnNetworkPlayer(GameObject prefab, string classId, out PlayerRig rig, out string reason)
+        {
+            return TrySpawnNetworkPlayer(prefab, classId, false, out rig, out reason);
+        }
+
+        /// <summary>As above; <paramref name="locallyControlled"/> admits the host's own presenting player (camera and input stay as authored).</summary>
+        public bool TrySpawnNetworkPlayer(GameObject prefab, string classId, bool locallyControlled, out PlayerRig rig, out string reason)
+        {
+            rig = null;
+            if (!TryResolveClass(classId, out CharacterClassData selected))
+            {
+                reason = "class '" + (classId ?? "") + "' is not approved";
+                return false;
+            }
+
+            return TrySpawnNetworkPlayer(prefab, selected, locallyControlled, out rig, out reason);
+        }
+
+        /// <summary>
+        /// Instantiates <paramref name="prefab"/> at the first free layout spawn and admits it with <see cref="TryJoin"/>
+        /// (auto-filled party, trusted class, sender bound) BEFORE the caller spawns the network object, so nothing is ever
+        /// half admitted: on any refusal the instance is gone again and the combat registry is untouched. A remote rig has
+        /// no camera, listener or lights, no gameplay input, and is driven externally (PlayerMovement.Step).
+        /// </summary>
+        public bool TrySpawnNetworkPlayer(GameObject prefab, CharacterClassData selectedClass, bool locallyControlled,
+            out PlayerRig rig, out string reason)
+        {
+            rig = null;
+            reason = null;
+            if (prefab == null) { reason = "no player prefab"; return false; }
+            if (selectedClass == null) { reason = "no class selected"; return false; }
+            if (_state == RunState.Dead || _state == RunState.Extracted) { reason = "the run already ended"; return false; }
+            if (locallyControlled && _local != null) { reason = "a local player is already in the run"; return false; }
+            if (!TryResolveParty(-1, out _, out reason)) return false;
+
+            PickSpawnPose(out Vector3 position, out Quaternion rotation);
+
+            GameObject instance = Instantiate(prefab, position, rotation);
+            _networkSpawnCount++;
+            instance.name = prefab.name + "_N" + _networkSpawnCount;
+
+            PlayerRig spawned = instance.GetComponent<PlayerRig>();
+            if (spawned == null)
+            {
+                Destroy(instance);
+                reason = "prefab has no PlayerRig";
+                return false;
+            }
+
+            if (!locallyControlled) StripPresentation(instance);
+
+            // Whatever the template carried is not this player's: start from empty hands and an empty bag.
+            if (spawned.Equipment != null) spawned.Equipment.Clear();
+            if (spawned.Inventory != null) spawned.Inventory.Clear();
+
+            if (!TryJoin(spawned, -1, locallyControlled, selectedClass, out reason))
+            {
+                // The rig registered itself in its Awake; take it out now instead of at the end of the frame.
+                CombatRegistry.Unregister(spawned.CombatId, spawned);
+                Destroy(instance);
+                return false;
+            }
+
+            if (!locallyControlled)
+            {
+                spawned.SetInputEnabled(false);
+                if (spawned.Movement != null) spawned.Movement.ExternalDriven = true;
+            }
+
+            rig = spawned;
+            Debug.Log($"[Emberdelve][RunDirector] network player joined id={spawned.PlayerId} party={spawned.PartyId} class={selectedClass.classId} local={locallyControlled} players={_sessions.Count}");
+            return true;
+        }
+
+        private static void StripPresentation(GameObject instance)
+        {
+            Camera[] cameras = instance.GetComponentsInChildren<Camera>(true);
+            for (int i = 0; i < cameras.Length; i++)
+            {
+                cameras[i].enabled = false;
+                cameras[i].gameObject.tag = "Untagged";
+                AudioListener listener = cameras[i].GetComponent<AudioListener>();
+                if (listener != null) listener.enabled = false;
+            }
+
+            ClassLoadout inheritedLoadout = instance.GetComponent<ClassLoadout>();
+            if (inheritedLoadout != null) inheritedLoadout.DiscardInheritedVisuals();
+
+            Light[] lights = instance.GetComponentsInChildren<Light>(true);
+            for (int i = 0; i < lights.Length; i++) lights[i].enabled = false;
+        }
+
+        /// <summary>The first layout spawn no current player stands on (join order = slot order); when all are taken the slots are reused in turn.</summary>
+        private void PickSpawnPose(out Vector3 position, out Quaternion rotation)
+        {
+            Vector3 ground = layout != null ? layout.CellCenterWorld(layout.playerStartCell) : Vector3.zero;
+            int slots = layout != null && layout.playerSpawns != null ? layout.playerSpawns.Count : 0;
+
+            if (slots > 0)
+            {
+                ground = layout.PlayerSpawnWorld(_networkSpawnCount);
+                for (int i = 0; i < slots; i++)
+                {
+                    Vector3 candidate = layout.PlayerSpawnWorld(i);
+                    if (!SpawnOccupied(candidate))
+                    {
+                        ground = candidate;
+                        break;
+                    }
+                }
+            }
+
+            position = ground + Vector3.up * 0.15f;
+
+            // Face the middle of the map so a fresh player is not staring at a wall.
+            Vector3 toCentre = layout != null
+                ? layout.CellCenterWorld(new Vector2Int(layout.gridWidth / 2, layout.gridHeight / 2)) - ground
+                : Vector3.forward;
+            toCentre.y = 0f;
+            float yaw = toCentre.sqrMagnitude > 0.01f ? Mathf.Atan2(toCentre.x, toCentre.z) * Mathf.Rad2Deg : 0f;
+            rotation = Quaternion.Euler(0f, yaw, 0f);
+        }
+
+        private bool SpawnOccupied(Vector3 ground)
+        {
+            for (int i = 0; i < _sessions.Count; i++)
+            {
+                PlayerRig other = _sessions[i].Rig;
+                if (other == null) continue;
+                Vector3 delta = other.transform.position - ground;
+                delta.y = 0f;
+                if (delta.sqrMagnitude < 1.2f * 1.2f) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// U3A2: takes one player out of the run immediately (disconnect). Their session and party seat are freed, their death
+        /// hook is unsubscribed, and the rig leaves the combat registry (which also unbinds its command sender) so nothing
+        /// can target, hit or hear it any more. The rig object itself is left to the caller (the network layer despawns it);
+        /// pass <paramref name="destroyRig"/> when nothing else owns it. Returns false for an unknown id (idempotent).
+        ///
+        /// Run-end audit: removing a player never ends the run. A hosted run with nobody in it stays Running so a late
+        /// joiner can enter; the run-wide outcome is still only ever decided by a player's own death or extraction.
+        /// </summary>
+        public bool RemovePlayer(int playerId, string reason, bool destroyRig = false)
+        {
+            if (!_byPlayerId.TryGetValue(playerId, out PlayerSession session)) return false;
+
+            PlayerRig rig = session.Rig;
+            if (rig != null && rig.Health != null && session.DiedHandler != null) rig.Health.Died -= session.DiedHandler;
+            session.DiedHandler = null;
+
+            _byPlayerId.Remove(playerId);
+            _sessions.Remove(session);
+            if (_local == session) _local = null;
+
+            if (rig != null)
+            {
+                CombatRegistry.Unregister(rig.CombatId, rig);
+                rig.SetInputEnabled(false);
+                if (rig.Movement != null) rig.Movement.CancelDash();
+            }
+
+            Debug.Log($"[Emberdelve][RunDirector] player removed id={playerId} reason='{reason}' players={_sessions.Count} senders={CombatSenders.BoundCount} registry={CombatRegistry.All.Count}");
+
+            if (destroyRig && rig != null) Destroy(rig.gameObject);
+            return true;
+        }
+
+        /// <summary>Offline only: the process-wide time scale belongs to the local game; a networked process never changes it.</summary>
+        private static void ResetTimeScale()
+        {
+            if (NetRole.IsOffline) Time.timeScale = 1f;
+        }
+
         private void OnDestroy()
         {
             GameServices.Unregister<RunDirector>(this);
@@ -460,7 +718,7 @@ namespace Emberdelve.Flow
             // R7: the process-wide combat table and its per-run switches are cleared with the run that filled them.
             CombatRegistry.ResetForRun();
 
-            Time.timeScale = 1f;
+            ResetTimeScale();
         }
 
         private void Update()
@@ -497,13 +755,16 @@ namespace Emberdelve.Flow
             }
         }
 
-        private void TogglePause()
+        internal void TogglePause()
         {
             if (_state != RunState.Running && _state != RunState.Paused) return;
             _paused = !_paused;
-            Time.timeScale = _paused ? 0f : 1f;
+
+            // Online, pause is the local player's menu only: the clock and the run-wide state belong to everybody.
+            bool offline = NetRole.IsOffline;
+            if (offline) Time.timeScale = _paused ? 0f : 1f;
             if (_local != null && _local.IsRunning) _local.Rig.SetInputEnabled(!_paused);
-            SetState(_paused ? RunState.Paused : RunState.Running);
+            if (offline) SetState(_paused ? RunState.Paused : RunState.Running);
             GameEvents.RaisePause(_paused);
 
             Cursor.lockState = _paused ? CursorLockMode.None : CursorLockMode.Locked;
@@ -610,7 +871,7 @@ namespace Emberdelve.Flow
             if (session.IsLocal)
             {
                 _paused = false;
-                Time.timeScale = 1f;
+                ResetTimeScale();
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
                 RunContext.CompleteRun(session.Result);
@@ -632,7 +893,7 @@ namespace Emberdelve.Flow
             if (_state != RunState.Running && _state != RunState.Paused) return;
             SetState(outcome);
             _paused = false;
-            Time.timeScale = 1f;
+            ResetTimeScale();
         }
 
         private void SetState(RunState state)
@@ -811,12 +1072,24 @@ namespace Emberdelve.Flow
 
         public void RestartRun()
         {
+            if (!SceneFlowAllowed)
+            {
+                Debug.LogWarning("[Emberdelve][RunDirector] RestartRun ignored: the scene is network-controlled (role " + NetRole.Current + ")");
+                return;
+            }
+
             Time.timeScale = 1f;
             SceneManager.LoadScene(config != null ? config.dungeonSceneName : SceneManager.GetActiveScene().name);
         }
 
         public void ReturnToLobby()
         {
+            if (!SceneFlowAllowed)
+            {
+                Debug.LogWarning("[Emberdelve][RunDirector] ReturnToLobby ignored: the scene is network-controlled (role " + NetRole.Current + ")");
+                return;
+            }
+
             Time.timeScale = 1f;
             SceneManager.LoadScene(config != null ? config.lobbySceneName : "Lobby");
         }

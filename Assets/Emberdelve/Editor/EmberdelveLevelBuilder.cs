@@ -51,6 +51,7 @@ namespace Emberdelve.EditorTools
             BuildLoot(layout, director);
             BuildEnemies(layout, config, director);
             BuildExtractionGate(layout, config, director);
+            BuildNetSceneRoles(master, rig);
 
             // V1: material / mesh / volume-profile assets were created or modified through the AssetDatabase.
             AssetDatabase.SaveAssets();
@@ -319,7 +320,52 @@ namespace Emberdelve.EditorTools
             SetReference(director, "fallbackClass", EmberdelveAssetLibrary.Warrior);
             SetReference(director, "playerRig", rig);
             SetReference(director, "layout", EmberdelveAssetLibrary.Layout);
+
+            // U3A2: the classes a network client may ask for by id. Offline never reads this list.
+            SerializedObject serializedDirector = new SerializedObject(director);
+            SerializedProperty approved = serializedDirector.FindProperty("approvedClasses");
+            if (approved != null)
+            {
+                CharacterClassData[] classes = EmberdelveAssetLibrary.Classes;
+                approved.arraySize = classes.Length;
+                for (int i = 0; i < classes.Length; i++) approved.GetArrayElementAtIndex(i).objectReferenceValue = classes[i];
+                serializedDirector.ApplyModifiedPropertiesWithoutUndo();
+            }
+
             return director;
+        }
+
+        // ---------------------------------------------------------------- network roles (U3A2)
+
+        /// <summary>
+        /// One scene object that switches the offline-only parts off for networked roles (see NetSceneRoles). Offline it is a
+        /// no-op, so the authored offline scene behaves exactly as before. The scene rig is switched off for every networked
+        /// role (players come from the network prefab); clients also lose the game master (combat authority, run director,
+        /// HUD), enemies, loot and the extraction gate; a dedicated server disables its HUD, result screen and feedback.
+        /// </summary>
+        private static void BuildNetSceneRoles(GameObject master, PlayerRig rig)
+        {
+            GameObject enemies = GameObject.Find("Enemies");
+            GameObject loot = GameObject.Find("Loot");
+            GameObject gate = GameObject.Find("Ember_Gate");
+
+            List<GameObject> client = new List<GameObject> { master };
+            if (enemies != null) client.Add(enemies);
+            if (loot != null) client.Add(loot);
+            if (gate != null) client.Add(gate);
+
+            List<Behaviour> server = new List<Behaviour>();
+            HudController hud = master.GetComponent<HudController>();
+            ResultScreenController result = master.GetComponent<ResultScreenController>();
+            FeedbackDirector feedback = master.GetComponent<FeedbackDirector>();
+            if (hud != null) server.Add(hud);
+            if (result != null) server.Add(result);
+            if (feedback != null) server.Add(feedback);
+
+            GameObject roles = new GameObject("Net_SceneRoles");
+            NetSceneRoles component = roles.AddComponent<NetSceneRoles>();
+            component.Configure(new[] { rig.gameObject }, client.ToArray(), server.ToArray());
+            EditorUtility.SetDirty(component);
         }
 
         // ---------------------------------------------------------------- player

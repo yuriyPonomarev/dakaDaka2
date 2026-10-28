@@ -54,12 +54,12 @@ namespace Emberdelve.EditorTools
             if (_failures == 0)
             {
                 Debug.Log(Tag + " PASS checks=" + _checks + " failures=0");
-                EditorApplication.Exit(0);
+                EmberdelveGateExit.Exit(0);
                 return;
             }
 
             Debug.LogError(Tag + " FAIL checks=" + _checks + " failures=" + _failures);
-            EditorApplication.Exit(1);
+            EmberdelveGateExit.Exit(1);
         }
 
         /// <summary>floor((score - 10) / 2.0), hand-computed per score.</summary>

@@ -92,7 +92,7 @@ namespace Emberdelve.EditorTools
             if (_wall != null) Destroy(_wall);
             if (_authority != null) _authority.SetClock(null);
             Debug.Log("[Emberdelve][MovementLifecycle] " + (_fail == 0 ? "PASS" : "FAIL") + " checks=" + _n + " failures=" + _fail);
-            EditorApplication.Exit(_fail == 0 ? 0 : 1);
+            EmberdelveGateExit.Exit(_fail == 0 ? 0 : 1);
         }
 
         // ---- helpers -----------------------------------------------------------------------------------------

@@ -36,6 +36,18 @@ namespace Emberdelve.Core
 
         public static bool IsNetworked => _current != NetRoleKind.Offline;
 
+        /// <summary>
+        /// U3A3 proof switch (--ember-net-no-enemies): on a process that runs the simulation, the dungeon's enemies are not
+        /// started, so a walking/admission proof is not disturbed by combat. Always false offline; only the launcher sets it.
+        /// </summary>
+        public static bool EnemiesDisabled { get; private set; }
+
+        /// <summary>Called by the launcher only.</summary>
+        public static void SetEnemiesDisabled(bool disabled)
+        {
+            EnemiesDisabled = disabled && _current != NetRoleKind.Offline;
+        }
+
         /// <summary>Called by the launcher only. Not meant for gameplay code.</summary>
         public static void Set(NetRoleKind role)
         {
@@ -47,6 +59,7 @@ namespace Emberdelve.Core
         public static void ResetToOffline()
         {
             _current = NetRoleKind.Offline;
+            EnemiesDisabled = false;
         }
     }
 }

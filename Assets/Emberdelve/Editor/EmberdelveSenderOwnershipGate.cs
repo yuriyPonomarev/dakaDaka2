@@ -98,7 +98,7 @@ namespace Emberdelve.EditorTools
             if (_authority != null) _authority.AllowLegacyMeleeAttacks = false;
             CombatTeams.FriendlyFire = false;
             Debug.Log("[Emberdelve][SenderOwnership] " + (_fail == 0 ? "PASS" : "FAIL") + " checks=" + _n + " failures=" + _fail);
-            EditorApplication.Exit(_fail == 0 ? 0 : 1);
+            EmberdelveGateExit.Exit(_fail == 0 ? 0 : 1);
         }
 
         // -------------------------------------------------------------------------------------- helpers

@@ -62,6 +62,7 @@ namespace Emberdelve.Player
         private int _playerId;
         private int _partyId;
         private bool _extracted;
+        private bool _registered;
 
         /// <summary>Whether this process controls the rig (input, camera, HUD binding). Not a gameplay rule.</summary>
         public bool IsLocallyControlled => locallyControlled;
@@ -78,6 +79,21 @@ namespace Emberdelve.Player
                 if (_playerId == 0) WireRig();
                 return _playerId;
             }
+        }
+
+        /// <summary>
+        /// U3A2: a client process gives a replicated view the id the SERVER issued for that player (the server's combat id).
+        /// Only a client-only process may do this, only once, and only with a positive id; the view is never registered as a
+        /// combat entity (see <see cref="WireRig"/>), so the id is a label for events and the HUD and nothing else. Returns
+        /// false (changing nothing) anywhere else: the server and offline processes derive the id themselves.
+        /// </summary>
+        public bool SetNetworkPlayerId(int playerId)
+        {
+            if (!NetRole.IsClientOnly || playerId <= 0) return false;
+            WireRig();
+            if (_playerId != 0 && _playerId != playerId) return false;
+            _playerId = playerId;
+            return true;
         }
 
         /// <summary>The party this player belongs to (0 until the run director assigns one). Teammates are friendly, other parties hostile.</summary>
@@ -382,9 +398,19 @@ namespace Emberdelve.Player
 
             if (_wired) return;
 
+            // U3A2: a client-only process holds this rig as a replicated VIEW. It takes no combat id and is never
+            // registered as a combat entity (the server owns the world); its player id is set by SetNetworkPlayerId, and
+            // none of the combat event wiring below applies to it. Offline / server / host take the path they always did.
+            if (NetRole.IsClientOnly)
+            {
+                _wired = true;
+                return;
+            }
+
             _combatId = CombatRegistry.AllocateId();
             _playerId = _combatId;
             CombatRegistry.Register(_combatId, this);
+            _registered = true;
 
             _hitVolumes = HitVolumeLayout.EnsureHumanoid(gameObject, 0.92f, 1.68f);
 
@@ -552,7 +578,7 @@ namespace Emberdelve.Player
 
         private void OnDestroy()
         {
-            if (!_wired) return;
+            if (!_wired || !_registered) return;
 
             if (health != null)
             {

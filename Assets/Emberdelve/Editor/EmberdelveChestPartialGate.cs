@@ -20,7 +20,7 @@ void Check(bool ok,string text){n++;if(!ok){fail++;Debug.LogError("[ChestPartial
 T Make<T>() where T:ScriptableObject {var x=ScriptableObject.CreateInstance<T>();cleanup.Add(x);return x;}
 IEnumerator Start(){yield return null;yield return null;try{Execute();}catch(Exception e){fail++;Debug.LogException(e);}finally{foreach(var x in cleanup)if(x!=null)Destroy(x);}
 yield return null;Check(pendingPickup==null,"fully collected loose source destroyed");
-Debug.Log("[Emberdelve][ChestPartial] "+(fail==0?"PASS":"FAIL")+" checks="+n+" failures="+fail);EditorApplication.Exit(fail==0?0:1);}
+Debug.Log("[Emberdelve][ChestPartial] "+(fail==0?"PASS":"FAIL")+" checks="+n+" failures="+fail);EmberdelveGateExit.Exit(fail==0?0:1);}
 LootPickup pendingPickup;
 void Execute(){
 var rig=FindFirstObjectByType<PlayerRig>();var director=FindFirstObjectByType<Emberdelve.Flow.RunDirector>();Check(rig!=null&&director!=null,"real scene host");if(rig==null||director==null)return;

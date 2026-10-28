@@ -30,6 +30,6 @@ public static class EmberdelveAttributeDataGate {
  typeof(EmberdelveAssetLibrary).GetMethod("ApplyAttributeDefinitions",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,null);
  for(int i=0;i<4;i++)Check(snapshots[i]==EditorJsonUtility.ToJson(assets[i])&&dirty[i]==EditorUtility.IsDirty(assets[i]),"builder idempotent "+i);
  }catch(Exception e){fail++;Debug.LogException(e);}finally{if(temp!=null)UnityEngine.Object.DestroyImmediate(temp);if(custom!=null)UnityEngine.Object.DestroyImmediate(custom);}
- Debug.Log("[Emberdelve][AttributeData] "+(fail==0?"PASS":"FAIL")+" checks="+n+" failures="+fail);EditorApplication.Exit(fail==0?0:1);
+ Debug.Log("[Emberdelve][AttributeData] "+(fail==0?"PASS":"FAIL")+" checks="+n+" failures="+fail);EmberdelveGateExit.Exit(fail==0?0:1);
  }
 }}
