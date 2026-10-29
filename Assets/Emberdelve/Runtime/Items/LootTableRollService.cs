@@ -141,7 +141,7 @@ namespace Emberdelve.Data
                 if (!AffixRarities.IsKnown(entry.affixRarity))
                 {
                     reason = $"{table.name}: entry {i} declares rarity value {(int)entry.affixRarity}, which is not a " +
-                             "known rarity (0 Common, 1 Uncommon, 2 Rare); an unknown rarity is refused, never " +
+                             $"known rarity ({ItemRarityRules.StoredLegend}); an unknown rarity is refused, never " +
                              "read as Common";
                     return false;
                 }
@@ -176,9 +176,18 @@ namespace Emberdelve.Data
                 }
             }
 
-            // Only a rarity that actually rolls affixes needs an affix catalog. Common gear rolls none, so a
-            // table with no catalog authored at all can still mint Common gear identities - it just may not
-            // pretend to roll Uncommon or Rare gear.
+            // D3a: a rarity ladder replaces the per-entry rarity of every gear unit, so it is checked as its own
+            // profile before anything is drawn: known tiers, one rung per tier, sane weights, a positive total, and
+            // a catalog big enough for the deepest tier it can pick. A table without a ladder skips all of this.
+            if (table.UsesRarityLadder)
+            {
+                if (!TryCheckLadder(table, out bool ladderRollsAffixes, out reason)) return false;
+                if (requestsGearInstances && ladderRollsAffixes) requestsRolledAffixes = true;
+            }
+
+            // Only a rarity that actually rolls affixes needs an affix catalog. Poor and Common gear roll none, so a
+            // table with no catalog authored at all can still mint Poor/Common gear identities - it just may not
+            // pretend to roll Uncommon or better gear.
             if (requestsRolledAffixes && table.AffixCatalogCount == 0)
             {
                 reason = $"{table.name}: entries ask for rolled gear but the table declares no affix catalog " +
@@ -219,6 +228,26 @@ namespace Emberdelve.Data
                 LootEntry entry = table.entries[index];
                 StageDrop(staged, pending, entry, RandomInRange(random, entry));
                 copies[index]++;
+            }
+
+            // ---- 2b. D3a: with a rarity ladder, every gear unit draws its tier now, one draw per unit in staging
+            // order, on a stream of its own. The shape stream above and the affix streams below are untouched, so
+            // which items dropped does not depend on the ladder, and a table without a ladder never gets here.
+            if (table.UsesRarityLadder && pending.Count > 0)
+            {
+                ILootRng rarityRandom = root.Fork(LootTable.RarityStream);
+                for (int i = 0; i < pending.Count; i++)
+                {
+                    PendingUnit unit = pending[i];
+                    if (!table.TryPickLadderRarity(rarityRandom, out AffixRarity picked))
+                    {
+                        reason = $"{table.name}: the rarity ladder could not pick a tier";
+                        return false;
+                    }
+
+                    unit.Rarity = picked;
+                    pending[i] = unit;
+                }
             }
 
             // ---- 3. validate every rolled unit against the trusted catalog without minting, then produce each
@@ -343,6 +372,73 @@ namespace Emberdelve.Data
                 authority = null;
                 reason = $"{table.name}: the table is not backed by the item catalog: {reason}";
                 return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// The ladder as a profile: every rung a known tier (one rung per tier), weights inside 0..MaxLadderWeight, a
+        /// positive total. <paramref name="rollsAffixes"/> says whether any weighted tier rolls affixes (so the table
+        /// needs an affix catalog) - and the catalog must have at least as many definitions as the deepest weighted tier
+        /// rolls, because the count is never lowered to fit.
+        /// </summary>
+        private static bool TryCheckLadder(LootTable table, out bool rollsAffixes, out string reason)
+        {
+            rollsAffixes = false;
+            reason = null;
+
+            HashSet<AffixRarity> seen = new HashSet<AffixRarity>();
+            int deepest = 0;
+
+            for (int i = 0; i < table.rarityLadder.Length; i++)
+            {
+                RarityWeight rung = table.rarityLadder[i];
+                if (rung == null)
+                {
+                    reason = $"{table.name}: rarity ladder rung {i} is empty";
+                    return false;
+                }
+
+                if (!AffixRarities.IsKnown(rung.rarity))
+                {
+                    reason = $"{table.name}: rarity ladder rung {i} declares rarity value {(int)rung.rarity}, which is not a " +
+                             $"known rarity ({ItemRarityRules.StoredLegend}); an unknown rarity is refused, never read as Common";
+                    return false;
+                }
+
+                if (!seen.Add(rung.rarity))
+                {
+                    reason = $"{table.name}: rarity ladder lists {rung.rarity} twice (rung {i}): one rung per tier";
+                    return false;
+                }
+
+                if (rung.weight < 0 || rung.weight > LootTable.MaxLadderWeight)
+                {
+                    reason = $"{table.name}: rarity ladder rung {i} ({rung.rarity}) has weight {rung.weight}, outside " +
+                             $"0..{LootTable.MaxLadderWeight}";
+                    return false;
+                }
+
+                if (rung.weight > 0 && AffixRarities.TryExpectedAffixCount(rung.rarity, out int count) && count > deepest)
+                    deepest = count;
+            }
+
+            if (table.RarityLadderTotalWeight <= 0)
+            {
+                reason = $"{table.name}: rarity ladder has no positive weight, so it can never pick a tier";
+                return false;
+            }
+
+            if (deepest > 0)
+            {
+                rollsAffixes = true;
+                if (table.AffixCatalogCount < deepest)
+                {
+                    reason = $"{table.name}: the rarity ladder can pick a tier that rolls {deepest} distinct affixes but the " +
+                             $"affix catalog lists {table.AffixCatalogCount}: the count is never lowered to fit the catalog";
+                    return false;
+                }
             }
 
             return true;

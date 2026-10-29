@@ -134,7 +134,7 @@ namespace Emberdelve.Items
 
             if (expected == 0)
             {
-                // Common is fixed stats only: no affix pool is consulted and no randomness is consumed.
+                // Poor and Common are fixed stats only: no affix pool is consulted and no randomness is consumed.
                 records = new AffixRecord[0];
                 reason = null;
                 return true;
@@ -190,14 +190,14 @@ namespace Emberdelve.Items
 
             if (!AffixRarities.TryExpectedAffixCount(rarity, out expected))
             {
-                reason = $"unknown rarity value {(int)rarity}: only Common (0 affixes), Uncommon (1) and " +
-                         $"Rare (2) exist";
+                reason = $"unknown rarity value {(int)rarity}: only the ladder members " +
+                         $"({ItemRarityRules.StoredLegend}) exist";
                 return false;
             }
 
             if (expected == 0)
             {
-                // Common carries no rolled affixes, so no gear category is needed and none is claimed.
+                // Poor and Common carry no rolled affixes, so no gear category is needed and none is claimed.
                 reason = null;
                 return true;
             }

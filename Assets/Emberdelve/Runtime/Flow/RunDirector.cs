@@ -859,7 +859,8 @@ namespace Emberdelve.Flow
                 session.Inventory != null ? session.Inventory.LifetimeCollected : 0,
                 session.Kills,
                 Mathf.Max(0f, session.EndedAt - _startedAt),
-                session.PlayerId);
+                session.PlayerId,
+                rig != null ? Emberdelve.Items.GearScore.ForEquipment(rig.Equipment) : 0);
             session.HasResult = true;
 
             bool anyoneLeft = false;

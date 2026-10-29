@@ -172,7 +172,7 @@ namespace Emberdelve.Items
             if (!AffixRarities.IsKnownValue(rarity))
             {
                 rarityValue = AffixRarity.Common;
-                reason = $"snapshot rarity {rarity} is not a known rarity (0 Common, 1 Uncommon, 2 Rare)";
+                reason = $"snapshot rarity {rarity} is not a known rarity ({ItemRarityRules.StoredLegend})";
                 return false;
             }
 

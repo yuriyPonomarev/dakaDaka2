@@ -21,9 +21,11 @@ namespace Emberdelve.Data
         [Min(0)] public int weight = 1;
         [Min(1)] public int maxCopies = 1;
 
-        [Tooltip("The rarity this entry is rolled at. Common (0) rolls no affixes and consumes no affix RNG " +
-                 "and keeps the item's own fixed stats. Uncommon (1) and Rare (2) roll that many accepted " +
-                 "affixes from this table's catalog. Rarity says nothing about whether the drop is a concrete " +
+        [Tooltip("The rarity this entry is rolled at. Poor (6) and Common (0) roll no affixes and consume no affix " +
+                 "RNG and keep the item's own fixed stats. Uncommon (1), Rare (2), Epic (3), Legendary (4) and Unique " +
+                 "(5) roll 1/2/3/4/5 accepted affixes from this table's catalog. When the table declares a rarity " +
+                 "ladder, a worn-gear unit takes its rarity from the ladder instead and this field is only a baseline. " +
+                 "Rarity says nothing about whether the drop is a concrete " +
                  "item: worn gear is one concrete item with its own UID at every rarity, Common included, and " +
                  "carried goods stay a definition plus the amount the table drew.")]
         public AffixRarity affixRarity = AffixRarity.Common;
@@ -33,17 +35,36 @@ namespace Emberdelve.Data
         public int EffectiveWeight => Mathf.Max(0, weight);
         public int EffectiveCopies => Mathf.Max(1, maxCopies);
 
-        /// <summary>The affix question, and only the affix question: true when this entry declares a rarity
-        /// above Common and therefore rolls random affixes from the table's catalog. It deliberately does NOT
-        /// say whether the drop is a concrete item - Common gear is a concrete item too, and carried goods
+        /// <summary>The affix question, and only the affix question: true when this entry declares a tier that
+        /// rolls at least one affix (Uncommon and above) from the table's catalog. Poor and Common roll none, and an
+        /// unknown value is not "rolled gear" (the validators refuse it separately). It deliberately does NOT
+        /// say whether the drop is a concrete item - Poor/Common gear is a concrete item too, and carried goods
         /// never roll affixes at any rarity.</summary>
-        public bool RequestsRolledGear => affixRarity != AffixRarity.Common;
+        public bool RequestsRolledGear => AffixRarities.RollsAffixes(affixRarity);
 
         /// <summary>The identity question: true when every unit this entry drops is produced as one concrete
         /// <see cref="Emberdelve.Items.ItemInstance"/> with its own UID, because the item is worn or held gear.
         /// Worn gear is one item per unit at Common, Uncommon and Rare alike; carried goods (currency,
         /// consumables, relics) stay a definition plus the amount the table drew.</summary>
         public bool RequestsGearInstance => item != null && item.IsEquippable;
+    }
+
+    /// <summary>D3a: one rung of a table's rarity ladder - a tier and its relative weight.</summary>
+    [System.Serializable]
+    public class RarityWeight
+    {
+        public AffixRarity rarity = AffixRarity.Common;
+        [Min(0)] public int weight = 1;
+
+        public RarityWeight()
+        {
+        }
+
+        public RarityWeight(AffixRarity rarity, int weight)
+        {
+            this.rarity = rarity;
+            this.weight = weight;
+        }
     }
 
     /// <summary>
@@ -87,6 +108,14 @@ namespace Emberdelve.Data
                  "refused when this catalog is empty - never downgraded to Common.")]
         public AffixDefinition[] affixCatalog;
 
+        [Header("Rarity ladder (D3a)")]
+        [Tooltip("Optional. Empty (the default, and every table authored before D3a) means each gear entry rolls at " +
+                 "the rarity it declares and nothing here is read. When set, every worn-gear unit this table drops " +
+                 "draws its rarity from these weights, one draw per unit on its own seeded stream (RarityStream), " +
+                 "so the shape and affix streams - and therefore which items drop and what an Uncommon/Rare unit " +
+                 "rolls - are untouched. One rung per tier, weights are relative, a weight of 0 disables a tier.")]
+        public RarityWeight[] rarityLadder;
+
         [Header("Roll shape")]
         [Tooltip("How many separate drops this table may produce for one container.")]
         [Min(1)] public int maxRolls = 3;
@@ -101,8 +130,68 @@ namespace Emberdelve.Data
         /// <summary>Stream ids of the table roll (<see cref="RngMix.Combine"/> of the table seed and the id).</summary>
         public const ulong ShapeStream = 1UL;
         public const ulong AffixStream = 2UL;
+        /// <summary>D3a: the rarity-ladder draws. A separate stream, so a table without a ladder consumes exactly what it always did.</summary>
+        public const ulong RarityStream = 4UL;
+
+        /// <summary>Largest weight one ladder rung may carry (keeps the total far inside an int).</summary>
+        public const int MaxLadderWeight = 1000000;
 
         public int EntryCount => entries != null ? entries.Length : 0;
+
+        /// <summary>True when a rarity ladder is authored (at least one rung). Null and empty are the same: no ladder.</summary>
+        public bool UsesRarityLadder => rarityLadder != null && rarityLadder.Length > 0;
+
+        /// <summary>Sum of the ladder weights (0 without a ladder or with only null/zero rungs).</summary>
+        public long RarityLadderTotalWeight
+        {
+            get
+            {
+                if (rarityLadder == null) return 0;
+                long total = 0;
+                for (int i = 0; i < rarityLadder.Length; i++)
+                {
+                    if (rarityLadder[i] != null && rarityLadder[i].weight > 0) total += rarityLadder[i].weight;
+                }
+                return total;
+            }
+        }
+
+        /// <summary>
+        /// The ladder weight of one tier. Rungs are looked up by tier, never by position, so the order they were
+        /// authored in does not change what a seed produces.
+        /// </summary>
+        public int LadderWeightOf(AffixRarity rarity)
+        {
+            if (rarityLadder == null) return 0;
+            for (int i = 0; i < rarityLadder.Length; i++)
+            {
+                if (rarityLadder[i] != null && rarityLadder[i].rarity == rarity) return Mathf.Max(0, rarityLadder[i].weight);
+            }
+            return 0;
+        }
+
+        /// <summary>
+        /// One ladder draw: a tier chosen with the ladder weights, walking the tiers in rank order (Poor first). Exactly
+        /// one <c>Next(total)</c> is consumed. False (tier Common) when there is no usable ladder.
+        /// </summary>
+        public bool TryPickLadderRarity(ILootRng random, out AffixRarity picked)
+        {
+            picked = AffixRarity.Common;
+            long total = RarityLadderTotalWeight;
+            if (random == null || total <= 0 || total > int.MaxValue) return false;
+
+            int ticket = random.Next((int)total);
+            int running = 0;
+            for (int i = 0; i < AffixRarities.ByRank.Length; i++)
+            {
+                AffixRarity tier = AffixRarities.ByRank[i];
+                running += LadderWeightOf(tier);
+                if (ticket >= running) continue;
+                picked = tier;
+                return true;
+            }
+            return false;
+        }
 
         /// <summary>How many affix definitions this table authored. Null and empty are the same thing: no catalog.</summary>
         public int AffixCatalogCount => affixCatalog != null ? affixCatalog.Length : 0;
@@ -113,10 +202,18 @@ namespace Emberdelve.Data
         {
             get
             {
-                if (entries == null) return false;
-                for (int i = 0; i < entries.Length; i++)
+                if (entries != null)
                 {
-                    if (entries[i] != null && entries[i].RequestsRolledGear) return true;
+                    for (int i = 0; i < entries.Length; i++)
+                    {
+                        if (entries[i] != null && entries[i].RequestsRolledGear) return true;
+                    }
+                }
+
+                for (int i = 0; i < AffixRarities.ByRank.Length; i++)
+                {
+                    AffixRarity tier = AffixRarities.ByRank[i];
+                    if (AffixRarities.RollsAffixes(tier) && LadderWeightOf(tier) > 0) return true;
                 }
                 return false;
             }
@@ -208,7 +305,7 @@ namespace Emberdelve.Data
                     if (!AffixRarities.IsKnown(entry.affixRarity))
                     {
                         problems.Add($"{name}: entry {i} declares rarity value {(int)entry.affixRarity}, which is " +
-                                     "not a known rarity (0 Common, 1 Uncommon, 2 Rare)");
+                                     $"not a known rarity ({ItemRarityRules.StoredLegend})");
                         continue;
                     }
 
@@ -237,6 +334,8 @@ namespace Emberdelve.Data
                     }
                 }
             }
+
+            ValidateRarityLadder(problems);
 
             // A table that drops gear has to be able to build the catalog that minting requires, and one item
             // id naming two different definitions would make a minted identity ambiguous. Repeated references
@@ -286,6 +385,62 @@ namespace Emberdelve.Data
             }
 
             return problems;
+        }
+
+        /// <summary>
+        /// D3a: the ladder is data like everything else on a table, so a bad one is a reported problem and never a
+        /// silent fallback: unknown tier, duplicate tier, negative or oversized weight, no weight at all, a ladder on a
+        /// table that drops no gear, or a tier that rolls more affixes than the table's catalog has definitions.
+        /// </summary>
+        private void ValidateRarityLadder(List<string> problems)
+        {
+            int needed = 0;
+
+            if (UsesRarityLadder)
+            {
+                HashSet<AffixRarity> seen = new HashSet<AffixRarity>();
+                for (int i = 0; i < rarityLadder.Length; i++)
+                {
+                    RarityWeight rung = rarityLadder[i];
+                    if (rung == null) { problems.Add($"{name}: rarity ladder rung {i} is empty"); continue; }
+
+                    if (!AffixRarities.IsKnown(rung.rarity))
+                    {
+                        problems.Add($"{name}: rarity ladder rung {i} declares rarity value {(int)rung.rarity}, which is " +
+                                     $"not a known rarity ({ItemRarityRules.StoredLegend})");
+                        continue;
+                    }
+
+                    if (!seen.Add(rung.rarity))
+                        problems.Add($"{name}: rarity ladder lists {rung.rarity} twice (rung {i}): one rung per tier");
+
+                    if (rung.weight < 0 || rung.weight > MaxLadderWeight)
+                        problems.Add($"{name}: rarity ladder rung {i} ({rung.rarity}) has weight {rung.weight}, outside 0..{MaxLadderWeight}");
+                    else if (rung.weight > 0 && AffixRarities.TryExpectedAffixCount(rung.rarity, out int count) && count > needed)
+                        needed = count;
+                }
+
+                if (RarityLadderTotalWeight <= 0)
+                    problems.Add($"{name}: rarity ladder has no positive weight, so it can never pick a tier");
+
+                if (!RequestsGearInstances)
+                    problems.Add($"{name}: declares a rarity ladder but drops no worn gear, so nothing would read it");
+            }
+
+            if (entries != null)
+            {
+                for (int i = 0; i < entries.Length; i++)
+                {
+                    if (entries[i] != null && AffixRarities.TryExpectedAffixCount(entries[i].affixRarity, out int count) && count > needed)
+                        needed = count;
+                }
+            }
+
+            if (needed > 0 && AffixCatalogCount > 0 && AffixCatalogCount < needed)
+            {
+                problems.Add($"{name}: a tier here rolls {needed} distinct affixes but the affix catalog lists only " +
+                             $"{AffixCatalogCount}: the count is never lowered to fit the catalog");
+            }
         }
 
         private void OnValidate()

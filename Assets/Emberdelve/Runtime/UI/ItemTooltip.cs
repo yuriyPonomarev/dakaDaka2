@@ -75,30 +75,36 @@ namespace Emberdelve.UI
     public static class ItemTooltip
     {
         public static readonly Color NeutralColor = new Color(0.88f, 0.84f, 0.78f, 1f);
-        public static readonly Color CommonColor = new Color(0.58f, 0.62f, 0.68f, 1f);
+        // D3a rarity ladder colours (DND_PARITY.md): Poor grey, Common white, Uncommon green, Rare blue, Epic purple,
+        // Legendary orange, Unique gold. Common moved from the old blue-grey to white when Poor took the grey; Uncommon
+        // and Rare keep their previous values. Each is checked against the panel backgrounds by the inventory UI gate.
+        public static readonly Color PoorColor = new Color(0.6f, 0.6f, 0.6f, 1f);
+        public static readonly Color CommonColor = new Color(1f, 1f, 1f, 1f);
         public static readonly Color UncommonColor = new Color(0.36f, 0.8f, 0.38f, 1f);
         public static readonly Color RareColor = new Color(0.38f, 0.6f, 1f, 1f);
+        public static readonly Color EpicColor = new Color(0.7f, 0.45f, 0.95f, 1f);
+        public static readonly Color LegendaryColor = new Color(1f, 0.58f, 0.15f, 1f);
+        public static readonly Color UniqueColor = new Color(1f, 0.84f, 0.25f, 1f);
 
         public const int ShortUidLength = 8;
 
         public static string RarityName(AffixRarity rarity)
         {
-            switch (rarity)
-            {
-                case AffixRarity.Common: return "Common";
-                case AffixRarity.Uncommon: return "Uncommon";
-                case AffixRarity.Rare: return "Rare";
-                default: return "Unknown";
-            }
+            return AffixRarities.Name(rarity);
         }
 
         public static Color RarityColor(AffixRarity rarity)
         {
             switch (rarity)
             {
+                case AffixRarity.Poor: return PoorColor;
+                case AffixRarity.Common: return CommonColor;
                 case AffixRarity.Uncommon: return UncommonColor;
                 case AffixRarity.Rare: return RareColor;
-                default: return CommonColor;
+                case AffixRarity.Epic: return EpicColor;
+                case AffixRarity.Legendary: return LegendaryColor;
+                case AffixRarity.Unique: return UniqueColor;
+                default: return NeutralColor; // an unknown value is never painted as a real tier
             }
         }
 

@@ -1654,7 +1654,7 @@ namespace Emberdelve.EditorTools
             Color body = ItemTooltip.NeutralColor;
             Color panelBg = new Color(0.055f, 0.05f, 0.045f, 1f);
             Color tipBg = new Color(0.045f, 0.04f, 0.036f, 1f);
-            foreach (AffixRarity rarity in new[] { AffixRarity.Common, AffixRarity.Uncommon, AffixRarity.Rare })
+            foreach (AffixRarity rarity in AffixRarities.ByRank) // D3a: all seven tiers, Poor..Unique
             {
                 Color c = ItemTooltip.RarityColor(rarity);
                 float distance = Mathf.Sqrt((c.r - body.r) * (c.r - body.r) + (c.g - body.g) * (c.g - body.g) + (c.b - body.b) * (c.b - body.b));

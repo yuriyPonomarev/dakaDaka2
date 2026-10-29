@@ -16,9 +16,13 @@ namespace Emberdelve.Core
         /// <summary>R7: the player this result belongs to (0 for a result built without one).</summary>
         public readonly int PlayerId;
 
-        public RunResult(RunState outcome, string className, float lootValue, int itemsCollected, int enemiesSlain, float duration, int playerId = 0)
+        /// <summary>D3a: gear score of what the player wore when the run ended (display only; 0 when nothing was worn).</summary>
+        public readonly int GearScore;
+
+        public RunResult(RunState outcome, string className, float lootValue, int itemsCollected, int enemiesSlain, float duration, int playerId = 0, int gearScore = 0)
         {
             PlayerId = playerId;
+            GearScore = gearScore;
             Outcome = outcome; ClassName = className; LootValue = lootValue;
             ItemsCollected = itemsCollected; EnemiesSlain = enemiesSlain; DurationSeconds = duration;
         }

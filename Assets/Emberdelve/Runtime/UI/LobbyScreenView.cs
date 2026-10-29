@@ -16,6 +16,7 @@ namespace Emberdelve.UI
         private readonly Dictionary<CharacterClassData, Text> _statLabels = new Dictionary<CharacterClassData, Text>();
         private CharacterClassData _selected;
         private Text _lastResultLabel;
+        private Text _gearScoreLabel;
 
         public void Build(Canvas canvas, IReadOnlyList<CharacterClassData> classes,
             System.Action<CharacterClassData> onSelected, System.Action onStart, RunResult lastResult, bool hasResult)
@@ -43,6 +44,14 @@ namespace Emberdelve.UI
                 UiFactory.SetRect(_lastResultLabel.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
                     new Vector2(1200f, 34f), new Vector2(0f, -190f));
             }
+
+            // D3a: gear score, display only. The lobby has no persistent stash yet, so the number is the score of
+            // what the player wore when the last run ended (RunResult.GearScore); before any run it is 0.
+            int gearScore = hasResult ? lastResult.GearScore : 0;
+            _gearScoreLabel = UiFactory.CreateText(root, "GearScore", Emberdelve.Items.GearScore.Label(gearScore), 22,
+                new Color(0.95f, 0.78f, 0.4f, 1f), TextAnchor.MiddleRight);
+            UiFactory.SetRect(_gearScoreLabel.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(360f, 36f), new Vector2(-200f, -40f));
 
             int count = Mathf.Max(1, classes.Count);
             const float cardWidth = 420f;

@@ -310,6 +310,7 @@ namespace Emberdelve.EditorTools
             GearRejections();
             JsonRejections();
             VersionChecks();
+            ProductionMigrationChecks();
             RegistryChecks();
             LoadoutAtomicity();
             OverflowChecks();
@@ -374,8 +375,8 @@ namespace Emberdelve.EditorTools
             gearJson0 = gearSnap0.ToJson();
             loadoutJson0 = loadout0.ToJson();
 
-            Check(bagSnap0.schemaVersion == 1 && bagSnap0.kind == "bag" && bagSnap0.containerId == "bag" && bagSnap0.width == 10 && bagSnap0.height == 6 && bagSnap0.entries.Length == 8,
-                "bag snapshot header: version 1, bag, 10x6, 8 entries");
+            Check(bagSnap0.schemaVersion == ContainerSnapshot.CurrentSchemaVersion && bagSnap0.kind == "bag" && bagSnap0.containerId == "bag" && bagSnap0.width == 10 && bagSnap0.height == 6 && bagSnap0.entries.Length == 8,
+                "bag snapshot header: current version (2 since D3a), bag, 10x6, 8 entries");
             Check(gearSnap0.kind == "equipment" && gearSnap0.width == 0 && gearSnap0.height == 0 && gearSnap0.entries.Length == 5, "equipment snapshot header: equipment, no grid, 5 entries");
             Check(bagSnap0.checksum.StartsWith("sha256:", StringComparison.Ordinal) && bagSnap0.checksum.Length == 71 && bagSnap0.ChecksumMatches(), "checksum shape sha256:+64 hex and it matches");
             Check(StackEntry(bagSnap0, "ember_coin") != null && string.IsNullOrEmpty(StackEntry(bagSnap0, "ember_coin").item.uid), "carried stacks are quantity entries by item id with no uid");
@@ -764,12 +765,12 @@ namespace Emberdelve.EditorTools
             RefuseJson("exponent quantity", Rep(j, "\"quantity\":1,", "\"quantity\":1e0,", "qty exponent"), "whole number");
             RefuseJson("integer beyond int range", Rep(j, "\"quantity\":1,", "\"quantity\":99999999999,", "qty huge"), "whole number");
             RefuseJson("entries is not an array", Rep(j, "\"entries\":[", "\"entries\":{", "entries obj").Replace("}]", "}}"), "malformed");
-            RefuseJson("deeply nested document", "{\"schemaVersion\":1,\"a\":" + new string('[', 40) + new string(']', 40) + "}", "nesting");
+            RefuseJson("deeply nested document", "{\"schemaVersion\":" + ContainerSnapshot.CurrentSchemaVersion + ",\"a\":" + new string('[', 40) + new string(']', 40) + "}", "nesting");
             RefuseJson("document above the size cap", "{\"a\":\"" + new string('x', StrictJson.MaxDocumentLength + 10) + "\"}", "limit");
             RefuseJson("raw control character in a string", Rep(j, "\"kind\":\"bag\"", "\"kind\":\"ba\ng\"", "control char"), "control character");
             RefuseJson("unknown escape", Rep(j, "\"kind\":\"bag\"", "\"kind\":\"b\\qg\"", "bad escape"), "escape");
 
-            StringBuilder many = new StringBuilder("{\"schemaVersion\":1,\"kind\":\"bag\",\"containerId\":\"bag\",\"width\":10,\"height\":4,\"entries\":[");
+            StringBuilder many = new StringBuilder("{\"schemaVersion\":" + ContainerSnapshot.CurrentSchemaVersion + ",\"kind\":\"bag\",\"containerId\":\"bag\",\"width\":10,\"height\":4,\"entries\":[");
             for (int i = 0; i <= ContainerSnapshot.MaxEntries; i++) { if (i > 0) many.Append(','); many.Append("null"); }
             many.Append("],\"checksum\":\"\"}");
             RefuseJson("more entries than the cap in the document", many.ToString(), "above the limit");
@@ -790,7 +791,7 @@ namespace Emberdelve.EditorTools
             RefuseJson("integer above int.MaxValue", Rep(j, "\"quantity\":1,", "\"quantity\":2147483648,", "int max + 1"), "whole number");
             RefuseJson("integer below int.MinValue", Rep(j, "\"quantity\":1,", "\"quantity\":-2147483649,", "int min - 1"), "whole number");
             RefuseLoadoutJson("loadout json with whitespace", loadoutJson0.Replace("\"bag\":", "\"bag\": "), "canonical");
-            RefuseLoadoutJson("loadout json repeating a member", Rep(loadoutJson0, "\"bag\":{", "\"equipment\":{\"schemaVersion\":1,\"kind\":\"equipment\",\"containerId\":\"equipment\",\"width\":0,\"height\":0,\"entries\":[],\"checksum\":\"x\"},\"bag\":{", "dup equipment member"), "repeats");
+            RefuseLoadoutJson("loadout json repeating a member", Rep(loadoutJson0, "\"bag\":{", "\"equipment\":{\"schemaVersion\":" + ContainerSnapshot.CurrentSchemaVersion + ",\"kind\":\"equipment\",\"containerId\":\"equipment\",\"width\":0,\"height\":0,\"entries\":[],\"checksum\":\"x\"},\"bag\":{", "dup equipment member"), "repeats");
             Check(ContainerSnapshot.TryFromJson(j, out ContainerSnapshot canonicalOk, out string reason) && canonicalOk.ToJson() == j, "the exact canonical text is accepted: " + reason);
 
             Check(State() == baseline, "no json refusal changed the target");
@@ -801,33 +802,105 @@ namespace Emberdelve.EditorTools
         private void VersionChecks()
         {
             string baseline = State();
-            Check(ContainerSnapshot.CurrentSchemaVersion == 1 && ContainerSnapshot.MinSupportedSchemaVersion == 1, "schema version starts at 1");
+            int cur = ContainerSnapshot.CurrentSchemaVersion;
+            // D3a bumped the schema to 2 (rarity ladder); 1 stays readable through the production migration.
+            Check(cur == 2 && ContainerSnapshot.MinSupportedSchemaVersion == 1, "schema version is 2 since D3a, 1 is still migrated");
             string j = bagJson0;
-            foreach (string v in new[] { "0", "2", "99", "-1", "2147483647" })
+            string sv = "\"schemaVersion\":" + cur;
+            foreach (string v in new[] { "0", "3", "99", "-1", "2147483647" })
             {
-                string doc = Rep(j, "\"schemaVersion\":1", "\"schemaVersion\":" + v, "version " + v);
+                string doc = Rep(j, sv, "\"schemaVersion\":" + v, "version " + v);
                 int num = int.Parse(v, CultureInfo.InvariantCulture);
-                RefuseJson("schemaVersion " + v, doc, num > 1 ? "newer" : "older");
-                string ldoc = Rep(loadoutJson0, "{\"schemaVersion\":1,\"bag\"", "{\"schemaVersion\":" + v + ",\"bag\"", "loadout version " + v);
-                RefuseLoadoutJson("loadout schemaVersion " + v, ldoc, num > 1 ? "newer" : "older");
+                RefuseJson("schemaVersion " + v, doc, num > cur ? "newer" : "older");
+                string ldoc = Rep(loadoutJson0, "{" + sv + ",\"bag\"", "{\"schemaVersion\":" + v + ",\"bag\"", "loadout version " + v);
+                RefuseLoadoutJson("loadout schemaVersion " + v, ldoc, num > cur ? "newer" : "older");
             }
-            RefuseJson("schemaVersion 1.0", Rep(j, "\"schemaVersion\":1", "\"schemaVersion\":1.0", "version float"), "whole number");
-            RefuseJson("schemaVersion as a string", Rep(j, "\"schemaVersion\":1", "\"schemaVersion\":\"1\"", "version string"), "must be a number");
-            RefuseJson("missing schemaVersion", Rep(j, "\"schemaVersion\":1,", "", "no version"), "no schemaVersion");
+            RefuseJson("schemaVersion 2.0", Rep(j, sv, "\"schemaVersion\":2.0", "version float"), "whole number");
+            RefuseJson("schemaVersion as a string", Rep(j, sv, "\"schemaVersion\":\"2\"", "version string"), "must be a number");
+            RefuseJson("missing schemaVersion", Rep(j, sv + ",", "", "no version"), "no schemaVersion");
 
             ContainerSnapshot s;
-            foreach (int v in new[] { 0, 2, 7, -3 })
+            foreach (int v in new[] { 0, 1, 3, 7, -3 })
             {
                 s = BagClone(); s.schemaVersion = v; s.Seal();
-                RefuseBag("in-memory schemaVersion " + v, s, v > 1 ? "newer" : "older");
+                RefuseBag("in-memory schemaVersion " + v, s, v > cur ? "newer" : "older");
             }
-            LoadoutSnapshot l = loadout0.Clone(); l.schemaVersion = 2; l.Seal();
-            RefuseLoadout("loadout schemaVersion 2 in memory", l, "newer");
+            LoadoutSnapshot l = loadout0.Clone(); l.schemaVersion = 3; l.Seal();
+            RefuseLoadout("loadout schemaVersion 3 in memory", l, "newer");
+            l = loadout0.Clone(); l.schemaVersion = 1; l.Seal();
+            RefuseLoadout("loadout schemaVersion 1 in memory (an old version must be migrated while parsing)", l, "older");
             l = loadout0.Clone(); l.schemaVersion = 0; l.Seal();
             RefuseLoadout("loadout schemaVersion 0 in memory", l, "older");
 
-            Check(ContainerSnapshot.TryFromJson(j, out ContainerSnapshot ok, out string reason) && ok.schemaVersion == 1, "the supported version parses: " + reason);
+            Check(ContainerSnapshot.TryFromJson(j, out ContainerSnapshot ok, out string reason) && ok.schemaVersion == cur, "the supported version parses: " + reason);
             Check(State() == baseline, "no version refusal changed the target");
+        }
+
+        // ------------------------------------------------------------------ D3a: the production 1 -> 2 migration
+
+        /// <summary>A genuine version 1 document is the current model written at schemaVersion 1 and sealed: version 1 and 2 share one layout and one checksum rule, only the version differs.</summary>
+        private ContainerSnapshot AsVersion1(ContainerSnapshot snapshot)
+        {
+            ContainerSnapshot old = snapshot.Clone();
+            old.schemaVersion = 1;
+            return old.Seal();
+        }
+
+        private void ProductionMigrationChecks()
+        {
+            string baseline = State();
+            ContainerSchema.ClearMigrationsForTest(); // exactly the production chain
+            string v1Bag = AsVersion1(bagSnap0).ToJson();
+            Check(v1Bag.StartsWith("{\"schemaVersion\":1,", StringComparison.Ordinal) && v1Bag != bagJson0, "a version 1 bag document is built");
+
+            Check(ContainerSnapshot.TryFromJson(v1Bag, out ContainerSnapshot migrated, out string reason), "an intact version 1 bag migrates: " + reason);
+            Check(migrated != null && migrated.schemaVersion == 2 && migrated.ChecksumMatches() && migrated.ToJson() == bagJson0,
+                "the migrated bag is a normal version 2 snapshot with the same content (same bytes as writing it at version 2)");
+            Inventory twin = NewBag(cat, 10, 6, out Equipment twinGear);
+            Check(migrated != null && twin.TryRestore(migrated, out reason) && twin.ToContainerSnapshot().ToJson() == bagJson0, "and it restores with every uid, rarity and roll as saved: " + reason);
+            Destroy(twin.gameObject);
+
+            RefuseJson("a version 1 bag edited after it was written", v1Bag.Replace("\"quantity\":8", "\"quantity\":7"), "integrity");
+            RefuseJson("a version 1 bag with a wrong checksum", Rep(v1Bag, "\"checksum\":\"sha256:", "\"checksum\":\"sha256:0", "bad v1 checksum"), "integrity");
+
+            // Version 1 could only write 0, 1 or 2. A version 1 document naming a later tier was not written by version 1.
+            ContainerSnapshot lateTier = BagClone();
+            GearEntry(lateTier, "emberthread_mantle", 2).item.rarity = 3;
+            RefuseJson("a version 1 bag that names Epic", AsVersion1(lateTier).ToJson(), "did not exist in schema version 1");
+            ContainerSnapshot poorTier = BagClone();
+            GearEntry(poorTier, "emberthread_mantle", 2).item.rarity = 6;
+            RefuseJson("a version 1 bag that names Poor", AsVersion1(poorTier).ToJson(), "did not exist in schema version 1");
+
+            // The same document written at the current version is structurally readable; the validator then judges the tier.
+            ContainerSnapshot epicWrongCount = BagClone();
+            GearEntry(epicWrongCount, "emberthread_mantle", 2).item.rarity = 3;
+            epicWrongCount.Seal();
+            RefuseBag("Epic carrying 2 affixes (needs 3)", epicWrongCount, "expects 3");
+            ContainerSnapshot unknownTier = BagClone();
+            GearEntry(unknownTier, "emberthread_mantle", 2).item.rarity = 7;
+            unknownTier.Seal();
+            RefuseBag("an unknown tier 7", unknownTier, "not a known rarity");
+
+            // loadout wrapper at version 1 (both containers at version 1)
+            LoadoutSnapshot oldLoadout = loadout0.Clone();
+            oldLoadout.schemaVersion = 1;
+            oldLoadout.bag.schemaVersion = 1;
+            oldLoadout.equipment.schemaVersion = 1;
+            oldLoadout.Seal();
+            string v1Loadout = oldLoadout.ToJson();
+            Check(LoadoutSnapshot.TryFromJson(v1Loadout, out LoadoutSnapshot lo, out reason) && lo.schemaVersion == 2 && lo.ToJson() == loadoutJson0,
+                "an intact version 1 loadout migrates to the version 2 bytes: " + reason);
+            RefuseLoadoutJson("a version 1 loadout edited after it was written", v1Loadout.Replace("\"quantity\":8", "\"quantity\":7"), "integrity");
+
+            // a version 2 wrapper around a version 1 container is refused
+            JsonNode mixed = ParseTree(loadoutJson0);
+            JsonNode inner = ContainerSchema.Member(mixed, "bag");
+            JsonNode oldBag = ParseTree(v1Bag);
+            ContainerSchema.Member(inner, "schemaVersion").Text = "1";
+            ContainerSchema.Member(inner, "checksum").Text = ContainerSchema.Member(oldBag, "checksum").Text;
+            RefuseLoadoutJson("a version 2 loadout wrapper around a version 1 bag", StrictJson.Serialize(mixed, null), "share one version");
+
+            Check(State() == baseline, "production migration checks left the fixture state intact");
         }
 
         // ------------------------------------------------------------------ cross-container uid uniqueness
@@ -1130,18 +1203,18 @@ namespace Emberdelve.EditorTools
                         JsonNode cs = ContainerSchema.Member(root, "checksum");
                         return cs != null && cs.Text == ContainerSchema.TreeChecksum(root) ? null : "the v0 checksum does not match the document";
                     },
-                    Upgrade = root => { ContainerSchema.Member(root, "schemaVersion").Text = "1"; return null; }
+                    Upgrade = root => { ContainerSchema.Member(root, "schemaVersion").Text = "1"; return null; } // then the production 1 -> 2 step runs
                 });
 
                 Check(ContainerSnapshot.TryFromJson(v0Bag, out ContainerSnapshot migrated, out string reason), "an intact v0 document migrates: " + reason);
-                Check(migrated != null && migrated.schemaVersion == 1 && migrated.ChecksumMatches() && migrated.ToJson() == bagJson0, "the migrated model is a normal current snapshot with a fresh checksum (same bytes as the original)");
+                Check(migrated != null && migrated.schemaVersion == ContainerSnapshot.CurrentSchemaVersion && migrated.ChecksumMatches() && migrated.ToJson() == bagJson0, "the migrated model (v0 -> test step -> production 1 -> 2) is a normal current snapshot with a fresh checksum (same bytes as the original)");
                 Inventory twin = NewBag(cat, 10, 6, out Equipment twinGear);
                 Check(migrated != null && twin.TryRestore(migrated, out reason) && twin.ToContainerSnapshot().ToJson() == bagJson0, "and it restores: " + reason);
                 Destroy(twin.gameObject);
 
                 RefuseJson("a v0 document edited after it was written (original checksum fails)", v0Bag.Replace("\"quantity\":8", "\"quantity\":7"), "integrity");
                 RefuseJson("a v0 document with a wrong checksum", Rep(v0Bag, "\"checksum\":\"sha256:", "\"checksum\":\"sha256:0", "bad v0 checksum"), "integrity");
-                RefuseJson("a version 2 document is still newer even with migrations registered", Rep(bagJson0, "\"schemaVersion\":1", "\"schemaVersion\":2", "v2"), "newer");
+                RefuseJson("a version 3 document is still newer even with migrations registered", Rep(bagJson0, "\"schemaVersion\":2", "\"schemaVersion\":3", "v3"), "newer");
 
                 // loadout: wrapper and both containers at v0
                 string v0Loadout = MakeV0(loadoutJson0, true);

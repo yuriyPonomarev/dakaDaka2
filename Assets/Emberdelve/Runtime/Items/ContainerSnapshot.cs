@@ -44,8 +44,13 @@ namespace Emberdelve.Items
     /// the stash). Plain serializable data plus a canonical JSON form; the rules that decide whether a snapshot may
     /// be restored live in <see cref="ContainerSnapshotValidator"/> and the catalog.
     ///
-    /// Format (schemaVersion 1): kind, containerId, grid width/height (0x0 for equipment), entries (canonically
-    /// ordered: grid entries by row then column, equipment entries by slot number) and a checksum.
+    /// Format (schemaVersion 2; D3a): kind, containerId, grid width/height (0x0 for equipment), entries (canonically
+    /// ordered: grid entries by row then column, equipment entries by slot number) and a checksum. Version 2 is the
+    /// same layout as version 1; what it adds is the meaning of the item "rarity" int: the stored ladder is now
+    /// Common 0, Uncommon 1, Rare 2, Epic 3, Legendary 4, Unique 5, Poor 6, and 7 or more is refused. A version 1
+    /// document is migrated while it is parsed (its checksum is verified under the version 1 rule first, its rarities
+    /// must be 0..2 because nothing else existed then, and the result is re-sealed as version 2) - old saves load
+    /// with every item, rarity and rolled affix exactly as written.
     ///
     /// The checksum is TAMPER EVIDENCE, NOT SECURITY. It is an unkeyed SHA-256 over the canonical content (the same layout as the JSON, but floats as exact bit patterns so it does not depend on how a runtime spells a float) of everything
     /// except the checksum field. It catches accidental corruption and casual hand edits (a changed value, a swapped
@@ -60,12 +65,12 @@ namespace Emberdelve.Items
     /// </summary>
     public sealed class ContainerSnapshot
     {
-        public const int CurrentSchemaVersion = 1;
+        public const int CurrentSchemaVersion = 2;
         public const int MinSupportedSchemaVersion = 1;
         /// <summary>Largest number of entries a snapshot may carry (a 12x12 bag cannot exceed 144; this is a hard sanity cap).</summary>
         public const int MaxEntries = 512;
         public const int MaxGridDimension = 64;
-        /// <summary>Parser-level cap on an item's affix array; the rarity rule (0..2) is enforced by the validator.</summary>
+        /// <summary>Parser-level cap on an item's affix array; the rarity rule (0..5 affixes by tier) is enforced by the validator.</summary>
         public const int MaxAffixesPerItemInDocument = 8;
         public const string ChecksumPrefix = "sha256:";
 
@@ -358,12 +363,28 @@ namespace Emberdelve.Items
             snapshot = null;
 
             if (!ContainerSchema.TryReadVersionAndUpgrade(root, what, out migrated, out reason)) return false;
+            if (!TryReadFields(root, what, out ContainerSnapshot result, out reason)) return false;
+
+            if (migrated) result.Seal(); // integrity was verified on the ORIGINAL document before migration; write a fresh checksum
+            snapshot = result;
+            reason = null;
+            return true;
+        }
+
+        /// <summary>
+        /// Strict structural read of one container tree with NO version handling: the same field rules as a normal
+        /// read, used by <see cref="TryRead"/> after the version gate and by an older version's integrity check, which
+        /// has to rebuild the document under its own rule before it is migrated.
+        /// </summary>
+        internal static bool TryReadFields(JsonNode root, string what, out ContainerSnapshot result, out string reason)
+        {
+            result = null;
 
             if (!StrictJson.TryExpectObject(root, what,
                     new[] { "schemaVersion", "kind", "containerId", "width", "height", "entries", "checksum" },
                     out Dictionary<string, JsonNode> map, out reason)) return false;
 
-            ContainerSnapshot result = new ContainerSnapshot();
+            result = new ContainerSnapshot();
 
             if (!StrictJson.TryInt(map["schemaVersion"], what + " schemaVersion", out result.schemaVersion, out reason)) return false;
             if (!StrictJson.TryString(map["kind"], what + " kind", out result.kind, out reason)) return false;
@@ -377,12 +398,10 @@ namespace Emberdelve.Items
             result.entries = new ContainerEntry[entryNodes.Count];
             for (int i = 0; i < entryNodes.Count; i++)
             {
-                if (!TryReadEntry(entryNodes[i], $"{what} entry {i}", out ContainerEntry entry, out reason)) return false;
+                if (!TryReadEntry(entryNodes[i], $"{what} entry {i}", out ContainerEntry entry, out reason)) { result = null; return false; }
                 result.entries[i] = entry;
             }
 
-            if (migrated) result.Seal(); // integrity was verified on the ORIGINAL document before migration; write a fresh checksum
-            snapshot = result;
             reason = null;
             return true;
         }
@@ -447,8 +466,9 @@ namespace Emberdelve.Items
     }
 
     /// <summary>
-    /// The schema version policy and the migration chain. Version 1 is the only version that exists, so nothing is
-    /// registered: an older or newer document is refused with a reason that says which.
+    /// The schema version policy and the migration chain. Version 2 is current (D3a); the one production migration is
+    /// 1 to 2 (<see cref="VerifyVersion1Integrity"/> then <see cref="UpgradeVersion1To2"/>). A document older than 1 or
+    /// newer than 2 is refused with a reason that says which.
     ///
     /// Correct order for a future migration (the order this code enforces): (1) verify the ORIGINAL document's checksum
     /// under the OLD version's own rule (<see cref="MigrationStep.VerifyIntegrity"/>; for a version that hashed the
@@ -461,12 +481,79 @@ namespace Emberdelve.Items
     /// </summary>
     internal static class ContainerSchema
     {
-        private static readonly Dictionary<int, MigrationStep> Steps = new Dictionary<int, MigrationStep>();
+        private static readonly Dictionary<int, MigrationStep> Steps = CreateProductionSteps();
 
-        /// <summary>TEST-ONLY: register a migration from <paramref name="fromVersion"/> to fromVersion + 1. Production registers none.</summary>
+        private static Dictionary<int, MigrationStep> CreateProductionSteps()
+        {
+            Dictionary<int, MigrationStep> steps = new Dictionary<int, MigrationStep>();
+            steps[1] = new MigrationStep { VerifyIntegrity = VerifyVersion1Integrity, Upgrade = UpgradeVersion1To2 };
+            return steps;
+        }
+
+        /// <summary>TEST-ONLY: register a migration from <paramref name="fromVersion"/> to fromVersion + 1 (replacing any step already there).</summary>
         internal static void RegisterMigrationForTest(int fromVersion, MigrationStep step) { Steps[fromVersion] = step; }
 
-        internal static void ClearMigrationsForTest() { Steps.Clear(); }
+        /// <summary>TEST-ONLY: drop every test registration and restore exactly the production chain (1 to 2).</summary>
+        internal static void ClearMigrationsForTest()
+        {
+            Steps.Clear();
+            Dictionary<int, MigrationStep> production = CreateProductionSteps();
+            foreach (KeyValuePair<int, MigrationStep> pair in production) Steps[pair.Key] = pair.Value;
+        }
+
+        /// <summary>
+        /// D3a: is this version 1 document (a container, or a loadout wrapper around two containers) intact under the
+        /// VERSION 1 checksum rule? That rule is not the tree-text rule: it is the SHA-256 over the canonical body with
+        /// floats as exact bit patterns, so the tree is read back into a model with the strict reader (no version
+        /// handling) and its own checksum recomputed. A wrapper is verified against its own checksum and must hold two
+        /// version 1 containers; each container is verified again when it is read on its own.
+        /// </summary>
+        private static string VerifyVersion1Integrity(JsonNode root)
+        {
+            if (Member(root, "bag") != null || Member(root, "equipment") != null)
+            {
+                if (!LoadoutSnapshot.TryReadFieldsForVerification(root, out LoadoutSnapshot loadout, out string loadoutReason))
+                    return loadoutReason;
+                if (loadout.bag.schemaVersion != 1 || loadout.equipment.schemaVersion != 1)
+                    return "a version 1 loadout must hold version 1 containers (the wrapper and its containers share one version)";
+                return loadout.ChecksumMatches() ? null : "the version 1 loadout checksum does not match its content";
+            }
+
+            if (!ContainerSnapshot.TryReadFields(root, "container snapshot", out ContainerSnapshot container, out string reason))
+                return reason;
+            return container.ChecksumMatches() ? null : "the version 1 container checksum does not match its content";
+        }
+
+        /// <summary>
+        /// D3a: version 1 to 2 changes no field. The meaning of the rarity int grew (3 Epic, 4 Legendary, 5 Unique, 6 Poor
+        /// were appended), and version 1 could only ever have written 0 Common, 1 Uncommon or 2 Rare - so a version 1
+        /// document naming any other tier was not written by version 1 and is refused rather than reinterpreted. A
+        /// wrapper has no entries of its own; its containers are upgraded (and checked) when they are read.
+        /// </summary>
+        private static string UpgradeVersion1To2(JsonNode root)
+        {
+            JsonNode entries = Member(root, "entries");
+            if (entries != null && entries.Type == JsonNode.Kind.Array)
+            {
+                for (int i = 0; i < entries.Items.Count; i++)
+                {
+                    JsonNode rarity = Member(Member(entries.Items[i], "item"), "rarity");
+                    if (rarity == null) continue; // a missing or malformed item is reported by the strict reader that follows
+
+                    if (!StrictJson.TryInt(rarity, $"entry {i} item rarity", out int value, out string reason)) return reason;
+                    if (value != ItemRarityRules.StoredCommon && value != ItemRarityRules.StoredUncommon &&
+                        value != ItemRarityRules.StoredRare)
+                    {
+                        return $"entry {i} item rarity {value} did not exist in schema version 1 (only 0 Common, 1 Uncommon, 2 Rare)";
+                    }
+                }
+            }
+
+            JsonNode version = Member(root, "schemaVersion");
+            if (version == null) return "no schemaVersion to upgrade";
+            version.Text = "2";
+            return null;
+        }
 
         /// <summary>Checksum of an older-style document: SHA-256 over the compact re-serialization of the tree without its checksum member.</summary>
         internal static string TreeChecksum(JsonNode root)

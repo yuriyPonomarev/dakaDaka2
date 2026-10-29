@@ -328,61 +328,129 @@ namespace Emberdelve.Data
     }
 
     /// <summary>
-    /// Item rarity from Docs/Design/ITEM_AFFIXES.md (Common 0 affixes, Uncommon 1, Rare 2). This is the
-    /// affix layer's own enum: no existing ItemKind/EquipmentSlot/SkillStat numeric value is changed, and
-    /// no existing enum gains a member.
+    /// Item rarity: the D3a ladder from decision C7 (Docs/Design/DND_PARITY.md) on top of the original
+    /// Common/Uncommon/Rare of Docs/Design/ITEM_AFFIXES.md. The numeric values are what saves, packets and assets
+    /// store, so they are STABLE and append-only: Common=0, Uncommon=1, Rare=2 never change meaning, Epic=3,
+    /// Legendary=4 and Unique=5 are appended, and Poor=6 is appended LAST even though Poor ranks below Common.
+    ///
+    /// The value is therefore an identity, never an order. Never compare two AffixRarity values with a relational
+    /// operator and never sort by (int): use <see cref="AffixRarities.Ordinal"/>, <see cref="AffixRarities.Compare"/> or
+    /// <see cref="AffixRarities.IsAtLeast"/>, which rank Poor &lt; Common &lt; Uncommon &lt; Rare &lt; Epic &lt; Legendary &lt;
+    /// Unique. There is no Artifact tier (C7). This is the affix layer's own enum: no existing ItemKind/EquipmentSlot/
+    /// SkillStat numeric value is changed.
     /// </summary>
     public enum AffixRarity
     {
         Common = 0,
         Uncommon = 1,
         Rare = 2,
+        Epic = 3,
+        Legendary = 4,
+        Unique = 5,
+        Poor = 6,
     }
 
-    /// <summary>Rarity-to-affix-count rules that reject an unknown rarity instead of clamping it.</summary>
+    /// <summary>
+    /// Rarity rules that reject an unknown rarity instead of clamping it. A thin typed layer over
+    /// <see cref="Emberdelve.Items.ItemRarityRules"/>, which owns the table (stored ints, ranks, affix counts) so the
+    /// EditMode tests can exercise it without Unity.
+    /// </summary>
     public static class AffixRarities
     {
-        public const int MinRarityValue = 0;
-        public const int MaxRarityValue = 2;
+        /// <summary>Number of tiers (7).</summary>
+        public const int TierCount = Emberdelve.Items.ItemRarityRules.TierCount;
 
+        /// <summary>Most affixes any tier rolls (5, Unique).</summary>
+        public const int MaxAffixCount = Emberdelve.Items.ItemRarityRules.MaxAffixCount;
+
+        /// <summary>Every tier from lowest to highest rank (Poor first, Unique last).</summary>
+        public static readonly AffixRarity[] ByRank =
+        {
+            AffixRarity.Poor, AffixRarity.Common, AffixRarity.Uncommon, AffixRarity.Rare,
+            AffixRarity.Epic, AffixRarity.Legendary, AffixRarity.Unique,
+        };
+
+        /// <summary>Only the declared members count; a cast of an arbitrary int is not a rarity.</summary>
         public static bool IsKnown(AffixRarity rarity)
         {
-            return rarity >= AffixRarity.Common && rarity <= AffixRarity.Rare;
+            return Emberdelve.Items.ItemRarityRules.IsKnownStored((int)rarity);
         }
 
         /// <summary>For data that has not been converted to the enum yet (a save file, a packet).</summary>
         public static bool IsKnownValue(int rawRarity)
         {
-            return rawRarity >= MinRarityValue && rawRarity <= MaxRarityValue;
+            return Emberdelve.Items.ItemRarityRules.IsKnownStored(rawRarity);
         }
 
-        /// <summary>0/1/2 for a known rarity. An unknown rarity returns false with count -1, never 0.</summary>
-        public static bool TryExpectedAffixCount(AffixRarity rarity, out int count)
+        /// <summary>Rank of a tier: Poor 0, Common 1, Uncommon 2, Rare 3, Epic 4, Legendary 5, Unique 6. False for an unknown value.</summary>
+        public static bool TryOrdinal(AffixRarity rarity, out int ordinal)
         {
-            if (!IsKnown(rarity))
+            return Emberdelve.Items.ItemRarityRules.TryOrdinal((int)rarity, out ordinal);
+        }
+
+        /// <summary>Rank of a known tier, or -1 for an unknown value. Use for sorting keys.</summary>
+        public static int Ordinal(AffixRarity rarity)
+        {
+            return TryOrdinal(rarity, out int ordinal) ? ordinal : -1;
+        }
+
+        /// <summary>The tier at a rank (0 Poor .. 6 Unique). False outside 0..6.</summary>
+        public static bool TryFromOrdinal(int ordinal, out AffixRarity rarity)
+        {
+            if (Emberdelve.Items.ItemRarityRules.TryStoredAtOrdinal(ordinal, out int stored))
             {
-                count = -1;
-                return false;
+                rarity = (AffixRarity)stored;
+                return true;
             }
 
-            switch (rarity)
-            {
-                case AffixRarity.Common: count = 0; return true;
-                case AffixRarity.Uncommon: count = 1; return true;
-                default: count = 2; return true;
-            }
+            rarity = AffixRarity.Common;
+            return false;
+        }
+
+        /// <summary>
+        /// Tier order: negative when a ranks lower, 0 when the same, positive when higher. An unknown value ranks
+        /// below every known tier (so a sort never throws), and two unknown values compare by their raw value only to
+        /// keep the order total; callers that must reject unknowns check <see cref="IsKnown"/> first.
+        /// </summary>
+        public static int Compare(AffixRarity a, AffixRarity b)
+        {
+            int ra = Ordinal(a);
+            int rb = Ordinal(b);
+            if (ra != rb) return ra < rb ? -1 : 1;
+            if (ra >= 0) return 0;
+            int ia = (int)a;
+            int ib = (int)b;
+            return ia == ib ? 0 : (ia < ib ? -1 : 1);
+        }
+
+        /// <summary>True when both are known and a is the same tier as or above b.</summary>
+        public static bool IsAtLeast(AffixRarity a, AffixRarity minimum)
+        {
+            return Emberdelve.Items.ItemRarityRules.IsAtLeast((int)a, (int)minimum);
+        }
+
+        /// <summary>True for a known tier that rolls at least one affix (Uncommon and above).</summary>
+        public static bool RollsAffixes(AffixRarity rarity)
+        {
+            return TryExpectedAffixCount(rarity, out int count) && count > 0;
+        }
+
+        /// <summary>Display name ("Poor" .. "Unique"); "Unknown" for an unknown value.</summary>
+        public static string Name(AffixRarity rarity)
+        {
+            return Emberdelve.Items.ItemRarityRules.Name((int)rarity);
+        }
+
+        /// <summary>0/0/1/2/3/4/5 (Poor..Unique). An unknown rarity returns false with count -1, never 0.</summary>
+        public static bool TryExpectedAffixCount(AffixRarity rarity, out int count)
+        {
+            return Emberdelve.Items.ItemRarityRules.TryExpectedAffixCount((int)rarity, out count);
         }
 
         /// <summary>Same rule over a raw numeric rarity; an out-of-range value is rejected, not clamped.</summary>
         public static bool TryExpectedAffixCount(int rawRarity, out int count)
         {
-            if (!IsKnownValue(rawRarity))
-            {
-                count = -1;
-                return false;
-            }
-
-            return TryExpectedAffixCount((AffixRarity)rawRarity, out count);
+            return Emberdelve.Items.ItemRarityRules.TryExpectedAffixCount(rawRarity, out count);
         }
     }
 }

@@ -40,7 +40,8 @@ Check(!AffixCatalog.TryValidate(new[]{a,b},out reason),"duplicate stat key");b.s
 Check(AffixCatalog.TryValidate(new[]{a,b},out reason),"distinct catalog");b.id=a.id;Check(!AffixCatalog.TryValidate(new[]{a,b},out reason),"duplicate id");
 Check(!AffixCatalog.TryValidate(new AffixDefinition[]{a,null},out reason),"null catalog entry");
 for(int i=0;i<3;i++){int count;Check(AffixRarities.TryExpectedAffixCount(i,out count)&&count==i,"rarity count "+i);}
-foreach(int i in new[]{-1,3,99}){int count;Check(!AffixRarities.TryExpectedAffixCount(i,out count)&&count==-1,"unknown rarity");}
+// D3a: 3..6 are Epic/Legendary/Unique/Poor now; the first unknown stored int is 7.
+foreach(int i in new[]{-1,7,99}){int count;Check(!AffixRarities.TryExpectedAffixCount(i,out count)&&count==-1,"unknown rarity");}
 Check(!AffixBandRules.TryValidateValue(AffixStatKey.MoveSpeed,.03,.12,.0000001,.08000005,out reason),"fine-step half-step rejected at large grid index");
 Check(AffixBandRules.TryValidateValue(AffixStatKey.MoveSpeed,.03,.12,.0000001,.08,out reason),"fine-grid valid point");
 Check(!AffixBandRules.TryValidateBand(AffixStatKey.MoveSpeed,.03,.12000005,.0000001,out reason),"fine-grid half-step band endpoint rejected");

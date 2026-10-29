@@ -36,7 +36,8 @@ var valid=rare.ToSnapshot();
 foreach(string uid in new[]{"",new string('0',32),Guid.NewGuid().ToString("D"),"not_a_uid"}){dto=valid.Clone();dto.uid=uid;Reject(dto,auth,"malformed UID");}
 dto=valid.Clone();dto.itemId="unknown";Reject(dto,auth,"unknown item");
 foreach(int quantity in new[]{0,2,-1}){dto=valid.Clone();dto.quantity=quantity;Reject(dto,auth,"gear quantity");}
-foreach(int rarity in new[]{-1,3,99}){dto=valid.Clone();dto.rarity=rarity;Reject(dto,auth,"unknown rarity");}
+// D3a: 3..6 are Epic/Legendary/Unique/Poor now; the first unknown stored int is 7.
+foreach(int rarity in new[]{-1,7,99}){dto=valid.Clone();dto.rarity=rarity;Reject(dto,auth,"unknown rarity");}
 dto=valid.Clone();dto.rarity=0;Reject(dto,auth,"count rarity mismatch");
 dto=valid.Clone();dto.affixes[1]=dto.affixes[0].Clone();Reject(dto,auth,"duplicate affix ID/key");
 dto=valid.Clone();dto.affixes[0].id="unknown";Reject(dto,auth,"unknown affix");

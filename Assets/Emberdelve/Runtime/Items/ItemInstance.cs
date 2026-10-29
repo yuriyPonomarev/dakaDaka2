@@ -499,7 +499,7 @@ namespace Emberdelve.Items
 
             if (!AffixRarities.TryExpectedAffixCount(rarity, out int expected))
             {
-                reason = $"unknown rarity value {(int)rarity}: only Common (0 affixes), Uncommon (1) and Rare (2) exist";
+                reason = $"unknown rarity value {(int)rarity}: only the ladder members ({ItemRarityRules.StoredLegend}) exist";
                 return false;
             }
 
@@ -628,7 +628,7 @@ namespace Emberdelve.Items
 
             if (!AffixRarities.IsKnownValue(snapshot.rarity))
             {
-                reason = $"snapshot rarity {snapshot.rarity} is not a known rarity (0 Common, 1 Uncommon, 2 Rare)";
+                reason = $"snapshot rarity {snapshot.rarity} is not a known rarity ({ItemRarityRules.StoredLegend})";
                 return false;
             }
 

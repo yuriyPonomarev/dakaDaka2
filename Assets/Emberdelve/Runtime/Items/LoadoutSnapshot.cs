@@ -86,6 +86,27 @@ namespace Emberdelve.Items
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Structure-only read of a loadout tree with no version handling and no migration, for an older version's
+        /// integrity check (the wrapper checksum covers both containers' text, so the model is rebuilt to recompute it).
+        /// </summary>
+        internal static bool TryReadFieldsForVerification(JsonNode root, out LoadoutSnapshot result, out string reason)
+        {
+            result = null;
+
+            if (!StrictJson.TryExpectObject(root, "loadout snapshot", new[] { "schemaVersion", "bag", "equipment", "checksum" },
+                    out Dictionary<string, JsonNode> map, out reason)) return false;
+
+            LoadoutSnapshot parsed = new LoadoutSnapshot();
+            if (!StrictJson.TryInt(map["schemaVersion"], "loadout schemaVersion", out parsed.schemaVersion, out reason)) return false;
+            if (!ContainerSnapshot.TryReadFields(map["bag"], "loadout bag", out parsed.bag, out reason)) return false;
+            if (!ContainerSnapshot.TryReadFields(map["equipment"], "loadout equipment", out parsed.equipment, out reason)) return false;
+            if (!StrictJson.TryString(map["checksum"], "loadout checksum", out parsed.checksum, out reason)) return false;
+
+            result = parsed;
+            return true;
+        }
+
         /// <summary>Strict structural parse, canonical-only input and the same migration rules as <see cref="ContainerSnapshot.TryFromJson"/>; content validation happens in <see cref="TryRestore"/>.</summary>
         public static bool TryFromJson(string json, out LoadoutSnapshot snapshot, out string reason)
         {
