@@ -14,11 +14,21 @@ namespace Emberdelve.Stats
         }
     }
 
-    /// <summary>Engine-free D4b1 timing math. The registered actor supplies the factor, never an intent.</summary>
+    /// <summary>Engine-free DEX action timing math. The registered actor supplies the factor, never an intent.</summary>
     public static class ActionSpeedRules
     {
         public static float SanitizeFactor(float factor) =>
             float.IsNaN(factor) || float.IsInfinity(factor) || factor <= 0f ? 1f : factor;
+
+        /// <summary>D4b2: one accepted reload duration. Draw and skill timings are deliberately unrelated.</summary>
+        public static float ReloadDuration(float authoredSeconds, float actionFactor)
+        {
+            float authored = Finite(authoredSeconds) ? Math.Max(0f, authoredSeconds) : .1f;
+            float duration = authored / SanitizeFactor(actionFactor);
+            // Preserve finite positive authoring unless its arithmetic cannot be represented safely.
+            if (!Finite(duration)) duration = authored;
+            return Math.Max(.1f, duration);
+        }
 
         public static MeleeActionTiming Resolve(float windup, float active, float recovery, float wallRecoil,
             float weaponCooldown, float actionFactor, float cooldownGrace)

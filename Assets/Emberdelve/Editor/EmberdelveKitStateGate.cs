@@ -279,16 +279,19 @@ namespace Emberdelve.EditorTools
                 "another player cannot start P2's reload (" + reason + ")");
             Check(_authority.TryStartReload(_s2, _p2.CombatId, out reason), "the owner starts the reload (" + reason + ")");
             KitView started = View(_p2);
-            Check(started.Reloading && bow.IsReloading && Near(started.ReloadRemaining, started.ReloadTime, 0.02f), "reloading, timer = reload time");
+            // D4b2: saved Hollow Bow1.9s / Archer DEX16 rate1.12 =1.6964285714s; metadata remains1.9.
+            Check(Near(started.ReloadTime, 1.9f, 0.0001f) && Near(started.ReloadDuration, 1.6964285714f, 0.0001f),
+                "authored reload metadata and independently calculated accepted duration remain distinct");
+            Check(started.Reloading && bow.IsReloading && Near(started.ReloadRemaining, started.ReloadDuration, 0.02f), "reloading, timer = accepted reload duration");
             Check(!_authority.TryStartReload(_s2, _p2.CombatId, out reason), "a second start while reloading is refused");
 
             yield return null; yield return null;
-            Check(View(_p2).Reloading && Near(View(_p2).ReloadRemaining, started.ReloadTime, 0.02f), "frames passing do not advance the reload: the authority clock did not move");
+            Check(View(_p2).Reloading && Near(View(_p2).ReloadRemaining, started.ReloadDuration, 0.02f), "frames passing do not advance the reload: the authority clock did not move");
 
-            Advance(started.ReloadTime * 0.5f);
+            Advance(started.ReloadDuration * 0.5f);
             Check(View(_p2).Reloading && Near(bow.ReloadProgress, 0.5f, 0.03f), "half the reload time: still reloading, progress " + bow.ReloadProgress);
 
-            Advance(started.ReloadTime * 0.5f + 0.01f);
+            Advance(started.ReloadDuration * 0.5f + 0.01f);
             int taken = Mathf.Min(empty.MagazineSize, empty.Reserve);
             KitView done = View(_p2);
             Check(!done.Reloading && !bow.IsReloading && done.Magazine == taken && done.Reserve == empty.Reserve - taken

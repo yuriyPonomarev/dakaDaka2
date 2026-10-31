@@ -68,6 +68,8 @@ namespace Emberdelve.Combat
         public float ReloadTime;
         public bool Reloading;
         public float ReloadRemaining;
+        /// <summary>Accepted immutable reload duration; ReloadTime remains the authored pool metadata.</summary>
+        public float ReloadDuration;
         public int ActiveCastId;
     }
 
@@ -117,6 +119,8 @@ namespace Emberdelve.Combat
         public string ActiveWeaponId = string.Empty;
         public bool Reloading;
         public float ReloadRemaining;
+        /// <summary>Accepted immutable reload duration; ReloadTime remains the authored pool metadata.</summary>
+        public float ReloadDuration;
 
         public AmmoPool Active =>
             ActiveWeaponId.Length > 0 && Pools.TryGetValue(ActiveWeaponId, out AmmoPool pool) ? pool : null;
@@ -176,6 +180,7 @@ namespace Emberdelve.Combat
             Pools.Clear();
             Reloading = false;
             ReloadRemaining = 0f;
+            ReloadDuration = 0f;
             AddPools(seed, true);
             ActiveWeaponId = seed.ActiveWeaponId ?? string.Empty;
         }
@@ -202,6 +207,7 @@ namespace Emberdelve.Combat
             // RangedCombat.Initialize always ended a draw/reload when the hand changed.
             Reloading = false;
             ReloadRemaining = 0f;
+            ReloadDuration = 0f;
         }
 
         private void AddPools(in KitSeed seed, bool adoptAll)
@@ -263,6 +269,7 @@ namespace Emberdelve.Combat
         {
             Reloading = false;
             ReloadRemaining = 0f;
+            ReloadDuration = 0f;
             AmmoPool pool = Active;
             if (pool == null) return;
 
@@ -309,13 +316,14 @@ namespace Emberdelve.Combat
             return true;
         }
 
-        public bool TryStartReload()
+        public bool TryStartReload(float acceptedDuration)
         {
             AmmoPool pool = Active;
             if (pool == null || Reloading || Frozen) return false;
             if (pool.Magazine >= pool.MagazineSize || pool.Reserve <= 0) return false;
             Reloading = true;
-            ReloadRemaining = Mathf.Max(0.1f, pool.ReloadTime);
+            ReloadDuration = acceptedDuration;
+            ReloadRemaining = ReloadDuration;
             return true;
         }
 
@@ -367,6 +375,7 @@ namespace Emberdelve.Combat
                 ReloadTime = pool != null ? pool.ReloadTime : 0f,
                 Reloading = Reloading,
                 ReloadRemaining = Reloading ? ReloadRemaining : 0f,
+                ReloadDuration = Reloading ? ReloadDuration : 0f,
                 ActiveCastId = ActiveCastId,
             };
         }

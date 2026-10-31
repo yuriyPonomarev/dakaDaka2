@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Data;
+using Emberdelve.Stats;
 
 namespace Emberdelve.Combat
 {
@@ -101,7 +102,9 @@ namespace Emberdelve.Combat
             if (!AuthorizeSender(sender, combatId, "reload", false, out reason)) return false;
             if (!CombatRegistry.TryGet(combatId, out ICombatEntity entity) || entity.IsDead) { reason = "instigator is dead or unknown"; return false; }
             if (!_kits.TryGetValue(combatId, out CombatKitState kit)) { reason = "no kit record"; return false; }
-            if (!kit.TryStartReload()) { reason = "nothing to reload"; return false; }
+            float rate = entity is IActionSpeedSource source ? source.ActionSpeedFactor : 1f;
+            float duration = ActionSpeedRules.ReloadDuration(kit.Active != null ? kit.Active.ReloadTime : 0f, rate);
+            if (!kit.TryStartReload(duration)) { reason = "nothing to reload"; return false; }
 
             PushKit(kit, entity);
             reason = string.Empty;

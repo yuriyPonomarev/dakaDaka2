@@ -5,6 +5,7 @@ using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.InputLayer;
 using Emberdelve.Player;
+using Emberdelve.Stats;
 
 namespace Emberdelve.Combat
 {
@@ -31,6 +32,7 @@ namespace Emberdelve.Combat
         private float _drawStartedAt;
         private bool _reloading;
         private float _reloadTimer;
+        private float _reloadDuration;
         private bool _viewBound;
 
         public event Action<AttackIntent> AttackStarted;
@@ -47,7 +49,9 @@ namespace Emberdelve.Combat
         public bool IsDrawing => _drawing;
         public bool IsReloading => _reloading;
         public float Charge => _drawing ? Mathf.Clamp01((Time.time - _drawStartedAt) / Mathf.Max(0.05f, _weapon.drawTime)) : 0f;
-        public float ReloadProgress => _reloading ? 1f - Mathf.Clamp01(_reloadTimer / Mathf.Max(0.05f, _weapon.reloadTime)) : 0f;
+        public float ReloadDuration => _reloadDuration;
+        public float ReloadProgress => _reloading && _reloadDuration > 0f
+            ? 1f - Mathf.Clamp01(_reloadTimer / _reloadDuration) : 0f;
 
         /// <summary>R7: the player this component belongs to; every event it raises carries it (0 = no player, e.g. a bare bag in a tool).</summary>
         private int OwnerId
@@ -82,6 +86,7 @@ namespace Emberdelve.Combat
         private void InitializeLocal(WeaponData weapon, int startingReserve, int maxReserve, int startingMagazine)
         {
             _weapon = weapon;
+            _reloadTimer = _reloadDuration = 0f;
 
             if (weapon == null || !weapon.IsRanged)
             {
@@ -165,7 +170,8 @@ namespace Emberdelve.Combat
         private void StartReload()
         {
             _reloading = true;
-            _reloadTimer = Mathf.Max(0.1f, _weapon.reloadTime);
+            _reloadDuration = ActionSpeedRules.ReloadDuration(_weapon.reloadTime, rig != null ? rig.ActionSpeedFactor : 1f);
+            _reloadTimer = _reloadDuration;
             CancelDraw();
             GameEvents.RaiseToast(OwnerId, "Reloading...");
         }
@@ -192,12 +198,14 @@ namespace Emberdelve.Combat
             _maxReserve = view.MaxReserve;
             _reloading = view.Reloading;
             _reloadTimer = view.ReloadRemaining;
+            _reloadDuration = view.ReloadDuration;
             if (changed) GameEvents.RaiseAmmo(OwnerId, _magazine, _reserve);
         }
 
         private void FinishReload()
         {
             _reloading = false;
+            _reloadTimer = _reloadDuration = 0f;
             int need = _weapon.magazineSize - _magazine;
             int taken = Mathf.Min(need, _reserve);
             _magazine += taken;

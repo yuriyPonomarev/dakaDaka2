@@ -3,14 +3,14 @@ using Emberdelve.Stats;
 
 namespace Emberdelve.Data
 {
-    /// <summary>Authored DEX score to locomotion factor. Captured once when a class is initialized.</summary>
+    /// <summary>Authored DEX locomotion and action curves. Captured once when a class is initialized.</summary>
     [CreateAssetMenu(menuName = "Emberdelve/Attribute Curve Profile", fileName = "AttributeCurveProfile")]
     public sealed class AttributeCurveProfile : ScriptableObject
     {
         [Tooltip("Strictly increasing score coordinates and positive finite factors. Linear interpolation; held endpoints.")]
         public CurvePoint[] movement = MovementCurveDefaults.CreatePoints();
 
-        [Tooltip("DEX score to swept-melee action rate. Positive finite factors; no draw/reload/skill scaling.")]
+        [Tooltip("DEX score to swept-melee and reload action rate. Positive finite factors; no draw or skill scaling.")]
         public CurvePoint[] action = ActionSpeedCurveDefaults.CreatePoints();
 
         public bool TryCaptureMovement(out PiecewiseLinearCurve curve, out string error)
