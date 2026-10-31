@@ -14,6 +14,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.LootTable
   tableId: jeweler_cache
   entries:
+  - item: {fileID: 11400000, guid: 0f02157398f10934ea4d3f8d8b7df3a4, type: 2}
+    minAmount: 2
+    maxAmount: 2
+    weight: 1
+    maxCopies: 1
+    affixRarity: 0
   - item: {fileID: 11400000, guid: 9aa03fc8bfc84a2f9fc47c870b9e96c9, type: 2}
     minAmount: 1
     maxAmount: 1
@@ -47,6 +53,6 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 3579720142dff794ea198e20f860c7af, type: 2}
   - {fileID: 11400000, guid: 3351b2f852c7b3f44bc5be8c30396cd9, type: 2}
   rarityLadder: []
-  maxRolls: 3
+  maxRolls: 4
   guaranteeFirstEntry: 1
   nothingWeight: 0

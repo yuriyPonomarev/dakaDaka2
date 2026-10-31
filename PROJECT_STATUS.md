@@ -1,6 +1,6 @@
 # Emberdelve — project status / handoff
 
-Latest continuation (31 October 2026): see [Docs/Tasks/D3bc-20261030.md](Docs/Tasks/D3bc-20261030.md) and [Docs/ROADMAP.md](Docs/ROADMAP.md). The M1–M4 sections below are historical; D3 infrastructure now passes the recorded 60-group regression.
+Latest continuation (31 October 2026): see [Docs/Tasks/D3bc-20261030.md](Docs/Tasks/D3bc-20261030.md) and [Docs/ROADMAP.md](Docs/ROADMAP.md). The M1–M4 sections below are historical; D3 infrastructure passes the recorded60-group regression; [D3d playable content](Docs/Tasks/D3d.md) now passes13 selected groups /13,172 checks with real input and rendered proof. Continuing D4a immutable curves and DEX movement; six attributes and both mana pools remain.
 
 Original first-person PvPvE dungeon-extraction prototype (dark fantasy / dungeon-synth).
 Unity **6000.2.5f1**, URP, new Input System. Unity project root: `DakaDaka/`. Slice code: `Assets/Emberdelve/`.

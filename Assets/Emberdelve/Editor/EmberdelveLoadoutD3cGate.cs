@@ -216,19 +216,31 @@ namespace Emberdelve.EditorTools
             Check(channel.HasTimedUse && overTime.HasTimedUse && !noHeal.HasTimedUse, "a channel or a heal over time makes a healing item timed; a channel on a non-healing item does not");
 
             string[] guids = AssetDatabase.FindAssets("t:ItemData", new[] { EmberdelvePaths.Data });
-            int assets = 0, changed = 0;
+            int assets = 0, changed = 0, authored = 0;
             foreach (string guid in guids)
             {
                 ItemData item = AssetDatabase.LoadAssetAtPath<ItemData>(AssetDatabase.GUIDToAssetPath(guid));
                 if (item == null) continue;
                 assets++;
-                if (item.moveSpeedPenalty != 0f || item.useChannelSeconds != 0f || item.healOverTimeSeconds != 0f)
+                bool expected;
+                if (item.itemId == "smoldering_tonic")
+                {
+                    authored++;
+                    expected = item.moveSpeedPenalty == 0f && item.useChannelSeconds == 1.8f && item.healOverTimeSeconds == 4f;
+                }
+                else if (item.itemId == "graspwrap_gloves")
+                {
+                    authored++;
+                    expected = item.moveSpeedPenalty == 3f && item.useChannelSeconds == 0f && item.healOverTimeSeconds == 0f;
+                }
+                else expected = item.moveSpeedPenalty == 0f && item.useChannelSeconds == 0f && item.healOverTimeSeconds == 0f;
+                if (!expected)
                 {
                     changed++;
-                    Debug.LogError("[LoadoutD3c] authored item with a D3c value: " + item.itemId);
+                    Debug.LogError("[LoadoutD3c] unexpected authored D3c tuning: " + item.itemId);
                 }
             }
-            Check(assets >= 12 && changed == 0, "all " + assets + " authored items keep penalty 0, channel 0, heal-over-time 0: existing content is unchanged (D3c authors no content)");
+            Check(assets >= 14 && authored == 2 && changed == 0, "D3d authors only gloves penalty 3 and tonic channel 1.8/heal duration 4; every older item retains its zero defaults");
         }
 
         private static ItemData MakeItem(string id)

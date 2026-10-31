@@ -28,6 +28,9 @@ MonoBehaviour:
   value: 24
   healAmount: 0
   ammoGrant: 0
+  moveSpeedPenalty: 3
+  useChannelSeconds: 0
+  healOverTimeSeconds: 0
   iconColor: {r: 0.4, g: 0.28, b: 0.2, a: 1}
   worldMaterial: {fileID: 2100000, guid: 6ec4327473fcff1409e3aba30ecdf15a, type: 2}
   worldSize: {x: 0.3, y: 0.2, z: 0.3}

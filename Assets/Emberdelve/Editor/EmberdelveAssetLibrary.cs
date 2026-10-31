@@ -28,6 +28,7 @@ namespace Emberdelve.EditorTools
         public static WeaponData Rapier;
         public static ItemData Coin;
         public static ItemData Draught;
+        public static ItemData SmolderingTonic;
         public static ItemData Relic;
         public static ItemData ArrowBundle;
         public static ItemData Cuirass;
@@ -56,7 +57,7 @@ namespace Emberdelve.EditorTools
         public static LootTable SupplyLoot;
         public static LootTable EmberLoot;
         public static LootTable SealedLoot;
-        /// <summary>D3b: a table of the new slot items. No chest spawn uses it, so no existing seed's loot changes.</summary>
+        /// <summary>D3d: the entry-room jeweler cache. Existing chest salts, indices and tables stay unchanged.</summary>
         public static LootTable JewelerLoot;
 
         /// <summary>
@@ -855,6 +856,30 @@ namespace Emberdelve.EditorTools
                 };
             });
 
+            // D3d authored movement cost: three points off the shared 300-point base (1%).
+            if (Gloves != null && Gloves.moveSpeedPenalty != 3f)
+            {
+                Gloves.moveSpeedPenalty = 3f;
+                EditorUtility.SetDirty(Gloves);
+            }
+
+            SmolderingTonic = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_SmolderingTonic.asset", i =>
+            {
+                i.itemId = "smoldering_tonic";
+                i.displayName = "Smoldering Tonic";
+                i.description = "Drink carefully to recover health over time. Moving fast or taking damage interrupts drinking.";
+                i.kind = ItemKind.Consumable;
+                i.value = 28;
+                i.maxStack = 2;
+                i.healAmount = 45;
+                i.useChannelSeconds = 1.8f;
+                i.healOverTimeSeconds = 4f;
+                i.iconColor = new Color(0.85f, 0.45f, 0.12f);
+                i.worldMaterial = EmberdelveMaterials.ArmorMat;
+                i.worldSize = new Vector3(0.24f, 0.3f, 0.24f);
+                i.gridFootprint = Vector2Int.one;
+            });
+
             Necklace = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_EmberbeadNecklace.asset", i =>
             {
                 i.itemId = "emberbead_necklace";
@@ -900,11 +925,9 @@ namespace Emberdelve.EditorTools
         }
 
         /// <summary>
-        /// D3b: a loot table holding the three new slot items. It is NOT referenced by any chest spawn or enemy drop, which
-        /// is the point: adding the items to Supply/Ember/Sealed would change the weighted draw for every authored chest seed
-        /// and break byte parity of the loot golden capture. A later slice that wants jewelry in the world adds a spawn (or a
-        /// deliberate re-baseline). Idempotent: the table is created once, then only its rarity profile and catalog are
-        /// re-asserted. Gloves Common, necklace Uncommon (one affix), ring Rare (two).
+        /// D3d: the new cache holds a timed consumable and all three slot items. A separate appended spawn preserves
+        /// every pre-existing chest id/salt and the original tables' golden loot. Four draws without empty weight,
+        /// maxCopies one per entry, guarantee the four entries; only the jewelry's affixes vary by raid seed.
         /// </summary>
         private static void BuildJewelerLoot()
         {
@@ -920,6 +943,23 @@ namespace Emberdelve.EditorTools
                     new LootEntry { item = Ring, minAmount = 1, maxAmount = 1, weight = 2, maxCopies = 1 },
                 };
             });
+
+            // Upgrade the already-created D3b table once; retain its GUID and all original item definitions.
+            if (JewelerLoot.maxRolls != 4 || JewelerLoot.entries == null || JewelerLoot.entries.Length != 4 ||
+                JewelerLoot.entries[0].item != SmolderingTonic)
+            {
+                JewelerLoot.maxRolls = 4;
+                JewelerLoot.guaranteeFirstEntry = true;
+                JewelerLoot.nothingWeight = 0;
+                JewelerLoot.entries = new[]
+                {
+                    new LootEntry { item = SmolderingTonic, minAmount = 2, maxAmount = 2, weight = 1, maxCopies = 1 },
+                    new LootEntry { item = Gloves, minAmount = 1, maxAmount = 1, weight = 3, maxCopies = 1 },
+                    new LootEntry { item = Necklace, minAmount = 1, maxAmount = 1, weight = 2, maxCopies = 1 },
+                    new LootEntry { item = Ring, minAmount = 1, maxAmount = 1, weight = 2, maxCopies = 1 },
+                };
+                EditorUtility.SetDirty(JewelerLoot);
+            }
 
             ApplyTableProfile(JewelerLoot, Affixes,
                 (Necklace, AffixRarity.Uncommon),
@@ -1337,6 +1377,17 @@ namespace Emberdelve.EditorTools
                 lootTable = SealedLoot,
                 bodyMaterial = EmberdelveMaterials.ChestSealed,
                 lidMaterial = EmberdelveMaterials.ChestSealedLid,
+            });
+
+            // Append, never insert: ChestId includes the layout index, so old raid seeds remain stable.
+            Layout.chestSpawns.Add(new ChestSpawnSpec
+            {
+                cell = new Vector2Int(6, 5),
+                variant = Emberdelve.Interaction.ChestVariant.Supply,
+                seed = 606,
+                lootTable = JewelerLoot,
+                bodyMaterial = EmberdelveMaterials.ChestEmber,
+                lidMaterial = EmberdelveMaterials.ChestEmberLid,
             });
 
             EditorUtility.SetDirty(Layout);

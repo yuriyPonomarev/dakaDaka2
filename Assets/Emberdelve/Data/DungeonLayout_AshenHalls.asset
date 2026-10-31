@@ -198,3 +198,9 @@ MonoBehaviour:
     lootTable: {fileID: 11400000, guid: 8e4dc9988d979024bb9a46e92c195b7a, type: 2}
     bodyMaterial: {fileID: 2100000, guid: 4091ec3fba0f3f349bab068d06f53901, type: 2}
     lidMaterial: {fileID: 2100000, guid: 3e3d9ceb7905bb84eb306153969d0e5c, type: 2}
+  - cell: {x: 6, y: 5}
+    variant: 0
+    seed: 606
+    lootTable: {fileID: 11400000, guid: 1764a1e297888fe4283a10ef4832f9cb, type: 2}
+    bodyMaterial: {fileID: 2100000, guid: 4274bbf4e1787ae48bfc774e6f984430, type: 2}
+    lidMaterial: {fileID: 2100000, guid: b3e02270324f95549a901695eba961a2, type: 2}

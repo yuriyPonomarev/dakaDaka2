@@ -1,0 +1,21 @@
+# D3d — playable equipment and consumable content
+
+Accepted 31 October 2026. Base a84afc02. The remaining D3 content is available through the normal saved dungeon and input paths.
+
+## Behavior and preservation
+
+The data builder appends a sixth chest at Entry Hall cell (6,5), stable salt606 and runtime id Chest_Supply_6_5_5. Its reachable approach is (6,4). The original five chest indices, positions and salts, and all three old loot-table bytes remain unchanged. The existing JewelerCache asset keeps its GUID and now draws all four capped entries without replacement: Smoldering Tonic x2, Common Graspwrap Gloves, Uncommon Emberbead Necklace and Rare Cinder Band. Individual UIDs/rolls pass through the existing chest/inventory authority pipeline.
+
+Smoldering Tonic takes1.8 seconds to drink, then heals45 HP over4 seconds, max stack2. Ordinary movement interrupts drinking without consuming anything. The old Blood Draught remains instant. Gloves author3 movement penalty points (3/300 =1% base movement). Existing ChestSpawner reads the saved layout, so no scene rebuild was needed.
+
+Changed: Editor/EmberdelveAssetLibrary.cs, LoadoutD3cGate.cs, new D3ContentGate.cs, saved DungeonLayout_AshenHalls, item catalog, gloves and jeweler loot, new Item_SmolderingTonic.asset. The authored-default check now explicitly permits only these two nondefault fields/items and still asserts all old items remain zero.
+
+## Executed evidence
+
+- Live graphical normal-input gate:50 checks /0 failures; E opens the actual production chest, inventory command equips its exact gloves, Digit1 starts drinking, W interrupts, retry completes once. Frame counter advanced1730 to1737. Inspected screenshot Logs/d3d_20261031_loot.png; summary Logs/d3d_20261031_live_summary.json and editor log Logs/d3d_20261031_editor.log.
+- Final headless D3Content:52/0, Logs/d3d_20261031_final/summary.json. Also proves double-build byte idempotency, unchanged old table bytes/spawn identities, path reachability, exact rarity/affix counts, no duplicate reopen, real character displacement, cancellation reason moving, no early consume/heal, exactly one revision and45 HP, no replay and all gear UIDs retained.
+- Twelve affected regression groups:13,120 checks /0 failures, Logs/d3d_20261031_regression/summary.json: Slots442, LoadoutD3c188, ItemCatalog129, LootGoldenCapture53, LootPipeline9954, ContainerSnapshot1023, InventoryFlow415, InventoryUI485, Extraction39, ResultLoop80, NetSeams163, SavedSerialization149. That summary correctly remains failed overall because its original D3Content entry failed; use the final separate rerun above for that group. Final selected total:13groups /13,172 checks /0 failures.
+
+The first headless D3Content attempt failed26/1 because focus disabled its virtual keyboard. A transient InputSettings clone with IgnoreFocus and explicit device enable fixes the fixture without changing saved project settings. The next attempt failed51/1:30 headless frames were too short for movement acceleration. The final fixture holds real W until cancellation or1 second game time, settles for0.5 seconds, and checks actual horizontal displacement and reason. Both failures are retained in Logs/d3d_20261031_input_fix and the original regression directory. No direct chest/potion callback replaces real input. Cleanup removes only owned input, restores the exact settings object and destroys the temporary clone.
+
+Independent source review approved the content/data and final input-settings/cancellation path; its nonblocking precision note was addressed by checking horizontal displacement. Reviewer ran no Unity checks. Consolidated selected evidence: Logs/d3d_20261031_accepted_summary.json. Root executed all evidence above. No server combat or full network raid acceptance is inferred. D3 infrastructure/content closure is complete; optional potion glow/reveal remains future presentation/content work. Next: D4a authored immutable curves and score-based DEX movement, preserving six attribute keys, class scores and mana for both classes.
