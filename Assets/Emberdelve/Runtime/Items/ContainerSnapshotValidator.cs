@@ -200,7 +200,7 @@ namespace Emberdelve.Items
                 // ---- what it is
                 if (definition.IsEquippable)
                 {
-                    if (!grid && validatedEntry.Slot != definition.equipSlot)
+                    if (!grid && !EquipmentSlots.Accepts(definition.equipSlot, validatedEntry.Slot))
                     {
                         reason = $"{at}: {definition.itemId} belongs in slot {definition.equipSlot}, not {validatedEntry.Slot}";
                         return false;

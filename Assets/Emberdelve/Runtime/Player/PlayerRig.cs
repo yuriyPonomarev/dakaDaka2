@@ -936,7 +936,8 @@ namespace Emberdelve.Player
             WeaponData main = ActiveWeapon != null ? ActiveWeapon : _mainHand;
             WeaponData off = OffhandWeapon;
             bool offContributes = off != null && off.IsShield && !(main != null && main.twoHanded);
-            float factor = CombatFlowRules.HeldFactor(main, off, offContributes);
+            // D3c: worn gear's authored penalty joins the held weapons' in the same factor (counted here and nowhere else).
+            float factor = CombatFlowRules.HeldFactor(main, off, offContributes, equipment != null ? equipment.MoveSpeedPenaltyPoints : 0f);
 
             if (GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) && authority is ICombatFlowState flow)
             {

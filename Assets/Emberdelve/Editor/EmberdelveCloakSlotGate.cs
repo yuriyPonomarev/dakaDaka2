@@ -300,7 +300,7 @@ namespace Emberdelve.EditorTools
             Check((int)EquipmentSlot.Back == 6, "Back is appended as 6, existing values unchanged");
             Check((int)EquipmentSlot.Legs == 5 && (int)EquipmentSlot.Chest == 4 && (int)EquipmentSlot.Head == 3 &&
                   (int)EquipmentSlot.OffHand == 2 && (int)EquipmentSlot.Weapon == 1, "earlier slot values untouched");
-            Check(Equipment.SlotCount == 7, "slot count derived from the enum is 7 (None + six slots)");
+            Check(Equipment.SlotCount == 14, "slot count derived from the enum is 14 (None + thirteen slots; was 12 before D3c appended AltWeapon and AltOffHand, 7 before D3b appended Hands, Feet, Necklace, RingLeft, RingRight)");
             Check(gear.WornInstances.Count == Equipment.SlotCount, "the worn-instance window is as long as the derived slot count");
             Check(gear.IndexOfSlot(EquipmentSlot.Back) == 6 && gear.IndexOfSlot(EquipmentSlot.None) == -1, "slot index mapping");
             Check(ItemCategoryRules.TryFromEquipmentSlot(ashen, out AffixCategory cat, out string catReason) && cat == AffixCategory.Cloak,
@@ -432,9 +432,9 @@ namespace Emberdelve.EditorTools
             ItemInstance legs = Mint(auth, boots, AffixRarity.Common);
             Check(bag.TryAddInstance(legs, out reason) && bag.TryAddInstance(commonAshen, out reason), "boots and cloak in the bag");
             Check(gear.TryEquipFromInventory(bag.IndexOfInstance(legs.Uid), out reason) && gear.TryEquipFromInventory(bag.IndexOfInstance(commonAshen.Uid), out reason), "boots and cloak worn together");
-            Check(gear.FilledCount == 2 && gear.EquippedInstance(EquipmentSlot.Legs) == legs && gear.EquippedInstance(EquipmentSlot.Back) == commonAshen, "two different slots, two instances");
-            Check(gear.Describe().Contains("Back=Ashen Cloak") && gear.Describe().Contains("Legs=Footpad Boots"), "Describe names both slots: " + gear.Describe());
-            Check(gear.TryUnequip(EquipmentSlot.Legs, out reason) && gear.EquippedInstance(EquipmentSlot.Back) == commonAshen, "removing boots leaves the cloak");
+            Check(gear.FilledCount == 2 && gear.EquippedInstance(EquipmentSlot.Feet) == legs && gear.EquippedInstance(EquipmentSlot.Back) == commonAshen, "two different slots, two instances");
+            Check(gear.Describe().Contains("Back=Ashen Cloak") && gear.Describe().Contains("Feet=Footpad Boots"), "Describe names both slots: " + gear.Describe());
+            Check(gear.TryUnequip(EquipmentSlot.Feet, out reason) && gear.EquippedInstance(EquipmentSlot.Back) == commonAshen, "removing boots leaves the cloak");
             gear.Clear();
             bag.Clear();
             Check(gear.FilledCount == 0 && rig.GetArmorRating() == baseArmor && SameScores(Scores(rig), baseScores), "Clear removes the cloak contribution too");

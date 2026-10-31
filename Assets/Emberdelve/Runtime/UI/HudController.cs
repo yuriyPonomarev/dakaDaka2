@@ -956,7 +956,10 @@ namespace Emberdelve.UI
         private void ApplyActiveWeapon(WeaponData weapon)
         {
             if (_weaponLabel == null) return;
-            _weaponLabel.text = weapon != null ? weapon.displayName : "Unarmed";
+            // D3c: weapon set 2 is marked; set 1 reads exactly as before.
+            string setTag = _director != null && _director.Player != null && _director.Player.Equipment != null &&
+                            _director.Player.Equipment.ActiveWeaponSet == 1 ? "  (II)" : string.Empty;
+            _weaponLabel.text = (weapon != null ? weapon.displayName : "Unarmed") + setTag;
         }
 
         // R7: the HUD follows the run-wide state AND the local player's own run state (the local player dying hides it even

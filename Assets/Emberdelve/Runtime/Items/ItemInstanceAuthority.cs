@@ -14,7 +14,7 @@ namespace Emberdelve.Items
     /// <summary>
     /// The default trusted mapping from the equipment slots this project actually has to the affix categories.
     /// Weapon and OffHand are held gear, so a shield resolves to Armor (it protects) and a blade to Weapon;
-    /// Head/Chest are Armor and Legs is Boots; anything carried rather than worn resolves to None, which is
+    /// Head/Chest/Hands are Armor, Legs and Feet are Boots, Necklace and both rings are Jewelry (D3b); anything carried rather than worn resolves to None, which is
     /// only ever legal for an item with no affixes.
     ///
     /// U2B11: Back (the cloak slot) resolves to <see cref="AffixCategory.Cloak"/>, so a cloak rolls the
@@ -61,6 +61,22 @@ namespace Emberdelve.Items
                     return true;
                 case EquipmentSlot.Back:
                     category = AffixCategory.Cloak;
+                    reason = null;
+                    return true;
+                // D3b. Hands are armour; Feet are boots (Footpad Boots moved from Legs to Feet); a necklace and both ring
+                // slots are Jewelry, a family of their own that never rolls armour or move speed.
+                case EquipmentSlot.Hands:
+                    category = AffixCategory.Armor;
+                    reason = null;
+                    return true;
+                case EquipmentSlot.Feet:
+                    category = AffixCategory.Boots;
+                    reason = null;
+                    return true;
+                case EquipmentSlot.Necklace:
+                case EquipmentSlot.RingLeft:
+                case EquipmentSlot.RingRight:
+                    category = AffixCategory.Jewelry;
                     reason = null;
                     return true;
                 default:

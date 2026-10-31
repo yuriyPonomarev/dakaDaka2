@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a69090fdcbb9784688d25194e1e5755, type: 3}
+  m_Name: Item_CinderBandRing
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.ItemData
+  itemId: cinder_band_ring
+  displayName: Cinder Band
+  description: A plain band, dark as a dead coal. Right click to wear.
+  gridFootprint: {x: 1, y: 1}
+  maxStack: 1
+  equipSlot: 10
+  grantedWeapon: {fileID: 0}
+  statModifiers: []
+  attributeBonuses: []
+  kind: 5
+  value: 30
+  healAmount: 0
+  ammoGrant: 0
+  iconColor: {r: 0.55, g: 0.55, b: 0.6, a: 1}
+  worldMaterial: {fileID: 2100000, guid: 6ec4327473fcff1409e3aba30ecdf15a, type: 2}
+  worldSize: {x: 0.14, y: 0.14, z: 0.06}

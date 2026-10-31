@@ -55,7 +55,7 @@ var sword=rig.MainHandWeapon;string before=EditorJsonUtility.ToJson(sword);Hit(r
 Check(bag.TryAddInstance(a,out reason)&&gear.TryEquipFromInventory(bag.IndexOfInstance(a.Uid),out reason),"equip melee3");Check(rig.GetFlatWeaponDamageBonus(sword)==3,"live melee provider");Hit(rig,sword,1.5f,1,false,38.976f,"boosted sword");Hit(rig,sword,1.5f,1,true,70.1568f,"boosted headshot");gear.RefreshStats();gear.RefreshStats();Check(rig.GetFlatWeaponDamageBonus(sword)==3,"no flat accumulation");
 var cry=Make<SkillData>();cry.flatDamage=14;cry.skillId="gate_flat";var flatIntent=new SkillIntent(rig.CombatId,rig.Kind,cry,sword,rig.CombatCenter,Vector3.forward,3,1,100,default,1,1);
 var hit=new HitCandidate(target.CombatId,rig.CombatCenter+Vector3.forward,false);var flatInfo=DamageResolver.ResolveSkill(flatIntent,hit,target,rig.GetOutgoingDamageMultiplier(sword),1,rig.GetFlatWeaponDamageBonus(sword));Check(Mathf.Abs(flatInfo.Amount-18.816f)<.0001f,"flat skill ignores weapon flat");
-Check(gear.TryUnequip(EquipmentSlot.Legs,out reason),"remove melee gear");Hit(rig,sword,1.5f,1,false,34.944f,"unequip restores sword");
+Check(gear.TryUnequip(EquipmentSlot.Feet,out reason),"remove melee gear");Hit(rig,sword,1.5f,1,false,34.944f,"unequip restores sword");
 var archer=AssetDatabase.LoadAssetAtPath<CharacterClassData>("Assets/Emberdelve/Data/Class_Archer.asset");rig.ApplyClass(archer,cfg);gear.Clear();bag.Clear();var bow=rig.MainHandWeapon;
 Check(bag.TryAddInstance(b,out reason)&&gear.TryEquipFromInventory(bag.IndexOfInstance(b.Uid),out reason),"equip projectile3");Check(rig.GetFlatWeaponDamageBonus(bow)==3&&rig.GetFlatWeaponDamageBonus(sword)==0,"channels distinct");
 Hit(rig,bow,15,1,false,48.8992f,"boosted full bow");Hit(rig,bow,15,.5f,false,34.22944f,"charge scales full boosted base");Hit(rig,bow,32,1,false,35.95619f,"independent 31.475m swept-contact falloff scales full boosted base");
@@ -63,7 +63,7 @@ var piercing=Make<SkillData>();piercing.skillId="gate_pierce";piercing.flatDamag
 var skillIntent=new SkillIntent(rig.CombatId,rig.Kind,piercing,bow,rig.CombatCenter,Vector3.forward,30,2,110,default,2,.96f);hit=new HitCandidate(target.CombatId,rig.CombatCenter+Vector3.forward*15,false);
 var skillInfo=DamageResolver.ResolveSkill(skillIntent,hit,target,rig.GetOutgoingDamageMultiplier(bow),.96f,rig.GetFlatWeaponDamageBonus(bow));Check(Mathf.Abs(skillInfo.Amount-63.3733632f)<.0001f,"weapon skill boostedbase skill CHA once");
 foreach(float bad in new[]{float.NaN,float.PositiveInfinity,float.NegativeInfinity,-1f})Check(bow.DamageAtRange(15,bad)==bow.DamageAtRange(15),"bad bonus sanitized");
-Check(gear.TryUnequip(EquipmentSlot.Legs,out reason),"remove ranged gear");Hit(rig,bow,15,1,false,44.9344f,"unboosted archer restored");Check(before==EditorJsonUtility.ToJson(sword),"weapon definition unchanged");CombatRegistry.Unregister(target.CombatId,target);gear.Clear();bag.Clear();
+Check(gear.TryUnequip(EquipmentSlot.Feet,out reason),"remove ranged gear");Hit(rig,bow,15,1,false,44.9344f,"unboosted archer restored");Check(before==EditorJsonUtility.ToJson(sword),"weapon definition unchanged");CombatRegistry.Unregister(target.CombatId,target);gear.Clear();bag.Clear();
 
 }
 }}

@@ -34,6 +34,13 @@ namespace Emberdelve.EditorTools
         private const string LoadoutV1 = @"{""schemaVersion"":1,""bag"":{""schemaVersion"":1,""kind"":""bag"",""containerId"":""bag"",""width"":10,""height"":6,""entries"":[{""slot"":"""",""x"":0,""y"":0,""item"":{""uid"":"""",""itemId"":""ember_coin"",""quantity"":8,""rarity"":0,""affixes"":[]}},{""slot"":"""",""x"":2,""y"":0,""item"":{""uid"":""a1b2c3d4e5f60718293a4b5c6d7e8f90"",""itemId"":""footpad_boots"",""quantity"":1,""rarity"":1,""affixes"":[{""id"":""affix_constitution"",""key"":""constitution"",""value"":2}]}},{""slot"":"""",""x"":4,""y"":0,""item"":{""uid"":""0f1e2d3c4b5a69788796a5b4c3d2e1f0"",""itemId"":""emberthread_mantle"",""quantity"":1,""rarity"":2,""affixes"":[{""id"":""affix_strength"",""key"":""strength"",""value"":2},{""id"":""affix_dexterity"",""key"":""dexterity"",""value"":3}]}}],""checksum"":""sha256:5176dcab484065b6c337d4865f3c9b08dbb7c7627396903d339b992d6c10e5d3""},""equipment"":{""schemaVersion"":1,""kind"":""equipment"",""containerId"":""equipment"",""width"":0,""height"":0,""entries"":[{""slot"":""Legs"",""x"":0,""y"":0,""item"":{""uid"":""3c4d5e6f708192a3b4c5d6e7f8091a2b"",""itemId"":""footpad_boots"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""Back"",""x"":0,""y"":0,""item"":{""uid"":""5d6e7f8091a2b3c4d5e6f708192a3b4c"",""itemId"":""ashen_cloak"",""quantity"":1,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:02dd427b8904494bca581a1c95afd2a0f82ba01d42ae77e9b06fff658d29b9d8""},""checksum"":""sha256:b361d63c46e606f9ffe59de7181f07887175c47748e796fe068fa8229168056c""}";
         private const string LoadoutV2 = @"{""schemaVersion"":2,""bag"":{""schemaVersion"":2,""kind"":""bag"",""containerId"":""bag"",""width"":10,""height"":6,""entries"":[{""slot"":"""",""x"":0,""y"":0,""item"":{""uid"":"""",""itemId"":""ember_coin"",""quantity"":8,""rarity"":0,""affixes"":[]}},{""slot"":"""",""x"":2,""y"":0,""item"":{""uid"":""a1b2c3d4e5f60718293a4b5c6d7e8f90"",""itemId"":""footpad_boots"",""quantity"":1,""rarity"":1,""affixes"":[{""id"":""affix_constitution"",""key"":""constitution"",""value"":2}]}},{""slot"":"""",""x"":4,""y"":0,""item"":{""uid"":""0f1e2d3c4b5a69788796a5b4c3d2e1f0"",""itemId"":""emberthread_mantle"",""quantity"":1,""rarity"":2,""affixes"":[{""id"":""affix_strength"",""key"":""strength"",""value"":2},{""id"":""affix_dexterity"",""key"":""dexterity"",""value"":3}]}}],""checksum"":""sha256:8842d299f14637967d776d37f727f4de2ecf6ae7ba72b32533fa466959acd197""},""equipment"":{""schemaVersion"":2,""kind"":""equipment"",""containerId"":""equipment"",""width"":0,""height"":0,""entries"":[{""slot"":""Legs"",""x"":0,""y"":0,""item"":{""uid"":""3c4d5e6f708192a3b4c5d6e7f8091a2b"",""itemId"":""footpad_boots"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""Back"",""x"":0,""y"":0,""item"":{""uid"":""5d6e7f8091a2b3c4d5e6f708192a3b4c"",""itemId"":""ashen_cloak"",""quantity"":1,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:9540a6efad0fd5ef3c4965e83fa13e794ce508028b46510509abcfb3ff75900b""},""checksum"":""sha256:9aa07f251febeb2990aee33aae85c4ca387ae69a19cf52080f4fbd3555675ea6""}";
         private const string BagV2Checksum = "sha256:8842d299f14637967d776d37f727f4de2ecf6ae7ba72b32533fa466959acd197";
+        // D3c: the same saves at schema version 4 (checksums again computed outside Unity, by a replica of the canonical body). The boots
+        // moved from Legs to Feet in version 3, so the equipment entries are in slot-number order (Back 6, Feet 8); version 4 adds the
+        // loadout's weaponSet 0 and an empty belt. A version 1, 2 or 3 save migrates to exactly these bytes (the version 3 ones are checked in the D3c gate).
+        private const string BagV4 = @"{""schemaVersion"":4,""kind"":""bag"",""containerId"":""bag"",""width"":10,""height"":6,""entries"":[{""slot"":"""",""x"":0,""y"":0,""item"":{""uid"":"""",""itemId"":""ember_coin"",""quantity"":8,""rarity"":0,""affixes"":[]}},{""slot"":"""",""x"":2,""y"":0,""item"":{""uid"":""a1b2c3d4e5f60718293a4b5c6d7e8f90"",""itemId"":""footpad_boots"",""quantity"":1,""rarity"":1,""affixes"":[{""id"":""affix_constitution"",""key"":""constitution"",""value"":2}]}},{""slot"":"""",""x"":4,""y"":0,""item"":{""uid"":""0f1e2d3c4b5a69788796a5b4c3d2e1f0"",""itemId"":""emberthread_mantle"",""quantity"":1,""rarity"":2,""affixes"":[{""id"":""affix_strength"",""key"":""strength"",""value"":2},{""id"":""affix_dexterity"",""key"":""dexterity"",""value"":3}]}}],""checksum"":""sha256:949612a038eeead894c222ed485b22e8c9d34872c0520733be6ccbcc43adaa81""}";
+        private const string BagV4Checksum = "sha256:949612a038eeead894c222ed485b22e8c9d34872c0520733be6ccbcc43adaa81";
+        private const string EquipmentV4 = @"{""schemaVersion"":4,""kind"":""equipment"",""containerId"":""equipment"",""width"":0,""height"":0,""entries"":[{""slot"":""Back"",""x"":0,""y"":0,""item"":{""uid"":""5d6e7f8091a2b3c4d5e6f708192a3b4c"",""itemId"":""ashen_cloak"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""Feet"",""x"":0,""y"":0,""item"":{""uid"":""3c4d5e6f708192a3b4c5d6e7f8091a2b"",""itemId"":""footpad_boots"",""quantity"":1,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:cb0c2f7b21b3e701d48760d08a91580224ee3562ded63936fe3a94ebe8db5c46""}";
+        private const string LoadoutV4 = @"{""schemaVersion"":4,""bag"":{""schemaVersion"":4,""kind"":""bag"",""containerId"":""bag"",""width"":10,""height"":6,""entries"":[{""slot"":"""",""x"":0,""y"":0,""item"":{""uid"":"""",""itemId"":""ember_coin"",""quantity"":8,""rarity"":0,""affixes"":[]}},{""slot"":"""",""x"":2,""y"":0,""item"":{""uid"":""a1b2c3d4e5f60718293a4b5c6d7e8f90"",""itemId"":""footpad_boots"",""quantity"":1,""rarity"":1,""affixes"":[{""id"":""affix_constitution"",""key"":""constitution"",""value"":2}]}},{""slot"":"""",""x"":4,""y"":0,""item"":{""uid"":""0f1e2d3c4b5a69788796a5b4c3d2e1f0"",""itemId"":""emberthread_mantle"",""quantity"":1,""rarity"":2,""affixes"":[{""id"":""affix_strength"",""key"":""strength"",""value"":2},{""id"":""affix_dexterity"",""key"":""dexterity"",""value"":3}]}}],""checksum"":""sha256:949612a038eeead894c222ed485b22e8c9d34872c0520733be6ccbcc43adaa81""},""equipment"":{""schemaVersion"":4,""kind"":""equipment"",""containerId"":""equipment"",""width"":0,""height"":0,""entries"":[{""slot"":""Back"",""x"":0,""y"":0,""item"":{""uid"":""5d6e7f8091a2b3c4d5e6f708192a3b4c"",""itemId"":""ashen_cloak"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""Feet"",""x"":0,""y"":0,""item"":{""uid"":""3c4d5e6f708192a3b4c5d6e7f8091a2b"",""itemId"":""footpad_boots"",""quantity"":1,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:cb0c2f7b21b3e701d48760d08a91580224ee3562ded63936fe3a94ebe8db5c46""},""weaponSet"":0,""belt"":["""","""","""",""""],""checksum"":""sha256:13859d65990c88f7e7bda4bd44e7a088437e87125bb872c6b6ef40eb1f6ed11c""}";
 
         private static void Check(bool ok, string label)
         {
@@ -234,7 +241,7 @@ namespace Emberdelve.EditorTools
                 Check(keys.Count >= ItemRarityRules.MaxAffixCount,
                     item.itemId + " (" + AffixCategories.Describe(category) + ") has " + keys.Count + " distinct affix keys, enough for the 5 a Unique needs");
             }
-            Check(covered == AffixCategories.All, "the catalog has gear in all four families: " + AffixCategories.Describe(covered));
+            Check(covered == AffixCategories.All, "the catalog has gear in all five families (boots, cloak, armour, weapon, jewelry): " + AffixCategories.Describe(covered));
         }
 
         // ------------------------------------------------------------------ 3. counts, uniqueness, determinism
@@ -340,7 +347,7 @@ namespace Emberdelve.EditorTools
                     else if (fixedText != fixedLines) Check(false, item.itemId + " " + tier + " fixed properties differ from another tier of the same item");
                     Check(tooltip.RolledLines.Count == AffixCountOf(tier) && tooltip.HasRolledSection == (AffixCountOf(tier) > 0), item.itemId + " " + tier + " tooltip lists " + AffixCountOf(tier) + " rolled lines");
 
-                    if (item.equipSlot == EquipmentSlot.Legs) oneOfEachTier.Add(instance);
+                    if (item.equipSlot == EquipmentSlot.Feet) oneOfEachTier.Add(instance);
                 }
                 fixedByItem[item.itemId] = fixedText;
             }
@@ -422,12 +429,12 @@ namespace Emberdelve.EditorTools
 
         private static void Snapshots(ItemCatalog catalog, ItemInstanceAuthority authority, List<ItemData> gear)
         {
-            Check(ContainerSnapshot.CurrentSchemaVersion == 2 && ContainerSnapshot.MinSupportedSchemaVersion == 1, "schema version 2, version 1 still readable");
+            Check(ContainerSnapshot.CurrentSchemaVersion == 4 && ContainerSnapshot.MinSupportedSchemaVersion == 1, "schema version 4 (was 3 before D3c), version 1 still readable");
 
             // ---- a literal version 1 save (only Common/Uncommon/Rare existed) loads unchanged
             Check(ContainerSnapshot.TryFromJson(BagV1, out ContainerSnapshot migrated, out string reason), "the literal version 1 bag migrates: " + reason);
-            Check(migrated != null && migrated.schemaVersion == 2 && migrated.ToJson() == BagV2 && migrated.checksum == BagV2Checksum,
-                "migrated bag equals the literal version 2 document and its independently computed checksum");
+            Check(migrated != null && migrated.schemaVersion == 4 && migrated.ToJson() == BagV4 && migrated.checksum == BagV4Checksum,
+                "migrated bag equals the literal version 4 document and its independently computed checksum (1 to 2 to 3 to 4)");
             Check(migrated != null && migrated.entries.Length == 3 && migrated.entries[0].item.itemId == "ember_coin" && migrated.entries[0].item.quantity == 8 && migrated.entries[0].item.rarity == 0 &&
                   migrated.entries[1].item.itemId == "footpad_boots" && migrated.entries[1].item.rarity == 1 && migrated.entries[1].item.affixes.Length == 1 && migrated.entries[1].item.affixes[0].value == 2f &&
                   migrated.entries[2].item.itemId == "emberthread_mantle" && migrated.entries[2].item.rarity == 2 && migrated.entries[2].item.affixes.Length == 2 &&
@@ -435,10 +442,15 @@ namespace Emberdelve.EditorTools
                   migrated.entries[1].item.uid == "a1b2c3d4e5f60718293a4b5c6d7e8f90" && migrated.entries[2].item.uid == "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
                 "every uid, tier and rolled value of the old save is exactly as written");
             Check(migrated != null && ContainerSnapshotValidator.TryValidate(migrated, catalog, null, ContainerKinds.Bag, out ValidatedContainer validated, out reason) && validated != null, "the migrated bag passes the full validator: " + reason);
-            Check(ContainerSnapshot.TryFromJson(BagV2, out ContainerSnapshot current, out reason) && current.ToJson() == BagV2, "the version 2 document parses as current: " + reason);
-            Check(ContainerSnapshot.TryFromJson(EquipmentV1, out ContainerSnapshot gearOld, out reason) && gearOld.ToJson() == EquipmentV2 &&
+            Check(ContainerSnapshot.TryFromJson(BagV2, out ContainerSnapshot bagFromV2, out reason) && bagFromV2.ToJson() == BagV4, "the literal version 2 bag migrates to the version 4 bytes: " + reason);
+            Check(ContainerSnapshot.TryFromJson(BagV4, out ContainerSnapshot current, out reason) && current.ToJson() == BagV4, "the version 4 document parses as current: " + reason);
+            Check(ContainerSnapshot.TryFromJson(EquipmentV1, out ContainerSnapshot gearOld, out reason) && gearOld.ToJson() == EquipmentV4 &&
                   ContainerSnapshotValidator.TryValidate(gearOld, catalog, null, ContainerKinds.Equipment, out validated, out reason), "the literal version 1 equipment migrates and validates: " + reason);
-            Check(LoadoutSnapshot.TryFromJson(LoadoutV1, out LoadoutSnapshot loadout, out reason) && loadout.schemaVersion == 2 && loadout.ToJson() == LoadoutV2 && loadout.ChecksumMatches(), "the literal version 1 loadout migrates to the version 2 bytes: " + reason);
+            Check(LoadoutSnapshot.TryFromJson(LoadoutV1, out LoadoutSnapshot loadout, out reason) && loadout.schemaVersion == 4 && loadout.ToJson() == LoadoutV4 && loadout.ChecksumMatches(), "the literal version 1 loadout migrates to the version 4 bytes: " + reason);
+
+            Check(ContainerSnapshot.TryFromJson(EquipmentV2, out ContainerSnapshot gearFromV2, out reason) && gearFromV2.ToJson() == EquipmentV4 &&
+                  LoadoutSnapshot.TryFromJson(LoadoutV2, out LoadoutSnapshot loadoutFromV2, out reason) && loadoutFromV2.ToJson() == LoadoutV4,
+                "the literal version 2 equipment and loadout (boots in Legs) migrate to the version 4 bytes (boots in Feet, weaponSet 0, empty belt): " + reason);
 
             // ---- tampering with a version 1 save
             Check(!ContainerSnapshot.TryFromJson(BagV1.Replace("\"quantity\":8", "\"quantity\":7"), out _, out reason) && Has(reason, "integrity"), "an edited version 1 save fails its own checksum: " + reason);

@@ -369,6 +369,11 @@ namespace Emberdelve.EditorTools
             Check(statsNoPools0 != pristineStats, "wearing the fixture changes the stats");
 
             loadout0 = LoadoutSnapshot.Capture(bag, gear);
+            // D3c: the version 4 members. The fixture states them explicitly (weapon set 1 in hand, an empty belt) so every older
+            // document, which migrates to exactly these defaults, can be compared byte for byte with the current one.
+            loadout0.weaponSet = 0;
+            loadout0.belt = new[] { "", "", "", "" };
+            loadout0.Seal();
             bagSnap0 = loadout0.bag.Clone();
             gearSnap0 = loadout0.equipment.Clone();
             bagJson0 = bagSnap0.ToJson();
@@ -686,20 +691,20 @@ namespace Emberdelve.EditorTools
             string baseline = State();
             ContainerSnapshot s;
 
-            s = GearClone(); SlotEntry(s, "Legs").slot = "Head"; s.Seal();
+            s = GearClone(); SlotEntry(s, "Feet").slot = "Head"; s.Seal();
             RefuseGear("boots in the Head slot", s, "belongs in slot");
             s = GearClone(); SlotEntry(s, "Chest").slot = "Weapon"; s.Seal();
             RefuseGear("a cuirass in the Weapon slot", s, "belongs in slot");
-            s = GearClone(); { ContainerEntry second = SlotEntry(s, "Back"); second.slot = "Legs"; second.item = GearEntry(bagSnap0, "footpad_boots", 1).item.Clone(); } s.Seal();
+            s = GearClone(); { ContainerEntry second = SlotEntry(s, "Back"); second.slot = "Feet"; second.item = GearEntry(bagSnap0, "footpad_boots", 1).item.Clone(); } s.Seal();
             RefuseGear("two items in one slot", s, "holds two items");
             s = GearClone(); { ContainerEntry shield = SlotEntry(s, "OffHand"); shield.item = new ItemSnapshot { uid = "", itemId = "ember_coin", quantity = 1, rarity = 0, affixes = new AffixSnapshot[0] }; } s.Seal();
             RefuseGear("a stack in an equipment slot", s, "not wearable");
-            foreach (string bad in new[] { "Hands", "weapon", "None", "", "7", "Legs " })
+            foreach (string bad in new[] { "Gloves", "weapon", "None", "", "7", "Feet " })
             {
-                s = GearClone(); SlotEntry(s, "Legs").slot = bad; s.Seal();
+                s = GearClone(); SlotEntry(s, "Feet").slot = bad; s.Seal();
                 RefuseGear("slot name '" + bad + "'", s, "not an equipment slot name");
             }
-            s = GearClone(); SlotEntry(s, "Legs").x = 1; s.Seal();
+            s = GearClone(); SlotEntry(s, "Feet").x = 1; s.Seal();
             RefuseGear("an equipment entry with a cell", s, "no cell");
             s = GearClone(); s.width = 1; s.Seal();
             RefuseGear("an equipment container with a grid", s, "no grid");
@@ -710,15 +715,15 @@ namespace Emberdelve.EditorTools
             RefuseGear("a different equipment container id", s, "restores container");
             s = GearClone(); SlotEntry(s, "Weapon").item.affixes[0].value = float.NaN; s.Seal();
             RefuseGear("NaN rolled value on worn gear", s, "finite");
-            s = GearClone(); SlotEntry(s, "Legs").item.affixes[0].value = 0.095f; s.Seal();
+            s = GearClone(); SlotEntry(s, "Feet").item.affixes[0].value = 0.095f; s.Seal();
             RefuseGear("off-step rolled value on worn gear", s, "off-step");
-            s = GearClone(); SlotEntry(s, "Legs").item.itemId = "no_such_item"; s.Seal();
+            s = GearClone(); SlotEntry(s, "Feet").item.itemId = "no_such_item"; s.Seal();
             RefuseGear("unknown item on a worn slot", s, "unknown item");
-            s = GearClone(); SlotEntry(s, "Legs").item.uid = SlotEntry(s, "Back").item.uid; s.Seal();
+            s = GearClone(); SlotEntry(s, "Feet").item.uid = SlotEntry(s, "Back").item.uid; s.Seal();
             RefuseGear("the same uid worn in two slots", s, "duplicate uid");
             s = GearClone(); SlotEntry(s, "Back").item.quantity = 0; RefuseGear("edited quantity, stale checksum", s, "does not match");
             s = GearClone(); Array.Reverse(s.entries); s.checksum = s.ComputeChecksum(); RefuseGear("equipment entries out of canonical order", s, "canonical order");
-            s = GearClone(); s.schemaVersion = 3; s.Seal(); RefuseGear("equipment from a newer schema", s, "newer");
+            s = GearClone(); s.schemaVersion = 5; s.Seal(); RefuseGear("equipment from a newer schema", s, "newer");
 
             Check(State() == baseline, "after every equipment refusal the bag and equipment equal the baseline");
 
@@ -803,11 +808,11 @@ namespace Emberdelve.EditorTools
         {
             string baseline = State();
             int cur = ContainerSnapshot.CurrentSchemaVersion;
-            // D3a bumped the schema to 2 (rarity ladder); 1 stays readable through the production migration.
-            Check(cur == 2 && ContainerSnapshot.MinSupportedSchemaVersion == 1, "schema version is 2 since D3a, 1 is still migrated");
+            // D3a bumped the schema to 2 (rarity ladder), D3b to 3 (slots), D3c to 4 (weapon sets, belt); 1, 2 and 3 stay readable through the production migrations.
+            Check(cur == 4 && ContainerSnapshot.MinSupportedSchemaVersion == 1, "schema version is 4 since D3c, 1, 2 and 3 are still migrated");
             string j = bagJson0;
             string sv = "\"schemaVersion\":" + cur;
-            foreach (string v in new[] { "0", "3", "99", "-1", "2147483647" })
+            foreach (string v in new[] { "0", "5", "99", "-1", "2147483647" })
             {
                 string doc = Rep(j, sv, "\"schemaVersion\":" + v, "version " + v);
                 int num = int.Parse(v, CultureInfo.InvariantCulture);
@@ -815,18 +820,20 @@ namespace Emberdelve.EditorTools
                 string ldoc = Rep(loadoutJson0, "{" + sv + ",\"bag\"", "{\"schemaVersion\":" + v + ",\"bag\"", "loadout version " + v);
                 RefuseLoadoutJson("loadout schemaVersion " + v, ldoc, num > cur ? "newer" : "older");
             }
-            RefuseJson("schemaVersion 2.0", Rep(j, sv, "\"schemaVersion\":2.0", "version float"), "whole number");
-            RefuseJson("schemaVersion as a string", Rep(j, sv, "\"schemaVersion\":\"2\"", "version string"), "must be a number");
+            RefuseJson("schemaVersion 2.0", Rep(j, sv, "\"schemaVersion\":4.0", "version float"), "whole number");
+            RefuseJson("schemaVersion as a string", Rep(j, sv, "\"schemaVersion\":\"4\"", "version string"), "must be a number");
             RefuseJson("missing schemaVersion", Rep(j, sv + ",", "", "no version"), "no schemaVersion");
 
             ContainerSnapshot s;
-            foreach (int v in new[] { 0, 1, 3, 7, -3 })
+            foreach (int v in new[] { 0, 1, 2, 3, 5, 7, -3 })
             {
                 s = BagClone(); s.schemaVersion = v; s.Seal();
                 RefuseBag("in-memory schemaVersion " + v, s, v > cur ? "newer" : "older");
             }
-            LoadoutSnapshot l = loadout0.Clone(); l.schemaVersion = 3; l.Seal();
-            RefuseLoadout("loadout schemaVersion 3 in memory", l, "newer");
+            LoadoutSnapshot l = loadout0.Clone(); l.schemaVersion = 5; l.Seal();
+            RefuseLoadout("loadout schemaVersion 5 in memory", l, "newer");
+            l = loadout0.Clone(); l.schemaVersion = 2; l.Seal();
+            RefuseLoadout("loadout schemaVersion 2 in memory (an old version must be migrated while parsing)", l, "older");
             l = loadout0.Clone(); l.schemaVersion = 1; l.Seal();
             RefuseLoadout("loadout schemaVersion 1 in memory (an old version must be migrated while parsing)", l, "older");
             l = loadout0.Clone(); l.schemaVersion = 0; l.Seal();
@@ -838,7 +845,7 @@ namespace Emberdelve.EditorTools
 
         // ------------------------------------------------------------------ D3a: the production 1 -> 2 migration
 
-        /// <summary>A genuine version 1 document is the current model written at schemaVersion 1 and sealed: version 1 and 2 share one layout and one checksum rule, only the version differs.</summary>
+        /// <summary>A genuine version 1 document is the current model written at schemaVersion 1 and sealed: versions 1, 2 and 3 share one layout and one checksum rule, only the version differs.</summary>
         private ContainerSnapshot AsVersion1(ContainerSnapshot snapshot)
         {
             ContainerSnapshot old = snapshot.Clone();
@@ -854,8 +861,8 @@ namespace Emberdelve.EditorTools
             Check(v1Bag.StartsWith("{\"schemaVersion\":1,", StringComparison.Ordinal) && v1Bag != bagJson0, "a version 1 bag document is built");
 
             Check(ContainerSnapshot.TryFromJson(v1Bag, out ContainerSnapshot migrated, out string reason), "an intact version 1 bag migrates: " + reason);
-            Check(migrated != null && migrated.schemaVersion == 2 && migrated.ChecksumMatches() && migrated.ToJson() == bagJson0,
-                "the migrated bag is a normal version 2 snapshot with the same content (same bytes as writing it at version 2)");
+            Check(migrated != null && migrated.schemaVersion == 4 && migrated.ChecksumMatches() && migrated.ToJson() == bagJson0,
+                "the migrated bag (1 to 2 to 3 to 4) is a normal version 4 snapshot with the same content (same bytes as writing it at version 2)");
             Inventory twin = NewBag(cat, 10, 6, out Equipment twinGear);
             Check(migrated != null && twin.TryRestore(migrated, out reason) && twin.ToContainerSnapshot().ToJson() == bagJson0, "and it restores with every uid, rarity and roll as saved: " + reason);
             Destroy(twin.gameObject);
@@ -886,10 +893,11 @@ namespace Emberdelve.EditorTools
             oldLoadout.schemaVersion = 1;
             oldLoadout.bag.schemaVersion = 1;
             oldLoadout.equipment.schemaVersion = 1;
+            SlotEntry(oldLoadout.equipment, "Feet").slot = "Legs"; // what version 1 really wrote: the boots were worn in Legs
             oldLoadout.Seal();
             string v1Loadout = oldLoadout.ToJson();
-            Check(LoadoutSnapshot.TryFromJson(v1Loadout, out LoadoutSnapshot lo, out reason) && lo.schemaVersion == 2 && lo.ToJson() == loadoutJson0,
-                "an intact version 1 loadout migrates to the version 2 bytes: " + reason);
+            Check(LoadoutSnapshot.TryFromJson(v1Loadout, out LoadoutSnapshot lo, out reason) && lo.schemaVersion == 4 && lo.ToJson() == loadoutJson0,
+                "an intact version 1 loadout (boots in Legs) migrates to the version 4 bytes (boots in Feet, weaponSet 0, empty belt): " + reason);
             RefuseLoadoutJson("a version 1 loadout edited after it was written", v1Loadout.Replace("\"quantity\":8", "\"quantity\":7"), "integrity");
 
             // a version 2 wrapper around a version 1 container is refused
@@ -898,7 +906,43 @@ namespace Emberdelve.EditorTools
             JsonNode oldBag = ParseTree(v1Bag);
             ContainerSchema.Member(inner, "schemaVersion").Text = "1";
             ContainerSchema.Member(inner, "checksum").Text = ContainerSchema.Member(oldBag, "checksum").Text;
-            RefuseLoadoutJson("a version 2 loadout wrapper around a version 1 bag", StrictJson.Serialize(mixed, null), "share one version");
+            RefuseLoadoutJson("a current loadout wrapper around a version 1 bag", StrictJson.Serialize(mixed, null), "share one version");
+
+            // ---- D3b: the production 2 -> 3 migration (boots Legs -> Feet)
+            ContainerSnapshot v2Gear = gearSnap0.Clone();
+            v2Gear.schemaVersion = 2;
+            SlotEntry(v2Gear, "Feet").slot = "Legs";
+            v2Gear.Seal();
+            string v2GearJson = v2Gear.ToJson();
+            Check(v2GearJson.StartsWith("{\"schemaVersion\":2,", StringComparison.Ordinal) && v2GearJson.Contains("\"slot\":\"Legs\"") && !v2GearJson.Contains("\"Feet\""), "a version 2 equipment document with the boots in Legs is built");
+            Check(ContainerSnapshot.TryFromJson(v2GearJson, out ContainerSnapshot gear3, out reason) && gear3.schemaVersion == 4 && gear3.ChecksumMatches() && gear3.ToJson() == gearJson0,
+                "the version 2 equipment migrates: Legs/footpad_boots becomes Feet, entries re-ordered, uid and rolls untouched, bytes equal a version 4 write: " + reason);
+            Check(gear3 != null && SlotEntry(gear3, "Feet").item.itemId == "footpad_boots" && SlotEntry(gear3, "Feet").item.uid == SlotEntry(gearSnap0, "Feet").item.uid, "the migrated Feet entry is the same boots with the same uid");
+            RefuseJson("a version 2 equipment edited after it was written", v2GearJson.Replace("\"quantity\":1", "\"quantity\":2"), "integrity");
+
+            ContainerSnapshot v2Bag = bagSnap0.Clone();
+            v2Bag.schemaVersion = 2;
+            v2Bag.Seal();
+            Check(ContainerSnapshot.TryFromJson(v2Bag.ToJson(), out ContainerSnapshot bag3, out reason) && bag3.ToJson() == bagJson0, "a version 2 bag is only re-versioned: " + reason);
+
+            // Version 2 could not have written the new slots: such a document was not written by version 2.
+            foreach (string newSlot in new[] { "Hands", "Feet", "Necklace", "RingLeft", "RingRight" })
+            {
+                ContainerSnapshot forged = v2Gear.Clone();
+                SlotEntry(forged, "Back").slot = newSlot;
+                forged.Seal();
+                RefuseJson("a version 2 equipment naming the slot " + newSlot, forged.ToJson(), "did not exist in schema version 2");
+            }
+
+            LoadoutSnapshot v2Loadout = loadout0.Clone();
+            v2Loadout.schemaVersion = 2;
+            v2Loadout.bag.schemaVersion = 2;
+            v2Loadout.equipment.schemaVersion = 2;
+            SlotEntry(v2Loadout.equipment, "Feet").slot = "Legs";
+            v2Loadout.Seal();
+            Check(LoadoutSnapshot.TryFromJson(v2Loadout.ToJson(), out LoadoutSnapshot lo3, out reason) && lo3.schemaVersion == 4 && lo3.ToJson() == loadoutJson0,
+                "an intact version 2 loadout migrates to the version 4 bytes: " + reason);
+            RefuseLoadoutJson("a version 2 loadout edited after it was written", v2Loadout.ToJson().Replace("\"quantity\":8", "\"quantity\":7"), "integrity");
 
             Check(State() == baseline, "production migration checks left the fixture state intact");
         }
@@ -919,7 +963,7 @@ namespace Emberdelve.EditorTools
             Check(reg.TryGetOwner(bootsBUid, out string owner) && owner == "bag", "the boots uid is owned by 'bag'");
 
             ContainerSnapshot gearDup = GearClone();
-            SlotEntry(gearDup, "Legs").item = GearEntry(bagSnap0, "footpad_boots", 1).item.Clone();
+            SlotEntry(gearDup, "Feet").item = GearEntry(bagSnap0, "footpad_boots", 1).item.Clone();
             gearDup.Seal();
             int before = reg.Count;
             Check(!reg.TryRegisterSnapshot(gearDup, cat, out reason) && Has(reason, "already held by container 'bag'"), "an equipment snapshot reusing a bag uid is refused by the registry: " + reason);
@@ -949,7 +993,7 @@ namespace Emberdelve.EditorTools
 
             // uid worn by the player cannot also be restored into the bag, and the other way round
             ContainerSnapshot bagDup = BagClone();
-            GearEntry(bagDup, "footpad_boots", 1).item = SlotEntry(gearSnap0, "Legs").item.Clone();
+            GearEntry(bagDup, "footpad_boots", 1).item = SlotEntry(gearSnap0, "Feet").item.Clone();
             bagDup.Seal();
             RefuseBag("a bag snapshot holding a uid the player is wearing", bagDup, "already worn");
             RefuseGear("an equipment snapshot holding a uid the bag carries", gearDup, "already carried");
@@ -978,9 +1022,9 @@ namespace Emberdelve.EditorTools
             RefuseLoadout("valid bag + invalid equipment (cuirass in the Weapon slot)", l, "equipment section refused");
             l = loadout0.Clone(); StackEntry(l.bag, "ember_coin").item.itemId = "no_such_item"; l.Seal();
             RefuseLoadout("invalid bag (unknown item) + valid equipment", l, "bag section refused");
-            l = loadout0.Clone(); SlotEntry(l.equipment, "Legs").item.affixes[0].value = float.NaN; l.Seal();
+            l = loadout0.Clone(); SlotEntry(l.equipment, "Feet").item.affixes[0].value = float.NaN; l.Seal();
             RefuseLoadout("valid bag + equipment with a NaN roll", l, "equipment section refused");
-            l = loadout0.Clone(); GearEntry(l.bag, "footpad_boots", 1).item = SlotEntry(l.equipment, "Legs").item.Clone(); l.Seal();
+            l = loadout0.Clone(); GearEntry(l.bag, "footpad_boots", 1).item = SlotEntry(l.equipment, "Feet").item.Clone(); l.Seal();
             RefuseLoadout("both sections valid on their own but sharing a uid", l, "both the bag and the equipment");
             l = loadout0.Clone(); l.bag.entries[0].item.quantity += 1; l.bag.checksum = l.bag.ComputeChecksum();
             RefuseLoadout("bag content edited and its own checksum fixed up, loadout checksum stale", l, "loadout checksum");
@@ -1153,8 +1197,8 @@ namespace Emberdelve.EditorTools
             // equipment entries carry no cell at all
             foreach (int bad in new[] { int.MaxValue, int.MinValue, -1 })
             {
-                s = GearClone(); SlotEntry(s, "Legs").x = bad; s.Seal(); RefuseGear("equipment entry with x=" + bad, s, "no cell");
-                s = GearClone(); SlotEntry(s, "Legs").y = bad; s.Seal(); RefuseGear("equipment entry with y=" + bad, s, "no cell");
+                s = GearClone(); SlotEntry(s, "Feet").x = bad; s.Seal(); RefuseGear("equipment entry with x=" + bad, s, "no cell");
+                s = GearClone(); SlotEntry(s, "Feet").y = bad; s.Seal(); RefuseGear("equipment entry with y=" + bad, s, "no cell");
             }
 
             // the live placement API is overflow-safe too
@@ -1214,7 +1258,7 @@ namespace Emberdelve.EditorTools
 
                 RefuseJson("a v0 document edited after it was written (original checksum fails)", v0Bag.Replace("\"quantity\":8", "\"quantity\":7"), "integrity");
                 RefuseJson("a v0 document with a wrong checksum", Rep(v0Bag, "\"checksum\":\"sha256:", "\"checksum\":\"sha256:0", "bad v0 checksum"), "integrity");
-                RefuseJson("a version 3 document is still newer even with migrations registered", Rep(bagJson0, "\"schemaVersion\":2", "\"schemaVersion\":3", "v3"), "newer");
+                RefuseJson("a version 5 document is still newer even with migrations registered", Rep(bagJson0, "\"schemaVersion\":4", "\"schemaVersion\":5", "v5"), "newer");
 
                 // loadout: wrapper and both containers at v0
                 string v0Loadout = MakeV0(loadoutJson0, true);
@@ -1244,6 +1288,20 @@ namespace Emberdelve.EditorTools
             return root;
         }
 
+        private void LegacySlots(JsonNode equipment)
+        {
+            JsonNode entries = ContainerSchema.Member(equipment, "entries");
+            if (entries == null) return;
+            for (int i = 0; i < entries.Items.Count; i++)
+            {
+                JsonNode slot = ContainerSchema.Member(entries.Items[i], "slot");
+                if (slot == null) continue;
+                if (slot.Text == "Feet") slot.Text = "Legs";
+                Check(slot.Text != "Hands" && slot.Text != "Necklace" && slot.Text != "RingLeft" && slot.Text != "RingRight" && slot.Text != "AltWeapon" && slot.Text != "AltOffHand",
+                    "the legacy fixture names no slot that did not exist in its era: " + slot.Text);
+            }
+        }
+
         /// <summary>Rewrites a current document as a schemaVersion-0 document whose checksum follows the old (tree) rule.</summary>
         private string MakeV0(string json, bool loadout)
         {
@@ -1253,10 +1311,15 @@ namespace Emberdelve.EditorTools
                 foreach (string part in new[] { "bag", "equipment" })
                 {
                     JsonNode inner = ContainerSchema.Member(root, part);
+                    // A version 0 document predates the slots added in 3 (Feet) and 4 (AltWeapon, AltOffHand): the boots were worn in Legs,
+                    // and the production 2 -> 3 and 3 -> 4 steps refuse a document that names a slot its era never had.
+                    if (part == "equipment") LegacySlots(inner);
                     ContainerSchema.Member(inner, "schemaVersion").Text = "0";
                     ContainerSchema.Member(inner, "checksum").Text = ContainerSchema.TreeChecksum(inner);
                 }
             }
+            // D3c: version 0 predates the loadout's weaponSet and belt too, so they are not part of the old document (the 3 to 4 step adds them).
+            if (loadout) root.Members.RemoveAll(m => m.Key == "weaponSet" || m.Key == "belt");
             ContainerSchema.Member(root, "schemaVersion").Text = "0";
             ContainerSchema.Member(root, "checksum").Text = ContainerSchema.TreeChecksum(root);
             return StrictJson.Serialize(root, null);
@@ -1267,10 +1330,10 @@ namespace Emberdelve.EditorTools
         private void ObserverAndLedgerChecks()
         {
             // a loadout in which two uids SWAP containers: boots A (worn) goes to the bag, boots B (carried) is worn
-            ItemSnapshot wornA = SlotEntry(loadout0.equipment, "Legs").item.Clone();
+            ItemSnapshot wornA = SlotEntry(loadout0.equipment, "Feet").item.Clone();
             ItemSnapshot carriedB = GearEntry(loadout0.bag, "footpad_boots", 1).item.Clone();
             LoadoutSnapshot moved = loadout0.Clone();
-            SlotEntry(moved.equipment, "Legs").item = carriedB.Clone();
+            SlotEntry(moved.equipment, "Feet").item = carriedB.Clone();
             GearEntry(moved.bag, "footpad_boots", 1).item = wornA.Clone();
             moved.Seal();
             Guid uidA = Guid.ParseExact(wornA.uid, "N"), uidB = Guid.ParseExact(carriedB.uid, "N");
@@ -1288,7 +1351,7 @@ namespace Emberdelve.EditorTools
             Check(reg.Count == count && reg.TryGetOwner(uidA, out owner) && owner == "equipment", "that refusal left the ledger untouched");
 
             LoadoutSnapshot bad = moved.Clone();
-            SlotEntry(bad.equipment, "Legs").item.affixes[0].value = float.NaN;
+            SlotEntry(bad.equipment, "Feet").item.affixes[0].value = float.NaN;
             bad.Seal();
             RefuseLoadout("a moved loadout with a bad roll, ledger given", bad, "equipment section refused", reg);
             Check(reg.Count == count && reg.TryGetOwner(uidA, out owner) && owner == "equipment" && reg.TryGetOwner(uidB, out owner) && owner == "bag", "a refused loadout left the ledger untouched");
@@ -1329,8 +1392,8 @@ namespace Emberdelve.EditorTools
             Check(ok, "the moved loadout restores even though a subscriber throws: " + reason);
             Check(calls > 0, "subscribers were notified (" + calls + " calls)");
             Check(violations == 0, "no observer ever saw a uid both worn and carried, or an old half-state (" + violations + " violations)");
-            Check(gear.EquippedInstance(EquipmentSlot.Legs).Uid == uidB && bag.HoldsInstanceUid(uidA) && !bag.HoldsInstanceUid(uidB), "A moved to the bag and B is worn");
-            Check(DescribeInstance(gear.EquippedInstance(EquipmentSlot.Legs)) == descB, "B keeps its exact uid and rolls on the worn side");
+            Check(gear.EquippedInstance(EquipmentSlot.Feet).Uid == uidB && bag.HoldsInstanceUid(uidA) && !bag.HoldsInstanceUid(uidB), "A moved to the bag and B is worn");
+            Check(DescribeInstance(gear.EquippedInstance(EquipmentSlot.Feet)) == descB, "B keeps its exact uid and rolls on the worn side");
             Check(reg.Count == count && reg.TryGetOwner(uidA, out owner) && owner == "bag" && reg.TryGetOwner(uidB, out owner) && owner == "equipment", "the ledger moved both uids atomically with the restore");
             Check(LoadoutSnapshot.Capture(bag, gear).ToJson() == moved.ToJson(), "capturing now gives the moved loadout's bytes");
 

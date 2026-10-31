@@ -134,7 +134,7 @@ namespace Emberdelve.Items
                         return _inventory.TryMove(sourceIndex, command.DestinationCell, out reason);
                     if (command.Kind == InventoryCommandKind.Equip)
                     {
-                        if (source.Item == null || source.Item.equipSlot != command.DestinationSlot)
+                        if (source.Item == null || !EquipmentSlots.Accepts(source.Item.equipSlot, command.DestinationSlot))
                         {
                             reason = "the source item does not fit the requested equipment slot";
                             return false;
@@ -146,7 +146,7 @@ namespace Emberdelve.Items
                             reason = "the expected target gear identity no longer matches that slot";
                             return false;
                         }
-                        return _equipment.TryEquipFromInventory(sourceIndex, out reason);
+                        return _equipment.TryEquipFromInventory(sourceIndex, command.DestinationSlot, out reason);
                     }
                     return UseStack(source, command.SourceStackId, out reason);
 
@@ -168,6 +168,50 @@ namespace Emberdelve.Items
                         return false;
                     }
                     return _equipment.TryUnequip(command.DestinationSlot, out reason);
+
+                case InventoryCommandKind.SwapEquipment:
+                {
+                    // D3b: the two ring slots exchange their contents. Both identities are checked against the live slots
+                    // before anything moves, and Equipment performs the exchange as one step (or refuses and changes nothing).
+                    EquipmentSlot ringTo = command.DestinationSlot;
+                    EquipmentSlot ringFrom = EquipmentSlots.OtherRing(ringTo);
+                    ItemInstance ringFromItem = _equipment.EquippedInstance(ringFrom);
+                    ItemInstance ringToItem = _equipment.EquippedInstance(ringTo);
+                    Guid ringFromUid = ringFromItem != null ? ringFromItem.Uid : Guid.Empty;
+                    Guid ringToUid = ringToItem != null ? ringToItem.Uid : Guid.Empty;
+                    if (ringFromUid != command.ExpectedSourceGearUid)
+                    {
+                        reason = "the expected gear identity no longer matches the source ring slot";
+                        return false;
+                    }
+                    if (ringToUid != command.ExpectedTargetGearUid)
+                    {
+                        reason = "the expected gear identity no longer matches the target ring slot";
+                        return false;
+                    }
+                    return _equipment.TrySwapRingSlots(ringFrom, ringTo, out reason);
+                }
+
+                case InventoryCommandKind.SwapWeaponSet:
+                {
+                    // D3c: both identities are checked against the live main hands before anything moves; Equipment decides
+                    // the rest (dead, mid-attack, no weapon in the other set, no revision room) and changes nothing on a refusal.
+                    ItemInstance activeHand = _equipment.MainHandInstance(_equipment.ActiveWeaponSet);
+                    ItemInstance otherHand = _equipment.MainHandInstance(1 - _equipment.ActiveWeaponSet);
+                    Guid activeUid = activeHand != null ? activeHand.Uid : Guid.Empty;
+                    Guid otherUid = otherHand != null ? otherHand.Uid : Guid.Empty;
+                    if (activeUid != command.ExpectedSourceGearUid)
+                    {
+                        reason = "the expected gear identity no longer matches the weapon in hand";
+                        return false;
+                    }
+                    if (otherUid != command.ExpectedTargetGearUid)
+                    {
+                        reason = "the expected gear identity no longer matches the other weapon set";
+                        return false;
+                    }
+                    return _equipment.TrySwapWeaponSet(out reason);
+                }
 
                 default:
                     reason = "unknown inventory command";
@@ -218,6 +262,40 @@ namespace Emberdelve.Items
                     AttemptNotification(() => GameEvents.RaiseToast(_rig.PlayerId, toastReason));
                 }
                 return false;
+            }
+
+            // D3c: a potion with a drink channel and/or a heal over time. Consumable effects stay authority-owned: the channel and
+            // the heal run on ConsumableChannel, which only this authority starts.
+            if (item.HasTimedUse && canHeal && !canGrantAmmo)
+            {
+                ConsumableChannel timed = ConsumableChannel.Ensure(_rig.gameObject);
+                if (timed == null)
+                {
+                    reason = "no consumable channel for this player";
+                    return false;
+                }
+
+                if (item.useChannelSeconds > 0f)
+                {
+                    // The drink: nothing is consumed (and no revision committed) until it completes; an interrupted drink keeps the item.
+                    if (!timed.TryBegin(slot, out reason))
+                    {
+                        string beginReason = reason;
+                        AttemptNotification(() => GameEvents.RaiseToast(_rig.PlayerId, beginReason));
+                        return false;
+                    }
+                    return true;
+                }
+
+                // Heal over time with no channel: consumed now, delivered over healOverTimeSeconds.
+                if (!_inventory.CanCommitRevision(out reason)) return false;
+                if (!_inventory.TryConsumeStackSilently(stackId, 1, item, out ItemData timedConsumed, out reason)) return false;
+                AttemptNotification(() => timed.StartHeal(timedConsumed));
+                AttemptNotification(() => GameEvents.RaiseToast(_rig.PlayerId,
+                    $"Used {timedConsumed.displayName} (+{timedConsumed.healAmount} HP over {timedConsumed.healOverTimeSeconds:0.#} s)"));
+                AttemptNotification(_inventory.NotifyAuthorityMutation);
+                reason = null;
+                return true;
             }
 
             if (!_inventory.CanCommitRevision(out reason)) return false;

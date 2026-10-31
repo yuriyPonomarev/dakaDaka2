@@ -10,8 +10,8 @@ namespace Emberdelve.Items
     /// slots to weights and reads the worn instances' rarity. Nothing in the game reads the score for a rule - no
     /// matchmaking, no stat, no loot - it is a number shown in the lobby.
     ///
-    /// Slot weights: the main weapon counts double (2), every other worn slot counts once (1). D3b appends the new
-    /// slots (hands, feet, necklace, rings) here with a weight of 1 each.
+    /// Slot weights: the main weapon counts double (2), every other worn slot counts once (1). D3b added the new
+    /// slots (hands, feet, necklace, both rings) with a weight of 1 each, so a full kit has 11 slots and 12 weight.
     /// </summary>
     public static class GearScore
     {
@@ -20,18 +20,25 @@ namespace Emberdelve.Items
         {
             switch (slot)
             {
-                case EquipmentSlot.Weapon: return 2;
+                case EquipmentSlot.Weapon:
+                case EquipmentSlot.AltWeapon: return 2;
                 case EquipmentSlot.OffHand:
+                case EquipmentSlot.AltOffHand:
                 case EquipmentSlot.Head:
                 case EquipmentSlot.Chest:
                 case EquipmentSlot.Legs:
                 case EquipmentSlot.Back:
+                case EquipmentSlot.Hands:
+                case EquipmentSlot.Feet:
+                case EquipmentSlot.Necklace:
+                case EquipmentSlot.RingLeft:
+                case EquipmentSlot.RingRight:
                     return 1;
                 default: return 0;
             }
         }
 
-        /// <summary>Score of the gear currently worn. 0 for null equipment or an empty character. Read-only.</summary>
+        /// <summary>Score of the active kit (inactive weapon-set hands do not contribute). 0 for null equipment or an empty character. Read-only.</summary>
         public static int ForEquipment(Equipment equipment)
         {
             return TryForEquipment(equipment, out int score, out _) ? score : 0;
@@ -52,7 +59,7 @@ namespace Emberdelve.Items
             foreach (EquipmentSlot slot in Enum.GetValues(typeof(EquipmentSlot)))
             {
                 int weight = SlotWeight(slot);
-                if (weight == 0) continue;
+                if (weight == 0 || !equipment.IsSlotLive((int)slot)) continue;
 
                 ItemInstance worn = equipment.EquippedInstance(slot);
                 rarities.Add(worn != null ? worn.RarityValue : GearScoreRules.EmptySlot);

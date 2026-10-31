@@ -20,6 +20,27 @@ namespace Emberdelve.Data
         Legs = 5,
         /// <summary>Back / cloak slot (U2B11). Appended, never reordered: assets store the integer.</summary>
         Back = 6,
+        /// <summary>Gloves / gauntlets (D3b). Appended, never reordered: assets and saves store the integer.</summary>
+        Hands = 7,
+        /// <summary>Boots (D3b). Footpad Boots moved here from <see cref="Legs"/>; Legs stays for trousers and old saves.</summary>
+        Feet = 8,
+        /// <summary>Necklace (D3b). Jewelry: no armour, rolls the Jewelry affix family.</summary>
+        Necklace = 9,
+        /// <summary>
+        /// First ring slot (D3b). A ring item authors RingLeft as its canonical slot and may be worn in either ring
+        /// slot (<see cref="EquipmentSlots.Accepts"/>); the two ring slots are otherwise independent.
+        /// </summary>
+        RingLeft = 10,
+        /// <summary>Second ring slot (D3b). See <see cref="RingLeft"/>.</summary>
+        RingRight = 11,
+        /// <summary>
+        /// Main hand of weapon set 2 (D3c). Nothing authors this slot: a weapon item authors <see cref="Weapon"/> and
+        /// <see cref="EquipmentSlots.Accepts"/> lets it stand in either main-hand slot, the way a ring fits either ring slot.
+        /// Weapon (set 1) and this slot (set 2) are the two sets' main hands; the set that is NOT active contributes no stats.
+        /// </summary>
+        AltWeapon = 12,
+        /// <summary>Off hand of weapon set 2 (D3c). A shield or off-hand item authors <see cref="OffHand"/> and fits either off-hand slot.</summary>
+        AltOffHand = 13,
     }
 
     /// <summary>
@@ -104,6 +125,16 @@ namespace Emberdelve.Data
         [Tooltip("Ammo granted when used (0 = none).")]
         public int ammoGrant = 0;
 
+        [Header("Move penalty and timed use (D3c)")]
+        [Tooltip("Move-speed penalty of WEARING this item, in reference points on a 300 base (30 = -10 percent of the final ground speed), " +
+                 "summed with the held weapons' own penalty by CombatFlowRules.HeldFactor. 0 = none. Armour, jewelry and any worn piece that is " +
+                 "not a weapon; a weapon item's penalty is its WeaponData.heldMoveSpeedPenalty (counted once), so this field is ignored on an item that grants a weapon.")]
+        [Range(0f, 100f)] public float moveSpeedPenalty = 0f;
+        [Tooltip("Seconds the player must stand and drink before the item is consumed (0 = used at once). Moving fast, being hit or attacking cancels the drink and keeps the item.")]
+        [Range(0f, 10f)] public float useChannelSeconds = 0f;
+        [Tooltip("Seconds over which healAmount is delivered after the item is consumed (0 = all at once). The total is exactly healAmount.")]
+        [Range(0f, 60f)] public float healOverTimeSeconds = 0f;
+
         [Header("Blockout presentation")]
         public Color iconColor = new Color(0.85f, 0.72f, 0.35f);
         public Material worldMaterial;
@@ -116,6 +147,9 @@ namespace Emberdelve.Data
         public int EffectiveMaxStack => Mathf.Max(1, maxStack);
 
         public bool IsEquippable => equipSlot != EquipmentSlot.None;
+
+        /// <summary>D3c: true when using this item takes a channel and/or heals over time instead of acting at once.</summary>
+        public bool HasTimedUse => healAmount > 0 && (useChannelSeconds > 0f || healOverTimeSeconds > 0f);
 
         /// <summary>Only carried items stack. A worn breastplate is one item in its own shape.</summary>
         public bool CanStack => !IsEquippable && EffectiveMaxStack > 1;

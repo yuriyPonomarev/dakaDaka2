@@ -222,11 +222,11 @@ namespace Emberdelve.EditorTools
 
             Check(equipment.TryEquipFromInventory(bag.IndexOfInstance(first.Uid), out string equipFirst),
                 "equip first rolled boots: " + equipFirst);
-            Check(bag.IndexOfStack(firstStack) == -1 && equipment.EquippedInstance(EquipmentSlot.Legs).Uid == first.Uid,
+            Check(bag.IndexOfStack(firstStack) == -1 && equipment.EquippedInstance(EquipmentSlot.Feet).Uid == first.Uid,
                 "equipping retires the incoming carried-stack ID");
             Check(equipment.TryEquipFromInventory(bag.IndexOfInstance(second.Uid), out string replace),
                 "replace with second rolled boots: " + replace);
-            Check(equipment.EquippedInstance(EquipmentSlot.Legs).Uid == second.Uid && bag.HoldsInstanceUid(first.Uid),
+            Check(equipment.EquippedInstance(EquipmentSlot.Feet).Uid == second.Uid && bag.HoldsInstanceUid(first.Uid),
                 "replacement equips the incoming exact UID and returns the outgoing UID");
 
             int firstIndex = bag.IndexOfInstance(first.Uid);
@@ -237,7 +237,7 @@ namespace Emberdelve.EditorTools
             Check(first.ToSnapshot().ToJson() == firstSnapshot && second.ToSnapshot().ToJson() == secondSnapshot,
                 "replacement preserves both gear UIDs, rarity and exact rolls");
 
-            Check(equipment.TryUnequip(EquipmentSlot.Legs, out string unequip), "unequip replacement: " + unequip);
+            Check(equipment.TryUnequip(EquipmentSlot.Feet, out string unequip), "unequip replacement: " + unequip);
             int secondIndex = bag.IndexOfInstance(second.Uid);
             Check(secondIndex >= 0, "unequipped boots return to the bag");
             if (secondIndex >= 0)

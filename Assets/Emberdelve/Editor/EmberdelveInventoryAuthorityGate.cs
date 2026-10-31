@@ -250,51 +250,51 @@ namespace Emberdelve.EditorTools
             incoming = movedGear;
             ulong before = _bag.Revision;
             InventoryCommand wrongSource = Create(InventoryCommandKind.Equip, incoming.StackId, 0,
-                Vector2Int.zero, EquipmentSlot.Legs, Guid.NewGuid(), Guid.Empty);
+                Vector2Int.zero, EquipmentSlot.Feet, Guid.NewGuid(), Guid.Empty);
             InventoryCommandResult wrongSourceResult = _authority.Submit(_rig, wrongSource);
-            Check(!wrongSourceResult.Accepted && wrongSourceResult.Revision == before && _equipment.EquippedInstance(EquipmentSlot.Legs) == null,
+            Check(!wrongSourceResult.Accepted && wrongSourceResult.Revision == before && _equipment.EquippedInstance(EquipmentSlot.Feet) == null,
                 "wrong source gear UID is refused without changing either side: " + Describe(wrongSourceResult));
 
             InventoryCommand equip = Create(InventoryCommandKind.Equip, incoming.StackId, 0,
-                Vector2Int.zero, EquipmentSlot.Legs, incomingUid, Guid.Empty);
+                Vector2Int.zero, EquipmentSlot.Feet, incomingUid, Guid.Empty);
             InventoryCommandResult equipped = _authority.Submit(_rig, equip);
             Check(equipped.Accepted && equipped.Changed && equipped.Revision == before + 1 &&
-                  _equipment.EquippedInstance(EquipmentSlot.Legs) != null &&
-                  _equipment.EquippedInstance(EquipmentSlot.Legs).Uid == incomingUid,
+                  _equipment.EquippedInstance(EquipmentSlot.Feet) != null &&
+                  _equipment.EquippedInstance(EquipmentSlot.Feet).Uid == incomingUid,
                 "equip moves the exact source UID into its authored slot: " + Describe(equipped));
 
             Check(_bag.TryAdd(boots, 1, out reason), "add replacement gear: " + reason);
             InventorySlot replacement = Find(boots);
-            Guid wornUid = _equipment.EquippedInstance(EquipmentSlot.Legs).Uid;
+            Guid wornUid = _equipment.EquippedInstance(EquipmentSlot.Feet).Uid;
             InventoryCommand wrongTarget = Create(InventoryCommandKind.Equip, replacement.StackId, 0,
-                Vector2Int.zero, EquipmentSlot.Legs, GearUid(replacement), Guid.NewGuid());
+                Vector2Int.zero, EquipmentSlot.Feet, GearUid(replacement), Guid.NewGuid());
             ulong replacementBefore = _bag.Revision;
             InventoryCommandResult wrongTargetResult = _authority.Submit(_rig, wrongTarget);
             Check(!wrongTargetResult.Accepted && wrongTargetResult.Revision == replacementBefore &&
-                  _equipment.EquippedInstance(EquipmentSlot.Legs).Uid == wornUid,
+                  _equipment.EquippedInstance(EquipmentSlot.Feet).Uid == wornUid,
                 "wrong target gear UID refuses replacement atomically: " + Describe(wrongTargetResult));
 
             InventoryCommand replace = Create(InventoryCommandKind.Equip, replacement.StackId, 0,
-                Vector2Int.zero, EquipmentSlot.Legs, GearUid(replacement), wornUid);
+                Vector2Int.zero, EquipmentSlot.Feet, GearUid(replacement), wornUid);
             InventoryCommandResult replaced = _authority.Submit(_rig, replace);
             Check(replaced.Accepted && replaced.Changed && replaced.Revision == replacementBefore + 1 &&
-                  _equipment.EquippedInstance(EquipmentSlot.Legs).Uid == GearUid(replacement),
+                  _equipment.EquippedInstance(EquipmentSlot.Feet).Uid == GearUid(replacement),
                 "valid replacement checks the target UID and advances once: " + Describe(replaced));
 
-            Guid currentUid = _equipment.EquippedInstance(EquipmentSlot.Legs).Uid;
+            Guid currentUid = _equipment.EquippedInstance(EquipmentSlot.Feet).Uid;
             InventoryCommand wrongUnequip = Create(InventoryCommandKind.Unequip, 0, 0,
-                Vector2Int.zero, EquipmentSlot.Legs, Guid.NewGuid(), Guid.Empty);
+                Vector2Int.zero, EquipmentSlot.Feet, Guid.NewGuid(), Guid.Empty);
             ulong unequipBefore = _bag.Revision;
             InventoryCommandResult wrongUnequipResult = _authority.Submit(_rig, wrongUnequip);
             Check(!wrongUnequipResult.Accepted && wrongUnequipResult.Revision == unequipBefore &&
-                  _equipment.EquippedInstance(EquipmentSlot.Legs).Uid == currentUid,
+                  _equipment.EquippedInstance(EquipmentSlot.Feet).Uid == currentUid,
                 "wrong unequip UID is refused without changing gear: " + Describe(wrongUnequipResult));
 
             InventoryCommand unequip = Create(InventoryCommandKind.Unequip, 0, 0,
-                Vector2Int.zero, EquipmentSlot.Legs, currentUid, Guid.Empty);
+                Vector2Int.zero, EquipmentSlot.Feet, currentUid, Guid.Empty);
             InventoryCommandResult unequipped = _authority.Submit(_rig, unequip);
             Check(unequipped.Accepted && unequipped.Changed && unequipped.Revision == unequipBefore + 1 &&
-                  _equipment.EquippedInstance(EquipmentSlot.Legs) == null && _bag.HoldsInstanceUid(currentUid),
+                  _equipment.EquippedInstance(EquipmentSlot.Feet) == null && _bag.HoldsInstanceUid(currentUid),
                 "unequip returns the same gear UID to the bag and commits once: " + Describe(unequipped));
         }
 
@@ -306,7 +306,7 @@ namespace Emberdelve.EditorTools
             Check(_bag.TryAdd(boots, 1, out string reason), "add boots for full-bag test: " + reason);
             InventorySlot incoming = Find(boots);
             InventoryCommand equip = Create(InventoryCommandKind.Equip, incoming.StackId, 0,
-                Vector2Int.zero, EquipmentSlot.Legs, GearUid(incoming), Guid.Empty);
+                Vector2Int.zero, EquipmentSlot.Feet, GearUid(incoming), Guid.Empty);
             Check(_authority.Submit(_rig, equip).Accepted, "equip boots before filling the bag");
 
             _bag.Clear();
@@ -314,17 +314,17 @@ namespace Emberdelve.EditorTools
             foreach (Vector2Int cell in new[] { Vector2Int.zero, Vector2Int.right, Vector2Int.up, Vector2Int.one })
                 Check(_bag.TryAddAt(coin, 8, cell, out reason), "fill exact bag cell " + cell + ": " + reason);
 
-            Guid wornUid = _equipment.EquippedInstance(EquipmentSlot.Legs).Uid;
+            Guid wornUid = _equipment.EquippedInstance(EquipmentSlot.Feet).Uid;
             string bagBefore = _bag.ToContainerSnapshot().ToJson();
             string gearBefore = _equipment.ToContainerSnapshot().ToJson();
             ulong revisionBefore = _bag.Revision;
             InventoryCommand command = Create(InventoryCommandKind.Unequip, 0, 0,
-                Vector2Int.zero, EquipmentSlot.Legs, wornUid, Guid.Empty);
+                Vector2Int.zero, EquipmentSlot.Feet, wornUid, Guid.Empty);
             InventoryCommandResult refused = _authority.Submit(_rig, command);
             Check(!refused.Accepted && refused.Revision == revisionBefore && _bag.Revision == revisionBefore &&
                   _bag.ToContainerSnapshot().ToJson() == bagBefore &&
                   _equipment.ToContainerSnapshot().ToJson() == gearBefore &&
-                  _equipment.EquippedInstance(EquipmentSlot.Legs).Uid == wornUid,
+                  _equipment.EquippedInstance(EquipmentSlot.Feet).Uid == wornUid,
                 "full 2x2 bag refuses unequip with exact bag/gear snapshots intact: " + Describe(refused));
         }
 

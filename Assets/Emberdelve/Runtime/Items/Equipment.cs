@@ -43,6 +43,15 @@ namespace Emberdelve.Items
     /// (Docs/Design/ARMOR_RULES.md) - an armor affix is still not silently reinterpreted as block reduction.
     /// melee_damage and projectile_damage were given their own authority-read flat weapon channel in U2B7
     /// rather than being smuggled into a damage multiplier.
+    ///
+    /// D3c: two weapon sets. Set 0 is <see cref="EquipmentSlot.Weapon"/> + <see cref="EquipmentSlot.OffHand"/>, set 1 is
+    /// <see cref="EquipmentSlot.AltWeapon"/> + <see cref="EquipmentSlot.AltOffHand"/>. All four hold their worn instances all
+    /// the time (so uids, snapshots and the "one uid, one place" rule see them), but only the ACTIVE set is live: the
+    /// <see cref="WornInstances"/> window, the stat source and the move-speed penalty read the active set only, and the hand
+    /// that combat uses is the active set's (set N's main hand is ClassLoadout slot N; an empty slot falls back to what the class
+    /// asset authors, exactly as an empty Weapon slot always did). The active set is state of this component, changed only by
+    /// <see cref="TrySwapWeaponSet"/> (the authority command SwapWeaponSet) or by a forced/local ClassLoadout switch that
+    /// reports it through <see cref="BeginWeaponSet"/> / <see cref="CompleteWeaponSet"/>.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class Equipment : MonoBehaviour
@@ -78,6 +87,23 @@ namespace Emberdelve.Items
 
         private WornInstanceListView _wornInstanceView;
 
+        /// <summary>D3c: the live weapon set (0 or 1). Mirrors ClassLoadout.ActiveSlot; saved in the loadout snapshot.</summary>
+        private int _activeSet;
+
+        /// <summary>D3c: while a restore (or another caller that commits its own revision) switches sets, the switch must not commit a second one.</summary>
+        private int _quietSetChange;
+
+        /// <summary>D3c: the live weapon set, 0 (Weapon + OffHand) or 1 (AltWeapon + AltOffHand).</summary>
+        public int ActiveWeaponSet => _activeSet;
+
+        /// <summary>
+        /// D3c: the move-speed penalty of the pieces worn in the LIVE slots, in reference points on a 300 base, as
+        /// <see cref="ItemData.moveSpeedPenalty"/> authors it. A weapon-granting item contributes nothing here (its weapon's
+        /// own held penalty is what counts, once). Recomputed by every <see cref="RefreshStats"/>, read by the rig's
+        /// move-flow factor, so it reaches the speed through exactly one path.
+        /// </summary>
+        public float MoveSpeedPenaltyPoints { get; private set; }
+
         public IReadOnlyList<ItemData> Slots => _slotViews;
         public int FilledCount { get; private set; }
 
@@ -93,7 +119,7 @@ namespace Emberdelve.Items
         {
             get
             {
-                if (_wornInstanceView == null) _wornInstanceView = new WornInstanceListView(_gear);
+                if (_wornInstanceView == null) _wornInstanceView = new WornInstanceListView(this, _gear);
                 return _wornInstanceView;
             }
         }
@@ -174,6 +200,18 @@ namespace Emberdelve.Items
         /// </summary>
         public bool TryEquipFromInventory(int inventoryIndex, out string reason)
         {
+            return TryEquipFromInventory(inventoryIndex, EquipmentSlot.None, out reason);
+        }
+
+        /// <summary>
+        /// D3b: <see cref="TryEquipFromInventory(int, out string)"/> with an EXPLICIT target slot. <see cref="EquipmentSlot.None"/>
+        /// means "the item's own slot": for a ring that is the first empty ring slot, and when both ring slots are full the
+        /// equip is refused (nothing is replaced behind the player's back) until the caller names the ring slot to replace.
+        /// A named slot must accept the item (<see cref="EquipmentSlots.Accepts"/>): a ring fits either ring slot, anything
+        /// else only its authored slot.
+        /// </summary>
+        public bool TryEquipFromInventory(int inventoryIndex, EquipmentSlot target, out string reason)
+        {
             reason = null;
 
             if (_rig == null)
@@ -204,7 +242,7 @@ namespace Emberdelve.Items
                 return false;
             }
 
-            return TryEquipSelected(inventoryIndex, incoming, out reason);
+            return TryEquipSelected(inventoryIndex, incoming, target, out reason);
         }
 
         /// <summary>
@@ -248,7 +286,7 @@ namespace Emberdelve.Items
                 return false;
             }
 
-            return TryEquipSelected(bagIndex, incoming, out reason);
+            return TryEquipSelected(bagIndex, incoming, EquipmentSlot.None, out reason);
         }
 
         /// <summary>
@@ -257,7 +295,12 @@ namespace Emberdelve.Items
         /// half filled or a bag half emptied. The instance resolved from the selected bag slot is the instance
         /// that ends up worn: no copy, no re-roll and no second identity is minted on the way in.
         /// </summary>
-        private bool TryEquipSelected(int bagIndex, ItemInstance incoming, out string reason)
+        private bool TryEquipSelected(int bagIndex, ItemInstance incoming, EquipmentSlot requested, out string reason)
+        {
+            using (GameEventTransaction.Defer()) return TryEquipSelectedState(bagIndex, incoming, requested, out reason);
+        }
+
+        private bool TryEquipSelectedState(int bagIndex, ItemInstance incoming, EquipmentSlot requested, out string reason)
         {
             reason = null;
 
@@ -287,7 +330,9 @@ namespace Emberdelve.Items
                 return false;
             }
 
-            int index = SlotIndex(item.equipSlot);
+            if (!TryChooseSlot(item, requested, out EquipmentSlot targetSlot, out reason)) return false;
+
+            int index = SlotIndex(targetSlot);
             if (index < 0)
             {
                 reason = "no such equipment slot";
@@ -345,6 +390,364 @@ namespace Emberdelve.Items
             return true;
         }
 
+        /// <summary>
+        /// D3b: which slot would this item go to? A named <paramref name="requested"/> slot must accept the item. With
+        /// <see cref="EquipmentSlot.None"/> the item's own slot is used, except for a ring: the first EMPTY ring slot
+        /// (RingLeft, then RingRight), and when both are full there is no default and the answer is a refusal that says an
+        /// explicit target slot is required. Read-only.
+        /// </summary>
+        public bool TryChooseSlot(ItemData item, EquipmentSlot requested, out EquipmentSlot slot, out string reason)
+        {
+            slot = EquipmentSlot.None;
+
+            if (item == null)
+            {
+                reason = "no item";
+                return false;
+            }
+
+            if (!EquipmentSlots.IsRealSlot(item.equipSlot))
+            {
+                reason = $"{item.displayName} cannot be worn or held";
+                return false;
+            }
+
+            if (requested != EquipmentSlot.None)
+            {
+                if (!EquipmentSlots.Accepts(item.equipSlot, requested))
+                {
+                    reason = $"{item.displayName} does not fit the {requested} slot";
+                    return false;
+                }
+
+                slot = requested;
+                reason = null;
+                return true;
+            }
+
+            if (!EquipmentSlots.IsRing(item.equipSlot))
+            {
+                slot = item.equipSlot;
+                reason = null;
+                return true;
+            }
+
+            EquipmentSlot[] candidates = EquipmentSlots.CandidatesFor(item.equipSlot);
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                int candidate = SlotIndex(candidates[i]);
+                if (candidate >= 0 && _gear[candidate] == null)
+                {
+                    slot = candidates[i];
+                    reason = null;
+                    return true;
+                }
+            }
+
+            reason = $"both ring slots are full: name the ring slot to replace for {item.displayName}";
+            return false;
+        }
+
+        /// <summary>
+        /// D3b: moves the ring in <paramref name="from"/> to <paramref name="to"/> and whatever <paramref name="to"/> held
+        /// back to <paramref name="from"/>, as one step. Both are ring slots and differ; at least one holds a ring (an empty
+        /// target just moves the ring across). It is a pure exchange between two slots of one array: no bag cell is touched
+        /// and no identity is created or dropped, so every uid is conserved. Every check comes before the first write, so a
+        /// refusal (dead player, no revision room, a worn item that does not accept the other slot) changes nothing - not a
+        /// slot, not the stats, not the shared revision. The stat source is rebuilt through the same
+        /// <see cref="RefreshStats"/> every equip uses, so the totals are unchanged by a swap and nothing accumulates.
+        /// </summary>
+        public bool TrySwapRingSlots(EquipmentSlot from, EquipmentSlot to, out string reason)
+        {
+            using (GameEventTransaction.Defer()) return TrySwapRingSlotsState(from, to, out reason);
+        }
+
+        private bool TrySwapRingSlotsState(EquipmentSlot from, EquipmentSlot to, out string reason)
+        {
+            reason = null;
+
+            if (!EquipmentSlots.IsRing(from) || !EquipmentSlots.IsRing(to) || from == to)
+            {
+                reason = "a ring swap needs the two different ring slots";
+                return false;
+            }
+
+            if (_rig == null)
+            {
+                reason = "no player is wearing it";
+                return false;
+            }
+
+            if (_rig.IsDead)
+            {
+                reason = "dead players cannot change gear";
+                return false;
+            }
+
+            int a = SlotIndex(from);
+            int b = SlotIndex(to);
+            if (a < 0 || b < 0)
+            {
+                reason = "no such equipment slot";
+                return false;
+            }
+
+            ItemInstance first = _gear[a];
+            ItemInstance second = _gear[b];
+            if (first == null && second == null)
+            {
+                reason = "both ring slots are empty";
+                return false;
+            }
+
+            if (first != null && !EquipmentSlots.Accepts(first.Definition.equipSlot, to))
+            {
+                reason = $"{first.Definition.displayName} does not fit the {to} slot";
+                return false;
+            }
+
+            if (second != null && !EquipmentSlots.Accepts(second.Definition.equipSlot, from))
+            {
+                reason = $"{second.Definition.displayName} does not fit the {from} slot";
+                return false;
+            }
+
+            Inventory revisionOwner = BagPartner();
+            if (revisionOwner == null)
+            {
+                reason = "equipment has no shared inventory revision owner";
+                return false;
+            }
+
+            if (!revisionOwner.CanCommitRevision(out reason)) return false;
+
+            _gear[a] = second;
+            _gear[b] = first;
+            RecomputeSlots();
+            RefreshStats();
+            revisionOwner.CommitRevision();
+
+            GameEvents.RaiseInventoryChanged(OwnerId);
+            return true;
+        }
+
+        // ------------------------------------------------------------ D3c: weapon sets
+
+        /// <summary>D3c: is the slot at this array index part of what is live? Every slot is, except the hand slots of the set that is not in hand.</summary>
+        internal bool IsSlotLive(int index)
+        {
+            int set = EquipmentSlots.SetOf((EquipmentSlot)index);
+            return set < 0 || set == _activeSet;
+        }
+
+        /// <summary>D3c: the instance worn in a weapon set's main hand slot (null = the class default weapon is in that hand).</summary>
+        public ItemInstance MainHandInstance(int set)
+        {
+            return EquippedInstance(EquipmentSlots.MainHandOf(set));
+        }
+
+        /// <summary>
+        /// D3c: the weapon that would be in set <paramref name="set"/>'s main hand: the worn item's weapon, else the class asset's
+        /// (primary for set 0, secondary for set 1). Null when neither exists. Read-only.
+        /// </summary>
+        public WeaponData WeaponOfSet(int set)
+        {
+            int index = SlotIndex(EquipmentSlots.MainHandOf(set));
+            return ResolveWeaponOfSet(set, index >= 0 ? _gear[index] : null);
+        }
+
+        private WeaponData ResolveWeaponOfSet(int set, ItemInstance wornMainHand)
+        {
+            if (set < 0 || set >= EquipmentSlots.WeaponSetCount) return null;
+            if (wornMainHand != null && wornMainHand.Definition != null && wornMainHand.Definition.grantedWeapon != null)
+                return wornMainHand.Definition.grantedWeapon;
+
+            CharacterClassData data = _rig != null ? _rig.Class : null;
+            if (data == null) return null;
+            return set == 0 ? data.primaryWeapon : data.secondaryWeapon;
+        }
+
+        /// <summary>The weapon set's off hand: the worn item's weapon, or null (the rig then falls back to the class asset's off hand).</summary>
+        private WeaponData WornOffhandOfSet(int set)
+        {
+            int index = SlotIndex(EquipmentSlots.OffHandOf(set));
+            ItemInstance worn = index >= 0 ? _gear[index] : null;
+            return worn != null && worn.Definition != null ? worn.Definition.grantedWeapon : null;
+        }
+
+        /// <summary>
+        /// D3c: ClassLoadout calls this when a different weapon set is about to take the hand, BEFORE the rig re-resolves its defense,
+        /// so the new set's off hand is already in place when the main hand is applied. Records the live set; for a real swap it also
+        /// puts the set's off hand in the rig (nothing is touched when the rig already has that exact off hand). Returns whether the
+        /// live set value changed.
+        /// </summary>
+        internal bool BeginWeaponSet(int set, bool isSwap)
+        {
+            if (set < 0 || set >= EquipmentSlots.WeaponSetCount) return false;
+
+            bool changed = _activeSet != set;
+            _activeSet = set;
+
+            if (isSwap && _rig != null)
+            {
+                WeaponData worn = WornOffhandOfSet(set);
+                CharacterClassData data = _rig.Class;
+                WeaponData effective = worn != null ? worn : (data != null ? data.offhandShield : null);
+                if (!ReferenceEquals(_rig.OffhandWeapon, effective)) _rig.SetOffhandWeapon(worn);
+            }
+
+            return changed;
+        }
+
+        /// <summary>
+        /// D3c: ClassLoadout calls this after the hand has changed. A real swap (or any change of the live set) re-derives the stat source
+        /// and the penalty from the new live slots through the same <see cref="RefreshStats"/> every equip uses, so nothing the other
+        /// set granted stays behind and nothing is added twice; a real swap also commits ONE shared revision (the live set is part of the
+        /// saved loadout) and tells observers once. A swap in the middle of a restore or an unequip leaves the revision to that operation.
+        /// </summary>
+        internal void CompleteWeaponSet(bool setChanged, bool isSwap)
+        {
+            if (!setChanged && !isSwap) return;
+
+            // Nothing worn in any hand slot means neither set contributes anything, so a swap cannot change a stat: the (heavier)
+            // rebuild is skipped and a bare class swaps exactly as it did before weapon sets existed.
+            if (HasWornHandItem()) RefreshStats();
+
+            if (isSwap)
+            {
+                ConsumableChannel channel = _rig != null ? _rig.GetComponent<ConsumableChannel>() : null;
+                if (channel != null) channel.Cancel("swapped weapons");
+            }
+
+            if (!isSwap || _quietSetChange > 0) return;
+
+            Inventory revisionOwner = BagPartner();
+            if (revisionOwner != null && revisionOwner.CanCommitRevision(out _)) revisionOwner.CommitRevision();
+            GameEvents.RaiseInventoryChanged(OwnerId);
+        }
+
+        private bool HasWornHandItem()
+        {
+            for (int set = 0; set < EquipmentSlots.WeaponSetCount; set++)
+            {
+                int main = SlotIndex(EquipmentSlots.MainHandOf(set));
+                int off = SlotIndex(EquipmentSlots.OffHandOf(set));
+                if ((main >= 0 && _gear[main] != null) || (off >= 0 && _gear[off] != null)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// D3c: the weapon-set swap, as one step. Every check comes before the first write: the player lives, a loadout exists, the
+        /// other set has a weapon to hold, the player is not mid-attack (the same <see cref="ClassLoadout.IsActionLocked"/> rule a
+        /// player swap always had: a swing, a draw or a reload), and the shared revision has room. A refusal changes nothing - not
+        /// the live set, the hand, the off hand, the stats, the revision. The change itself cannot fail after those checks: the
+        /// loadout takes the hand, the off hand follows, the stat source is rebuilt from the other set (the previous set's
+        /// contribution leaves in the same pass), one revision is committed, observers are told once.
+        /// </summary>
+        public bool TrySwapWeaponSet(out string reason)
+        {
+            reason = null;
+
+            if (_rig == null)
+            {
+                reason = "no player to swap weapons for";
+                return false;
+            }
+
+            if (_rig.IsDead)
+            {
+                reason = "dead players cannot swap weapons";
+                return false;
+            }
+
+            ClassLoadout loadout = _rig.Loadout;
+            if (loadout == null)
+            {
+                reason = "no weapon loadout";
+                return false;
+            }
+
+            int target = 1 - _activeSet;
+            if (loadout.WeaponInSlot(target) == null)
+            {
+                reason = $"weapon set {target + 1} has no weapon";
+                return false;
+            }
+
+            if (loadout.IsActionLocked)
+            {
+                reason = "cannot swap weapons during an attack";
+                GameEvents.RaiseToast(OwnerId, loadout.ActionLockMessage);
+                return false;
+            }
+
+            Inventory revisionOwner = BagPartner();
+            if (revisionOwner == null)
+            {
+                reason = "equipment has no shared inventory revision owner";
+                return false;
+            }
+
+            if (!revisionOwner.CanCommitRevision(out reason)) return false;
+
+            if (!loadout.ForceSwitchToSlot(target))
+            {
+                reason = "the weapon loadout did not take the other set";
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// D3c restore, validation half: would set <paramref name="set"/> have a weapon in its main hand after this container is
+        /// restored (a worn item in that hand, or the class asset's weapon)? Always true for set 1 and for a pair with no rig. Touches nothing.
+        /// </summary>
+        internal bool WouldHoldWeapon(ValidatedContainer validated, int set)
+        {
+            // Set 1 (the original hands) is never refused here - an empty hand has always meant "the class weapon" - and a bare
+            // bag/equipment pair with no rig to drive has no hand to check.
+            if (set == 0 || _rig == null || _rig.Loadout == null) return true;
+
+            EquipmentSlot hand = EquipmentSlots.MainHandOf(set);
+            if (validated != null)
+            {
+                for (int i = 0; i < validated.Entries.Count; i++)
+                {
+                    if (validated.Entries[i].Slot == hand && validated.Entries[i].Definition.grantedWeapon != null) return true;
+                }
+            }
+
+            return ResolveWeaponOfSet(set, null) != null;
+        }
+
+        /// <summary>
+        /// D3c restore, apply half: makes <paramref name="set"/> the live set as part of a loadout restore, which commits its own single
+        /// revision and its own notification. Cannot fail after <see cref="WouldHoldWeapon"/> passed; with no loadout to drive (a bare
+        /// bag and equipment pair) only the recorded set changes.
+        /// </summary>
+        internal void ApplyRestoredWeaponSet(int set)
+        {
+            if (set < 0 || set >= EquipmentSlots.WeaponSetCount) return;
+
+            ClassLoadout loadout = _rig != null ? _rig.Loadout : null;
+            _quietSetChange++;
+            try
+            {
+                if (loadout != null && loadout.ActiveSlot >= 0 && loadout.ActiveSlot != set)
+                {
+                    loadout.ForceSwitchToSlot(set);
+                }
+                else
+                {
+                    bool changed = BeginWeaponSet(set, false);
+                    CompleteWeaponSet(changed, false);
+                }
+            }
+            finally { _quietSetChange--; }
+        }
+
         public bool TryUnequip(EquipmentSlot slot, out string reason)
         {
             reason = null;
@@ -360,6 +763,11 @@ namespace Emberdelve.Items
         }
 
         public void Clear()
+        {
+            using (GameEventTransaction.Defer()) ClearState();
+        }
+
+        private void ClearState()
         {
             bool changed = false;
             for (int i = 0; i < SlotCount; i++) changed |= _gear[i] != null;
@@ -406,13 +814,19 @@ namespace Emberdelve.Items
         {
             _modifierScratch.Clear();
             _summaryScratch.Clear();
+            float penaltyPoints = 0f;
 
             for (int i = 0; i < SlotCount; i++)
             {
                 ItemInstance worn = _gear[i];
-                if (worn == null) continue;
+                if (worn == null || !IsSlotLive(i)) continue;
 
                 ItemData item = worn.Definition;
+
+                // D3c: a worn piece's authored penalty joins the held-weapon penalty in CombatFlowRules.HeldFactor. A weapon item's
+                // own number is its WeaponData's, which is already counted for the weapon in hand, so it is not added here.
+                if (!item.GrantsWeapon && item.moveSpeedPenalty > 0f && !float.IsNaN(item.moveSpeedPenalty))
+                    penaltyPoints += item.moveSpeedPenalty;
 
                 if (item.statModifiers != null)
                 {
@@ -426,6 +840,8 @@ namespace Emberdelve.Items
 
                 _summaryScratch.Add($"{item.displayName} ({item.ShortSummary})");
             }
+
+            MoveSpeedPenaltyPoints = penaltyPoints;
 
             CharacterStatStack stats = _rig != null ? _rig.Stats : null;
             if (stats != null)
@@ -506,6 +922,11 @@ namespace Emberdelve.Items
         }
 
         public bool TryRestore(ContainerSnapshot snapshot, ItemUidRegistry others, out string reason)
+        {
+            using (GameEventTransaction.Defer()) return TryRestoreState(snapshot, others, out reason);
+        }
+
+        private bool TryRestoreState(ContainerSnapshot snapshot, ItemUidRegistry others, out string reason)
         {
             if (!TryPrepareRestore(snapshot, others, true, out ValidatedContainer validated, out reason)) return false;
 
@@ -597,7 +1018,7 @@ namespace Emberdelve.Items
                 if (previous != null)
                 {
                     removed.Add(previous.Definition);
-                    if (previous.Definition.GrantsWeapon) handSlots.Add((EquipmentSlot)i);
+                    if (previous.Definition.GrantsWeapon && EquipmentSlots.SetOf((EquipmentSlot)i) >= 0) handSlots.Add((EquipmentSlot)i);
                 }
                 _gear[i] = null;
             }
@@ -613,7 +1034,7 @@ namespace Emberdelve.Items
             // Hand every previously worn weapon back to the class first, so a slot that is no longer worn does not
             // keep a saved weapon in the hand; then the restored weapons take their hands like equipping does.
             for (int i = 0; i < handSlots.Count; i++) RestoreClassHand(handSlots[i]);
-            for (int i = 0; i < validated.Entries.Count; i++) ApplyHand(validated.Entries[i].Definition);
+            for (int i = 0; i < validated.Entries.Count; i++) ApplyHand(validated.Entries[i].Definition, validated.Entries[i].Slot);
 
             // Same refresh every equip/unequip uses: the equipment stat source is replaced wholesale and only the
             // ceilings are re-applied (SetMax never pays out), so nothing heals and nothing accumulates.
@@ -649,22 +1070,28 @@ namespace Emberdelve.Items
         {
             _gear[index] = instance;
             RecomputeSlots();
-            ApplyHand(instance.Definition);
+            ApplyHand(instance.Definition, (EquipmentSlot)index);
         }
 
-        /// <summary>The hand half of wearing an item: a weapon or shield definition takes its hand, anything else does nothing.</summary>
-        private void ApplyHand(ItemData item)
+        /// <summary>
+        /// The hand half of wearing an item: a weapon or shield definition takes the hand of the slot it was put in (D3c: a
+        /// set-2 slot fills set 2's hand, which is only the hand in use while set 2 is the active set), anything else does nothing.
+        /// </summary>
+        private void ApplyHand(ItemData item, EquipmentSlot slot)
         {
             if (!item.GrantsWeapon) return;
 
-            if (item.equipSlot == EquipmentSlot.OffHand)
+            int set = EquipmentSlots.SetOf(slot);
+            if (set < 0) return;
+
+            if (EquipmentSlots.IsOffHand(slot))
             {
-                if (_rig != null) _rig.SetOffhandWeapon(item.grantedWeapon);
+                if (_rig != null && set == _activeSet) _rig.SetOffhandWeapon(item.grantedWeapon);
                 return;
             }
 
             ClassLoadout loadout = _rig != null ? _rig.Loadout : null;
-            if (loadout != null) loadout.TryReplaceWeaponSlot(0, item.grantedWeapon);
+            if (loadout != null) loadout.TryReplaceWeaponSlot(set, item.grantedWeapon);
         }
 
         /// <summary>
@@ -676,6 +1103,11 @@ namespace Emberdelve.Items
         /// leaves the player empty handed and never destroys a weapon.
         /// </summary>
         private bool TryUnequipSlot(int index, out string reason)
+        {
+            using (GameEventTransaction.Defer()) return TryUnequipSlotState(index, out reason);
+        }
+
+        private bool TryUnequipSlotState(int index, out string reason)
         {
             reason = null;
 
@@ -748,14 +1180,30 @@ namespace Emberdelve.Items
             CharacterClassData data = _rig != null ? _rig.Class : null;
             if (data == null) return;
 
-            if (slot == EquipmentSlot.OffHand)
+            int set = EquipmentSlots.SetOf(slot);
+            if (set < 0) return;
+
+            if (EquipmentSlots.IsOffHand(slot))
             {
-                if (_rig != null) _rig.SetOffhandWeapon(data.offhandShield);
+                if (set == _activeSet) _rig.SetOffhandWeapon(data.offhandShield);
                 return;
             }
 
             ClassLoadout loadout = _rig != null ? _rig.Loadout : null;
-            if (loadout != null && data.primaryWeapon != null) loadout.TryReplaceWeaponSlot(0, data.primaryWeapon);
+            if (loadout == null) return;
+
+            WeaponData classWeapon = set == 0 ? data.primaryWeapon : data.secondaryWeapon;
+            if (classWeapon != null)
+            {
+                loadout.TryReplaceWeaponSlot(set, classWeapon);
+            }
+            else if (set == 1)
+            {
+                // A class with no secondary weapon: set 2's hand is empty again. If it was the live set, the player falls back to set 1.
+                _quietSetChange++;
+                try { loadout.ClearSecondaryWeapon(); }
+                finally { _quietSetChange--; }
+            }
         }
 
         private void RecomputeSlots()
@@ -823,10 +1271,12 @@ namespace Emberdelve.Items
         /// </summary>
         private sealed class WornInstanceListView : IReadOnlyList<ItemInstance>
         {
+            private readonly Equipment _owner;
             private readonly ItemInstance[] _slots;
 
-            public WornInstanceListView(ItemInstance[] slots)
+            public WornInstanceListView(Equipment owner, ItemInstance[] slots)
             {
+                _owner = owner;
                 _slots = slots;
             }
 
@@ -839,7 +1289,9 @@ namespace Emberdelve.Items
                         throw new IndexOutOfRangeException($"equipment has {_slots.Length} slot(s), " +
                                                            $"index {index} is not one of them");
                     }
-                    return _slots[index];
+                    // D3c: the weapon set that is not in hand is worn but not live; it reads as empty here, so every stat consumer of
+                    // this window (attributes, armor, affixes, the effective-stats capture) sees the active set only.
+                    return _owner.IsSlotLive(index) ? _slots[index] : null;
                 }
             }
 
@@ -847,7 +1299,7 @@ namespace Emberdelve.Items
 
             public IEnumerator<ItemInstance> GetEnumerator()
             {
-                for (int i = 0; i < _slots.Length; i++) yield return _slots[i];
+                for (int i = 0; i < _slots.Length; i++) yield return _owner.IsSlotLive(i) ? _slots[i] : null;
             }
 
             IEnumerator IEnumerable.GetEnumerator()

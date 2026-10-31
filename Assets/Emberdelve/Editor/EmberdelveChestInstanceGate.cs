@@ -39,7 +39,7 @@ Check(chest.Open(rig)&&ReferenceEquals(chest.Remaining[0].Instance,instance)&&ch
 bag.ConfigureGrid(10,4);Check(chest.Open(rig)&&chest.Remaining.Count==0&&bag.HoldsInstanceUid(instance.Uid),"freed space transfers owned instance");
 Check(ReferenceEquals(bag.InstanceAt(bag.IndexOfInstance(instance.Uid)),instance)&&bag.MintedInstanceCount==minted,"transfer no copy or remint");
 int recovered=bag.RecoveredValue;chest.Open(rig);Check(bag.RecoveredValue==recovered,"empty reopen no credit");
-Check(rig.Equipment.TryEquipFromInventory(bag.IndexOfInstance(instance.Uid),out reason)&&ReferenceEquals(rig.Equipment.EquippedInstance(EquipmentSlot.Legs),instance),"actual chest gear equipped");
+Check(rig.Equipment.TryEquipFromInventory(bag.IndexOfInstance(instance.Uid),out reason)&&ReferenceEquals(rig.Equipment.EquippedInstance(EquipmentSlot.Feet),instance),"actual chest gear equipped");
 Check(rig.AttributeStats.GetAttribute(Emberdelve.Stats.SixAttribute.Dexterity)>11,"actual random DEX bonus applied");
 Check(!director.TryCollectLootInstance(rig,instance,out reason),"duplicate worn UID refused");
 Check(before==EditorJsonUtility.ToJson(boots)+EditorJsonUtility.ToJson(dex)+EditorJsonUtility.ToJson(con),"definitions unchanged");

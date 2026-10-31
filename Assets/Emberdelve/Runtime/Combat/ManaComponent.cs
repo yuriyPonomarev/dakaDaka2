@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using Emberdelve.Core;
 
 namespace Emberdelve.Combat
 {
@@ -84,7 +85,7 @@ namespace Emberdelve.Combat
             _timeSinceSpend = regenDelay;
             _regenAllowed = true;
             _configured = true;
-            Changed?.Invoke(_current, maxMana);
+            GameEventTransaction.Publish(Changed, _current, (float)maxMana);
         }
 
         public bool HasAmount(int amount) => _current + 0.0001f >= Mathf.Max(0, amount);
@@ -101,7 +102,7 @@ namespace Emberdelve.Combat
 
             maxMana = clamped;
             if (_current > maxMana) _current = maxMana;
-            Changed?.Invoke(_current, maxMana);
+            GameEventTransaction.Publish(Changed, _current, (float)maxMana);
         }
 
         /// <summary>Regeneration rate changed by something worn rather than by the class asset.</summary>
@@ -119,7 +120,7 @@ namespace Emberdelve.Combat
 
             _current = Mathf.Max(0f, _current - cost);
             _timeSinceSpend = 0f;
-            Changed?.Invoke(_current, maxMana);
+            GameEventTransaction.Publish(Changed, _current, (float)maxMana);
             return true;
         }
 
@@ -128,14 +129,14 @@ namespace Emberdelve.Combat
             if (amount <= 0f) return;
             float previous = _current;
             _current = Mathf.Min(maxMana, _current + amount);
-            if (!Mathf.Approximately(previous, _current)) Changed?.Invoke(_current, maxMana);
+            if (!Mathf.Approximately(previous, _current)) GameEventTransaction.Publish(Changed, _current, (float)maxMana);
         }
 
         public void RefillToMax()
         {
             if (IsFull) return;
             _current = maxMana;
-            Changed?.Invoke(_current, maxMana);
+            GameEventTransaction.Publish(Changed, _current, (float)maxMana);
         }
 
         /// <summary>Turns regeneration on or off, e.g. while the owner is dead.</summary>
@@ -158,7 +159,7 @@ namespace Emberdelve.Combat
             _timeSinceSpend = sinceSpend;
             _regenAllowed = regenAllowed;
             _current = current;
-            if (changed) Changed?.Invoke(_current, maxMana);
+            if (changed) GameEventTransaction.Publish(Changed, _current, (float)maxMana);
         }
 
         private void Update()
@@ -171,7 +172,7 @@ namespace Emberdelve.Combat
             if (_timeSinceSpend < regenDelay) return;
 
             _current = Mathf.Min(maxMana, _current + regenPerSecond * Time.deltaTime);
-            Changed?.Invoke(_current, maxMana);
+            GameEventTransaction.Publish(Changed, _current, (float)maxMana);
         }
     }
 }

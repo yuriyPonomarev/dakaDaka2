@@ -3152,7 +3152,7 @@ namespace Emberdelve.EditorTools
                 Check(inventory.TryAdd(boots, 1, out string addBoots), $"boots put in the bag ({addBoots})");
                 Check(equipment.TryEquipFromInventory(inventory.IndexOfItem(boots), out string bootsReason),
                     $"boots equipped ({bootsReason})");
-                Check(equipment.Equipped(EquipmentSlot.Legs) == boots, "the legs slot holds the boots");
+                Check(equipment.Equipped(EquipmentSlot.Feet) == boots, "the feet slot holds the boots");
 
                 yield return WaitFrames(2);
                 float speedWearingBoots = _rig.Movement != null ? _rig.Movement.ResolveGroundSpeed(false, false) : 0f;
@@ -3213,7 +3213,7 @@ namespace Emberdelve.EditorTools
                 Check(_rig.OffhandWeapon == null, "the archer's off hand is empty again");
                 Check(_rig.Defense.HasShield == false, "no shield in the defense profile");
 
-                Check(equipment.TryUnequip(EquipmentSlot.Legs, out string unequipBootsReason),
+                Check(equipment.TryUnequip(EquipmentSlot.Feet, out string unequipBootsReason),
                     $"boots unequipped ({unequipBootsReason})");
                 yield return WaitFrames(2);
                 float speedAfterBoots = _rig.Movement != null ? _rig.Movement.ResolveGroundSpeed(false, false) : 0f;

@@ -50,32 +50,92 @@ namespace Emberdelve.Core
         /// <summary>Keyed by combat id (the body that carries the status), as before.</summary>
         public static event Action<int, Data.StatusKind, float> StatusChanged;
 
-        public static void RaiseRunState(RunState state) => RunStateChanged?.Invoke(state);
-        public static void RaiseObjective(string objective) => ObjectiveChanged?.Invoke(objective);
-        public static void RaisePause(bool paused) => PauseChanged?.Invoke(paused);
+        public static void RaiseRunState(RunState state) => GameEventTransaction.Publish(RunStateChanged, state);
+        public static void RaiseObjective(string objective) => GameEventTransaction.Publish(ObjectiveChanged, objective);
+        public static void RaisePause(bool paused) => GameEventTransaction.Publish(PauseChanged, paused);
 
-        public static void RaisePlayerRunState(int playerId, RunState state) => PlayerRunStateChanged?.Invoke(playerId, state);
-        public static void RaisePlayerHealth(int playerId, float current, float max) => PlayerHealthChanged?.Invoke(playerId, current, max);
-        public static void RaisePlayerDamaged(int playerId, DamageInfo info) => PlayerDamaged?.Invoke(playerId, info);
-        public static void RaiseDamageDealt(int playerId, HitFeedback feedback) => DamageDealt?.Invoke(playerId, feedback);
-        public static void RaiseItemCollected(int playerId, ItemData item, int totalCollected) => ItemCollected?.Invoke(playerId, item, totalCollected);
-        public static void RaiseInventoryChanged(int playerId) => InventoryChanged?.Invoke(playerId);
-        public static void RaiseHotbarChanged(int playerId) => HotbarChanged?.Invoke(playerId);
-        public static void RaiseEquipmentChanged(int playerId, ItemData item, bool equipped) => EquipmentChanged?.Invoke(playerId, item, equipped);
-        public static void RaiseAmmo(int playerId, int current, int reserve) => AmmoChanged?.Invoke(playerId, current, reserve);
-        public static void RaiseInteractionPrompt(int playerId, string prompt) => InteractionPromptChanged?.Invoke(playerId, prompt);
-        public static void RaiseInteractionHold(int playerId, float progress) => InteractionHoldChanged?.Invoke(playerId, progress);
-        public static void RaiseStatusLine(int playerId, string status) => StatusLineChanged?.Invoke(playerId, status);
-        public static void RaiseActiveWeapon(int playerId, WeaponData weapon) => ActiveWeaponChanged?.Invoke(playerId, weapon);
-        public static void RaisePlayerMana(int playerId, float current, float max) => PlayerManaChanged?.Invoke(playerId, current, max);
-        public static void RaiseSkillState(int playerId, SkillSnapshot snapshot) => SkillStateChanged?.Invoke(playerId, snapshot);
-        public static void RaiseSkillRejected(int playerId, SkillSnapshot snapshot, string reason) => SkillCastRejected?.Invoke(playerId, snapshot, reason);
-        public static void RaiseStatusChanged(int combatId, Data.StatusKind kind, float duration) => StatusChanged?.Invoke(combatId, kind, duration);
-        public static void RaiseToast(int playerId, string message) => ToastRaised?.Invoke(playerId, message);
-        public static void RaiseRunEnded(int playerId, RunResult result) => RunEnded?.Invoke(playerId, result);
+        public static void RaisePlayerRunState(int playerId, RunState state) => GameEventTransaction.Publish(PlayerRunStateChanged, playerId, state);
+        public static void RaisePlayerHealth(int playerId, float current, float max) => GameEventTransaction.Publish(PlayerHealthChanged, playerId, current, max);
+        public static void RaisePlayerDamaged(int playerId, DamageInfo info) => GameEventTransaction.Publish(PlayerDamaged, playerId, info);
+        public static void RaiseDamageDealt(int playerId, HitFeedback feedback) => GameEventTransaction.Publish(DamageDealt, playerId, feedback);
+        public static void RaiseItemCollected(int playerId, ItemData item, int totalCollected) => GameEventTransaction.Publish(ItemCollected, playerId, item, totalCollected);
+        public static void RaiseInventoryChanged(int playerId) => GameEventTransaction.Publish(InventoryChanged, playerId);
+        public static void RaiseHotbarChanged(int playerId) => GameEventTransaction.Publish(HotbarChanged, playerId);
+        public static void RaiseEquipmentChanged(int playerId, ItemData item, bool equipped) => GameEventTransaction.Publish(EquipmentChanged, playerId, item, equipped);
+        public static void RaiseAmmo(int playerId, int current, int reserve) => GameEventTransaction.Publish(AmmoChanged, playerId, current, reserve);
+        public static void RaiseInteractionPrompt(int playerId, string prompt) => GameEventTransaction.Publish(InteractionPromptChanged, playerId, prompt);
+        public static void RaiseInteractionHold(int playerId, float progress) => GameEventTransaction.Publish(InteractionHoldChanged, playerId, progress);
+        public static void RaiseStatusLine(int playerId, string status) => GameEventTransaction.Publish(StatusLineChanged, playerId, status);
+        public static void RaiseActiveWeapon(int playerId, WeaponData weapon) => GameEventTransaction.Publish(ActiveWeaponChanged, playerId, weapon);
+        public static void RaisePlayerMana(int playerId, float current, float max) => GameEventTransaction.Publish(PlayerManaChanged, playerId, current, max);
+        public static void RaiseSkillState(int playerId, SkillSnapshot snapshot) => GameEventTransaction.Publish(SkillStateChanged, playerId, snapshot);
+        public static void RaiseSkillRejected(int playerId, SkillSnapshot snapshot, string reason) => GameEventTransaction.Publish(SkillCastRejected, playerId, snapshot, reason);
+        public static void RaiseStatusChanged(int combatId, Data.StatusKind kind, float duration) => GameEventTransaction.Publish(StatusChanged, combatId, kind, duration);
+        public static void RaiseToast(int playerId, string message) => GameEventTransaction.Publish(ToastRaised, playerId, message);
+        public static void RaiseRunEnded(int playerId, RunResult result) => GameEventTransaction.Publish(RunEnded, playerId, result);
 
         /// <summary>A toast for every viewer (no owner): lobby messages and other facts that are not about one player.</summary>
-        public static void RaiseToast(string message) => ToastRaised?.Invoke(NoPlayer, message);
+        public static void RaiseToast(string message) => GameEventTransaction.Publish(ToastRaised, NoPlayer, message);
+    }
+
+    /// <summary>Defers presentation callbacks until a loadout transaction has committed. Nested hand changes share the outer scope.</summary>
+    internal static class GameEventTransaction
+    {
+        private static int _depth;
+        private static bool _flushing;
+        private static readonly System.Collections.Generic.Queue<Action> Pending = new System.Collections.Generic.Queue<Action>();
+
+        internal static IDisposable Defer()
+        {
+            _depth++;
+            return new Scope();
+        }
+
+        internal static void Publish<T1>(Action<T1> handlers, T1 value1)
+        {
+            if (handlers == null) return;
+            if (_depth == 0 && !_flushing) { handlers(value1); return; }
+            foreach (Action<T1> listener in handlers.GetInvocationList())
+                Pending.Enqueue(() => listener(value1));
+        }
+
+        internal static void Publish<T1, T2>(Action<T1, T2> handlers, T1 value1, T2 value2)
+        {
+            if (handlers == null) return;
+            if (_depth == 0 && !_flushing) { handlers(value1, value2); return; }
+            foreach (Action<T1, T2> listener in handlers.GetInvocationList())
+                Pending.Enqueue(() => listener(value1, value2));
+        }
+
+        internal static void Publish<T1, T2, T3>(Action<T1, T2, T3> handlers, T1 value1, T2 value2, T3 value3)
+        {
+            if (handlers == null) return;
+            if (_depth == 0 && !_flushing) { handlers(value1, value2, value3); return; }
+            foreach (Action<T1, T2, T3> listener in handlers.GetInvocationList())
+                Pending.Enqueue(() => listener(value1, value2, value3));
+        }
+
+        private sealed class Scope : IDisposable
+        {
+            private bool _disposed;
+            public void Dispose()
+            {
+                if (_disposed) return;
+                _disposed = true;
+                if (--_depth != 0 || _flushing) return;
+                _flushing = true;
+                try
+                {
+                    while (Pending.Count > 0)
+                    {
+                        Action callback = Pending.Dequeue();
+                        try { callback(); }
+                        catch (Exception exception) { Debug.LogException(exception); }
+                    }
+                }
+                finally { _flushing = false; }
+            }
+        }
     }
 
     /// <summary>

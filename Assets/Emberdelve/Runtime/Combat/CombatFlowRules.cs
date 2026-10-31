@@ -52,9 +52,21 @@ namespace Emberdelve.Combat
         /// <summary>Move-speed factor of held gear: 1 - (main-hand penalty + a contributing off-hand shield's) / 300, floored.</summary>
         public static float HeldFactor(WeaponData mainHand, WeaponData offHand, bool offHandContributes)
         {
+            return HeldFactor(mainHand, offHand, offHandContributes, 0f);
+        }
+
+        /// <summary>
+        /// D3c: the same factor with the penalty of the WORN gear (ItemData.moveSpeedPenalty summed over the live pieces, in the same
+        /// reference points) added to the held weapons' points before the one division and the one floor: 1 - (held + worn) / 300,
+        /// never below <see cref="MinHeldFactor"/>. The worn gear therefore reaches ResolveGroundSpeed through this single factor,
+        /// exactly once. Negative or NaN worn points count as 0.
+        /// </summary>
+        public static float HeldFactor(WeaponData mainHand, WeaponData offHand, bool offHandContributes, float wornPenaltyPoints)
+        {
             float points = 0f;
             if (mainHand != null) points += Mathf.Max(0f, mainHand.heldMoveSpeedPenalty);
             if (offHand != null && offHandContributes) points += Mathf.Max(0f, offHand.heldMoveSpeedPenalty);
+            if (wornPenaltyPoints > 0f) points += wornPenaltyPoints;
             return Mathf.Clamp(1f - points / PenaltyPointScale, MinHeldFactor, 1f);
         }
 

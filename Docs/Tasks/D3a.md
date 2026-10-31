@@ -1,6 +1,8 @@
 # D3a rarity ladder, snapshot schema 2 and gear score
 
-Status: IMPLEMENTED, NOT YET RUN. Written without a Unity editor or compiler available: nothing here has been compiled, no gate or NUnit test has been executed. Run the gates listed under "Gates to run" before accepting. Base: HEAD 1159ade.
+Continuation 31 October 2026: **RarityLadder 623/0 in real Unity; full regression 60 groups / 43,164 checks / 0 failures.** See [D3bc-20261030.md](D3bc-20261030.md) for fixes, evidence, current limitations and remaining acceptance. The original implementer status below records the state at handoff.
+
+Original handoff status: IMPLEMENTED, NOT YET RUN. Written without a Unity editor or compiler available: nothing here has been compiled, no gate or NUnit test has been executed. Run the gates listed under "Gates to run" before accepting. Base: HEAD 1159ade.
 
 Scope is D3a only. Slots, weapon sets, utility belt, move penalty and potions are D3b/D3c (plan at the end).
 

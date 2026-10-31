@@ -346,7 +346,7 @@ namespace Emberdelve.EditorTools
                 CheckInt("warrior derived health still 120 with both worn", 120, rig.AttributeStats.MaxHealth, "CON 15 is still modifier 2");
                 CheckClose("warrior pool health 150 with both worn", 150f, rig.Health.MaxHealth, "derived base plus the gear flat, once");
 
-                Unequip(rig, EquipmentSlot.Legs);
+                Unequip(rig, EquipmentSlot.Feet);
                 Unequip(rig, EquipmentSlot.Chest);
                 CheckAttributes(rig.AttributeStats, new[] { 16, 10, 14, 8, 10, 10 }, "warrior effective scores after unequipping both");
                 Check(rig.AttributeStats.EquippedBonuses.IsEmpty, "no attribute bonuses remain once nothing is worn");
@@ -358,7 +358,7 @@ namespace Emberdelve.EditorTools
                     Equip(rig, boots);
                     CheckClose($"warrior ceiling after cycle {cycle + 1} is still 150", 150f, rig.Health.MaxHealth, "no stacking across cycles");
                     CheckClose($"warrior current health after cycle {cycle + 1} is still 80", 80f, rig.Health.CurrentHealth, "no cycle heals");
-                    Unequip(rig, EquipmentSlot.Legs);
+                    Unequip(rig, EquipmentSlot.Feet);
                     Unequip(rig, EquipmentSlot.Chest);
                 }
 

@@ -275,6 +275,8 @@ namespace Emberdelve.Data
         Cloak = 1 << 1,
         Armor = 1 << 2,
         Weapon = 1 << 3,
+        /// <summary>D3b: necklaces and rings. Armour and movement affixes never roll here (jewelry has no armour).</summary>
+        Jewelry = 1 << 4,
     }
 
     /// <summary>Category-set rules: legal bits only, no silent widening of an authored set.</summary>
@@ -282,7 +284,7 @@ namespace Emberdelve.Data
     {
         /// <summary>The only bits this vocabulary knows.</summary>
         public const AffixCategory All =
-            AffixCategory.Boots | AffixCategory.Cloak | AffixCategory.Armor | AffixCategory.Weapon;
+            AffixCategory.Boots | AffixCategory.Cloak | AffixCategory.Armor | AffixCategory.Weapon | AffixCategory.Jewelry;
 
         /// <summary>At least one legal bit and no unknown bit (a hand-cast 16 or 3 is a failure, not a typo).</summary>
         public static bool IsKnownSet(AffixCategory categories)
@@ -308,7 +310,7 @@ namespace Emberdelve.Data
             if (bits == 0) return "none";
 
             System.Text.StringBuilder builder = new System.Text.StringBuilder();
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 5; i++)
             {
                 int bit = 1 << i;
                 if ((bits & bit) == 0) continue;

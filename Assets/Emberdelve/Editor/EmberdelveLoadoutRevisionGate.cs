@@ -119,7 +119,7 @@ namespace Emberdelve.EditorTools
             Check(inventoryEvents == 1 && observersSawExpectedState,
                 $"direct-add subscriber observes final bag and already-advanced revision (events={inventoryEvents}, " +
                 $"observersSawExpectedState={observersSawExpectedState}, revision={bag.Revision}/{expectedRevision}, " +
-                $"units={bag.TotalUnits}/{expectedTotalUnits}, gearUid={equipment.EquippedInstance(EquipmentSlot.Legs)?.Uid}/{expectedLegsUid})");
+                $"units={bag.TotalUnits}/{expectedTotalUnits}, gearUid={equipment.EquippedInstance(EquipmentSlot.Feet)?.Uid}/{expectedLegsUid})");
 
             before = bag.Revision;
             ResetEvents();
@@ -176,7 +176,7 @@ namespace Emberdelve.EditorTools
             ItemInstance incomingBoots = bag.InstanceAt(bootsIndex);
             ExpectSimpleState(before + 1, bag.TotalUnits - 1, incomingBoots != null ? incomingBoots.Uid : Guid.Empty);
             Check(equipment.TryEquipFromInventory(bootsIndex, out string equipReason), "equip gear succeeds: " + equipReason);
-            Guid wornUid = equipment.EquippedInstance(EquipmentSlot.Legs)?.Uid ?? Guid.Empty;
+            Guid wornUid = equipment.EquippedInstance(EquipmentSlot.Feet)?.Uid ?? Guid.Empty;
             Check(wornUid != Guid.Empty && bag.Revision == before + 1 && equipmentEvents == 1 && inventoryEvents == 1,
                 "equip commits one shared revision before both outward notifications");
             Check(observersSawExpectedState, "equip subscribers observe final bag, gear and revision");
@@ -207,7 +207,7 @@ namespace Emberdelve.EditorTools
             string combinedBagJson = combined.bag.ToJson();
             string combinedGearJson = combined.equipment.ToJson();
             before = bag.Revision;
-            Check(equipment.TryUnequip(EquipmentSlot.Legs, out string ignoredUnequip),
+            Check(equipment.TryUnequip(EquipmentSlot.Feet, out string ignoredUnequip),
                 "clear worn gear before combined restore: " + ignoredUnequip);
             Check(bag.Revision == before + 1, "successful unequip advances the shared revision once");
             Check(bag.TryAdd(coin, 2, out string diverge), "diverge bag before combined restore: " + diverge);
@@ -271,7 +271,7 @@ namespace Emberdelve.EditorTools
             if (!observe) return;
             observersSawExpectedState &= bag.Revision == expectedRevision &&
                 bag.TotalUnits == expectedTotalUnits &&
-                (equipment.EquippedInstance(EquipmentSlot.Legs)?.Uid ?? Guid.Empty) == expectedLegsUid &&
+                (equipment.EquippedInstance(EquipmentSlot.Feet)?.Uid ?? Guid.Empty) == expectedLegsUid &&
                 (expectedBag == null || bag.ToContainerSnapshot().ToJson() == expectedBag) &&
                 (expectedEquipment == null || equipment.ToContainerSnapshot().ToJson() == expectedEquipment);
         }

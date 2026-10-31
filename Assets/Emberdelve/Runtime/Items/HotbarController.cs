@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Data;
@@ -22,10 +24,43 @@ namespace Emberdelve.Items
     ///  - A bound stack that retires (consumed, removed, moved out, Clear, restore) reads as empty; the key does
     ///    nothing. A partial use keeps the same StackId and therefore the binding.
     ///
+    /// D3c: this is the utility belt. A binding still names a live StackId (so a lookalike stack never inherits it), but a
+    /// restore no longer throws the belt away: before the bag is replaced every live binding is read as an ITEM IDENTITY
+    /// (<see cref="BeltIdentity"/>: the instance uid for a uid-backed stack, otherwise the item definition) and after the new
+    /// stacks exist each slot is bound again to the stack that carries that identity - by identity, never by list index or old
+    /// StackId, so reordering the bag cannot move a key. An identity that no longer resolves leaves its key empty; nothing is
+    /// auto-filled. A restore of a belt that held nothing keeps the old behaviour (the first usable stacks are bound by default).
+    /// The belt also travels in the v4 loadout snapshot (<see cref="LoadoutSnapshot"/>).
+    ///
     /// Reads validate against the live bag, so a retired binding is empty even before it is pruned. Changes made
     /// by <see cref="TryAssign"/> raise <see cref="GameEvents.HotbarChanged"/>; seeding and retiring always accompany an
     /// InventoryChanged notification, which already refreshes the HUD.
     /// </summary>
+    /// <summary>
+    /// D3c: what a belt key points at, independent of any runtime StackId or list index: the instance uid when the stack is
+    /// uid-backed, otherwise the item definition (carried stacks are fungible, so the definition is their identity).
+    /// </summary>
+    public readonly struct BeltIdentity
+    {
+        public readonly ItemData Definition;
+        public readonly Guid Uid;
+
+        public BeltIdentity(ItemData definition, Guid uid)
+        {
+            Definition = definition;
+            Uid = uid;
+        }
+
+        public bool IsEmpty => Definition == null && Uid == Guid.Empty;
+
+        /// <summary>The snapshot spelling: "" (empty), "i:" + itemId, or "u:" + the 32-digit lowercase uid.</summary>
+        public string ToSnapshotText()
+        {
+            if (Uid != Guid.Empty) return "u:" + Uid.ToString("N");
+            return Definition != null ? "i:" + Definition.itemId : "";
+        }
+    }
+
     public sealed class HotbarBindings
     {
         public const int SlotCount = 4;
@@ -132,6 +167,61 @@ namespace Emberdelve.Items
 
             reason = "the bound item could not be used";
             return false;
+        }
+
+        /// <summary>D3c: the identity behind a slot's live binding, or an empty identity when the slot is empty or its stack retired.</summary>
+        public BeltIdentity IdentityAt(int slot)
+        {
+            if (!TryGetStack(slot, out InventorySlot stack)) return default;
+            return new BeltIdentity(stack.Item, stack.Instance != null ? stack.Instance.Uid : Guid.Empty);
+        }
+
+        /// <summary>D3c: the four identities as they are right now (a retired or empty binding reads as empty). Read-only.</summary>
+        public BeltIdentity[] CaptureIdentities()
+        {
+            BeltIdentity[] identities = new BeltIdentity[SlotCount];
+            for (int i = 0; i < SlotCount; i++) identities[i] = IdentityAt(i);
+            return identities;
+        }
+
+        /// <summary>
+        /// D3c: binds every slot again to the live stack that carries its saved identity, in bag order for fungible stacks (two
+        /// slots holding the same definition take two different stacks). Replaces all bindings. Raises no event (a restore's
+        /// InventoryChanged refreshes the HUD). Returns false, changing nothing, when every identity is empty - the caller then
+        /// seeds the defaults instead.
+        /// </summary>
+        public bool RebindFromIdentities(IReadOnlyList<BeltIdentity> identities, bool allowEmpty = false)
+        {
+            if (identities == null) return false;
+
+            bool any = false;
+            for (int i = 0; i < SlotCount && i < identities.Count; i++) any |= !identities[i].IsEmpty;
+            if ((!any && !allowEmpty) || _inventory == null) return false;
+
+            RetireAll();
+            HashSet<ulong> taken = new HashSet<ulong>();
+            for (int i = 0; i < SlotCount && i < identities.Count; i++)
+            {
+                BeltIdentity wanted = identities[i];
+                if (wanted.IsEmpty) continue;
+
+                for (int s = 0; s < _inventory.Slots.Count; s++)
+                {
+                    InventorySlot stack = _inventory.Slots[s];
+                    if (stack.StackId == 0 || taken.Contains(stack.StackId) || !IsUsableDefinition(stack.Item)) continue;
+
+                    bool matches = wanted.Uid != Guid.Empty
+                        ? stack.Instance != null && stack.Instance.Uid == wanted.Uid
+                        : stack.Instance == null && stack.Item == wanted.Definition;
+                    if (!matches) continue;
+
+                    _ids[i] = stack.StackId;
+                    taken.Add(stack.StackId);
+                    break;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>Drops every binding. Called by Inventory.Clear.</summary>

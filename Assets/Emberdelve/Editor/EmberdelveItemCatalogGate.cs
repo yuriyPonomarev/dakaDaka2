@@ -210,8 +210,10 @@ namespace Emberdelve.EditorTools
                   kinds.Contains(ItemKind.Consumable) && kinds.Contains(ItemKind.Relic) && kinds.Contains(ItemKind.AmmoPack),
                 "catalog covers weapons, armour, currency, consumables, relics and ammo");
             Check(slots.Contains(EquipmentSlot.Weapon) && slots.Contains(EquipmentSlot.OffHand) && slots.Contains(EquipmentSlot.Chest) &&
-                  slots.Contains(EquipmentSlot.Legs) && slots.Contains(EquipmentSlot.Back) && slots.Contains(EquipmentSlot.None),
-                "catalog covers weapon, shield, chest, boots, cloak and carried items");
+                  slots.Contains(EquipmentSlot.Feet) && slots.Contains(EquipmentSlot.Back) && slots.Contains(EquipmentSlot.None),
+                "catalog covers weapon, shield, chest, boots (Feet since D3b), cloak and carried items");
+            Check(slots.Contains(EquipmentSlot.Hands) && slots.Contains(EquipmentSlot.Necklace) && slots.Contains(EquipmentSlot.RingLeft),
+                "catalog covers the D3b slot items: gloves, necklace and ring");
 
             int affixAssets = AssetDatabase.FindAssets("t:AffixDefinition", new[] { EmberdelveAssetLibrary.AffixFolder }).Length;
             Check(catalog.AffixCount == affixAssets && affixAssets > 0, $"catalog affix list covers every affix asset ({catalog.AffixCount}/{affixAssets})");

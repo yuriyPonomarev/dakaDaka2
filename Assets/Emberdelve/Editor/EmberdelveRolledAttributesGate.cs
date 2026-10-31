@@ -39,7 +39,7 @@ Check(rig.AttributeStats.GetAttribute(Emberdelve.Stats.SixAttribute.Constitution
 Check(rig.MaxHealth==130&&rig.Mana.MaxMana==75,"actual pools derive rolled scores");
 Check(rig.CurrentHealth==hp&&rig.Mana.CurrentMana==mp,"larger ceilings do not refill");
 rig.RefreshEquipmentStats();rig.RefreshEquipmentStats();Check(rig.MaxHealth==130&&rig.Mana.MaxMana==75,"refresh no accumulation");
-Check(gear.TryUnequip(EquipmentSlot.Legs,out reason)&&rig.MaxHealth==120&&rig.Mana.MaxMana==70,"unequip exact restore");
+Check(gear.TryUnequip(EquipmentSlot.Feet,out reason)&&rig.MaxHealth==120&&rig.Mana.MaxMana==70,"unequip exact restore");
 }
 for(int i=0;i<6;i++){
 ItemInstance single;Check(ItemInstance.TryCreateNew(boots,1,AffixRarity.Uncommon,new[]{new AffixRecord("stat_"+i,(AffixStatKey)i,3)},auth,out single,out reason),"create attribute variant"+i);
@@ -50,7 +50,7 @@ if(i==0)Check(Mathf.Abs(rig.GetOutgoingDamageMultiplier(rig.MainHandWeapon)-1.39
 if(i==1)Check(Mathf.Abs(rig.Movement.ResolveWalkSpeed()-5.3277f)<.0001f,"rolled DEX actual walking plus fixed boots");
 if(i==4)Check(Mathf.Abs(rig.Mana.RegenPerSecond-3.25f)<.0001f,"rolled WIS real mana regen rate");
 if(i==5)Check(Mathf.Abs(rig.AttributeStats.GetAbilityEffectScale()-1.04f)<.0001f,"rolled CHA actual ability scale");
-Check(gear.TryUnequip(EquipmentSlot.Legs,out reason),"unequip variant"+i);
+Check(gear.TryUnequip(EquipmentSlot.Feet,out reason),"unequip variant"+i);
 }
 Check(bag.MintedInstanceCount==minted,"rolled transfers mint no UIDs");
 Check(classBefore==EditorJsonUtility.ToJson(rig.Class)&&bootsBefore==EditorJsonUtility.ToJson(boots),"class and fixed definition unchanged");

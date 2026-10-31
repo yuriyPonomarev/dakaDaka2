@@ -13,7 +13,20 @@ namespace Emberdelve.Items
         Merge = 2,
         Equip = 3,
         Unequip = 4,
-        Use = 5
+        Use = 5,
+        /// <summary>
+        /// D3b: exchange the two ring slots as one step. DestinationSlot is the ring slot that receives the ring from its
+        /// partner (the other ring slot); ExpectedSourceGearUid is the uid worn in the PARTNER slot and ExpectedTargetGearUid
+        /// the uid worn in DestinationSlot (Guid.Empty for an empty slot). Appended after Use: the integers are stable.
+        /// </summary>
+        SwapEquipment = 6,
+        /// <summary>
+        /// D3c: switch between the two weapon sets (main hand + off hand each). Carries no stack, cell or slot: the only inputs
+        /// are the preconditions, ExpectedSourceGearUid = the uid worn in the main hand of the set that is in hand now and
+        /// ExpectedTargetGearUid = the uid worn in the main hand of the set it will switch to (Guid.Empty = the class asset's
+        /// weapon is in that hand). Appended after SwapEquipment: the integers are stable.
+        /// </summary>
+        SwapWeaponSet = 7
     }
 
     /// <summary>A client intent containing identities and preconditions, never item data or effect amounts.</summary>
@@ -87,6 +100,20 @@ namespace Emberdelve.Items
                     if (SourceStackId == 0 && TargetStackId == 0 && cellIsZero &&
                         IsEquipmentSlot(DestinationSlot) && ExpectedSourceGearUid != Guid.Empty &&
                         ExpectedTargetGearUid == Guid.Empty)
+                    {
+                        reason = null;
+                        return true;
+                    }
+                    break;
+                case InventoryCommandKind.SwapEquipment:
+                    if (SourceStackId == 0 && TargetStackId == 0 && cellIsZero && EquipmentSlots.IsRing(DestinationSlot))
+                    {
+                        reason = null;
+                        return true;
+                    }
+                    break;
+                case InventoryCommandKind.SwapWeaponSet:
+                    if (SourceStackId == 0 && TargetStackId == 0 && cellIsZero && slotIsNone)
                     {
                         reason = null;
                         return true;

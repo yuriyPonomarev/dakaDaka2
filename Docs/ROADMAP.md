@@ -2,7 +2,11 @@
 
 Updated19October2026. Continue the existing project. Codex orchestrates/reviews; local Pi/Strata high implements. Working title/namespaces stay Emberdelve. This replaces the old roadmap as the forward plan; PROJECT_STATUS.md remains historical evidence.
 
-## Current continuation checkpoint — 26 October 2026
+## Current continuation — 31 October 2026
+
+The user resumed milestone development after Opus. Latest evidence and the executable next work item are in [D3bc-20261030.md](Tasks/D3bc-20261030.md). D3b/D3c are now compiled and stabilized: **60 groups / 43,164 checks / 0 failures**, including D3c 188/0, slots 442/0 and snapshots 1023/0. D2 ProjectileSim 108/0 and D3a RarityLadder 623/0 also ran on this tree. EditMode passed 242/0; the final inventory UI passed 485/0 after the text-fit fix, and the actual rendered thirteen-row screen was inspected with zero clipped labels. D3d must expose the new items and timed consumable/penalty rules in ordinary gameplay before D4; D3 is not accepted as a complete content milestone yet. The October 26 bounded scope below is historical and superseded by this continuation.
+
+## Historical continuation checkpoint — 26 October 2026
 
 The detailed continuation sequence and accepted task evidence are in [OPUS_COMPLETION_PLAN.md](Tasks/OPUS_COMPLETION_PLAN.md). Physical projectile/blade blocking is implemented and freshly verified (50/0). R10d snapshot consumer closure is accepted (seven groups / 11259 checks / 0 failures), and R6c1 inventory-screen identity/authority routing is accepted (four groups / 926 checks / 0 failures). Next narrow slice: R6c2 stable hotbar assignments. These are local Unity results; U3 dedicated-server/client proof remains pending.
 

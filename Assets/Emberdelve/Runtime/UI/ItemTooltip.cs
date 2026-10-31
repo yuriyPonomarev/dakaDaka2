@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using UnityEngine;
+using Emberdelve.Combat;
 using Emberdelve.Data;
 using Emberdelve.Items;
 using Emberdelve.Stats;
@@ -121,7 +122,7 @@ namespace Emberdelve.UI
                 Rarity = instance.Rarity,
                 RarityName = RarityName(instance.Rarity),
                 RarityColor = RarityColor(instance.Rarity),
-                SlotName = definition.IsEquippable ? SlotLabel(definition.equipSlot) : string.Empty,
+                SlotName = definition.IsEquippable ? ItemSlotLabel(definition.equipSlot) : string.Empty,
                 UidShort = ShortUid(instance.UidText),
             };
 
@@ -144,7 +145,7 @@ namespace Emberdelve.UI
             ItemTooltipModel model = new ItemTooltipModel
             {
                 Title = definition.displayName,
-                SlotName = definition.IsEquippable ? SlotLabel(definition.equipSlot) : string.Empty,
+                SlotName = definition.IsEquippable ? ItemSlotLabel(definition.equipSlot) : string.Empty,
             };
 
             AddFixedLines(definition, model.FixedLines);
@@ -157,9 +158,22 @@ namespace Emberdelve.UI
             {
                 case EquipmentSlot.Weapon: return "Main hand";
                 case EquipmentSlot.OffHand: return "Off hand";
+                case EquipmentSlot.AltWeapon: return "Main hand II";
+                case EquipmentSlot.AltOffHand: return "Off hand II";
                 case EquipmentSlot.Back: return "Back";
+                case EquipmentSlot.RingLeft: return "Left ring";
+                case EquipmentSlot.RingRight: return "Right ring";
                 default: return slot.ToString();
             }
+        }
+
+        /// <summary>
+        /// What an ITEM's tooltip calls the slot it is authored for. A ring fits either ring slot, so it is just "Ring";
+        /// every other slot reads as <see cref="SlotLabel"/>.
+        /// </summary>
+        public static string ItemSlotLabel(EquipmentSlot authored)
+        {
+            return EquipmentSlots.IsRing(authored) ? "Ring" : SlotLabel(authored);
         }
 
         public static string ShortUid(string uidText)
@@ -222,9 +236,19 @@ namespace Emberdelve.UI
                 }
             }
 
+            // D3c: a worn piece's move-speed penalty, as the percent of the final ground speed it takes (points on the 300 base).
+            if (definition.IsEquippable && !definition.GrantsWeapon && definition.moveSpeedPenalty > 0f)
+            {
+                lines.Add("Move speed -" + (definition.moveSpeedPenalty / CombatFlowRules.PenaltyPointScale * 100f).ToString("0.#", CultureInfo.InvariantCulture) + "%");
+            }
+
             if (!definition.IsEquippable)
             {
-                if (definition.healAmount > 0) lines.Add("Restores " + definition.healAmount + " health");
+                if (definition.healAmount > 0 && definition.healOverTimeSeconds > 0f)
+                    lines.Add("Restores " + definition.healAmount + " health over " + definition.healOverTimeSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s");
+                else if (definition.healAmount > 0) lines.Add("Restores " + definition.healAmount + " health");
+                if (definition.healAmount > 0 && definition.useChannelSeconds > 0f)
+                    lines.Add("Takes " + definition.useChannelSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s to drink; moving fast, a hit or an attack interrupts it");
                 if (definition.ammoGrant > 0) lines.Add("Grants " + definition.ammoGrant + " ammo");
                 lines.Add("Value " + definition.value);
             }

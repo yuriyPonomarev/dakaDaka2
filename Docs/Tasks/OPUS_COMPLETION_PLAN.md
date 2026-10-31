@@ -2,7 +2,11 @@
 
 Codex orchestrates, reviews, runs Unity and commits. Luna implements game changes. This execution continues the user request to finish Opus work. Original design and the latest recorded user decisions take precedence over old proposal tables.
 
-## Current authorized scope — 26 October 2026
+## Current continuation — 31 October 2026
+
+The user resumed milestone development after Opus. Latest evidence and the executable next work item are in [D3bc-20261030.md](D3bc-20261030.md). D3b/D3c are now compiled and stabilized: **60 groups / 43,164 checks / 0 failures**, including D3c 188/0, slots 442/0 and snapshots 1023/0. D2 ProjectileSim 108/0 and D3a RarityLadder 623/0 also ran on this tree. EditMode passed 242/0; the final inventory UI passed 485/0 after the text-fit fix, and the actual rendered thirteen-row screen was inspected with zero clipped labels. D3d must expose the new items and timed consumable/penalty rules in ordinary gameplay before D4; D3 is not accepted as a complete content milestone yet. The October 26 bounded scope below is historical and superseded by this continuation.
+
+## Historical authorized scope — 26 October 2026
 
 The user chose **only already-started changes and the nearest Opus refactors**. This continuation closes R6c2 (the applied hotbar/HUD work), the started R6d view/selection extraction rebased to the current UI, the prepared R8a assembly/NUnit slice, and the already-started R8b1 loot-service/UID-rule slice. Each needs independent review, actual Unity checks, and a local commit.
 
@@ -47,8 +51,8 @@ Fresh MultiPlayer baseline: 123 checks / 2 failures, both ranged assertions stil
 | D1 follow-ups IN PROGRESS | D1c1 DONE c32fd057 (review follow-ups), D1c2 DONE 72ce0297 (720 deg/s authority turn ceiling, user decision: no camera slowdown), D1c3 DONE 09a2c6a3 (ranged hit locations, head x1.5), D1c4 DONE ee3a201b (enemy swept swings, arc telegraph). Remaining D1c5: M-c guard exclusion, data gates, interact-prop swing blockers, wall feedback, hit-location HUD cue, timing dedup, live rendered review | Geometry/authority/input tests and live rendered review |
 | R1 follow-ups | Kit epoch and sender ownership, authoritative movement ability execution | Forged/replayed/other-player commands refused, normal skills still work |
 | U3A DONE | Compatible official networking stack; dedicated process and two clients, walking/ownership/late join, offline retained | U3A1-U3A5 landed (NGO 2.7.0). Gates at U3A4b: NetProof 35/0, NetAdmission 108/0, NetMovement 172/0, NetSeams 149/0; U3A5 adds NetFinal (full scenario + offline retention), the lobby Join/Host panel and Docs/NETWORK_PLAY.md. See U3A5.md for the recorded final run. |
-| D2 IMPLEMENTED (pending Unity run) | Complete simulated projectiles: authored gravity, deterministic stepping and flight-time tuning | Drop/falloff/wall/body/blade/location and tick-size checks. Code and gate written, not compiled or run: run `EmberdelveProjectileSimGate` (new) plus the regression gates listed in `Docs/Tasks/D2.md`; EditMode `ProjectileBallisticsTests` (new). |
-| D3 | Stable rarity extension, equipment slots, weapon sets, utility belt, item movement penalties and gear score. Split: **D3a IMPLEMENTED (pending Unity run)** rarity ladder Poor..Unique, schema 2 migration, colours, gear score, `EmberdelveRarityLadderGate` (see `Docs/Tasks/D3a.md`); D3b slots (hands, feet, necklace, rings); D3c weapon sets, utility belt, move penalty, potion channel (plan at the end of D3a.md) | Migration and atomic inventory/equipment checks, usable UI |
+| D2 VERIFIED | Authority-stepped ballistic projectiles, authored gravity and air-time falloff | ProjectileSim 108/0; projectile rules in EditMode 242/0; full 60-group regression passed. See D3bc-20261030.md for executed evidence. |
+| D3 infrastructure VERIFIED; content PENDING | D3a rarity ladder, D3b equipment slots/jewelry, D3c weapon sets/belt/penalty and potion rules; six stabilization fixes including text fit | RarityLadder 623/0, Slots 442/0, LoadoutD3c 188/0, snapshots 1023/0, final UI 485/0 and inspected real frame. D3d must wire reachable items and authored potion/penalty content before aggregate D3 acceptance; see D3bc-20261030.md. |
 | D4 | Accepted six-attribute role remap via authored curves and derived stats | Literal curve points, gameplay effects, save keys preserved; mana remains |
 | U3B | Server combat, skills and state replication | Real PvP/PvE, owner/cadence/stats validation and client visual agreement |
 | D5/U4B | Configurable raid timer/portals, corpse and interrupted extraction | Exact-once result, death/disconnect cannot bank, exact item ownership |

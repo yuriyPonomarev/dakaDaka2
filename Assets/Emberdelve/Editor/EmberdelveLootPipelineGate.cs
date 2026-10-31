@@ -943,8 +943,8 @@ namespace Emberdelve.EditorTools
             Check(bag.InstanceAt(slot).ToSnapshot().ToJson() == snapshot, "UID, rarity and rolled values survive pickup exactly");
             Check(session.Issuer.MintedCount == uidsBefore && pickup == null, "pickup mints nothing and removes the ground pickup");
 
-            Check(_rig.Equipment.TryEquipFromInventory(slot, out reason) && ReferenceEquals(_rig.Equipment.EquippedInstance(EquipmentSlot.Legs), dropped), "the picked-up instance equips as itself: " + reason);
-            Check(_rig.Equipment.EquippedInstance(EquipmentSlot.Legs).ToSnapshot().ToJson() == snapshot, "equipment holds the exact UID and rolls");
+            Check(_rig.Equipment.TryEquipFromInventory(slot, out reason) && ReferenceEquals(_rig.Equipment.EquippedInstance(EquipmentSlot.Feet), dropped), "the picked-up instance equips as itself: " + reason);
+            Check(_rig.Equipment.EquippedInstance(EquipmentSlot.Feet).ToSnapshot().ToJson() == snapshot, "equipment holds the exact UID and rolls");
             Check(_director.Session.Issuer.MintedCount == uidsBefore, "equipping mints nothing");
 
             // Uncommon and Common gear from a drop table keep identity through the ground too.

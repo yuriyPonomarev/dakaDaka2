@@ -55,6 +55,12 @@ foreach($method in $Methods){
         $expectedDiagnostics=@($bad | Where-Object {$_ -eq $expectedLine})
         $bad=@($bad | Where-Object {$_ -ne $expectedLine})
     }
+    # D3c deliberately throws from presentation observers to prove commit/payout isolation.
+    if($method -eq 'Emberdelve.EditorTools.EmberdelveLoadoutD3cGate.Run'){
+        $expectedLine='InvalidOperationException: expected D3c observer exception'
+        $expectedDiagnostics=@($bad | Where-Object {$_ -eq $expectedLine})
+        $bad=@($bad | Where-Object {$_ -ne $expectedLine})
+    }
     $passed=(!$timedOut -and $exitCode -eq 0 -and $positive.Count -ge 1 -and $bad.Count -eq 0)
     $result=[pscustomobject]@{
         method=$method; passed=$passed; exitCode=$exitCode; timedOut=$timedOut

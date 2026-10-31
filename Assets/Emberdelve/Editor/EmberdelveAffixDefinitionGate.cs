@@ -31,7 +31,7 @@ a.statKey=(AffixStatKey)99;Check(!a.TryValidate(out reason),"unknown enum");a.st
 foreach(string id in new[]{""," ","Upper","1bad","bad-key"}){a.id=id;Check(!a.TryValidate(out reason),"invalid id "+id);}a.id="test_affix";
 a.displayName=" ";Check(!a.TryValidate(out reason),"blank label");a.displayName="Test";
 foreach(float weight in new[]{0f,-1f,float.NaN,float.PositiveInfinity}){a.weight=weight;Check(!a.TryValidate(out reason),"bad weight");}a.weight=1;
-foreach(AffixCategory category in new[]{AffixCategory.None,(AffixCategory)16,(AffixCategory)17}){a.allowedCategories=category;Check(!a.TryValidate(out reason),"bad flags");}a.allowedCategories=AffixCategory.Boots;
+foreach(AffixCategory category in new[]{AffixCategory.None,(AffixCategory)32,(AffixCategory)33}){a.allowedCategories=category;Check(!a.TryValidate(out reason),"bad flags");}a.allowedCategories=AffixCategory.Boots;
 foreach(float step in new[]{0f,-1f,.5f,float.NaN,float.PositiveInfinity}){a.step=step;Check(!a.TryValidate(out reason),"bad attribute step");}a.step=1;
 a.minValue=3;a.maxValue=1;Check(!a.TryValidate(out reason),"reversed");a.minValue=1;a.maxValue=4;Check(!a.TryValidate(out reason),"band outside");a.maxValue=3;
 a.step=3;Check(!a.TryValidate(out reason),"unaligned top");a.step=1;

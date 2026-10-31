@@ -384,7 +384,7 @@ namespace Emberdelve.EditorTools
                 CheckInt("boots raise effective DEX to 11, still modifier 0", 11, rig.AttributeStats.GetAttribute(SixAttribute.Dexterity), "floor((11-10)/2) = 0");
                 CheckWalk("warrior with the authored boots", rig, 5.074f, WarriorHeld);
                 CheckClose("warrior sprint with boots 5.2 * 1.12", 5.824f * WarriorHeld, rig.Movement.ResolveGroundSpeed(true, false), "the boots' own sprint term");
-                Unequip(rig, EquipmentSlot.Legs);
+                Unequip(rig, EquipmentSlot.Feet);
                 CheckWalk("warrior bare again after unequipping the boots", rig, 4.3f, WarriorHeld);
 
                 // 4. Gear DEX threshold crossing: modifier 0 -> 1, and its exact removal.
@@ -567,7 +567,7 @@ namespace Emberdelve.EditorTools
                 CheckWalk("archer walking with Fleet Footing and the boots", rig, 6.2727325f, ArcherHeld);
                 CheckClose("archer sprint with Fleet Footing and the boots", 8.86144f * ArcherHeld, rig.Movement.ResolveGroundSpeed(true, false),
                     "sprint is not clamped into the walking band: its authored base and both gear terms are retained");
-                Unequip(rig, EquipmentSlot.Legs);
+                Unequip(rig, EquipmentSlot.Feet);
                 CheckWalk("archer walking back to 5.315875", rig, 5.315875f, ArcherHeld);
 
                 // 4. The amendment's order with a passive multiplier, a gear multiplier and a gear flat together.

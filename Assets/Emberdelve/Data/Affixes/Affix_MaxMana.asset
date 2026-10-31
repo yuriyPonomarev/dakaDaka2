@@ -19,4 +19,4 @@ MonoBehaviour:
   maxValue: 15
   step: 1
   weight: 1
-  allowedCategories: 15
+  allowedCategories: 31

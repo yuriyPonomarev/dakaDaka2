@@ -1,5 +1,7 @@
 # Emberdelve — project status / handoff
 
+Latest continuation (31 October 2026): see [Docs/Tasks/D3bc-20261030.md](Docs/Tasks/D3bc-20261030.md) and [Docs/ROADMAP.md](Docs/ROADMAP.md). The M1–M4 sections below are historical; D3 infrastructure now passes the recorded 60-group regression.
+
 Original first-person PvPvE dungeon-extraction prototype (dark fantasy / dungeon-synth).
 Unity **6000.2.5f1**, URP, new Input System. Unity project root: `DakaDaka/`. Slice code: `Assets/Emberdelve/`.
 

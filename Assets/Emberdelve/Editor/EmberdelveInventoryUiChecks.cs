@@ -524,9 +524,9 @@ namespace Emberdelve.EditorTools
             f.Check(f.CollectedEvents == 0 && f.InventoryEvents == 0,
                 $"the refusal notified and credited nothing ({f.InventoryEvents} notifications)");
 
-            yield return ClickEquipSlot(f, EquipmentSlot.Legs);
+            yield return ClickEquipSlot(f, EquipmentSlot.Feet);
 
-            f.Check(f.Equipment.Equipped(EquipmentSlot.Legs) == f.Boots && f.Equipment.FilledCount == 1,
+            f.Check(f.Equipment.Equipped(EquipmentSlot.Feet) == f.Boots && f.Equipment.FilledCount == 1,
                 "the same selection equips through the slot the item declares");
             f.Check(f.Inventory.IndexOfItem(f.Boots) < 0 && f.Inventory.Slots.Count == 0,
                 "the boots left the bag exactly once, so the refusal created no second copy");
@@ -1005,9 +1005,12 @@ namespace Emberdelve.EditorTools
             f.Check(restored, "the bag snapshot restores: " + restoreReason);
             f.Check(newDraughtId != 0 && newDraughtId != oldDraughtId,
                 "the restored draught stack has a fresh StackId");
-            f.Check(f.Inventory.Hotbar.StackIdAt(3) == 0 && f.Inventory.Hotbar.SlotOf(oldDraughtId) < 0 &&
-                    f.Inventory.Hotbar.StackIdAt(0) == newDraughtId && BoundCount(f, newDraughtId) == 1,
-                $"restore retires the old binding and binds the restored loadout by default ({BoundIds(f)})");
+            // D3c (old -> new): the restore used to retire every binding and bind the first usable stacks by default (key 1 = the draught).
+            // The belt now survives a restore by ITEM IDENTITY: key 4 was bound to the draught, so it is bound to the restored draught
+            // stack (a fresh StackId), the old StackId is retired, and no default fills key 1. A belt that held nothing still gets the defaults.
+            f.Check(f.Inventory.Hotbar.StackIdAt(3) == newDraughtId && f.Inventory.Hotbar.SlotOf(oldDraughtId) < 0 &&
+                    f.Inventory.Hotbar.StackIdAt(0) == 0 && BoundCount(f, newDraughtId) == 1,
+                $"restore keeps the belt by item identity: key 4 follows the draught to its restored stack, nothing is auto-bound to key 1 ({BoundIds(f)})");
         }
 
         private static IEnumerator HotbarKeyUsesBoundStackIdentity(Fixture f)
@@ -1517,7 +1520,9 @@ namespace Emberdelve.EditorTools
             int slotRows = 0;
             Vector3[] corners = new Vector3[4];
             foreach (EquipmentSlot slot in new[] { EquipmentSlot.Weapon, EquipmentSlot.OffHand, EquipmentSlot.Head,
-                         EquipmentSlot.Chest, EquipmentSlot.Legs, EquipmentSlot.Back })
+                         EquipmentSlot.Chest, EquipmentSlot.Legs, EquipmentSlot.Back, EquipmentSlot.Hands, EquipmentSlot.Feet,
+                         EquipmentSlot.Necklace, EquipmentSlot.RingLeft, EquipmentSlot.RingRight,
+                         EquipmentSlot.AltWeapon, EquipmentSlot.AltOffHand })
             {
                 RectTransform rect = FindChildRect(f.UiRoot, "Equip_" + slot);
                 RectTransform label = FindChildRect(f.UiRoot, "EquipLabel_" + slot);
@@ -1530,7 +1535,7 @@ namespace Emberdelve.EditorTools
                 label.GetWorldCorners(corners);
                 f.Check(Contains(panelCorners, corners, 0.5f), $"the {slot} label rectangle lies inside the satchel panel");
             }
-            f.Check(slotRows == 6, "the equipment column has six rows");
+            f.Check(slotRows == 13, "the equipment column has thirteen rows (eleven before D3c appended AltWeapon and AltOffHand, six before D3b)");
 
             // ---- two rolled drops of one base cloak
             List<AffixDefinition> affixes = new List<AffixDefinition>();
@@ -1684,7 +1689,11 @@ namespace Emberdelve.EditorTools
 
             // ---- right-click equips every kind of gear, even with a leftover selection
             ItemData cloak = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_AshenCloak.asset");
-            ItemData[] gear = { cloak, f.Cuirass, f.Boots, f.Blade };
+            ItemData gloves = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_GraspwrapGloves.asset");
+            ItemData necklace = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_EmberbeadNecklace.asset");
+            ItemData ring = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_CinderBandRing.asset");
+            f.Check(gloves != null && necklace != null && ring != null, "the D3b slot items load");
+            ItemData[] gear = { cloak, f.Cuirass, f.Boots, f.Blade, gloves, necklace, ring };
             foreach (ItemData item in gear)
             {
                 foreach (bool withSelection in new[] { false, true })
@@ -1712,6 +1721,10 @@ namespace Emberdelve.EditorTools
                     f.Check(f.Equipment.Equipped(item.equipSlot) == item && f.Inventory.IndexOfItem(item) < 0,
                         $"right click wore {item.displayName} into {item.equipSlot}{(withSelection ? " (with a selection pending)" : "")}");
                     f.Check(f.Screen.SelectedItem == null, "the right click leaves no selection behind");
+                    RectTransform gearNameRect = FindChildRect(f.UiRoot, "EquipLabel_" + item.equipSlot);
+                    Text gearNameText = gearNameRect != null ? gearNameRect.GetComponent<Text>() : null;
+                    f.Check(gearNameText != null && gearNameText.preferredHeight <= gearNameRect.rect.height + 0.5f,
+                        $"the worn {item.displayName} name fits its compact equipment row without clipping");
                 }
             }
 

@@ -45,7 +45,7 @@ namespace Emberdelve.Combat
             _current = maxHealth;
             IsDead = false;
             _timeSinceDamage = delay;
-            Changed?.Invoke(_current, maxHealth);
+            GameEventTransaction.Publish(Changed, _current, (float)maxHealth);
         }
 
         /// <summary>
@@ -64,7 +64,7 @@ namespace Emberdelve.Combat
             maxHealth = clamped;
             if (_current > maxHealth) _current = maxHealth;
 
-            Changed?.Invoke(_current, maxHealth);
+            GameEventTransaction.Publish(Changed, _current, (float)maxHealth);
         }
 
         public void ApplyDamage(DamageInfo damage)
@@ -73,7 +73,7 @@ namespace Emberdelve.Combat
 
             _current = Mathf.Max(0f, _current - Mathf.Max(0f, damage.Amount));
             _timeSinceDamage = 0f;
-            Changed?.Invoke(_current, maxHealth);
+            GameEventTransaction.Publish(Changed, _current, (float)maxHealth);
             Damaged?.Invoke(damage);
 
             if (_current <= 0f)
@@ -90,7 +90,7 @@ namespace Emberdelve.Combat
 
             float previous = _current;
             _current = Mathf.Clamp(amount, 1f, maxHealth);
-            if (!Mathf.Approximately(previous, _current)) Changed?.Invoke(_current, maxHealth);
+            if (!Mathf.Approximately(previous, _current)) GameEventTransaction.Publish(Changed, _current, (float)maxHealth);
         }
 
         public void Heal(float amount)
@@ -99,7 +99,7 @@ namespace Emberdelve.Combat
             _current = Mathf.Min(maxHealth, _current + amount);
             if (!Mathf.Approximately(previous, _current))
             {
-                Changed?.Invoke(_current, maxHealth);
+                GameEventTransaction.Publish(Changed, _current, (float)maxHealth);
             }
         }
 
@@ -112,7 +112,7 @@ namespace Emberdelve.Combat
             if (_timeSinceDamage < regenDelay) return;
 
             _current = Mathf.Min(maxHealth, _current + regenPerSecond * Time.deltaTime);
-            Changed?.Invoke(_current, maxHealth);
+            GameEventTransaction.Publish(Changed, _current, (float)maxHealth);
         }
     }
 }

@@ -4,6 +4,7 @@ using Emberdelve.Core;
 using Emberdelve.Combat;
 using Emberdelve.Data;
 using Emberdelve.InputLayer;
+using Emberdelve.Items;
 using Emberdelve.Skills;
 
 namespace Emberdelve.Player
@@ -120,7 +121,51 @@ namespace Emberdelve.Player
             EmberdelveInput input = _rig.Input;
             if (input == null) return;
 
-            if (input.SwapPressed) SwitchWeapon();
+            if (input.SwapPressed) RequestWeaponSetSwap();
+        }
+
+        /// <summary>
+        /// D3c: the swap key. Weapon set 1 is slot 0 (main hand = primary weapon) and set 2 is slot 1, so the existing SwapWeapon key
+        /// IS the weapon-set swap. It is submitted as the sequenced, owner-bound SwapWeaponSet inventory command, so the swap is
+        /// decided by the authority (refused while swinging, drawing or reloading; atomic; one revision). A bare rig with no command
+        /// authority keeps the direct local swap. The press is read once on its frame: a refusal queues nothing.
+        /// </summary>
+        public bool RequestWeaponSetSwap()
+        {
+            Equipment gear = _rig != null ? _rig.Equipment : null;
+            Inventory bag = _rig != null ? _rig.Inventory : null;
+            IInventoryAuthority authority = bag != null ? bag.CommandAuthority : null;
+            if (authority == null) return SwitchWeapon();
+            if (gear == null) return false;
+
+            int active = _activeSlot < 0 ? 0 : _activeSlot;
+            int target = active == 0 ? 1 : 0;
+            if (_slots[target] == null) return false;
+
+            ItemInstance current = gear.MainHandInstance(active);
+            ItemInstance next = gear.MainHandInstance(target);
+            if (!authority.TryCreateLocalCommand(InventoryCommandKind.SwapWeaponSet, 0, 0, Vector2Int.zero, EquipmentSlot.None,
+                    current != null ? current.Uid : System.Guid.Empty, next != null ? next.Uid : System.Guid.Empty,
+                    out InventoryCommand command, out _)) return false;
+
+            return authority.Submit(_rig, command).Accepted;
+        }
+
+        /// <summary>D3c: the weapon in a set's main hand (class asset or worn item), or null when that set has none. Read-only.</summary>
+        public WeaponData WeaponInSlot(int slot)
+        {
+            return slot >= 0 && slot < SlotCapacity ? _slots[slot] : null;
+        }
+
+        /// <summary>
+        /// D3c: empties set 2's main hand (a class with no secondary weapon whose worn set-2 weapon was taken off). When set 2 was in
+        /// hand the loadout first falls back to set 1, so it is never left holding nothing.
+        /// </summary>
+        internal void ClearSecondaryWeapon()
+        {
+            if (_slots[1] == null) return;
+            if (_activeSlot == 1 && _slots[0] != null) Equip(0);
+            if (_activeSlot != 1) _slots[1] = null;
         }
 
         /// <summary>Toggles primary and secondary. Returns false when the class has no secondary weapon.</summary>
@@ -219,6 +264,11 @@ namespace Emberdelve.Player
 
         private void Equip(int slot)
         {
+            using (GameEventTransaction.Defer()) EquipState(slot);
+        }
+
+        private void EquipState(int slot)
+        {
             // -1 means nothing has been equipped yet, which is the case on the very first Equip from Apply.
             // Storing at that point would copy the component's uninitialized ammo over the seeded state.
             WeaponData previous = _activeSlot >= 0 && _activeSlot < SlotCapacity ? _slots[_activeSlot] : null;
@@ -229,6 +279,12 @@ namespace Emberdelve.Player
             {
                 StoreAmmo(previous);
             }
+
+            // D3c: the weapon set follows the hand. A change of set is a swap (not the very first Equip of a class apply); the
+            // set's off hand is put in place before the rig resolves its defense for the new main hand.
+            bool isSwap = _activeSlot >= 0 && _activeSlot != slot;
+            Equipment setOwner = _rig != null ? _rig.Equipment : null;
+            bool setChanged = setOwner != null && setOwner.BeginWeaponSet(slot, isSwap);
 
             _activeSlot = slot;
             WeaponChangeCount++;
@@ -265,6 +321,9 @@ namespace Emberdelve.Player
             // The defense profile follows the hand it is standing in: a crossbow main hand cannot block
             // with a sword's capability, and a rapier is where a Parry flag may legitimately appear.
             if (_rig != null) _rig.ApplyMainHandWeapon(weapon);
+
+            // All hand, pool and ammo callbacks remain deferred until the new stats and shared revision are final.
+            if (setOwner != null) setOwner.CompleteWeaponSet(setChanged, isSwap);
 
             GameEvents.RaiseActiveWeapon(OwnerId, weapon);
             if (weapon != null) GameEvents.RaiseToast(OwnerId, $"Equipped {weapon.displayName}");

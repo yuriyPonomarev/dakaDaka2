@@ -998,6 +998,9 @@ namespace Emberdelve.Items
         /// </summary>
         internal void ApplyRestore(ValidatedContainer validated)
         {
+            // D3c: the belt is read as item identities while the old stacks still exist, and bound again to the restored stacks below.
+            BeltIdentity[] belt = Hotbar.CaptureIdentities();
+
             _stacks.Clear();
 
             int units = 0;
@@ -1021,10 +1024,11 @@ namespace Emberdelve.Items
             CarriedValue = value;
             Recompute();
 
-            // R6c2: every restored stack has a fresh StackId, so no old binding can survive; the restored
-            // loadout is a (re)established raid loadout and gets the default assignment. No event is raised
-            // here (see the doc above); NotifyRestore's InventoryChanged refreshes the HUD.
-            Hotbar.SeedDefaults();
+            // R6c2: every restored stack has a fresh StackId, so no old BINDING can survive. D3c: the belt does - by item identity
+            // (uid or definition), never by index: each key is bound again to the restored stack that carries what it pointed at.
+            // A belt that held nothing before the restore (a fresh bag) gets the default assignment, as before. No event is
+            // raised here (see the doc above); NotifyRestore's InventoryChanged refreshes the HUD.
+            if (!Hotbar.RebindFromIdentities(belt)) Hotbar.SeedDefaults();
         }
 
         /// <summary>Notify half of a restore: a throwing subscriber is logged and cannot undo or abort an applied restore.</summary>

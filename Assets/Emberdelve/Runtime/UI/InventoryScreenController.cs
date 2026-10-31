@@ -42,6 +42,10 @@ namespace Emberdelve.UI
         // at 720p and 1080p without growing the panel.
         private const float EquipSlotSize = 54f;
         private const float EquipSlotGap = 6f;
+        // D3b: eleven worn slots do not fit at 54 px. Past six slots the column tightens to a smaller gap and a slot size
+        // derived from the room the panel has (MaxEquipColumnHeight), so the paper doll still lies inside the panel.
+        private const float EquipSlotGapTight = 4f;
+        private const float MaxEquipColumnHeight = 392f;
 
         // The satchel is laid out from the panel's own inner bounds rather than from a handful of offsets
         // that happened to look right at one window size. Everything below is measured from the panel, so the
@@ -482,7 +486,7 @@ namespace Emberdelve.UI
                 }
 
                 InventorySlot source = _inventory.Slots[sourceIndex];
-                if (source.Item == null || source.Item.equipSlot != slot)
+                if (source.Item == null || !EquipmentSlots.Accepts(source.Item.equipSlot, slot))
                 {
                     GameEvents.RaiseToast(ToastOwner, $"{source.Item?.displayName ?? "Item"} does not fit the {slot} slot");
                     return;
@@ -654,10 +658,19 @@ namespace Emberdelve.UI
                         return;
                     }
 
-                    ItemInstance worn = _equipment.EquippedInstance(source.Item.equipSlot);
+                    // D3b: a ring goes to the first empty ring slot; with both full the player must click the ring slot to
+                    // replace (an explicit target), so nothing is replaced by a right click on the bag.
+                    if (!_equipment.TryChooseSlot(source.Item, EquipmentSlot.None, out EquipmentSlot equipTarget, out string chooseReason))
+                    {
+                        GameEvents.RaiseToast(ToastOwner, chooseReason);
+                        RefreshAfterRefusal();
+                        return;
+                    }
+
+                    ItemInstance worn = _equipment.EquippedInstance(equipTarget);
                     Guid targetUid = worn != null ? worn.Uid : Guid.Empty;
                     if (SubmitInventoryCommand(InventoryCommandKind.Equip, source, default, Vector2Int.zero,
-                            source.Item.equipSlot, Guid.Empty, targetUid, out string equipReason))
+                            equipTarget, Guid.Empty, targetUid, out string equipReason))
                     {
                         ClearSelection();
                         Rebuild();
@@ -1263,9 +1276,12 @@ namespace Emberdelve.UI
             float innerTop = PanelHeight * 0.5f - PanelInset;
 
             EquipmentSlot[] order = SlotOrder();
-            float equipStep = EquipSlotSize + EquipSlotGap;
+            float equipGap = order.Length > 6 ? EquipSlotGapTight : EquipSlotGap;
+            float equipSlotSize = Mathf.Min(EquipSlotSize,
+                Mathf.Floor((MaxEquipColumnHeight + equipGap) / Mathf.Max(1, order.Length) - equipGap));
+            float equipStep = equipSlotSize + equipGap;
             float equipColumnWidth = EquipSlotSize + EquipLabelGap + EquipLabelWidth;
-            float equipColumnHeight = order.Length * equipStep - EquipSlotGap;
+            float equipColumnHeight = order.Length * equipStep - equipGap;
 
             // The worn-kit column is measured by its slots plus the label extents that sit beside them, so a
             // slot label is never allowed to hang past the panel edge. The bag grid keeps its full width and
@@ -1374,16 +1390,16 @@ namespace Emberdelve.UI
             // Equipment column. The origin is the top-left corner of the column, and each row descends from
             // it once: the previous origin was already a full half-column below the centre and the loop then
             // descended again, which pushed the last two slots below the window.
-            Vector2 equipCentrePanel = new Vector2(equipColumnLeft + EquipSlotSize * 0.5f, 0f);
+            Vector2 equipCentrePanel = new Vector2(equipColumnLeft + equipSlotSize * 0.5f, 0f);
             Vector2 equipCenter = PanelToRoot(equipCentrePanel);
-            _equipOrigin = equipCenter + new Vector2(-EquipSlotSize * 0.5f, equipColumnHeight * 0.5f);
+            _equipOrigin = equipCenter + new Vector2(-equipSlotSize * 0.5f, equipColumnHeight * 0.5f);
             _equipGroup.anchoredPosition = equipCenter;
             _equipColumnLeftRoot = _equipOrigin.x;
 
             for (int i = 0; i < order.Length; i++)
             {
                 EquipmentSlot kind = order[i];
-                Vector2 center = _equipOrigin + new Vector2(EquipSlotSize * 0.5f, -(i * equipStep) - EquipSlotSize * 0.5f);
+                Vector2 center = _equipOrigin + new Vector2(equipSlotSize * 0.5f, -(i * equipStep) - equipSlotSize * 0.5f);
 
                 ItemData worn = _equipment != null ? _equipment.Equipped(kind) : null;
 
@@ -1391,7 +1407,7 @@ namespace Emberdelve.UI
                 color.a = worn != null ? 1f : 1f;
 
                 Image slotImage = UiFactory.CreateImage(_equipGroup.transform, "Equip_" + kind, color,
-                    new Vector2(EquipSlotSize, EquipSlotSize), center - equipCenter,
+                    new Vector2(equipSlotSize, equipSlotSize), center - equipCenter,
                     new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
 
                 _equipImages.Add(slotImage);
@@ -1404,17 +1420,20 @@ namespace Emberdelve.UI
                 // slots keep DimColor.
                 // P4c: the slot name is always shown (so a worn Back item cannot hide which slot it is); the
                 // worn item is a second line under it, in its rarity colour.
+                // Two lines must fit the compact 26px rows used by the expanded equipment list.
+                int labelFontSize = equipSlotSize < 30f ? 11 : 13;
+                int slotFontSize = equipSlotSize < 30f ? 9 : 11;
                 string slotName = ItemTooltip.SlotLabel(kind);
                 string labelText = slotName;
                 if (worn != null)
                 {
                     ItemInstance wornInstance = _equipment.EquippedInstance(kind);
                     Color nameColor = wornInstance != null ? ItemTooltip.RarityColor(wornInstance.Rarity) : TextColor;
-                    labelText = "<color=#" + ColorUtility.ToHtmlStringRGB(DimColor) + "><size=11>" + slotName + "</size></color>\n" +
+                    labelText = "<color=#" + ColorUtility.ToHtmlStringRGB(DimColor) + "><size=" + slotFontSize + ">" + slotName + "</size></color>\n" +
                                 "<color=#" + ColorUtility.ToHtmlStringRGB(nameColor) + ">" + worn.displayName + "</color>";
                 }
                 Text label = UiFactory.CreateText(_equipGroup.transform, "EquipLabel_" + kind,
-                    labelText, 13, worn != null ? TextColor : DimColor, TextAnchor.MiddleLeft, FontStyle.Bold);
+                    labelText, labelFontSize, worn != null ? TextColor : DimColor, TextAnchor.MiddleLeft, FontStyle.Bold);
                 label.horizontalOverflow = HorizontalWrapMode.Wrap;
                 label.verticalOverflow = VerticalWrapMode.Truncate;
                 label.supportRichText = true;
@@ -1422,9 +1441,9 @@ namespace Emberdelve.UI
                 label.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
                 label.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
                 label.rectTransform.pivot = new Vector2(0f, 0.5f);
-                label.rectTransform.sizeDelta = new Vector2(EquipLabelWidth, EquipSlotSize);
+                label.rectTransform.sizeDelta = new Vector2(EquipLabelWidth, equipSlotSize);
                 label.rectTransform.anchoredPosition = center - equipCenter +
-                    new Vector2(EquipSlotSize * 0.5f + EquipLabelGap, 0f);
+                    new Vector2(equipSlotSize * 0.5f + EquipLabelGap, 0f);
 
                 _equipLabels.Add(label);
             }

@@ -44,13 +44,27 @@ namespace Emberdelve.Items
     /// the stash). Plain serializable data plus a canonical JSON form; the rules that decide whether a snapshot may
     /// be restored live in <see cref="ContainerSnapshotValidator"/> and the catalog.
     ///
-    /// Format (schemaVersion 2; D3a): kind, containerId, grid width/height (0x0 for equipment), entries (canonically
+    /// Format (schemaVersion 4; D3c): kind, containerId, grid width/height (0x0 for equipment), entries (canonically
     /// ordered: grid entries by row then column, equipment entries by slot number) and a checksum. Version 2 is the
     /// same layout as version 1; what it adds is the meaning of the item "rarity" int: the stored ladder is now
     /// Common 0, Uncommon 1, Rare 2, Epic 3, Legendary 4, Unique 5, Poor 6, and 7 or more is refused. A version 1
     /// document is migrated while it is parsed (its checksum is verified under the version 1 rule first, its rarities
     /// must be 0..2 because nothing else existed then, and the result is re-sealed as version 2) - old saves load
     /// with every item, rarity and rolled affix exactly as written.
+    ///
+    /// Version 3 (D3b) is again the same layout. What it adds is five equipment slot NAMES (Hands, Feet, Necklace,
+    /// RingLeft, RingRight; an equipment entry stores the slot name) and one fact about old saves: the Footpad Boots
+    /// were worn in the Legs slot and now belong in Feet. A version 2 equipment entry named Legs that holds the item
+    /// footpad_boots is rewritten to Feet while the document is parsed (checksum verified under the version 2 rule
+    /// first, then re-sealed as version 3); a version 2 document that already names one of the five new slots was not
+    /// written by version 2 and is refused. A version 1 document runs both steps, 1 to 2 and then 2 to 3.
+    ///
+    /// Version 4 (D3c) is again the same CONTAINER layout. What it adds is two equipment slot NAMES (AltWeapon and AltOffHand: the
+    /// main hand and off hand of weapon set 2; Weapon and OffHand are set 1) and, on the LOADOUT wrapper only, two members: the
+    /// live weapon set (<see cref="LoadoutSnapshot.weaponSet"/>, 0 or 1) and the utility belt (<see cref="LoadoutSnapshot.belt"/>,
+    /// four item identities). A version 3 document migrates by adding weaponSet 0 and an empty belt (the Weapon and OffHand
+    /// entries it already has ARE set 1; set 2 is empty) and by re-versioning; a version 3 equipment entry naming one of the two
+    /// new slots was not written by version 3 and is refused. Chain 1 to 2 to 3 to 4.
     ///
     /// The checksum is TAMPER EVIDENCE, NOT SECURITY. It is an unkeyed SHA-256 over the canonical content (the same layout as the JSON, but floats as exact bit patterns so it does not depend on how a runtime spells a float) of everything
     /// except the checksum field. It catches accidental corruption and casual hand edits (a changed value, a swapped
@@ -65,7 +79,7 @@ namespace Emberdelve.Items
     /// </summary>
     public sealed class ContainerSnapshot
     {
-        public const int CurrentSchemaVersion = 2;
+        public const int CurrentSchemaVersion = 4;
         public const int MinSupportedSchemaVersion = 1;
         /// <summary>Largest number of entries a snapshot may carry (a 12x12 bag cannot exceed 144; this is a hard sanity cap).</summary>
         public const int MaxEntries = 512;
@@ -466,9 +480,11 @@ namespace Emberdelve.Items
     }
 
     /// <summary>
-    /// The schema version policy and the migration chain. Version 2 is current (D3a); the one production migration is
-    /// 1 to 2 (<see cref="VerifyVersion1Integrity"/> then <see cref="UpgradeVersion1To2"/>). A document older than 1 or
-    /// newer than 2 is refused with a reason that says which.
+    /// The schema version policy and the migration chain. Version 4 is current (D3c); the production migrations are
+    /// 1 to 2 (<see cref="VerifyVersion1Integrity"/> then <see cref="UpgradeVersion1To2"/>, D3a), 2 to 3
+    /// (<see cref="VerifyVersion2Integrity"/> then <see cref="UpgradeVersion2To3"/>, D3b) and 3 to 4
+    /// (<see cref="VerifyVersion3Integrity"/> then <see cref="UpgradeVersion3To4"/>, D3c). A document older than 1 or
+    /// newer than 4 is refused with a reason that says which.
     ///
     /// Correct order for a future migration (the order this code enforces): (1) verify the ORIGINAL document's checksum
     /// under the OLD version's own rule (<see cref="MigrationStep.VerifyIntegrity"/>; for a version that hashed the
@@ -487,13 +503,15 @@ namespace Emberdelve.Items
         {
             Dictionary<int, MigrationStep> steps = new Dictionary<int, MigrationStep>();
             steps[1] = new MigrationStep { VerifyIntegrity = VerifyVersion1Integrity, Upgrade = UpgradeVersion1To2 };
+            steps[2] = new MigrationStep { VerifyIntegrity = VerifyVersion2Integrity, Upgrade = UpgradeVersion2To3 };
+            steps[3] = new MigrationStep { VerifyIntegrity = VerifyVersion3Integrity, Upgrade = UpgradeVersion3To4 };
             return steps;
         }
 
         /// <summary>TEST-ONLY: register a migration from <paramref name="fromVersion"/> to fromVersion + 1 (replacing any step already there).</summary>
         internal static void RegisterMigrationForTest(int fromVersion, MigrationStep step) { Steps[fromVersion] = step; }
 
-        /// <summary>TEST-ONLY: drop every test registration and restore exactly the production chain (1 to 2).</summary>
+        /// <summary>TEST-ONLY: drop every test registration and restore exactly the production chain (1 to 2, 2 to 3, 3 to 4).</summary>
         internal static void ClearMigrationsForTest()
         {
             Steps.Clear();
@@ -510,18 +528,35 @@ namespace Emberdelve.Items
         /// </summary>
         private static string VerifyVersion1Integrity(JsonNode root)
         {
+            return VerifyLegacyIntegrity(root, 1);
+        }
+
+        /// <summary>D3b: version 2 hashes exactly like version 1 (same body, floats as bit patterns), so the same check applies.</summary>
+        private static string VerifyVersion2Integrity(JsonNode root)
+        {
+            return VerifyLegacyIntegrity(root, 2);
+        }
+
+        /// <summary>D3c: version 3 hashes exactly like versions 1 and 2 (the wrapper had no weaponSet or belt yet), so the same check applies.</summary>
+        private static string VerifyVersion3Integrity(JsonNode root)
+        {
+            return VerifyLegacyIntegrity(root, 3);
+        }
+
+        private static string VerifyLegacyIntegrity(JsonNode root, int version)
+        {
             if (Member(root, "bag") != null || Member(root, "equipment") != null)
             {
                 if (!LoadoutSnapshot.TryReadFieldsForVerification(root, out LoadoutSnapshot loadout, out string loadoutReason))
                     return loadoutReason;
-                if (loadout.bag.schemaVersion != 1 || loadout.equipment.schemaVersion != 1)
-                    return "a version 1 loadout must hold version 1 containers (the wrapper and its containers share one version)";
-                return loadout.ChecksumMatches() ? null : "the version 1 loadout checksum does not match its content";
+                if (loadout.bag.schemaVersion != version || loadout.equipment.schemaVersion != version)
+                    return $"a version {version} loadout must hold version {version} containers (the wrapper and its containers share one version)";
+                return loadout.ChecksumMatches() ? null : $"the version {version} loadout checksum does not match its content";
             }
 
             if (!ContainerSnapshot.TryReadFields(root, "container snapshot", out ContainerSnapshot container, out string reason))
                 return reason;
-            return container.ChecksumMatches() ? null : "the version 1 container checksum does not match its content";
+            return container.ChecksumMatches() ? null : $"the version {version} container checksum does not match its content";
         }
 
         /// <summary>
@@ -552,6 +587,92 @@ namespace Emberdelve.Items
             JsonNode version = Member(root, "schemaVersion");
             if (version == null) return "no schemaVersion to upgrade";
             version.Text = "2";
+            return null;
+        }
+
+        /// <summary>The item whose old worn slot (Legs) moved to Feet in schema version 3. Named here, as a literal, on purpose: a migration is a fixed fact about old saves, not a lookup into today's data.</summary>
+        internal const string FootpadBootsItemId = "footpad_boots";
+
+        /// <summary>
+        /// D3b: version 2 to 3 changes no field. Equipment entries store the slot NAME, and the Footpad Boots moved from
+        /// Legs to Feet, so an equipment entry named Legs that holds footpad_boots is renamed Feet. Nothing else about the
+        /// entry (uid, rarity, rolls) is touched, a Legs entry holding any other item is left alone (the validator decides
+        /// about it as it always did) and a bag has no slot names, so it is only re-versioned. Version 2 could not have
+        /// written the five slots appended in version 3, so a version 2 equipment entry naming one of them was not written
+        /// by version 2 and is refused rather than reinterpreted. A wrapper has no entries of its own; its containers are
+        /// upgraded (and checked) when they are read.
+        /// </summary>
+        private static string UpgradeVersion2To3(JsonNode root)
+        {
+            JsonNode kind = Member(root, "kind");
+            JsonNode entries = Member(root, "entries");
+            bool isEquipment = kind != null && kind.Type == JsonNode.Kind.String && kind.Text == ContainerKinds.Equipment;
+            if (isEquipment && entries != null && entries.Type == JsonNode.Kind.Array)
+            {
+                for (int i = 0; i < entries.Items.Count; i++)
+                {
+                    JsonNode entry = entries.Items[i];
+                    JsonNode slot = Member(entry, "slot");
+                    if (slot == null || slot.Type != JsonNode.Kind.String) continue; // reported by the strict reader that follows
+
+                    if (slot.Text == "Hands" || slot.Text == "Feet" || slot.Text == "Necklace" ||
+                        slot.Text == "RingLeft" || slot.Text == "RingRight")
+                    {
+                        return $"entry {i} names the slot {slot.Text}, which did not exist in schema version 2";
+                    }
+
+                    JsonNode itemId = Member(Member(entry, "item"), "itemId");
+                    if (itemId == null || itemId.Type != JsonNode.Kind.String) continue;
+
+                    if (slot.Text == "Legs" && itemId.Text == FootpadBootsItemId) slot.Text = "Feet";
+                }
+            }
+
+            JsonNode version = Member(root, "schemaVersion");
+            if (version == null) return "no schemaVersion to upgrade";
+            version.Text = "3";
+            return null;
+        }
+
+        /// <summary>
+        /// D3c: version 3 to 4 changes no container field. A bag is only re-versioned; an equipment container is re-versioned after
+        /// checking that it names neither new slot (AltWeapon, AltOffHand did not exist in version 3: such a document was not
+        /// written by version 3 and is refused rather than reinterpreted); the loadout wrapper gains weaponSet 0 (the saved
+        /// Weapon and OffHand ARE weapon set 1, set 2 is empty, set 1 is live) and an empty belt (a version 3 save never knew one,
+        /// so a restore binds the default keys exactly as it always did). The wrapper's two containers are upgraded when they are read.
+        /// </summary>
+        private static string UpgradeVersion3To4(JsonNode root)
+        {
+            JsonNode kind = Member(root, "kind");
+            JsonNode entries = Member(root, "entries");
+            bool isEquipment = kind != null && kind.Type == JsonNode.Kind.String && kind.Text == ContainerKinds.Equipment;
+            if (isEquipment && entries != null && entries.Type == JsonNode.Kind.Array)
+            {
+                for (int i = 0; i < entries.Items.Count; i++)
+                {
+                    JsonNode slot = Member(entries.Items[i], "slot");
+                    if (slot == null || slot.Type != JsonNode.Kind.String) continue; // reported by the strict reader that follows
+
+                    if (slot.Text == "AltWeapon" || slot.Text == "AltOffHand")
+                        return $"entry {i} names the slot {slot.Text}, which did not exist in schema version 3";
+                }
+            }
+
+            bool isLoadout = Member(root, "bag") != null || Member(root, "equipment") != null;
+            if (isLoadout)
+            {
+                if (Member(root, "weaponSet") != null || Member(root, "belt") != null)
+                    return "a version 3 loadout cannot carry weaponSet or belt: they were added in version 4";
+
+                JsonNode belt = new JsonNode { Type = JsonNode.Kind.Array, Items = new List<JsonNode>() };
+                for (int i = 0; i < LoadoutSnapshot.BeltSlotCount; i++) belt.Items.Add(new JsonNode { Type = JsonNode.Kind.String, Text = "" });
+                root.Members.Add(new KeyValuePair<string, JsonNode>("weaponSet", new JsonNode { Type = JsonNode.Kind.Number, Text = "0" }));
+                root.Members.Add(new KeyValuePair<string, JsonNode>("belt", belt));
+            }
+
+            JsonNode version = Member(root, "schemaVersion");
+            if (version == null) return "no schemaVersion to upgrade";
+            version.Text = "4";
             return null;
         }
 
