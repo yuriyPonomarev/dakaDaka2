@@ -439,6 +439,9 @@ namespace Emberdelve.EditorTools
         {
             AttributeCurveProfile profile = LoadOrCreate<AttributeCurveProfile>(AttributeMovementCurvePath,
                 p => p.movement = MovementCurveDefaults.CreatePoints());
+            // D4b1: serialize the new authored action table on existing profiles without replacing authored points.
+            // New field initializers also cover pre-D4b1 assets; marking dirty persists that one-time migration.
+            EditorUtility.SetDirty(profile);
             foreach (CharacterClassData data in Classes)
             {
                 if (data == null || data.attributeCurveProfile != null) continue;

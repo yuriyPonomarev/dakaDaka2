@@ -248,7 +248,7 @@ namespace Emberdelve.Player
             }
             else if (_recoiling)
             {
-                float duration = Mathf.Max(0.05f, _timing.WallRecoil);
+                float duration = Mathf.Max(1e-5f, _timing.WallRecoil); // Accepted action-scaled duration; epsilon only guards division.
                 float k = (Time.time - _recoilStart) / duration;
                 if (k >= 1f)
                 {

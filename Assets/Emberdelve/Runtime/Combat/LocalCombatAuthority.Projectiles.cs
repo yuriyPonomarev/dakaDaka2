@@ -204,7 +204,8 @@ namespace Emberdelve.Combat
 
             float now = Now;
             float cooldown = Mathf.Max(0.1f, weapon.cooldown);
-            if (_lastAttackTime.TryGetValue(instigator.CombatId, out float lastAttack) && now - lastAttack < cooldown * cooldownGrace)
+            if (_lastAttackTime.TryGetValue(instigator.CombatId, out float lastAttack) && now - lastAttack <
+                FrozenRepeatInterval(instigator.CombatId, lastAttack, cooldown * cooldownGrace))
             { reason = "attack faster than weapon cooldown"; return false; }
 
             range = Mathf.Max(1f, weapon.rangedRange);

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Data;
+using Emberdelve.Stats;
 
 namespace Emberdelve.Combat
 {
@@ -71,6 +72,9 @@ namespace Emberdelve.Combat
             public int WeaponEpoch;
             public SwingPatternData Pattern;
             public SwingTiming Timing;
+            public float RepeatInterval;
+            public float ActionSpeedFactor;
+            public float ContactWindow;
             public int ComboStep;
             public float StepMultiplier = 1f;
             public int Sequence;
@@ -99,7 +103,7 @@ namespace Emberdelve.Combat
             public IReadOnlyList<MeleeSwingHit> HitsView;
         }
 
-        /// <summary>Per instigator: the stamp of its last accepted swing and that swing's full length (the cooldown floor).</summary>
+        /// <summary>Per instigator: the stamp of its last accepted swing and that swing's complete accepted repeat interval (frozen across regear).</summary>
         private readonly Dictionary<int, KeyValuePair<float, float>> _lastSwingFloor = new Dictionary<int, KeyValuePair<float, float>>();
 
         private readonly Dictionary<int, ChainState> _chains = new Dictionary<int, ChainState>();
@@ -252,7 +256,11 @@ namespace Emberdelve.Combat
                 return RejectSwing(intent, chainReason, out reason);
             }
 
-            SwingTiming timing = legacyPick ? pattern.Timing : weapon.ComboTiming(intent.ComboStep, pattern);
+            SwingTiming authoredTiming = legacyPick ? pattern.Timing : weapon.ComboTiming(intent.ComboStep, pattern);
+            float actionFactor = instigator is IActionSpeedSource speedSource ? speedSource.ActionSpeedFactor : 1f;
+            MeleeActionTiming action = ActionSpeedRules.Resolve(authoredTiming.Windup, authoredTiming.Active,
+                authoredTiming.Recovery, authoredTiming.WallRecoil, weapon.cooldown, actionFactor, cooldownGrace);
+            SwingTiming timing = new SwingTiming(action.Windup, action.Active, action.Recovery, action.WallRecoil);
 
             if (_lastSequence.TryGetValue(intent.InstigatorCombatId, out int lastSequence) && intent.Sequence <= lastSequence)
             {
@@ -271,15 +279,11 @@ namespace Emberdelve.Combat
             // The interval between two attacks is the weapon cooldown on the authority clock, and never less than the
             // full length (windup + active + recovery) of the swing that was last accepted: a forged client cannot
             // swing faster than the pattern, even when a wall stop ended the previous swing early.
-            float minimumInterval = cooldown * cooldownGrace;
-            if (_lastAttackTime.TryGetValue(intent.InstigatorCombatId, out float lastAttack)
-                && _lastSwingFloor.TryGetValue(intent.InstigatorCombatId, out KeyValuePair<float, float> floor)
-                && floor.Key == lastAttack)
-            {
-                minimumInterval = Mathf.Max(minimumInterval, floor.Value);
-            }
+            float minimumInterval = _lastAttackTime.TryGetValue(intent.InstigatorCombatId, out float previousAttack)
+                ? FrozenRepeatInterval(intent.InstigatorCombatId, previousAttack, cooldown * cooldownGrace)
+                : cooldown * cooldownGrace;
 
-            if (_lastAttackTime.TryGetValue(intent.InstigatorCombatId, out lastAttack) && now - lastAttack < minimumInterval)
+            if (_lastAttackTime.TryGetValue(intent.InstigatorCombatId, out float lastAttack) && now - lastAttack < minimumInterval)
             {
                 return RejectSwing(intent, "attack faster than weapon cooldown", out reason);
             }
@@ -299,7 +303,7 @@ namespace Emberdelve.Combat
 
             // Accepted: only an accepted begin spends the cooldown (same clock and stamp as weapon attacks).
             _lastAttackTime[intent.InstigatorCombatId] = now;
-            _lastSwingFloor[intent.InstigatorCombatId] = new KeyValuePair<float, float>(now, timing.Total);
+            _lastSwingFloor[intent.InstigatorCombatId] = new KeyValuePair<float, float>(now, action.RepeatInterval);
 
             // The chain moves on only for an accepted step: the next step is this one + 1 and its window opens when this
             // step's recovery begins. The last step resets the chain (the finisher's longer recovery is in the timing).
@@ -336,11 +340,15 @@ namespace Emberdelve.Combat
                 WeaponEpoch = WeaponEpochOf(instigator),
                 Pattern = pattern,
                 Timing = timing,
+                RepeatInterval = action.RepeatInterval,
+                ActionSpeedFactor = action.Factor,
+                // Preserve the authored normalized blade-path contact window, including the active floor.
+                ContactWindow = timing.Active * Mathf.Clamp01(pattern.contactWindow / authoredTiming.Active),
                 ComboStep = intent.ComboStep,
                 StepMultiplier = Mathf.Max(0.05f, stepData.damageMultiplier),
                 Sequence = intent.Sequence,
                 StartTime = now,
-                SampleCount = SwingGeometry.SampleCount(pattern, weapon, FlowTuning.GridSwingTurnCeiling),
+                SampleCount = SwingGeometry.SampleCount(pattern, weapon, FlowTuning.GridSwingTurnCeiling, timing.Active),
                 TurnCeiling = FlowTuning.ResolvedSwingTurnCeiling,
                 BladeLength = pattern.BladeLength(weapon),
                 LastTs = 0f,
@@ -359,6 +367,13 @@ namespace Emberdelve.Combat
             return true;
         }
 
+        /// <summary>The last accepted melee interval governs until a different attack stamps the shared clock.</summary>
+        private float FrozenRepeatInterval(int combatId, float lastAttack, float fallback)
+        {
+            return _lastSwingFloor.TryGetValue(combatId, out KeyValuePair<float, float> prior) && prior.Key == lastAttack
+                ? prior.Value : fallback;
+        }
+
         public bool TryGetMeleeSwingStatus(int swingId, out MeleeSwingStatus status)
         {
             if (!_swingsById.TryGetValue(swingId, out SwingRecord r))
@@ -371,7 +386,7 @@ namespace Emberdelve.Combat
             if (r.HitsView == null) r.HitsView = r.Hits.AsReadOnly();
             status = new MeleeSwingStatus(r.Id, r.InstigatorId, r.Phase, r.EndReason, elapsed,
                 Mathf.Min(r.NextSample, r.SampleCount + 1), r.SampleCount, r.WallSample, r.HitsView,
-                r.ComboStep, r.StepMultiplier, r.Timing, r.TurnClamped, r.WallPoint, r.WallNormal, r.HasWallPoint);
+                r.ComboStep, r.StepMultiplier, r.Timing, r.TurnClamped, r.WallPoint, r.WallNormal, r.HasWallPoint, r.RepeatInterval, r.ActionSpeedFactor);
             return true;
         }
 
@@ -754,8 +769,8 @@ namespace Emberdelve.Combat
             float reach = pattern.EffectiveReach(rec.Weapon) + swingBroadPhaseMargin;
             float reachSqr = reach * reach;
             float sweepRadius = pattern.sweepRadius;
-            float sampleDt = pattern.activeTime / rec.SampleCount;
-            int windowSamples = Mathf.CeilToInt(pattern.contactWindow / Mathf.Max(1e-5f, sampleDt));
+            float sampleDt = rec.Timing.Active / rec.SampleCount;
+            int windowSamples = Mathf.Clamp(Mathf.CeilToInt(rec.ContactWindow / sampleDt), 0, rec.SampleCount);
 
             _registryBuffer.Clear();
             IReadOnlyList<ICombatEntity> all = CombatRegistry.All;

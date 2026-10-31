@@ -1657,7 +1657,8 @@ namespace Emberdelve.EditorTools
             Check(_authority.LastSequenceFor(rig.CombatId) > sequenceBefore, "the request consumed a fresh command sequence");
             Check(melee.IsSwinging && melee.ActivePattern == _sword.swingPatterns[0], "MeleeCombat plays the slash pattern");
             Check(visual.IsSwinging && visual.Pattern == _sword.swingPatterns[0], "the weapon visual plays the same pattern");
-            Check(melee.CooldownRemaining > 0f && melee.CooldownRemaining <= _sword.cooldown + 1e-3f && cooldownReadoutBefore <= 0f, $"the HUD cooldown readout runs ({melee.CooldownRemaining:F2} s)");
+            Check(_authority.TryGetMeleeSwingStatus(melee.LastSwingId, out MeleeSwingStatus acceptedHud), "the HUD reads an accepted swing interval");
+            Check(melee.CooldownRemaining > 0f && melee.CooldownRemaining <= acceptedHud.RepeatInterval + 1e-3f && cooldownReadoutBefore <= 0f, $"the HUD cooldown readout runs within its accepted interval ({melee.CooldownRemaining:F2} s)");
             Check(!melee.TryBeginSwing(0), "a second begin is refused while the swing runs");
 
             float guard = 0f;

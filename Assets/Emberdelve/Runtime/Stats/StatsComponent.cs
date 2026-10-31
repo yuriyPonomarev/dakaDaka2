@@ -47,6 +47,7 @@ namespace Emberdelve.Stats
         private AttributeBonuses _rolledBonuses;
         private bool _ready;
         private PiecewiseLinearCurve _movementCurve = MovementCurveDefaults.Curve;
+        private PiecewiseLinearCurve _actionCurve = ActionSpeedCurveDefaults.Curve;
 
         /// <summary>Changes whenever the class or equipped-instance derivation is replaced.</summary>
         public int Version { get; private set; }
@@ -93,6 +94,9 @@ namespace Emberdelve.Stats
 
         /// <summary>The DEX modifier currently in force, after equipment bonuses.</summary>
         public int DexterityModifier => _derived.Modifier(SixAttribute.Dexterity);
+
+        /// <summary>Captured DEX action rate, independent from locomotion and displayed modifiers.</summary>
+        public float ActionSpeedFactor => _ready ? _actionCurve.Evaluate(GetAttribute(SixAttribute.Dexterity)) : 1f;
 
         /// <summary>Effective DEX score evaluated against the immutable class-initialization snapshot.</summary>
         public float MoveSpeedFactor => _movementCurve.Evaluate(GetAttribute(SixAttribute.Dexterity));
@@ -150,6 +154,8 @@ namespace Emberdelve.Stats
         public void Initialize(CharacterClassData classData)
         {
             _owner = classData;
+            _actionCurve = AttributeCurveProfile.CaptureAction(
+                classData != null ? classData.attributeCurveProfile : null);
             _movementCurve = AttributeCurveProfile.CaptureMovement(
                 classData != null ? classData.attributeCurveProfile : null);
 

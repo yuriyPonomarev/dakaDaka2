@@ -20,8 +20,11 @@ namespace Emberdelve.Player
     [RequireComponent(typeof(PlayerMovement))]
     [RequireComponent(typeof(PlayerLook))]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, IWeaponChangeSource, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IGuardStateSource, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback, IKitSeedSource, IKitView, IMovementRollback
+    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, IWeaponChangeSource, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IGuardStateSource, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback, IKitSeedSource, IKitView, IMovementRollback, IActionSpeedSource
     {
+        /// <summary>Effective capture read by the offline authority; U3B must provide the server-owned equivalent.</summary>
+        public float ActionSpeedFactor => EffectiveStats.IsReady ? EffectiveStats.ActionSpeedFactor : 1f;
+
         [Header("Components")]
         [SerializeField] private EmberdelveInput input;
         [SerializeField] private PlayerMovement movement;

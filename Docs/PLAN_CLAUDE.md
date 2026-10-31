@@ -1,3 +1,7 @@
+# Current continuation —31 October2026
+
+Current accepted slice: D4b1 melee action speed after D4a. Follow Docs/CURRENT_WORK.md and Docs/ROADMAP.md. Latest user instruction: Codex develops/fixes sources; the existing local Pi/Strata model (HIGH) reviews and runs all compilation, unit tests, gameplay gates and builds. Do not use the older cloud-worker/reviewer or manager-runs-tests assignment below. Do not resume the obsolete paused U2B10 manager. The rest of this file is historical context.
+
 # Claude orchestration plan (2026-10-20)
 
 Takes over from Codex/Pi (paused 2026-10-20 16:09 at U2B10). Authoritative design: `Docs/Design/*`, `Docs/ROADMAP.md`, `AGENTS.md`. Historical per-task evidence: `Docs/Tasks`, `Docs/Reviews`, `C:/Users/yrapa/.pi/agent/projects/unity-emberdelve/` (manager-state.json, validation/ logs).

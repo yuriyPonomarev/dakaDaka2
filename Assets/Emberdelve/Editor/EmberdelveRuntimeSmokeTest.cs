@@ -1976,7 +1976,7 @@ namespace Emberdelve.EditorTools
 
                 yield return MovePlayerForReal(1.6f);
                 yield return RealMeleeMatrix("warrior sword after moving", input, melee, true);
-                yield return RealComboChain("warrior sword combo", input, melee);
+                yield return RealComboChain("warrior sword combo", input, melee, 1f, .73f);
 
                 Check(loadout.SwitchWeapon() && ranged.enabled && !melee.enabled, "warrior switched to the crossbow");
                 yield return RealRangedMatrix("warrior crossbow", input, ranged);
@@ -2003,7 +2003,7 @@ namespace Emberdelve.EditorTools
                 yield return RealMeleeMatrix("archer rapier standing", input, melee, false);
                 yield return MovePlayerForReal(1.6f);
                 yield return RealMeleeMatrix("archer rapier after moving", input, melee, true);
-                yield return RealComboChain("archer rapier combo", input, melee);
+                yield return RealComboChain("archer rapier combo", input, melee, 1.12f, .4642857143f);
 
                 loadout.SwitchToSlot(0);
                 CleanupRealCombat(input);
@@ -2021,7 +2021,7 @@ namespace Emberdelve.EditorTools
             /// (base x outgoing x step x location x zone), the finisher's longer recovery, window expiry in real time, and a
             /// press during the recovery being buffered into the next step.
             /// </summary>
-            private IEnumerator RealComboChain(string label, EmberdelveInput input, MeleeCombat melee)
+            private IEnumerator RealComboChain(string label, EmberdelveInput input, MeleeCombat melee, float expectedActionRate, float expectedFinisherRecovery)
             {
                 WeaponData weapon = melee.Weapon;
                 Check(weapon != null && melee.enabled && weapon.HasComboChain, $"{label}: the weapon in hand has a combo chain");
@@ -2089,8 +2089,14 @@ namespace Emberdelve.EditorTools
                 Check(ExpectedComboStep() == 0, $"{label}: after the last step the chain is complete");
                 SwingPatternData lastPattern = weapon.swingPatterns[weapon.comboSteps[weapon.comboSteps.Length - 1].patternIndex];
                 float lastScale = weapon.comboSteps[weapon.comboSteps.Length - 1].recoveryScale;
-                Check(Mathf.Abs(melee.ActiveTiming.Recovery - (lastPattern.recoveryTime * lastScale + weapon.comboFinisherRecovery)) < 1e-4f,
-                    $"{label}: the finisher recovers {weapon.comboFinisherRecovery:F2} s longer ({melee.ActiveTiming.Recovery:F2} s)");
+                // D4b1 independent class/data anchors: Warrior overhead(.38+.35)/1=.73;
+                // Archer rapier(.22+.30)/1.12=.4642857143. Finisher bonus scales exactly once.
+                Check(Mathf.Abs(_rig.EffectiveStats.ActionSpeedFactor - expectedActionRate) < 1e-6f,
+                    $"{label}: the original class action-rate anchor is {expectedActionRate}");
+                Check(Mathf.Abs((lastPattern.recoveryTime * lastScale + weapon.comboFinisherRecovery) / expectedActionRate - expectedFinisherRecovery) < 1e-6f,
+                    $"{label}: authored finisher arithmetic matches the independent {expectedFinisherRecovery:F6}s anchor");
+                Check(Mathf.Abs(melee.ActiveTiming.Recovery - expectedFinisherRecovery) < 1e-4f,
+                    $"{label}: the finisher includes its authored {weapon.comboFinisherRecovery:F2}s bonus at action rate {expectedActionRate} ({melee.ActiveTiming.Recovery:F2}s total recovery)");
 
                 // ---- 2. the combo window runs out in real time: the next press is step 1 again
                 yield return WaitUntil(Ready, weapon.cooldown + 3f);

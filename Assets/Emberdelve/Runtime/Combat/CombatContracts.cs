@@ -216,6 +216,9 @@ namespace Emberdelve.Combat
 
         /// <summary>D1b: the resolved timing of this swing (chain step scales and the finisher's extra recovery applied).</summary>
         public readonly Emberdelve.Data.SwingTiming Timing;
+        /// <summary>D4b1: complete accepted repeat floor and the sanitized action rate captured at begin.</summary>
+        public readonly float RepeatInterval;
+        public readonly float ActionSpeedFactor;
 
         /// <summary>
         /// D1c2: total degrees (yaw plus pitch, summed over every step of the swing) by which the authority's turn ceiling
@@ -235,7 +238,8 @@ namespace Emberdelve.Combat
         public MeleeSwingStatus(int swingId, int instigatorCombatId, SwingPhase phase, SwingEndReason endReason,
             float elapsed, int samplesProcessed, int sampleCount, int wallContactSample, IReadOnlyList<MeleeSwingHit> hits,
             int comboStep = 0, float stepMultiplier = 1f, Emberdelve.Data.SwingTiming timing = default,
-            float turnClampedDegrees = 0f, Vector3 wallPoint = default, Vector3 wallNormal = default, bool hasWallPoint = false)
+            float turnClampedDegrees = 0f, Vector3 wallPoint = default, Vector3 wallNormal = default, bool hasWallPoint = false,
+            float repeatInterval = 0f, float actionSpeedFactor = 1f)
         {
             WallPoint = wallPoint;
             WallNormal = wallNormal;
@@ -244,6 +248,8 @@ namespace Emberdelve.Combat
             ComboStep = comboStep;
             StepMultiplier = stepMultiplier;
             Timing = timing;
+            RepeatInterval = repeatInterval;
+            ActionSpeedFactor = actionSpeedFactor;
             SwingId = swingId;
             InstigatorCombatId = instigatorCombatId;
             Phase = phase;

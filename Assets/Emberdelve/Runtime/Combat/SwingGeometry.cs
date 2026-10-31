@@ -63,7 +63,11 @@ namespace Emberdelve.Combat
         /// sweep makes with a penetration deeper than half that spacing (at most 3 cm) is found. A ceiling of 0 or less
         /// uses the default 720 deg/s (the grid is never sized for an unlimited turn).
         /// </summary>
-        public static int SampleCount(SwingPatternData pattern, WeaponData weapon, float turnCeilingDegPerSec)
+        public static int SampleCount(SwingPatternData pattern, WeaponData weapon, float turnCeilingDegPerSec) =>
+            SampleCount(pattern, weapon, turnCeilingDegPerSec, pattern.activeTime);
+
+        /// <summary>D4b1: turn travel uses the accepted active duration; legacy callers keep authored duration.</summary>
+        public static int SampleCount(SwingPatternData pattern, WeaponData weapon, float turnCeilingDegPerSec, float activeDuration)
         {
             float length = pattern.BladeLength(weapon);
             SwingFrame frame = new SwingFrame(Vector3.zero, Quaternion.identity);
@@ -86,8 +90,11 @@ namespace Emberdelve.Combat
             float ceiling = turnCeilingDegPerSec > 0f && !float.IsInfinity(turnCeilingDegPerSec)
                 ? turnCeilingDegPerSec : CombatFlowTuning.DefaultSwingTurnCeilingDegPerSec;
             float translation = maxStep * probes / spacing;
-            float rotation = ceiling * Mathf.Deg2Rad * pattern.activeTime * pattern.EffectiveReach(weapon) / spacing;
-            int count = Mathf.CeilToInt(translation + rotation);
+            double rotation = (double)ceiling * Mathf.Deg2Rad * activeDuration * pattern.EffectiveReach(weapon) / spacing;
+            double samples = translation + rotation;
+            // Bound before converting to int: a very slow finite action rate must never overflow the sample grid.
+            if (samples >= MaxSamples) return MaxSamples;
+            int count = Mathf.CeilToInt((float)samples);
             return Mathf.Clamp(count, MinSamples, MaxSamples);
         }
 

@@ -152,7 +152,8 @@ namespace Emberdelve.Combat
             if (weapon == null) return 0f;
             float last = LastAttackTimeFor(combatId);
             if (float.IsNegativeInfinity(last)) return 0f;
-            return Mathf.Max(0f, last + Mathf.Max(0.1f, weapon.cooldown) * cooldownGrace - Now);
+            return Mathf.Max(0f, last + FrozenRepeatInterval(combatId, last,
+                Mathf.Max(0.1f, weapon.cooldown) * cooldownGrace) - Now);
         }
 
         private void Awake()
@@ -227,7 +228,8 @@ namespace Emberdelve.Combat
             // Cooldown on the authority's clock. intent.Timestamp is ignored on purpose.
             float now = Now;
             float cooldown = Mathf.Max(0.1f, weapon.cooldown);
-            if (_lastAttackTime.TryGetValue(intent.InstigatorCombatId, out float lastAttack) && now - lastAttack < cooldown * cooldownGrace)
+            if (_lastAttackTime.TryGetValue(intent.InstigatorCombatId, out float lastAttack) && now - lastAttack <
+                FrozenRepeatInterval(intent.InstigatorCombatId, lastAttack, cooldown * cooldownGrace))
             {
                 return Reject(intent, "attack faster than weapon cooldown", out reason);
             }

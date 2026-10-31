@@ -278,6 +278,12 @@ namespace Emberdelve.Core
         Emberdelve.Data.WeaponData ActiveWeapon { get; }
     }
 
+    /// <summary>Optional action-rate read on a registered entity. The offline authority reads it locally; U3B must own its server equivalent. Never supplied by an intent.</summary>
+    public interface IActionSpeedSource
+    {
+        float ActionSpeedFactor { get; }
+    }
+
     /// <summary>
     /// Optional companion of <see cref="IActiveWeaponProvider"/>: a counter that goes up on EVERY change of the held
     /// weapon (also a change that is undone before anyone looked: an A-B-A swap inside one frame). The combat authority

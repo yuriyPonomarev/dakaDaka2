@@ -155,7 +155,7 @@ namespace Emberdelve.Combat
                     if (_phaseTimer <= 0f && _phase == Phase.Active)
                     {
                         _phase = Phase.Recovery;
-                        _phaseTimer = Mathf.Max(0.02f, _timing.Recovery);
+                        _phaseTimer = _timing.Recovery;
                     }
                     break;
 
@@ -248,16 +248,21 @@ namespace Emberdelve.Combat
                 return false;
             }
 
+            if (!authority.TryGetMeleeSwingStatus(swingId, out MeleeSwingStatus accepted))
+            {
+                Debug.LogError("[MeleeCombat] Accepted swing has no authority timing/status: " + swingId, this);
+                return false;
+            }
             _pattern = pattern;
             _comboStep = step;
-            _timing = authority.TryGetMeleeSwingStatus(swingId, out MeleeSwingStatus accepted) ? accepted.Timing : _weapon.ComboTiming(step, pattern);
+            _timing = accepted.Timing;
             _swingId = swingId;
             _swingStartedAt = Time.time;
             _recoilStarted = false;
             _phase = _timing.Windup > 0f ? Phase.Windup : Phase.Active;
-            _phaseTimer = Mathf.Max(0.02f, _timing.Windup);
-            if (_phase == Phase.Active) _phaseTimer = Mathf.Max(0.02f, _timing.Active);
-            _readyTime = Time.time + Mathf.Max(0.1f, _weapon.cooldown, _timing.Total);
+            _phaseTimer = _timing.Windup;
+            if (_phase == Phase.Active) _phaseTimer = _timing.Active;
+            _readyTime = Time.time + Mathf.Max(0f, accepted.RepeatInterval - accepted.Elapsed);
 
             rig.PlaySwingVisual(_weapon, pattern, _timing);
             AttackStarted?.Invoke(intent);
@@ -270,7 +275,7 @@ namespace Emberdelve.Combat
         private void EnterActive()
         {
             _phase = Phase.Active;
-            _phaseTimer = Mathf.Max(0.02f, _timing.Active);
+            _phaseTimer = _timing.Active;
         }
 
         /// <summary>Reads the authority's state of this swing: a wall stop ends the active phase with a recoil.</summary>
@@ -287,7 +292,7 @@ namespace Emberdelve.Combat
             // End the recoil when the authority ends the swing (its stop time + the pattern's recoil time, on the
             // same swing clock), so the client's readout and the authority's state agree about when the swing is over.
             float stopTime = _timing.Windup + _timing.Active * status.WallContactSample / Mathf.Max(1, status.SampleCount);
-            _phaseTimer = Mathf.Max(0.05f, stopTime + _timing.WallRecoil - status.Elapsed);
+            _phaseTimer = Mathf.Max(0f, stopTime + _timing.WallRecoil - status.Elapsed);
             rig.PlaySwingRecoil();
             WallStopped?.Invoke(status);
             CombatDiagnostics.Log("melee-wall", $"[MeleeCombat] swing {_swingId} stopped by level geometry at sample {status.WallContactSample}/{status.SampleCount} with {status.Hits.Count} hit(s)", this);

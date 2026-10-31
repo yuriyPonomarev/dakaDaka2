@@ -34,6 +34,7 @@ namespace Emberdelve.Stats
         public readonly float MeleeFlatDamageBonus;
         public readonly float ProjectileFlatDamageBonus;
         public readonly float AbilityEffectScale;
+        public readonly float ActionSpeedFactor;
         public readonly float StatusSpeedMultiplier;
         public readonly float StatusOutgoingDamageMultiplier;
 
@@ -43,7 +44,7 @@ namespace Emberdelve.Stats
             float walkSpeed, float sprintSpeed, float crouchSpeed,
             float armorRating, float meleeDamageMultiplier, float rangedDamageMultiplier,
             float meleeFlatDamageBonus, float projectileFlatDamageBonus, float abilityEffectScale, float statusSpeedMultiplier,
-            float statusOutgoingDamageMultiplier)
+            float statusOutgoingDamageMultiplier, float actionSpeedFactor)
         {
             IsReady = isReady;
             AttributesReady = attributesReady;
@@ -65,6 +66,7 @@ namespace Emberdelve.Stats
             MeleeFlatDamageBonus = meleeFlatDamageBonus;
             ProjectileFlatDamageBonus = projectileFlatDamageBonus;
             AbilityEffectScale = abilityEffectScale;
+            ActionSpeedFactor = actionSpeedFactor;
             StatusSpeedMultiplier = statusSpeedMultiplier;
             StatusOutgoingDamageMultiplier = statusOutgoingDamageMultiplier;
         }
@@ -160,7 +162,8 @@ namespace Emberdelve.Stats
                 WeaponData.SanitizeBaseDamageBonus(meleeFlatBonus),
                 WeaponData.SanitizeBaseDamageBonus(projectileFlatBonus),
                 attributesReady ? attributes.GetAbilityEffectScale() : 1f,
-                Mathf.Clamp(speedStatus, 0f, 4f), Mathf.Clamp(damageStatus, 0f, 8f));
+                Mathf.Clamp(speedStatus, 0f, 4f), Mathf.Clamp(damageStatus, 0f, 8f),
+                attributesReady ? attributes.ActionSpeedFactor : 1f);
         }
 
         private static void SumFlatDamage(IReadOnlyList<ItemInstance> worn, out float melee, out float projectile)
