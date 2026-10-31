@@ -42,6 +42,8 @@ namespace Emberdelve.Data
         public float manaRegenDelay = 3f;
 
         [Header("Movement")]
+        [Tooltip("DEX score curve, copied at class initialization. Missing profile uses the D4a default table.")]
+        public AttributeCurveProfile attributeCurveProfile;
         public float moveSpeed = 3.6f;
         public float sprintSpeed = 5.4f;
         public float crouchSpeed = 1.7f;

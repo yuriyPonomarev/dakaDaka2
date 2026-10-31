@@ -398,6 +398,7 @@ namespace Emberdelve.Stats
         }
 
         /// <summary>
+        /// Legacy modifier-based rule, retained for literal compatibility tests. Live movement uses MoveSpeedFromScore.
         /// clamp(base * max(0.5, 1 + 0.025 * dexModifier) * passiveMoveMultiplier + itemFlatMoveSpeed,
         /// 2, 8). The passive multiplier and the flat item term are explicit inputs; sprint/crouch and
         /// gear are later integration work, not rules invented here.
@@ -414,6 +415,15 @@ namespace Emberdelve.Stats
         public static float MoveSpeed(float baseMoveSpeed, int dexterityModifier)
         {
             return MoveSpeed(baseMoveSpeed, dexterityModifier, 1f, 0f);
+        }
+
+        /// <summary>D4a walking order: clamp(base * score curve * multiplier + flat, 2, 8).</summary>
+        public static float MoveSpeedFromScore(float baseMoveSpeed, int dexterityScore,
+            PiecewiseLinearCurve curve, float passiveMoveMultiplier, float itemFlatMoveSpeed)
+        {
+            if (curve == null) throw new ArgumentNullException(nameof(curve));
+            return ClampMoveSpeed(baseMoveSpeed * curve.Evaluate(ClampScore(dexterityScore)) *
+                passiveMoveMultiplier + itemFlatMoveSpeed);
         }
 
         public static float ClampMoveSpeed(float speed)
@@ -480,13 +490,22 @@ namespace Emberdelve.Stats
             return AbilityEffectScale(effective.Modifier(SixAttribute.Charisma));
         }
 
-        /// <summary>One full derivation pass from a snapshot plus explicit base values.</summary>
+        /// <summary>D4a derivation: only locomotion migrates; all vital formulas retain their existing behavior.</summary>
+        public static DerivedStats Derive(AttributeSnapshot snapshot, DerivedStatBases bases,
+            PiecewiseLinearCurve movementCurve)
+        {
+            DerivedStats legacy = Derive(snapshot, bases);
+            return new DerivedStats(legacy.Effective, legacy.MaxHealth, legacy.MaxMana, legacy.ManaRegen,
+                MoveSpeedFromScore(bases.MoveSpeed, legacy.Effective.Dexterity, movementCurve, 1f, 0f));
+        }
+
+        /// <summary>Legacy modifier-based derivation, retained for literal compatibility tests.</summary>
         public static DerivedStats Derive(AttributeSnapshot snapshot, DerivedStatBases bases)
         {
             return Derive(snapshot.Effective, bases);
         }
 
-        /// <summary>One full derivation pass from effective scores plus explicit base values.</summary>
+        /// <summary>Legacy modifier-based derivation from effective scores and explicit base values.</summary>
         public static DerivedStats Derive(AttributeScores effective, DerivedStatBases bases)
         {
             return new DerivedStats(

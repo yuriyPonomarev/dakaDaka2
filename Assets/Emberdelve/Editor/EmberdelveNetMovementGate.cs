@@ -283,25 +283,42 @@ namespace Emberdelve.EditorTools
 
         /// <summary>
         /// How far a capsule-wide lane (centre line and +-lateral) from <paramref name="start"/> along <paramref name="yaw"/> stays on
-        /// walkable cells and 1 m clear of the given other players, up to <paramref name="max"/>.
+        /// walkable cells, clear of authored chest footprints, and 1 m clear of the given other players, up to <paramref name="max"/>.
         /// </summary>
-        private static float FreeDistance(DungeonLayoutData layout, bool[,] grid, Vector3 start, float yaw, float max, float lateral, List<Vector3> others)
+        private static float FreeDistance(DungeonLayoutData layout, bool[,] grid, Vector3 start, float yaw, float max, float lateral, List<Vector3> others, bool includeChests = true)
         {
             Vector3 dir = Dir(yaw);
             Vector3 right = Dir(yaw + 90f);
             float[] offsets = lateral > 0f ? new[] { 0f, lateral, -lateral } : new[] { 0f };
 
-            for (float d = 0f; d <= max; d += 0.1f)
+            // Integer steps avoid cumulative float drift excluding an exactly three-metre wall.
+            for (int step = 0; step <= Mathf.FloorToInt(max * 10f); step++)
             {
+                float d = step * 0.1f;
                 for (int i = 0; i < offsets.Length; i++)
                 {
-                    if (!Walkable(layout, grid, start + dir * d + right * offsets[i])) return Mathf.Max(0f, d - 0.1f);
+                    if (!Walkable(layout, grid, start + dir * d + right * offsets[i])) return Mathf.Max(0f, (step - 1) * 0.1f);
                 }
 
                 Vector3 centre = start + dir * d;
+                if (includeChests && layout.chestSpawns != null)
+                {
+                    foreach (ChestSpawnSpec chest in layout.chestSpawns)
+                    {
+                        if (chest == null || chest.lootTable == null) continue;
+                        Vector3 chestCenter = layout.CellCenterWorld(chest.cell);
+                        Vector3 bodySize = ChestSpawner.SizeFor(chest.variant);
+                        // ChestSpawner scales the lid locally under the already-scaled body.
+                        // Include both actual footprints, plus the capsule-wide clearance.
+                        Vector3 footprint = Vector3.Max(bodySize, Vector3.Scale(bodySize, bodySize));
+                        if (Mathf.Abs(centre.x - chestCenter.x) <= footprint.x * 0.5f + lateral &&
+                            Mathf.Abs(centre.z - chestCenter.z) <= footprint.z * 0.5f + lateral)
+                            return Mathf.Max(0f, (step - 1) * 0.1f);
+                    }
+                }
                 for (int i = 0; others != null && i < others.Count; i++)
                 {
-                    if (Flat(centre, others[i]) < 1.0f) return Mathf.Max(0f, d - 0.1f);
+                    if (Flat(centre, others[i]) < 1.0f) return Mathf.Max(0f, (step - 1) * 0.1f);
                 }
             }
 
@@ -363,9 +380,10 @@ namespace Emberdelve.EditorTools
             foreach (float candidate in new[] { 0f, 90f, 180f, 270f })
             {
                 // The wall alone (no other players) decides the distance; the lane must be wall-wide free up to it and no player may stand in it.
-                float boundary = FreeDistance(layout, grid, spawn[2], candidate, 40f, 0f, null);
+                float boundary = FreeDistance(layout, grid, spawn[2], candidate, 40f, 0f, null, includeChests: false);
                 float lane = FreeDistance(layout, grid, spawn[2], candidate, 40f, 0.45f, null);
                 float laneWithPlayers = FreeDistance(layout, grid, spawn[2], candidate, 40f, 0.45f, wOthers);
+                Debug.Log(Tag + " wall candidate yaw=" + candidate + " geometry=" + boundary.ToString("R", CultureInfo.InvariantCulture) + " clear=" + lane.ToString("R", CultureInfo.InvariantCulture) + " players=" + laneWithPlayers.ToString("R", CultureInfo.InvariantCulture));
                 if (boundary < 3f || boundary > 9f || lane < boundary - 1.0f || laneWithPlayers < lane - 0.3f) continue;
                 float score = Mathf.Abs(boundary - 6f);
                 if (score < bestScore) { bestScore = score; yawW = candidate; wallDist = boundary; }
@@ -373,6 +391,8 @@ namespace Emberdelve.EditorTools
 
             Check(wallDist > 0f, "W has a wall 3 to 9 m ahead: yaw " + yawW + " boundary " + wallDist.ToString("F1", CultureInfo.InvariantCulture) + " m");
             if (bestFree < walkNeeded || wallDist <= 0f) return 1;
+            Check(FreeDistance(layout, grid, spawn[2], yawW, 40f, 0.45f, wOthers) >= wallDist - 1.0f,
+                "the wall lane is clear of authored chest footprints and other players before level geometry");
 
             // ---- 1. player + server ---------------------------------------------------------------
             string exe = ArgValue("-ember-proof-reuse-exe");

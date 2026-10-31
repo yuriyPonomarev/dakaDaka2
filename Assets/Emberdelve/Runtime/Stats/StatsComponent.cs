@@ -46,6 +46,7 @@ namespace Emberdelve.Stats
         private DerivedStats _derived;
         private AttributeBonuses _rolledBonuses;
         private bool _ready;
+        private PiecewiseLinearCurve _movementCurve = MovementCurveDefaults.Curve;
 
         /// <summary>Changes whenever the class or equipped-instance derivation is replaced.</summary>
         public int Version { get; private set; }
@@ -93,22 +94,12 @@ namespace Emberdelve.Stats
         /// <summary>The DEX modifier currently in force, after equipment bonuses.</summary>
         public int DexterityModifier => _derived.Modifier(SixAttribute.Dexterity);
 
-        /// <summary>
-        /// max(0.5, 1 + 0.025 * DEX modifier): the locomotion term Docs/Design/ATTRIBUTES.md attaches to
-        /// DEX. It is floor-clamped at 0.5 so a terrible score still moves somebody.
-        /// </summary>
-        public float MoveSpeedFactor
-        {
-            get
-            {
-                float factor = 1f + AttributeRules.MoveSpeedPerModifier * DexterityModifier;
-                return factor < AttributeRules.MinMoveSpeedFactor ? AttributeRules.MinMoveSpeedFactor : factor;
-            }
-        }
+        /// <summary>Effective DEX score evaluated against the immutable class-initialization snapshot.</summary>
+        public float MoveSpeedFactor => _movementCurve.Evaluate(GetAttribute(SixAttribute.Dexterity));
 
         /// <summary>
         /// The amendment's ordinary walking rule, in its exact order:
-        /// clamp(authoredBase * max(0.5, 1 + 0.025 * DEX modifier) * passiveMultiplier + itemFlat, 2, 8).
+        /// clamp(authoredBase * captured DEX score curve * passiveMultiplier + itemFlat, 2, 8).
         /// The passive multiplier and the gear flat are inputs from <see cref="Emberdelve.Skills.CharacterStatStack"/>,
         /// deliberately NOT combined by <c>stack.Get</c>, because that helper computes (base + flat) * multiplier
         /// and the amendment specifies base * multiplier + flat. This is the one walking resolver; PlayerMovement
@@ -116,7 +107,8 @@ namespace Emberdelve.Stats
         /// </summary>
         public float ResolveMoveSpeed(float passiveMultiplier, float itemFlat)
         {
-            return AttributeRules.MoveSpeed(_bases.MoveSpeed, DexterityModifier, passiveMultiplier, itemFlat);
+            return AttributeRules.MoveSpeedFromScore(_bases.MoveSpeed, GetAttribute(SixAttribute.Dexterity),
+                _movementCurve, passiveMultiplier, itemFlat);
         }
 
         /// <summary>
@@ -158,6 +150,8 @@ namespace Emberdelve.Stats
         public void Initialize(CharacterClassData classData)
         {
             _owner = classData;
+            _movementCurve = AttributeCurveProfile.CaptureMovement(
+                classData != null ? classData.attributeCurveProfile : null);
 
             if (classData == null)
             {
@@ -173,10 +167,13 @@ namespace Emberdelve.Stats
             _bases = classData.AttributeBases;
             _snapshot = new AttributeSnapshot(classData.BaseAttributes);
             _rolledBonuses = AttributeBonuses.None;
-            _derived = AttributeRules.Derive(_snapshot, _bases);
+            _derived = DeriveCurrent();
             _ready = true;
             Version++;
         }
+
+        // The initialization and both equipment paths share the same curve-aware derivation.
+        private DerivedStats DeriveCurrent() => AttributeRules.Derive(_snapshot, _bases, _movementCurve);
 
         /// <summary>
         /// Recomputes from scratch for the definitions currently equipped. The bonus set is REPLACED
@@ -194,7 +191,7 @@ namespace Emberdelve.Stats
 
             _rolledBonuses = AttributeBonuses.None;
             _snapshot = _snapshot.WithBonuses(SumBonuses(equipped));
-            _derived = AttributeRules.Derive(_snapshot, _bases);
+            _derived = DeriveCurrent();
             Version++;
         }
 
@@ -243,7 +240,7 @@ namespace Emberdelve.Stats
 
             _rolledBonuses = rolled;
             _snapshot = _snapshot.WithBonuses(fixedBonuses.Plus(rolled));
-            _derived = AttributeRules.Derive(_snapshot, _bases);
+            _derived = DeriveCurrent();
             Version++;
         }
 

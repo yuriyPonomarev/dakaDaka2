@@ -29,6 +29,7 @@ MonoBehaviour:
   maxMana: 75
   manaRegenPerSecond: 3
   manaRegenDelay: 3.5
+  attributeCurveProfile: {fileID: 11400000, guid: bdb308de1f2f86e46b3fcf96639c8078, type: 2}
   moveSpeed: 4.3
   sprintSpeed: 5.2
   crouchSpeed: 1.7

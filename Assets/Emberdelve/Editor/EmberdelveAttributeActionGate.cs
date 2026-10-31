@@ -28,7 +28,7 @@ namespace Emberdelve.EditorTools
     ///
     /// Movement, asserted as numbers the resolver actually produces:
     /// - both classes author move_speed 4.3, sprint/crouch stay authored (5.2/1.7 and 6.4/2.1);
-    /// - the amendment's order clamp(authored * max(0.5, 1 + 0.025*DEX modifier) * passive/gear multiplier
+    /// - the amendment's order clamp(authored * captured DEX score curve * passive/gear multiplier
     ///   + flat, 2, 8), including the 2 and 8 clamps, and NOT CharacterStatStack.Get's (flat + base) * multiplier;
     /// - the bare attribute term before any passive (warrior 4.3, archer 4.6225) and the same speed after
     ///   Fleet Footing (archer 5.315875) are separate numbers, and the StatsComponent query equals the
@@ -382,8 +382,9 @@ namespace Emberdelve.EditorTools
                 CarryItem(rig, _boots);
                 Equip(rig, _boots);
                 CheckInt("boots raise effective DEX to 11, still modifier 0", 11, rig.AttributeStats.GetAttribute(SixAttribute.Dexterity), "floor((11-10)/2) = 0");
-                CheckWalk("warrior with the authored boots", rig, 5.074f, WarriorHeld);
-                CheckClose("warrior sprint with boots 5.2 * 1.12", 5.824f * WarriorHeld, rig.Movement.ResolveGroundSpeed(true, false), "the boots' own sprint term");
+                // D4a: DEX11 interpolates to 1.0125 although its displayed modifier remains zero.
+                CheckWalk("warrior with the authored boots", rig, 5.137425f, WarriorHeld);
+                CheckClose("warrior sprint with boots 5.2 * 1.0125 * 1.12", 5.8968f * WarriorHeld, rig.Movement.ResolveGroundSpeed(true, false), "the boots' own sprint term");
                 Unequip(rig, EquipmentSlot.Feet);
                 CheckWalk("warrior bare again after unequipping the boots", rig, 4.3f, WarriorHeld);
 
@@ -543,7 +544,7 @@ namespace Emberdelve.EditorTools
 
                 // 1. The bare attribute term (4.6225) and the same speed after Fleet Footing are separate numbers.
                 CheckClose("archer attribute move term 4.3 * 1.075 BEFORE Fleet Footing", 4.6225f, rig.AttributeStats.MoveSpeed, "DEX modifier 3, no passive folded in");
-                CheckClose("archer DEX locomotion factor 1 + 0.025*3", 1.075f, rig.AttributeStats.MoveSpeedFactor, "the amendment's DEX term");
+                CheckClose("archer authored score-16 locomotion factor", 1.075f, rig.AttributeStats.MoveSpeedFactor, "the amendment's DEX term");
                 CheckWalk("archer walking with Fleet Footing on top", rig, 5.315875f, ArcherHeld);
                 CheckClose("archer sprint 6.4 * 1.075 * 1.15", 7.912f * ArcherHeld, rig.Movement.ResolveGroundSpeed(true, false), "authored sprint base with its own passive term, x the ranged held factor (B1: bow 4 points of 300)");
                 CheckClose("archer crouch 2.1 * 1.075", 2.2575f * ArcherHeld, rig.Movement.ResolveGroundSpeed(false, true), "DEX applies to crouch too, base retained, x the ranged held factor");
@@ -556,16 +557,18 @@ namespace Emberdelve.EditorTools
                 CarryItem(rig, dexCharm);
                 Equip(rig, dexCharm);
                 CheckInt("archer DEX+2 gives 18, modifier 4", 4, rig.AttributeStats.GetModifier(SixAttribute.Dexterity), "crossed one threshold");
-                CheckClose("archer attribute move term after the crossing 4.3 * 1.1", 4.73f, rig.AttributeStats.MoveSpeed, "before Fleet Footing again");
-                CheckWalk("archer walking after the crossing", rig, 5.4395f, ArcherHeld);
+                // D4a: DEX18 lies between (16,1.075) and (22,1.135), hence 1.095.
+                CheckClose("archer attribute move term after the crossing 4.3 * 1.095", 4.7085f, rig.AttributeStats.MoveSpeed, "before Fleet Footing again");
+                CheckWalk("archer walking after the crossing", rig, 5.414775f, ArcherHeld);
                 Unequip(rig, EquipmentSlot.Head);
                 CheckWalk("archer walking back to 5.315875 after unequipping", rig, 5.315875f, ArcherHeld);
 
                 // 3. Authored gear on top of the passive.
                 CarryItem(rig, _boots);
                 Equip(rig, _boots);
-                CheckWalk("archer walking with Fleet Footing and the boots", rig, 6.2727325f, ArcherHeld);
-                CheckClose("archer sprint with Fleet Footing and the boots", 8.86144f * ArcherHeld, rig.Movement.ResolveGroundSpeed(true, false),
+                // D4a: boots produce DEX17 factor1.085, then Fleet1.15 and boots1.18.
+                CheckWalk("archer walking with Fleet Footing and the boots", rig, 6.3310835f, ArcherHeld);
+                CheckClose("archer sprint with Fleet Footing and the boots", 8.943872f * ArcherHeld, rig.Movement.ResolveGroundSpeed(true, false),
                     "sprint is not clamped into the walking band: its authored base and both gear terms are retained");
                 Unequip(rig, EquipmentSlot.Feet);
                 CheckWalk("archer walking back to 5.315875", rig, 5.315875f, ArcherHeld);
@@ -576,8 +579,8 @@ namespace Emberdelve.EditorTools
                                new StatModifier(SkillStat.MoveSpeed, SkillModifierMode.Flat, 1f) });
                 CarryItem(rig, orderCharm);
                 Equip(rig, orderCharm);
-                CheckWalk("archer with DEX+2, x1.2 and +1.0 flat", rig, 7.5274f, ArcherHeld);
-                float wrongOrder = (4.73f * 1.15f + 1f) * 1.2f * ArcherHeld;
+                CheckWalk("archer with DEX+2, x1.2 and +1.0 flat", rig, 7.49773f, ArcherHeld);
+                float wrongOrder = (4.7085f * 1.15f + 1f) * 1.2f * ArcherHeld;
                 Check(Mathf.Abs(rig.Movement.ResolveGroundSpeed(false, false) - wrongOrder) > 0.15f,
                     $"the archer resolver is NOT (flat + base) * multiplier either ({wrongOrder:F3} would have been wrong)");
                 Unequip(rig, EquipmentSlot.Head);
@@ -883,7 +886,7 @@ namespace Emberdelve.EditorTools
                 float query = rig.AttributeStats.ResolveMoveSpeed(multiplier, flat);
 
                 CheckClose($"{label} resolved walk speed", expected * held, resolver,
-                    "clamp(authored * max(0.5, 1 + 0.025*DEX modifier) * stack multiplier + stack flat, 2, 8), x the held-weapon factor");
+                    "clamp(authored * captured DEX score curve * stack multiplier + stack flat, 2, 8), x the held-weapon factor");
                 CheckClose($"{label} walking query equals the movement resolver", resolver, query * held,
                     $"same source (multiplier {multiplier:F4}, flat {flat:F4}), DEX applied exactly once, x the held-weapon factor");
             }

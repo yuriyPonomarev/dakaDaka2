@@ -92,6 +92,7 @@ namespace Emberdelve.EditorTools
             ApplyAttributeDefinitions();
             ApplyAttributeVitalBases();
             ApplyAttributeActionBases();
+            ApplyAttributeMovementCurve();
             BuildAffixCatalog();
             BuildItemCatalog();
             BuildLootTables();
@@ -428,6 +429,22 @@ namespace Emberdelve.EditorTools
             SetFinesse(Claw, false);
             SetFinesse(ClawElite, false);
 
+            AssetDatabase.SaveAssets();
+        }
+
+        internal const string AttributeMovementCurvePath = EmberdelvePaths.Data + "/AttributeCurve_Default.asset";
+
+        /// <summary>D4a migration: wire a shared profile without overwriting an existing authored table/reference.</summary>
+        private static void ApplyAttributeMovementCurve()
+        {
+            AttributeCurveProfile profile = LoadOrCreate<AttributeCurveProfile>(AttributeMovementCurvePath,
+                p => p.movement = MovementCurveDefaults.CreatePoints());
+            foreach (CharacterClassData data in Classes)
+            {
+                if (data == null || data.attributeCurveProfile != null) continue;
+                data.attributeCurveProfile = profile;
+                EditorUtility.SetDirty(data);
+            }
             AssetDatabase.SaveAssets();
         }
 

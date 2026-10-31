@@ -8,7 +8,7 @@ Written 22 Oct 2026. Research and design only. No source was edited, no Unity wa
 
 ## Execution clarification — 31 October 2026
 
-The continuation plan records the accepted six-attribute remap. Keep the six score/save keys, original class scores and **mana for Warrior and Archer**; historical C3/D4 suggestions below to remove martial mana are superseded. D2 ran108/0; D3 infrastructure and authored playable content are verified (see Tasks/D3bc-20261030.md and Tasks/D3d.md). D4 proceeds in narrow reviewed slices: D4a starts with authored immutable curves and score-based DEX movement. Other stat formulas stay unchanged until their own implemented/verified slice. Use our own authored breakpoints, not copied reference-game numeric tables.
+The continuation plan records the accepted six-attribute remap. Keep the six score/save keys, original class scores and **mana for Warrior and Archer**; historical C3/D4 suggestions below to remove martial mana are superseded. D2 ran108/0; D3 infrastructure and authored playable content are verified (see Tasks/D3bc-20261030.md and Tasks/D3d.md). D4 proceeds in narrow reviewed slices: D4a now implements authored immutable curves and score-based DEX movement (Tasks/D4a.md); D4b1 melee action speed follows. Other stat formulas stay unchanged until their own implemented/verified slice. Use our own authored breakpoints, not copied reference-game numeric tables.
 ## How to read this
 
 **Verification flags:**

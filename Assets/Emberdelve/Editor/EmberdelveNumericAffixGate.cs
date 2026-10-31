@@ -41,18 +41,19 @@ gear.RefreshStats();gear.RefreshStats();Check(rig.MaxHealth==130&&rig.Mana.MaxMa
 Check(gear.TryUnequip(EquipmentSlot.Feet,out reason)&&rig.MaxHealth==120&&rig.Mana.MaxMana==70&&rig.Mana.CurrentMana==mp,"unequip restores exact caps");}
 ItemInstance motion;Check(ItemInstance.TryCreateNew(boots,1,AffixRarity.Rare,new[]{new AffixRecord("numeric_2",AffixStatKey.MoveSpeed,.1f),new AffixRecord("numeric_3",AffixStatKey.ManaRegen,.2f)},auth,out motion,out reason),"motion and regen gear");
 Check(bag.TryAddInstance(motion,out reason)&&gear.TryEquipFromInventory(bag.IndexOfInstance(motion.Uid),out reason),"equip motion gear");
-Check(Mathf.Abs(rig.Movement.ResolveWalkSpeed()-5.174f)<.0001f,"fixed boots multiplier then flat speed");
+// D4a: fixed boots DEX11 gives factor1.0125; 4.3 * 1.0125 * 1.18 + 0.1 = 5.237425.
+Check(Mathf.Abs(rig.Movement.ResolveWalkSpeed()-5.237425f)<.0001f,"fixed boots multiplier then flat speed");
 Check(Mathf.Abs(rig.Mana.RegenPerSecond-3.2f)<.0001f,"WIS-derived regen plus flat");
-Check(Mathf.Abs(rig.Movement.ResolveGroundSpeed(true,false)-5.824f*(1f-18f/300f))<.0001f,"walk flat does not alter sprint (x the D1b held factor: sword 10 + shield 8 points of 300)");
-Check(Mathf.Abs(rig.Movement.ResolveGroundSpeed(false,true)-1.7f*(1f-18f/300f))<.0001f,"walk flat does not alter crouch (x the D1b held factor)");
+Check(Mathf.Abs(rig.Movement.ResolveGroundSpeed(true,false)-5.8968f*(1f-18f/300f))<.0001f,"walk flat does not alter sprint (x the D1b held factor: sword 10 + shield 8 points of 300)");
+Check(Mathf.Abs(rig.Movement.ResolveGroundSpeed(false,true)-1.72125f*(1f-18f/300f))<.0001f,"DEX11 crouch1.7*1.0125; walk flat excluded (x the D1b held factor)");
 Check(rig.AttributeStats.GetAttribute(Emberdelve.Stats.SixAttribute.Dexterity)==11,"fixed DEX remains once");
 Check(gear.TryUnequip(EquipmentSlot.Feet,out reason),"remove motion gear");
 ItemInstance combined;Check(ItemInstance.TryCreateNew(boots,1,AffixRarity.Rare,new[]{new AffixRecord("numeric_4",AffixStatKey.Constitution,3),new AffixRecord("numeric_0",AffixStatKey.MaxHealth,10)},auth,out combined,out reason),"CON plus HP gear");
 Check(bag.TryAddInstance(combined,out reason)&&gear.TryEquipFromInventory(bag.IndexOfInstance(combined.Uid),out reason),"equip combined gear");Check(rig.MaxHealth==140&&rig.CurrentHealth==hp,"derived CON cap plus flatHP once/no heal");Check(gear.TryUnequip(EquipmentSlot.Feet,out reason),"remove combined gear");
 ItemInstance slow=null,fast=null;Check(ItemInstance.TryCreateNew(boots,1,AffixRarity.Uncommon,new[]{new AffixRecord("numeric_2",AffixStatKey.MoveSpeed,.03f)},auth,out slow,out reason)&&ItemInstance.TryCreateNew(boots,1,AffixRarity.Uncommon,new[]{new AffixRecord("numeric_2",AffixStatKey.MoveSpeed,.12f)},auth,out fast,out reason),"same-base distinct speed rolls");
 Check(bag.TryAddInstance(slow,out reason)&&bag.TryAddInstance(fast,out reason),"carry both speed rolls");
-Check(gear.TryEquipFromInventory(bag.IndexOfInstance(slow.Uid),out reason)&&Mathf.Abs(rig.Movement.ResolveWalkSpeed()-5.104f)<.0001f,"selected slower UID");
-Check(gear.TryEquipFromInventory(bag.IndexOfInstance(fast.Uid),out reason)&&Mathf.Abs(rig.Movement.ResolveWalkSpeed()-5.194f)<.0001f,"selected faster UID swap");
+Check(gear.TryEquipFromInventory(bag.IndexOfInstance(slow.Uid),out reason)&&Mathf.Abs(rig.Movement.ResolveWalkSpeed()-5.167425f)<.0001f,"selected slower UID");
+Check(gear.TryEquipFromInventory(bag.IndexOfInstance(fast.Uid),out reason)&&Mathf.Abs(rig.Movement.ResolveWalkSpeed()-5.257425f)<.0001f,"selected faster UID swap");
 Check(gear.EquippedInstance(EquipmentSlot.Feet).Uid==fast.Uid&&bag.HoldsInstanceUid(slow.Uid),"swap preserves metadata ownership");
 Check(gear.TryUnequip(EquipmentSlot.Feet,out reason)&&Mathf.Abs(rig.Movement.ResolveWalkSpeed()-4.3f)<.0001f&&Mathf.Abs(rig.Mana.RegenPerSecond-3f)<.0001f,"all numeric effects removed");
 Check(before==EditorJsonUtility.ToJson(boots),"fixed definition unchanged");gear.Clear();bag.Clear();

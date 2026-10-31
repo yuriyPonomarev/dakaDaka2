@@ -188,7 +188,7 @@ namespace Emberdelve.Movement
 
         /// <summary>
         /// Docs/Design/ATTRIBUTES.md walking rule, in the amendment's exact order:
-        /// clamp(authoredMoveSpeed * max(0.5, 1 + 0.025 * DEX modifier) * passive/gear multiplier
+        /// clamp(authoredMoveSpeed * captured DEX score curve * passive/gear multiplier
         ///       + passive/gear flat, 2, 8).
         ///
         /// The multiplier and the flat are read separately from the stack on purpose: CharacterStatStack.Get
