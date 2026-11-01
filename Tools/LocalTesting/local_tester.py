@@ -10,6 +10,8 @@ import subprocess
 import time
 import urllib.request
 
+from status_writer import write_status
+
 PROJECT = Path(__file__).resolve().parents[2]
 ROOT = PROJECT / "Logs" / "local-testing"
 REQUESTS = ROOT / "requests"
@@ -35,9 +37,9 @@ def save(**values):
     values.update(controller_pid=os.getpid(), project=str(PROJECT),
                   provider="strata", model="strata", thinking="high",
                   updated_at=datetime.datetime.now().astimezone().isoformat())
-    temporary = STATE.with_suffix(".tmp")
-    temporary.write_text(json.dumps(values, ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary.replace(STATE)
+    # A transient Windows sharing violation here previously killed Pi with EPIPE.
+    # Keep consuming worker output even when progress publication is unavailable.
+    return write_status(STATE, values)
 
 def ready():
     try:
@@ -49,6 +51,8 @@ def ready():
 def source_hashes():
     paths = list((PROJECT / "Assets/Emberdelve").rglob("*.cs"))
     paths += list((PROJECT / "Tools").rglob("*.ps1"))
+    paths += list((PROJECT / "Tools").rglob("*.py"))
+    paths += list((PROJECT / "AgentScripts").rglob("*.cs"))
     return {str(p.relative_to(PROJECT)).replace("\\", "/"):
             hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
 

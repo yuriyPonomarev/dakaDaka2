@@ -71,6 +71,9 @@ namespace Emberdelve.InputLayer
         internal bool? PrimaryHeldOverride { get; set; }
         internal bool? PrimaryReleasedOverride { get; set; }
 
+        /// <summary>Whether the ordinary gameplay action map is enabled (system/UI actions remain separate).</summary>
+        public bool GameplayInputEnabled => _playerMap != null && _playerMap.enabled;
+
         private bool OverrideLive => _playerMap != null && _playerMap.enabled;
 
         public bool PrimaryPressed => PrimaryPressedOverride.HasValue

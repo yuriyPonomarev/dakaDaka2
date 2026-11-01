@@ -12,6 +12,8 @@ namespace Emberdelve.Combat
     /// <summary>
     /// Archer draw-and-release state machine plus ammunition bookkeeping. It produces a launch intent;
     /// the authority owns projectile travel, ordered collision, and impact damage.
+    /// Ordinary draw charging is LOCAL and the existing launch path still accepts its charge. U3B must own
+    /// server-clock begin/cancel records before this can count as network combat acceptance.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(PlayerRig))]
@@ -30,6 +32,9 @@ namespace Emberdelve.Combat
         private int _maxReserve;
         private bool _drawing;
         private float _drawStartedAt;
+        private WeaponData _drawWeapon;
+        private float _drawAuthoredTime;
+        private float _drawDuration;
         private bool _reloading;
         private float _reloadTimer;
         private float _reloadDuration;
@@ -48,7 +53,11 @@ namespace Emberdelve.Combat
             (_maxReserve <= 0 || _reserve < _maxReserve);
         public bool IsDrawing => _drawing;
         public bool IsReloading => _reloading;
-        public float Charge => _drawing ? Mathf.Clamp01((Time.time - _drawStartedAt) / Mathf.Max(0.05f, _weapon.drawTime)) : 0f;
+        /// <summary>Local accepted press capture; U3B must own equivalent server-clock begin/cancel state.</summary>
+        public float ActiveDrawDuration => _drawing ? _drawDuration : 0f;
+        public float ActiveAuthoredDrawTime => _drawing ? _drawAuthoredTime : 0f;
+        public float Charge => _drawing && _drawDuration > 0f
+            ? Mathf.Clamp01((Time.time - _drawStartedAt) / _drawDuration) : 0f;
         public float ReloadDuration => _reloadDuration;
         public float ReloadProgress => _reloading && _reloadDuration > 0f
             ? 1f - Mathf.Clamp01(_reloadTimer / _reloadDuration) : 0f;
@@ -85,6 +94,7 @@ namespace Emberdelve.Combat
 
         private void InitializeLocal(WeaponData weapon, int startingReserve, int maxReserve, int startingMagazine)
         {
+            CancelDraw();
             _weapon = weapon;
             _reloadTimer = _reloadDuration = 0f;
 
@@ -110,16 +120,18 @@ namespace Emberdelve.Combat
 
         private void Update()
         {
-            if (_weapon == null || rig == null) return;
+            if (_weapon == null || !_weapon.IsRanged || rig == null) { CancelDraw(); return; }
 
             EmberdelveInput input = rig.Input;
-            if (input == null) return;
+            if (input == null || !input.GameplayInputEnabled) { CancelDraw(); return; }
 
             if (rig.IsDead)
             {
                 CancelDraw();
                 return;
             }
+
+            if (_drawing && _drawWeapon != _weapon) CancelDraw();
 
             float dt = Time.deltaTime;
 
@@ -138,8 +150,11 @@ namespace Emberdelve.Combat
                 else StartReload();
             }
 
-            if (input.PrimaryPressed && !_reloading && _magazine > 0)
+            if (input.PrimaryPressed && !_drawing && !_reloading && _magazine > 0)
             {
+                _drawWeapon = _weapon;
+                _drawAuthoredTime = _weapon.drawTime;
+                _drawDuration = ActionSpeedRules.DrawDuration(_drawAuthoredTime, rig.ActionSpeedFactor);
                 _drawing = true;
                 _drawStartedAt = Time.time;
             }
@@ -152,9 +167,10 @@ namespace Emberdelve.Combat
                 if (input.PrimaryReleased)
                 {
                     float charge = Charge;
+                    WeaponData drawnWeapon = _drawWeapon;
                     CancelDraw();
 
-                    if (charge >= _weapon.minChargeToFire) Fire(charge);
+                    if (charge >= drawnWeapon.minChargeToFire) Fire(charge);
                     else GameEvents.RaiseToast(OwnerId, "Shot released too early");
                 }
             }
@@ -199,6 +215,7 @@ namespace Emberdelve.Combat
             _reloading = view.Reloading;
             _reloadTimer = view.ReloadRemaining;
             _reloadDuration = view.ReloadDuration;
+            if (_reloading) CancelDraw();
             if (changed) GameEvents.RaiseAmmo(OwnerId, _magazine, _reserve);
         }
 
@@ -263,9 +280,14 @@ namespace Emberdelve.Combat
         /// <summary>Abandons an in-progress draw, e.g. because a skill is about to fire instead.</summary>
         public void CancelDraw()
         {
-            if (!_drawing) return;
             _drawing = false;
-            if (rig != null) rig.SetDrawVisual(0f);
+            _drawWeapon = null;
+            _drawStartedAt = _drawAuthoredTime = _drawDuration = 0f;
+            if (rig != null)
+            {
+                rig.SetDrawVisual(0f);
+                rig.SetAimingPenalty(1f);
+            }
         }
 
         /// <summary>

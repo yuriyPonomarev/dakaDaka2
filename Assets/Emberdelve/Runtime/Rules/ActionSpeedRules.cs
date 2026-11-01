@@ -30,6 +30,15 @@ namespace Emberdelve.Stats
             return Math.Max(.1f, duration);
         }
 
+        /// <summary>D4b3 LOCAL ordinary draw duration. Server-clock begin/cancel authority remains U3B work.</summary>
+        public static float DrawDuration(float authoredSeconds, float actionFactor)
+        {
+            float authored = Finite(authoredSeconds) ? Math.Max(0f, authoredSeconds) : .05f;
+            float duration = authored / SanitizeFactor(actionFactor);
+            if (!Finite(duration)) duration = authored;
+            return Math.Max(.05f, duration);
+        }
+
         public static MeleeActionTiming Resolve(float windup, float active, float recovery, float wallRecoil,
             float weaponCooldown, float actionFactor, float cooldownGrace)
         {

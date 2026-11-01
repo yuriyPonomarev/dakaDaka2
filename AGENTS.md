@@ -1,6 +1,6 @@
 # Emberdelve / Cryptbound — Unity project instructions
 
-The user authorized continued development in this existing Unity project on19October2026. Latest user instruction31 October2026: Codex develops the game; the existing local Pi/Strata model with HIGH thinking reviews changes and runs all compilation, unit tests, gameplay gates and builds. The local tester reports defects; Codex makes source fixes. See Docs/LOCAL_TESTING.md. This supersedes the former local-implementer/manager-runs-tests role. Godot development is superseded; do not resume or edit that project.
+The user authorized continued development in this existing Unity project on19October2026. Latest user instruction31 October2026, reaffirmed1 November2026: Codex develops the game; the existing local Pi/Strata model with HIGH thinking reviews changes and runs all compilation, unit tests, gameplay gates and builds. The local tester reports defects; Codex makes source fixes. See Docs/LOCAL_TESTING.md. This supersedes the former local-implementer/manager-runs-tests role. Godot development is superseded; do not resume or edit that project.
 
 Unity version6000.2.5f1, URP17.2.0, C#, new Input System. Preserve existing M1–M4 functionality and unfinished M5 working-tree changes. No engine/package upgrade, resetting/cleaning the working tree, or modifying unrelated template assets. Keep Assets/Emberdelve as the game feature root. The user prefers a playable complete loop and editable scenes/prefabs, with focused independent verification.
 

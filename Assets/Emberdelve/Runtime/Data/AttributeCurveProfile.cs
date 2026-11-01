@@ -10,7 +10,7 @@ namespace Emberdelve.Data
         [Tooltip("Strictly increasing score coordinates and positive finite factors. Linear interpolation; held endpoints.")]
         public CurvePoint[] movement = MovementCurveDefaults.CreatePoints();
 
-        [Tooltip("DEX score to swept-melee and reload action rate. Positive finite factors; no draw or skill scaling.")]
+        [Tooltip("DEX score to swept-melee, reload and local ordinary draw rate. Positive finite factors; no skill scaling.")]
         public CurvePoint[] action = ActionSpeedCurveDefaults.CreatePoints();
 
         public bool TryCaptureMovement(out PiecewiseLinearCurve curve, out string error)

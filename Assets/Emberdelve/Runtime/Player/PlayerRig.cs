@@ -573,6 +573,7 @@ namespace Emberdelve.Player
         /// </summary>
         private void OnPlayerDied()
         {
+            GetComponent<RangedCombat>()?.CancelDraw();
             if (skills != null) skills.HandleDeath();
             if (movement != null) movement.CancelDash();
             if (status != null) status.ClearStatuses();
@@ -974,6 +975,7 @@ namespace Emberdelve.Player
 
         public void SetInputEnabled(bool enabled)
         {
+            if (!enabled) GetComponent<RangedCombat>()?.CancelDraw();
             if (input != null) input.SetGameplayInputEnabled(enabled);
         }
     }
