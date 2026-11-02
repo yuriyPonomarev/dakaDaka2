@@ -3,6 +3,7 @@ using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.Items;
+using Emberdelve.Stats;
 
 namespace Emberdelve.Interaction
 {
@@ -39,7 +40,7 @@ namespace Emberdelve.Interaction
     /// identity it already carries.
     /// </summary>
     [DisallowMultipleComponent]
-    public sealed class ChestInteractable : MonoBehaviour, IInteractable
+    public sealed class ChestInteractable : MonoBehaviour, IInteractable, IActorHoldDuration
     {
         [Header("Content")]
         [SerializeField] private ChestVariant variant = ChestVariant.Supply;
@@ -128,6 +129,13 @@ namespace Emberdelve.Interaction
                     default: return 0f;
                 }
             }
+        }
+
+        /// <summary>Only chests opt into CHA timing. Instant supply chests remain instant.</summary>
+        public float ResolveHoldDuration(IInteractionActor actor)
+        {
+            float rate = actor is IInteractionSpeedSource source ? source.InteractionSpeedFactor : 1f;
+            return InteractionSpeedRules.Duration(HoldDuration, rate);
         }
 
         private void Awake()

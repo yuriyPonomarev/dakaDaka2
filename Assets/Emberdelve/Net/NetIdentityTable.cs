@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Emberdelve.Combat;
 using Emberdelve.Player;
+using Emberdelve.Net.Rules;
 using Unity.Netcode;
 
 namespace Emberdelve.Net
@@ -18,6 +19,10 @@ namespace Emberdelve.Net
         public int PartyId;
         public PlayerRig Rig;
         public NetworkObject Object;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        // One gate per admitted connection; the row is discarded on disconnect.
+        internal readonly SkillIntentGate SkillIntents = new SkillIntentGate();
+#endif
     }
 
     /// <summary>

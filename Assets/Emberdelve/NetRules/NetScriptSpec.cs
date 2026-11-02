@@ -26,7 +26,8 @@ namespace Emberdelve.Net.Rules
         /// <summary>Sequence numbers jumped far ahead.</summary>
         SeqJump = 11,
         /// <summary>Movement frames sent on ANOTHER player's object through the development RPC (RequireOwnership off).</summary>
-        ForgeMove = 12
+        ForgeMove = 12,
+        SkillProof = 13
     }
 
     /// <summary>One step of a client test script: <c>name[:seconds][@yawDegrees]</c>.</summary>
@@ -68,6 +69,7 @@ namespace Emberdelve.Net.Rules
         public string Text { get; private set; } = "";
 
         public bool IsForgeOwnerOnly => _steps.Count == 1 && _steps[0].Kind == NetScriptKind.ForgeOwner;
+        public bool IsSkillProofOnly => _steps.Count == 1 && _steps[0].Kind == NetScriptKind.SkillProof;
 
         /// <summary>Seconds from the start until the last step and its trailing gap are over.</summary>
         public float TotalSeconds
@@ -85,6 +87,7 @@ namespace Emberdelve.Net.Rules
             switch (kind)
             {
                 case NetScriptKind.ForgeOwner: return "forge-owner";
+                case NetScriptKind.SkillProof: return "skill-proof";
                 case NetScriptKind.WalkForward: return "walk-forward";
                 case NetScriptKind.WalkSquare: return "walk-square";
                 case NetScriptKind.SprintForward: return "sprint-forward";
@@ -106,6 +109,7 @@ namespace Emberdelve.Net.Rules
             switch (name)
             {
                 case "forge-owner": kind = NetScriptKind.ForgeOwner; defaultSeconds = 0f; return true;
+                case "skill-proof": kind = NetScriptKind.SkillProof; defaultSeconds = 0f; return true;
                 case "walk-forward": kind = NetScriptKind.WalkForward; defaultSeconds = 3f; return true;
                 case "walk-square": kind = NetScriptKind.WalkSquare; defaultSeconds = 1f; return true;
                 case "sprint-forward": kind = NetScriptKind.SprintForward; defaultSeconds = 3f; return true;
@@ -161,7 +165,7 @@ namespace Emberdelve.Net.Rules
                 if (secondsText != null)
                 {
                     float parsed = 0f;
-                    if (kind == NetScriptKind.ForgeOwner ||
+                    if (kind == NetScriptKind.ForgeOwner || kind == NetScriptKind.SkillProof ||
                         !TryFloat(secondsText, out parsed) || parsed <= 0f || parsed > MaxStepSeconds)
                     {
                         error = "invalid seconds '" + secondsText + "' for " + part + " (0.." + MaxStepSeconds + ")";
@@ -191,9 +195,9 @@ namespace Emberdelve.Net.Rules
             {
                 for (int i = 0; i < result._steps.Count; i++)
                 {
-                    if (result._steps[i].Kind == NetScriptKind.ForgeOwner)
+                    if (result._steps[i].Kind == NetScriptKind.ForgeOwner || result._steps[i].Kind == NetScriptKind.SkillProof)
                     {
-                        error = "forge-owner cannot be chained";
+                        error = result._steps[i].Name + " cannot be chained";
                         return false;
                     }
                 }

@@ -66,6 +66,17 @@ namespace Emberdelve.NetRules.Tests
             Assert.That(NetScriptSpec.TryParse("forge-owner:3", out _, out _), Is.False);
         }
 
+        [Test]
+        public void SkillProof_IsAnIsolatedProbe()
+        {
+            NetScriptSpec spec = Parse("skill-proof");
+            Assert.That(spec.IsSkillProofOnly, Is.True);
+            Assert.That(spec.IsForgeOwnerOnly, Is.False);
+            Assert.That(NetScriptSpec.NameOf(spec.Steps[0].Kind), Is.EqualTo("skill-proof"));
+            Assert.That(NetScriptSpec.TryParse("skill-proof,jump", out _, out _), Is.False);
+            Assert.That(NetScriptSpec.TryParse("skill-proof:3", out _, out _), Is.False);
+        }
+
         [TestCase("")]
         [TestCase("dance")]
         [TestCase("walk-forward:")]

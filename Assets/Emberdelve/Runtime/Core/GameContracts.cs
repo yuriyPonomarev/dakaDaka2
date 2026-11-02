@@ -390,6 +390,24 @@ namespace Emberdelve.Core
         Emberdelve.Items.Inventory Inventory { get; }
     }
 
+    /// <summary>Optional effective duration multiplier read from the authority-registered caster, never from cast intent.</summary>
+    public interface ISkillCooldownSource
+    {
+        float SkillCooldownFactor { get; }
+    }
+
+    /// <summary>Optional actor-owned chest-opening rate. A server must own the equivalent stat read.</summary>
+    public interface IInteractionSpeedSource
+    {
+        float InteractionSpeedFactor { get; }
+    }
+
+    /// <summary>Optional per-actor hold duration. The interactor freezes it for one uninterrupted attempt.</summary>
+    public interface IActorHoldDuration
+    {
+        float ResolveHoldDuration(IInteractionActor actor);
+    }
+
     /// <summary>Anything a player can act on with the interact key. R2: every call carries the acting entity.</summary>
     public interface IInteractable
     {

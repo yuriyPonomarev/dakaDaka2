@@ -197,6 +197,46 @@ namespace Emberdelve.Net
 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
         /// <summary>
+        /// Development proof only: exercise the future server skill receiver across real
+        /// connections. Deliberately allows a forged call through NGO so the common server
+        /// path must reject it. Not an exposed production skill channel or client input.
+        /// </summary>
+        [Rpc(SendTo.Server, RequireOwnership = false)]
+        public void SkillIntentProofRpc(int slot, uint sequence, RpcParams rpcParams = default)
+        {
+            ulong sender = rpcParams.Receive.SenderClientId;
+            NetIdentityTable table = NetIdentityTable.Current;
+            if (!IsServer || !IsSpawned || table == null ||
+                !table.TryGetByClient(sender, out NetIdentity row) || row == null ||
+                sender != OwnerClientId || row.ClientId != sender || row.Object != NetworkObject ||
+                row.Rig == null || row.Rig != Rig || row.PlayerId != row.Rig.PlayerId ||
+                row.Rig.IsDead || row.Rig.Skills == null)
+            {
+                PlayerRig target = Rig;
+                Debug.Log(NetTuning.LogPrefix + "[server] skill-proof reject=identity sender=" + sender +
+                          " target=" + (target != null ? target.PlayerId : 0) +
+                          " mana=" + (target != null && target.Mana != null ? target.Mana.CurrentMana : -1f));
+                return;
+            }
+
+            // A connection's single ordered sequence covers both slots. The time and all
+            // gameplay outcomes come from the server; no identity or outcome is in the RPC.
+            SkillIntentVerdict verdict = row.SkillIntents.Submit(slot, sequence, Time.realtimeSinceStartupAsDouble);
+            if (verdict != SkillIntentVerdict.Accepted)
+            {
+                Debug.Log(NetTuning.LogPrefix + "[server] skill-proof reject=" + verdict + " sender=" + sender + " seq=" + sequence);
+                return;
+            }
+
+            float manaBefore = row.Rig.Mana != null ? row.Rig.Mana.CurrentMana : -1f;
+            bool cast = row.Rig.Skills.TryCastSlot(slot);
+            float manaAfter = row.Rig.Mana != null ? row.Rig.Mana.CurrentMana : -1f;
+            Debug.Log(NetTuning.LogPrefix + "[server] skill-proof admitted sender=" + sender + " slot=" + slot +
+                      " seq=" + sequence + " cast=" + cast + " manaBefore=" + manaBefore + " manaAfter=" + manaAfter +
+                      " cooldown=" + row.Rig.Skills.CooldownRemaining(slot));
+        }
+
+        /// <summary>
         /// DEVELOPMENT-ONLY forged-owner movement probe: the same payload and the same server path as <see cref="SubmitMoveRpc"/>,
         /// but RequireOwnership is OFF, so a client that does NOT own this object can still deliver it. The server compares the
         /// connection that delivered it with the object's owner and rejects, counts and logs the forgery.

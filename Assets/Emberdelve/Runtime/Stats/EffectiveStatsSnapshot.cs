@@ -35,6 +35,8 @@ namespace Emberdelve.Stats
         public readonly float ProjectileFlatDamageBonus;
         public readonly float AbilityEffectScale;
         public readonly float ActionSpeedFactor;
+        public readonly float InteractionSpeedFactor;
+        public readonly float SkillCooldownFactor;
         public readonly float StatusSpeedMultiplier;
         public readonly float StatusOutgoingDamageMultiplier;
 
@@ -44,7 +46,7 @@ namespace Emberdelve.Stats
             float walkSpeed, float sprintSpeed, float crouchSpeed,
             float armorRating, float meleeDamageMultiplier, float rangedDamageMultiplier,
             float meleeFlatDamageBonus, float projectileFlatDamageBonus, float abilityEffectScale, float statusSpeedMultiplier,
-            float statusOutgoingDamageMultiplier, float actionSpeedFactor)
+            float statusOutgoingDamageMultiplier, float actionSpeedFactor, float interactionSpeedFactor, float skillCooldownFactor)
         {
             IsReady = isReady;
             AttributesReady = attributesReady;
@@ -67,6 +69,8 @@ namespace Emberdelve.Stats
             ProjectileFlatDamageBonus = projectileFlatDamageBonus;
             AbilityEffectScale = abilityEffectScale;
             ActionSpeedFactor = actionSpeedFactor;
+            InteractionSpeedFactor = interactionSpeedFactor;
+            SkillCooldownFactor = skillCooldownFactor;
             StatusSpeedMultiplier = statusSpeedMultiplier;
             StatusOutgoingDamageMultiplier = statusOutgoingDamageMultiplier;
         }
@@ -163,7 +167,9 @@ namespace Emberdelve.Stats
                 WeaponData.SanitizeBaseDamageBonus(projectileFlatBonus),
                 attributesReady ? attributes.GetAbilityEffectScale() : 1f,
                 Mathf.Clamp(speedStatus, 0f, 4f), Mathf.Clamp(damageStatus, 0f, 8f),
-                attributesReady ? attributes.ActionSpeedFactor : 1f);
+                attributesReady ? attributes.ActionSpeedFactor : 1f,
+                attributesReady ? attributes.InteractionSpeedFactor : 1f,
+                attributesReady ? attributes.SkillCooldownFactor : 1f);
         }
 
         private static void SumFlatDamage(IReadOnlyList<ItemInstance> worn, out float melee, out float projectile)

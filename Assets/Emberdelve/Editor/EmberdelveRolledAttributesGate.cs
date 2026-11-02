@@ -49,7 +49,12 @@ for(int j=0;j<6;j++)Check(rig.AttributeStats.GetAttribute((Emberdelve.Stats.SixA
 if(i==0)Check(Mathf.Abs(rig.GetOutgoingDamageMultiplier(rig.MainHandWeapon)-1.392f)<.0001f,"rolled STR actual weapon scaling");
 if(i==1)Check(Mathf.Abs(rig.Movement.ResolveWalkSpeed()-5.3277f)<.0001f,"rolled DEX actual walking plus fixed boots");
 if(i==4)Check(Mathf.Abs(rig.Mana.RegenPerSecond-3.25f)<.0001f,"rolled WIS real mana regen rate");
-if(i==5)Check(Mathf.Abs(rig.AttributeStats.GetAbilityEffectScale()-1.04f)<.0001f,"rolled CHA actual ability scale");
+if(i==4)Check(Mathf.Abs(rig.AttributeStats.GetAbilityEffectScale()-1.06f)<.0001f,"rolled WIS+3 gives independent score13 power1.06");
+if(i==5){
+Check(Mathf.Abs(rig.AttributeStats.GetAbilityEffectScale()-1f)<.0001f,"rolled CHA leaves WIS10 power1 unchanged");
+Check(Mathf.Abs(rig.SkillCooldownFactor-.94f)<.0001f,"rolled CHA13 gives independent cooldown multiplier.94");
+Check(Mathf.Abs(rig.InteractionSpeedFactor-1.06f)<.0001f,"rolled CHA13 gives independent opening rate1.06");
+}
 Check(gear.TryUnequip(EquipmentSlot.Feet,out reason),"unequip variant"+i);
 }
 Check(bag.MintedInstanceCount==minted,"rolled transfers mint no UIDs");

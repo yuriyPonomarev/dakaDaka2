@@ -1291,6 +1291,10 @@ namespace Emberdelve.UI
 
             float leftColumnHeight = HeaderHeight + ColumnGap + gridHeight + ColumnGap + DetailHeight +
                                      ColumnGap + CarryHeight;
+            // Keep the background behind the whole centered bag column when the grid is tall.
+            // Its centre and all existing child positions stay fixed; smaller grids restore the base size.
+            if (_panel != null)
+                _panel.sizeDelta = new Vector2(PanelWidth, Mathf.Max(PanelHeight, leftColumnHeight + 2f * PanelInset));
             float leftColumnTop = innerTop - (PanelHeight - 2f * PanelInset - leftColumnHeight) * 0.5f;
 
             float headerTop = leftColumnTop;

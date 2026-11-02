@@ -38,3 +38,42 @@ MonoBehaviour:
     value: 1.2
   - x: 30
     value: 1.28
+  interaction:
+  - x: 1
+    value: 0.75
+  - x: 6
+    value: 0.9
+  - x: 10
+    value: 1
+  - x: 16
+    value: 1.12
+  - x: 22
+    value: 1.2
+  - x: 30
+    value: 1.28
+  skillCooldown:
+  - x: 1
+    value: 1.2
+  - x: 6
+    value: 1.06
+  - x: 10
+    value: 1
+  - x: 16
+    value: 0.88
+  - x: 22
+    value: 0.7
+  - x: 30
+    value: 0.4
+  skillPower:
+  - x: 1
+    value: 0.7
+  - x: 6
+    value: 0.9
+  - x: 10
+    value: 1
+  - x: 16
+    value: 1.12
+  - x: 22
+    value: 1.24
+  - x: 30
+    value: 1.4

@@ -40,6 +40,7 @@ namespace Emberdelve.Skills
         private readonly SkillData[] _active = new SkillData[ActiveSlotCapacity];
         private readonly SkillData[] _passive = new SkillData[PassiveSlotCapacity];
         private readonly float[] _cooldownRemaining = new float[ActiveSlotCapacity];
+        private readonly float[] _cooldownDuration = new float[ActiveSlotCapacity];
         private readonly bool[] _castableCache = new bool[ActiveSlotCapacity];
         private readonly bool[] _readyCache = new bool[ActiveSlotCapacity];
 
@@ -97,7 +98,7 @@ namespace Emberdelve.Skills
             for (int i = 0; i < ActiveSlotCapacity; i++)
             {
                 _active[i] = null;
-                _cooldownRemaining[i] = 0f;
+                _cooldownRemaining[i] = _cooldownDuration[i] = 0f;
                 _castableCache[i] = false;
                 _readyCache[i] = true;
             }
@@ -302,6 +303,10 @@ namespace Emberdelve.Skills
                 return false;
             }
 
+            // Capture the accepted stamp now; regear after begin cannot change this cast's clock.
+            float acceptedCooldown = authority.TryGetSkillCooldown(rig.CombatId, skill.skillId, out float acceptedRemaining)
+                ? acceptedRemaining : SkillCooldownRules.Duration(skill.EffectiveCooldown, rig.SkillCooldownFactor);
+            _cooldownDuration[slot] = acceptedCooldown;
             _context.ActivationId = activationId;
 
             bool performed = behavior.Cast(_context);
@@ -314,7 +319,7 @@ namespace Emberdelve.Skills
             if (!performed)
             {
                 Debug.LogError($"[SkillCaster] '{skill.skillId}' passed CanCast but its effect did not run; the cast stays spent.", this);
-                _cooldownRemaining[slot] = skill.EffectiveCooldown;
+                _cooldownRemaining[slot] = acceptedCooldown;
                 _castableCache[slot] = false;
                 _readyCache[slot] = false;
                 Reject(slot, "the cast could not be performed");
@@ -322,7 +327,7 @@ namespace Emberdelve.Skills
                 return false;
             }
 
-            _cooldownRemaining[slot] = skill.EffectiveCooldown;
+            _cooldownRemaining[slot] = acceptedCooldown;
             _castableCache[slot] = false;
             _readyCache[slot] = false;
 
@@ -350,7 +355,9 @@ namespace Emberdelve.Skills
             bool castable = CanCastSlot(slot, out _);
 
             return new SkillSnapshot(slot, true, skill.skillId, skill.displayName, skill.description,
-                skill.ShortSummary, skill.EffectiveManaCost, skill.EffectiveCooldown, CooldownRemaining(slot),
+                skill.ShortSummary, skill.EffectiveManaCost,
+                CooldownRemaining(slot) > 0f ? _cooldownDuration[slot] : SkillCooldownRules.Duration(skill.EffectiveCooldown, rig != null ? rig.SkillCooldownFactor : 1f),
+                CooldownRemaining(slot),
                 ready, castable, KeyLabel(slot), skill.iconColor);
         }
 
@@ -366,7 +373,7 @@ namespace Emberdelve.Skills
             KitEpoch++;
             for (int i = 0; i < ActiveSlotCapacity; i++)
             {
-                _cooldownRemaining[i] = 0f;
+                _cooldownRemaining[i] = _cooldownDuration[i] = 0f;
                 _castableCache[i] = false;
                 _readyCache[i] = true;
                 GameEvents.RaiseSkillState(OwnerId, Snapshot(i));
@@ -389,7 +396,7 @@ namespace Emberdelve.Skills
             if (mana != null) mana.SetRegenerationActive(true);
             for (int i = 0; i < ActiveSlotCapacity; i++)
             {
-                _cooldownRemaining[i] = 0f;
+                _cooldownRemaining[i] = _cooldownDuration[i] = 0f;
                 GameEvents.RaiseSkillState(OwnerId, Snapshot(i));
             }
 

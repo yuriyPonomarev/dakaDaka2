@@ -46,8 +46,11 @@ namespace Emberdelve.Stats
         private DerivedStats _derived;
         private AttributeBonuses _rolledBonuses;
         private bool _ready;
+        private PiecewiseLinearCurve _skillPowerCurve = SkillPowerCurveDefaults.Curve;
         private PiecewiseLinearCurve _movementCurve = MovementCurveDefaults.Curve;
         private PiecewiseLinearCurve _actionCurve = ActionSpeedCurveDefaults.Curve;
+        private PiecewiseLinearCurve _interactionCurve = InteractionCurveDefaults.Curve;
+        private PiecewiseLinearCurve _skillCooldownCurve = SkillCooldownCurveDefaults.Curve;
 
         /// <summary>Changes whenever the class or equipped-instance derivation is replaced.</summary>
         public int Version { get; private set; }
@@ -97,6 +100,12 @@ namespace Emberdelve.Stats
 
         /// <summary>Captured DEX action rate, independent from locomotion and displayed modifiers.</summary>
         public float ActionSpeedFactor => _ready ? _actionCurve.Evaluate(GetAttribute(SixAttribute.Dexterity)) : 1f;
+
+        /// <summary>Captured CHA chest-opening rate, separate from existing ability magnitude.</summary>
+        public float InteractionSpeedFactor => _ready ? _interactionCurve.Evaluate(GetAttribute(SixAttribute.Charisma)) : 1f;
+
+        public float SkillCooldownFactor => _ready
+            ? SkillCooldownRules.SanitizeMultiplier(_skillCooldownCurve.Evaluate(GetAttribute(SixAttribute.Charisma))) : 1f;
 
         /// <summary>Effective DEX score evaluated against the immutable class-initialization snapshot.</summary>
         public float MoveSpeedFactor => _movementCurve.Evaluate(GetAttribute(SixAttribute.Dexterity));
@@ -154,6 +163,12 @@ namespace Emberdelve.Stats
         public void Initialize(CharacterClassData classData)
         {
             _owner = classData;
+            _skillPowerCurve = AttributeCurveProfile.CaptureSkillPower(
+                classData != null ? classData.attributeCurveProfile : null);
+            _skillCooldownCurve = AttributeCurveProfile.CaptureSkillCooldown(
+                classData != null ? classData.attributeCurveProfile : null);
+            _interactionCurve = AttributeCurveProfile.CaptureInteraction(
+                classData != null ? classData.attributeCurveProfile : null);
             _actionCurve = AttributeCurveProfile.CaptureAction(
                 classData != null ? classData.attributeCurveProfile : null);
             _movementCurve = AttributeCurveProfile.CaptureMovement(
@@ -370,14 +385,14 @@ namespace Emberdelve.Stats
         }
 
         /// <summary>
-        /// clamp(1 + 0.04 * CHA modifier, 0.6, 1.4): the beneficial magnitude/duration scale for active
-        /// skills. Since U2A5 this is the number SkillCaster snapshots into SkillContext.EffectScale for
-        /// every accepted cast, and the number the projectile skills carry into their SkillIntent for the
-        /// authority to bound and apply once. Costs, cooldowns and projectile counts never come from it.
+        /// Captured authored WIS skill-power curve, bounded.6..1.4. SkillCaster and the authority
+        /// snapshot it once per accepted cast. Costs, cooldowns, projectile counts and ordinary
+        /// weapon damage remain separate. Regear affects subsequent casts, never a running effect.
         /// </summary>
         public float GetAbilityEffectScale()
         {
-            return AttributeRules.AbilityEffectScale(_derived.Effective);
+            return _ready ? SkillPowerRules.SanitizeFactor(
+                _skillPowerCurve.Evaluate(GetAttribute(SixAttribute.Wisdom))) : 1f;
         }
 
         /// <summary>One-line read model for a panel or a log: scores with modifiers, then derived vitals.</summary>

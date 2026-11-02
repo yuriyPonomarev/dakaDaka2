@@ -25,12 +25,14 @@ namespace Emberdelve.Interaction
         private IInteractable _current;
         private MonoBehaviour _currentHost;
         private float _holdProgress;
+        private float _holdDuration;
         private string _lastPrompt = string.Empty;
         private HealthComponent _health;
         private bool _runEnded;
 
         public IInteractable CurrentTarget => _current;
         public float HoldProgress => _holdProgress;
+        public float CapturedHoldDuration => _holdDuration;
 
         private void Awake()
         {
@@ -56,8 +58,7 @@ namespace Emberdelve.Interaction
             {
                 _current = target;
                 _currentHost = target as MonoBehaviour;
-                _holdProgress = 0f;
-                GameEvents.RaiseInteractionHold(rig.PlayerId, 0f);
+                ResetHold();
                 _lastPrompt = target == null ? string.Empty : BuildPrompt(rig, target, out _);
                 GameEvents.RaiseInteractionPrompt(rig.PlayerId, _lastPrompt);
             }
@@ -76,17 +77,26 @@ namespace Emberdelve.Interaction
 
             if (_current.RequiresHold)
             {
-                float duration = Mathf.Max(0.1f, _current.HoldDuration);
-
                 if (input.InteractHeld)
                 {
+                    float duration;
+                    if (_current is IActorHoldDuration timed)
+                    {
+                        // Keep the capture while partial progress decays, so repress/regear cannot retime it.
+                        if (_holdDuration <= 0f) _holdDuration = Mathf.Max(0.1f, timed.ResolveHoldDuration(rig));
+                        duration = _holdDuration;
+                    }
+                    else
+                    {
+                        // Extraction and other non-opted-in holds retain their original timing path.
+                        duration = Mathf.Max(0.1f, _current.HoldDuration);
+                    }
                     _holdProgress += Time.deltaTime / duration;
                     GameEvents.RaiseInteractionHold(rig.PlayerId, _holdProgress);
 
                     if (_holdProgress >= 1f)
                     {
-                        _holdProgress = 0f;
-                        GameEvents.RaiseInteractionHold(rig.PlayerId, 0f);
+                        ResetHold();
 
                         // The target may have become invalid during the hold (rule changed, run ended):
                         // ask again instead of trusting the answer from when the hold began.
@@ -103,6 +113,7 @@ namespace Emberdelve.Interaction
                 else if (_holdProgress > 0f)
                 {
                     _holdProgress = Mathf.Max(0f, _holdProgress - Time.deltaTime * 1.6f);
+                    if (_holdProgress <= 0f) _holdDuration = 0f;
                     GameEvents.RaiseInteractionHold(rig.PlayerId, _holdProgress);
                 }
             }
@@ -176,14 +187,20 @@ namespace Emberdelve.Interaction
             return best;
         }
 
+        private void ResetHold()
+        {
+            _holdProgress = 0f;
+            _holdDuration = 0f;
+            GameEvents.RaiseInteractionHold(rig.PlayerId, 0f);
+        }
+
         private void ClearTarget()
         {
             if (_current != null)
             {
                 _current = null;
                 _currentHost = null;
-                _holdProgress = 0f;
-                GameEvents.RaiseInteractionHold(rig.PlayerId, 0f);
+                ResetHold();
                 _lastPrompt = string.Empty;
                 GameEvents.RaiseInteractionPrompt(rig.PlayerId, string.Empty);
             }
@@ -207,9 +224,8 @@ namespace Emberdelve.Interaction
         // Any damage event interrupts a hold in progress: the player has to start over.
         private void OnDamaged(DamageInfo info)
         {
-            if (_holdProgress <= 0f) return;
-            _holdProgress = 0f;
-            GameEvents.RaiseInteractionHold(rig.PlayerId, 0f);
+            if (_holdProgress <= 0f && _holdDuration <= 0f) return;
+            ResetHold();
         }
 
         private void OnDisable()

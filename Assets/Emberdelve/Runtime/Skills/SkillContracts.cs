@@ -30,8 +30,8 @@ namespace Emberdelve.Skills
         public int ActivationId;
 
         /// <summary>
-        /// The ability effect scale of THIS cast (Docs/Design/ATTRIBUTES.md):
-        /// clamp(1 + 0.04 * CHA modifier, 0.6, 1.4), snapshotted by SkillCaster when the cast was accepted.
+        /// The ability effect scale of THIS cast (D4d1): the captured authored WIS skill-power curve,
+        /// bounded.6..1.4 and snapshotted by SkillCaster when the cast was accepted.
         /// 1 whenever the caster owns no attribute state, so an entity without six scores behaves exactly as
         /// it did before the amendment.
         ///
@@ -39,7 +39,7 @@ namespace Emberdelve.Skills
         /// what makes the scale per-cast instead of per-frame: an effect already running (a dash in flight,
         /// a status already applied) keeps the numbers the cast that produced it had, and gear changed
         /// afterwards only moves the next cast. It is also the only place this scale exists, so a behavior
-        /// that applied it and then handed it to the authority as well would be counting CHA twice.
+        /// that applied it and then handed it to the authority as well would be counting skill power twice.
         /// </summary>
         public float EffectScale { get; private set; }
 

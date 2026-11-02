@@ -245,10 +245,13 @@ namespace Emberdelve.EditorTools
                 check(afterAttributeMutation.Attributes.Effective.Dexterity == 16
                     && afterAttributeMutation.Attributes.Effective.Strength == 10,
                     "direct StatsComponent.Initialize invalidates rig capture");
-                check(Mathf.Approximately(afterAttributeMutation.AbilityEffectScale, 0.96f)
+                check(afterAttributeMutation.Attributes.Effective.Wisdom == 14
+                    && afterAttributeMutation.Attributes.Effective.Charisma == 8
+                    && Mathf.Approximately(abilityScaleBeforeAttributeMutation, 1f)
+                    && Mathf.Approximately(afterAttributeMutation.AbilityEffectScale, 1.08f)
                     && Mathf.Approximately(rig.AbilityEffectScale, afterAttributeMutation.AbilityEffectScale)
                     && !Mathf.Approximately(abilityScaleBeforeAttributeMutation, afterAttributeMutation.AbilityEffectScale),
-                    "CHA mutation invalidates the old capture and updates the public snapshot-backed ability scale");
+                    "WIS mutation invalidates the old capture and updates the public snapshot-backed ability scale");
 
                 float speedBeforeSlow = rig.Movement.ResolveGroundSpeed(false, false);
                 int statusVersionBeforeSlow = rig.Status.Version;

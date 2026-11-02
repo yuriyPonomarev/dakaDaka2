@@ -658,12 +658,14 @@ namespace Emberdelve.EditorTools
             view.Build();
 
             Check(CharacterStatsView.AttributeRowCount == 6, "the pane declares six attribute rows");
+            Check((int)baseScores[(int)SixAttribute.Wisdom] == 10, "saved Warrior bare WIS10 fixture anchor");
+            Check(Mathf.Approximately(rig.EffectiveStats.AbilityEffectScale, 1f), "independent WIS10 baseline skill power1");
             Dictionary<string, string> before = ReadPane(host.transform);
             string[] names = { "STRENGTH", "DEXTERITY", "CONSTITUTION", "INTELLIGENCE", "WISDOM", "CHARISMA" };
             foreach (string name in names) Check(before.ContainsKey(name), "pane lists " + name);
             Check(before.ContainsKey("Armour") && before["Armour"].StartsWith("0"), "pane shows armour 0 with nothing worn");
             Check(before.TryGetValue("Skill power", out string skillBefore)
-                && skillBefore.Contains("x  Charisma scales skill effects"),
+                && skillBefore.Contains("x (WIS)"),
                 "pane skill row comes from the current ability-scale snapshot: " + (skillBefore ?? "missing"));
 
             Check(bag.TryAddInstance(rare, out string reason) && gear.TryEquipFromInventory(bag.IndexOfInstance(rare.Uid), out reason), "wear the rare cloak for the pane: " + reason);
@@ -675,9 +677,11 @@ namespace Emberdelve.EditorTools
                 "WISDOM row shows fixed +1 and rolled +2 as worn +3: " + (wisRow ?? "missing"));
             Check(after.TryGetValue("Armour", out string armorRow) && armorRow.StartsWith("6"), "Armour row shows 6 with the cloak: " + (armorRow ?? "missing"));
             Check(after["STRENGTH"] == before["STRENGTH"] && after["CHARISMA"] == before["CHARISMA"], "scores the cloak does not touch are unchanged");
-            Check(after.TryGetValue("Skill power", out string skillAfter) && skillAfter == skillBefore,
-                "rolled Wisdom bonus leaves the snapshot-backed skill row unchanged: " + (skillAfter ?? "missing"));
-            Check(view.RowCount == 6 + 2 + 2 + 3, "the pane has one row per number (D1b: the deprecated Stamina row is gone, 3 -> 2 vitals) and did not grow on refresh (" + view.RowCount + ")");
+            Check(after.TryGetValue("Skill power", out string skillAfter) && skillAfter != skillBefore
+                && skillAfter == $"{1.06f:0.##}x (WIS)"
+                && Mathf.Approximately(rig.EffectiveStats.AbilityEffectScale, 1.06f),
+                "fixed WIS+1 and rolled WIS+2 give score13 and independent power1.06: " + (skillAfter ?? "missing"));
+            Check(view.RowCount == 6 + 2 + 2 + 4, "the pane has one row per number (D1b: the deprecated Stamina row is gone, 3 -> 2 vitals; D4c1 adds the chest-opening rate) and did not grow on refresh (" + view.RowCount + ")");
 
             gear.TryUnequip(EquipmentSlot.Back, out _);
             view.Refresh();
@@ -712,8 +716,10 @@ namespace Emberdelve.EditorTools
             Dictionary<string, string> withCharisma = ReadPane(host.transform);
             int charismaIndex = (int)SixAttribute.Charisma;
             int expectedCharisma = Mathf.Clamp((int)baseScores[charismaIndex] + 2, 1, 30);
-            int expectedCharismaModifier = AttributeRules.Modifier(expectedCharisma);
-            float expectedSkillScale = AttributeRules.AbilityEffectScale(expectedCharismaModifier);
+            // The cloak itself still has fixed WIS+1; its rolled CHA+2 must not become another power term.
+            // Own WIS10..16 knots1..1.12 give WIS11 ->1.02 independently of the runtime helper.
+            const float expectedSkillScale = 1.02f;
+            Check(rig.AttributeStats.GetAttribute(SixAttribute.Wisdom) == 11, "CHA-roll cloak keeps only its fixed WIS+1 power contribution");
             string skillWithCharisma = null;
             Check(withCharisma.TryGetValue("CHARISMA", out string charismaRow)
                 && charismaRow.StartsWith(expectedCharisma + "  ") && charismaRow.Contains("worn +2"),
@@ -721,9 +727,9 @@ namespace Emberdelve.EditorTools
             Check(Mathf.Approximately(rig.EffectiveStats.AbilityEffectScale, expectedSkillScale)
                 && withCharisma.TryGetValue("Skill power", out skillWithCharisma)
                 && skillWithCharisma != skillBefore
-                && skillWithCharisma == $"{rig.EffectiveStats.AbilityEffectScale:0.##}x  Charisma scales skill effects"
-                && skillWithCharisma == $"{expectedSkillScale:0.##}x  Charisma scales skill effects",
-                "numeric Skill power row matches the new snapshot and independent CHA rule: " + (skillWithCharisma ?? "missing"));
+                && skillWithCharisma == $"{rig.EffectiveStats.AbilityEffectScale:0.##}x (WIS)"
+                && skillWithCharisma == $"{expectedSkillScale:0.##}x (WIS)",
+                "numeric Skill power row matches fixed WIS11; rolled CHA is not a power multiplier: " + (skillWithCharisma ?? "missing"));
 
             Check(gear.TryUnequip(EquipmentSlot.Back, out reason), "unequip the CHA-roll cloak: " + reason);
             view.Refresh();
@@ -731,8 +737,8 @@ namespace Emberdelve.EditorTools
             Check(afterCharismaUnequip["CHARISMA"] == before["CHARISMA"]
                 && afterCharismaUnequip["Skill power"] == skillBefore
                 && Mathf.Approximately(rig.EffectiveStats.AbilityEffectScale,
-                    AttributeRules.AbilityEffectScale(AttributeRules.Modifier((int)baseScores[charismaIndex]))),
-                "CHA unequip restores the original score and snapshot-backed skill scale");
+                    1f),
+                "CHA-cloak unequip restores original CHA/WIS-backed power");
         }
 
         private static Dictionary<string, string> ReadPane(Transform host)

@@ -4,6 +4,7 @@ using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.Player;
+using Emberdelve.Stats;
 
 [assembly: InternalsVisibleTo("Assembly-CSharp-Editor")]
 [assembly: InternalsVisibleTo("Emberdelve.Editor")]
@@ -93,6 +94,7 @@ namespace Emberdelve.Combat
         private struct SkillStamp
         {
             public float Time;
+            public float Cooldown;
             public int Epoch;
         }
 
@@ -399,12 +401,13 @@ namespace Emberdelve.Combat
             // Cooldown on the authority clock. A stamp from an older kit epoch (a death, a respawn, a new
             // class application) no longer counts, exactly like the caster's own cleared cooldowns.
             float now = Now;
-            float cooldown = skill.EffectiveCooldown;
+            float multiplier = caster is ISkillCooldownSource source ? source.SkillCooldownFactor : 1f;
+            float cooldown = SkillCooldownRules.Duration(skill.EffectiveCooldown, multiplier);
             Dictionary<string, SkillStamp> stamps = SkillStampsFor(casterCombatId);
             bool hadStamp = stamps.TryGetValue(skillId, out SkillStamp previous);
-            if (hadStamp && previous.Epoch == kitAccess.Epoch && cooldown > 0f && now - previous.Time < cooldown - SkillClockTolerance)
+            if (hadStamp && previous.Epoch == kitAccess.Epoch && previous.Cooldown > 0f && now - previous.Time < previous.Cooldown - SkillClockTolerance)
             {
-                return RejectCast(casterCombatId, skillId, $"{skillId} cast faster than its {cooldown:F1}s cooldown", out reason);
+                return RejectCast(casterCombatId, skillId, $"{skillId} cast faster than its accepted {previous.Cooldown:F1}s cooldown", out reason);
             }
 
             // Mana and ammo are validated against the caster's own components, then spent here.
@@ -446,7 +449,7 @@ namespace Emberdelve.Combat
                 ? Mathf.Max(skillActivationWindow, DashSecondsFor(skill, scale) + DashReportGrace)
                 : skillActivationWindow);
             BeginMovementTracking(activation, skill, caster, scale);
-            stamps[skillId] = new SkillStamp { Time = now, Epoch = kitAccess.Epoch };
+            stamps[skillId] = new SkillStamp { Time = now, Cooldown = cooldown, Epoch = kitAccess.Epoch };
             kitAccess.NoteCast(activation.Id);
 
             activationId = activation.Id;

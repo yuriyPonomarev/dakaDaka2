@@ -34,7 +34,7 @@ namespace Emberdelve.UI
         public const int AttributeRowCount = AttributeRules.AttributeCount;
         public const int VitalRowCount = 2;   // Health and Mana
         public const int GuardRowCount = 2;
-        public const int SpeedRowCount = 3;
+        public const int SpeedRowCount = 4;
         public const int LineCount = SectionCount + AttributeRowCount + VitalRowCount + GuardRowCount + SpeedRowCount;
 
         public const float SectionHeight = 21f;
@@ -163,6 +163,7 @@ namespace Emberdelve.UI
             Row("Walk speed", ready && _rig.Movement != null ? _rig.Movement.ResolveWalkSpeed().ToString("0.00") + " m/s" : "-");
             Row("Weapon damage", ready ? DescribeWeapon() : "-");
             Row("Skill power", ready ? DescribeSkillPower(snapshot.AbilityEffectScale) : "-");
+            Row("Chest opening", ready ? snapshot.InteractionSpeedFactor.ToString("0.##") + "x" : "-");
         }
 
         // ------------------------------------------------------------ lines
@@ -258,7 +259,7 @@ namespace Emberdelve.UI
 
         private static string DescribeSkillPower(float abilityEffectScale)
         {
-            return $"{abilityEffectScale:0.##}x  Charisma scales skill effects";
+            return $"{abilityEffectScale:0.##}x (WIS)";
         }
 
         private static string Signed(int value)

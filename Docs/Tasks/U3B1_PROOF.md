@@ -1,0 +1,5 @@
+# U3B1 development-only network proof
+
+This follow-on adds a development-only RPC and scripted probe; it is not player-facing networking. `NetIdentity` owns one skill-intent gate for its lifetime. The server receiver checks the connection, spawned ownership, identity row, object, rig, player id and life before using that connection's gate; the server's clock and server `SkillCaster` decide the outcome. The probe asks for another player's skill, then its own Battle Cry, replay, malformed slot and a new request while cooling down. Real input, replicated resource/cooldown/visual feedback, delivery ordering with movement, host/offline regressions and malformed-packet rate limiting remain unresolved. No release skill RPC is added.
+
+Changed `NetIdentityTable.cs`, `NetPlayerRig.cs`, `NetInputSender.cs`, `NetClientProbe.cs`, `NetScriptSpec.cs`, and `NetScriptSpecTests.cs`. Local review, Unity compilation, EditMode, admission regression, and separate server/two-client proof pending. Freeze source while local QA runs. The proof must establish actual server mana/cooldown changes and forged identity rejection, not merely a sent RPC or process exit code.

@@ -11,6 +11,7 @@ import time
 import urllib.request
 
 from status_writer import write_status
+from prompt_builder import build_prompt
 
 PROJECT = Path(__file__).resolve().parents[2]
 ROOT = PROJECT / "Logs" / "local-testing"
@@ -20,6 +21,7 @@ for folder in (ROOT, REQUESTS, RESULTS, ROOT / "sessions"):
     folder.mkdir(parents=True, exist_ok=True)
 STATE = ROOT / "status.json"
 CONTRACT = PROJECT / "Tools" / "LocalTesting" / "TESTER_CONTRACT.md"
+PROFILE = PROJECT / "Tools" / "LocalTesting" / "unity-tester" / "SKILL.md"
 # Share the original controller's OS lock without replacing its historical state.
 lock_path = Path.home() / ".pi/agent/projects/dungeon-extraction/controller.lock"
 lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -53,6 +55,8 @@ def source_hashes():
     paths += list((PROJECT / "Tools").rglob("*.ps1"))
     paths += list((PROJECT / "Tools").rglob("*.py"))
     paths += list((PROJECT / "AgentScripts").rglob("*.cs"))
+    paths += [CONTRACT]
+    paths += list(PROFILE.parent.rglob("*.md"))
     return {str(p.relative_to(PROJECT)).replace("\\", "/"):
             hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
 
@@ -80,7 +84,9 @@ while True:
     brief = Path(request["brief"])
     if not brief.is_absolute():
         brief = PROJECT / brief
-    prompt = CONTRACT.read_text(encoding="utf-8") + "\n\n" + brief.read_text(encoding="utf-8-sig")
+    # Pi deliberately runs with --no-skills. Inject this narrowly scoped profile explicitly;
+    # the task brief remains last and supplies the current scope and evidence paths.
+    prompt = build_prompt(CONTRACT, PROFILE, brief)
     prompt_path = run / "prompt.md"
     prompt_path.write_text(prompt, encoding="utf-8")
     before = source_hashes()

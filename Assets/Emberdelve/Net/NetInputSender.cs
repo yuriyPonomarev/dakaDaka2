@@ -71,7 +71,7 @@ namespace Emberdelve.Net
             _spawnedAt = Time.unscaledTime;
 
             NetScriptSpec spec = args != null ? args.ScriptSpec : null;
-            _spec = spec != null && !spec.IsForgeOwnerOnly ? spec : null; // forge-owner is NetClientProbe's, not a movement script
+            _spec = spec != null && !spec.IsForgeOwnerOnly && !spec.IsSkillProofOnly ? spec : null; // probe scripts are not movement scripts
             _useRealInput = _spec == null && !Application.isBatchMode && _rig != null && _rig.Input != null;
             if (_useRealInput) _rig.SetInputEnabled(true);
 

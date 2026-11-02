@@ -20,10 +20,15 @@ namespace Emberdelve.Player
     [RequireComponent(typeof(PlayerMovement))]
     [RequireComponent(typeof(PlayerLook))]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, IWeaponChangeSource, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IGuardStateSource, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback, IKitSeedSource, IKitView, IMovementRollback, IActionSpeedSource
+    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, IWeaponChangeSource, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IGuardStateSource, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback, IKitSeedSource, IKitView, IMovementRollback, IActionSpeedSource, IInteractionSpeedSource, ISkillCooldownSource
     {
         /// <summary>Effective capture read by the offline authority; U3B must provide the server-owned equivalent.</summary>
         public float ActionSpeedFactor => EffectiveStats.IsReady ? EffectiveStats.ActionSpeedFactor : 1f;
+
+        /// <summary>Effective CHA rate for local chest holds; not proof of server-timed interaction.</summary>
+        public float InteractionSpeedFactor => EffectiveStats.IsReady ? EffectiveStats.InteractionSpeedFactor : 1f;
+
+        public float SkillCooldownFactor => EffectiveStats.IsReady ? EffectiveStats.SkillCooldownFactor : 1f;
 
         [Header("Components")]
         [SerializeField] private EmberdelveInput input;

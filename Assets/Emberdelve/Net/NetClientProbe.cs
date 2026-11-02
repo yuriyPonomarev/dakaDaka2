@@ -134,7 +134,7 @@ namespace Emberdelve.Net
 
         private void RunScript(NetPlayerRig ownedRig, IReadOnlyList<NetPlayerRig> rigs)
         {
-            if (_scriptDone || _script != NetLaunchArgs.ScriptForgeOwner) return; // movement scripts belong to NetInputSender
+            if (_scriptDone || (_script != NetLaunchArgs.ScriptForgeOwner && _script != "skill-proof")) return;
 
             NetPlayerRig victim = null;
             for (int i = 0; i < rigs.Count; i++)
@@ -148,6 +148,17 @@ namespace Emberdelve.Net
             _scriptDone = true;
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
             int victimId = victim.ServerPlayerId.Value;
+            if (_script == "skill-proof")
+            {
+                // Forge first: it must not consume the real owner's sequence or alter their kit.
+                victim.SkillIntentProofRpc(1, 1);
+                ownedRig.SkillIntentProofRpc(1, 1);
+                ownedRig.SkillIntentProofRpc(1, 1); // replay
+                ownedRig.SkillIntentProofRpc(9, 2); // invalid slot
+                ownedRig.SkillIntentProofRpc(1, 2); // fresh, but same skill is cooling down
+                Debug.Log(NetTuning.LogPrefix + "[client] script skill-proof sent target=" + victimId + " forged=1 self=4");
+                return;
+            }
             victim.ForgeOwnerTestRpc(777);
             victim.ForgeOwnerTestRpc(778);
             ownedRig.ForgeOwnerTestRpc(5);

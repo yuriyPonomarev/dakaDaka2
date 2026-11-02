@@ -17,52 +17,15 @@ using Emberdelve.Stats;
 namespace Emberdelve.EditorTools
 {
     /// <summary>
-    /// U2A5 gate: the CHA half of Docs/Design/ATTRIBUTES.md - ability effect_scale =
-    /// clamp(1 + 0.04 * CHA modifier, 0.6, 1.4) - verified through real casts, not through the helper.
-    ///
-    /// Lifecycle is the pattern EmberdelveAttributeVitalsGate / EmberdelveAttributeActionGate proved:
-    /// [InitializeOnLoad] subscribes once, Run() records the request in SessionState (which survives the
-    /// play-mode domain reload), opens a transient unsaved empty scene and asks for play mode.
-    /// EnteredPlayMode builds the rigs once with real AddComponent calls, so PlayerRig.Awake,
-    /// PlayerMovement.Awake (+CharacterController, minMoveDistance 0), PlayerLook.Awake, HealthComponent,
-    /// StatusComponent, SkillCaster.Awake and LocalCombatAuthority.Awake all run the way a scene rig runs
-    /// them. Nothing is saved, no scene or asset is written, and no Awake is invoked by hand or reflection;
-    /// reflection is used once, read-only, to see which ManaComponent the caster actually holds.
-    /// The pass is a coroutine so real frames, real physics and real Update order drive the measurements.
-    ///
-    /// Dash (warrior): SkillCaster.TryCastSlot -> DashBehavior -> PlayerMovement.TryStartDash ->
-    /// CharacterController.Move. The measured dash speed stays exactly the authored dashDistance /
-    /// dashDuration at every scale (that is what "scaled together" means, and it is what leaves the
-    /// authored trajectory speed and PlayerMovement's 24 m/s cap untouched); the duration derived from
-    /// PlayerMovement's own DashProgress is dashDuration * scale; the ground actually covered is
-    /// dashDistance * scale; and a real Emv_Level wall still stops the dash. Every dash is measured only
-    /// after PlayerMovement stops reporting it - a game-time bound derived from the authored scaled duration
-    /// plus a fixed settling margin, with an independent real-time watchdog - never after a fixed frame count.
-    ///
-    /// Battle Cry (warrior): real radial scan, real authority hits, real statuses on real targets. The self
-    /// buff and the target slow scale as DELTAS from neutral 1 (1.25 -> 1 + 0.25 * scale, 0.55 ->
-    /// 1 - 0.45 * scale) and their durations as duration * scale, inside the bounds StatusSpec and
-    /// StatusComponent already enforce. The authored flat 14 damage in the asset, the 6 m radius, the 4 target
-    /// cap, the 32 MP cost and the 14 s cooldown are identical at every scale - and so is the number a victim's
-    /// pool actually loses, 14 x the instigator multiplier the authority reads from the warrior (1.12 STR x
-    /// 1.2 Ashen Might) = 18.816, because BattleCryBehavior carries the scale into its two statuses and hands
-    /// the damage intent none. A buff already running is not retroactively
-    /// resized by gear equipped afterwards; the next accepted cast is.
-    ///
-    /// Multi-shot / Piercing Shot (archer): real magazine, real spread volley, real piercing line, real
-    /// authority. Each accepted arrow's damage is weapon falloff x the skill's own multiplier x the
-    /// instigator multiplier the authority read from the rig x the cast's CHA scale - each exactly once -
-    /// and is neither the unscaled number nor the scale applied twice. Projectile count, spread, range,
-    /// ammo, mana cost and cooldown are identical at every scale, and
-    /// PlayerRig.GetOutgoingDamageMultiplier does not move at all, so CHA cannot be counted twice.
-    ///
-    /// Ordinary attacks and an enemy instigator are unchanged at every CHA level. Shared class, skill,
-    /// weapon and item definitions are compared as pristine JSON before and after the whole pass.
-    ///
-    /// Run from the command line, e.g.
-    ///   Unity.exe -batchmode -nographics -projectPath . -logFile Logs/u2a5.log
-    ///           -executeMethod Emberdelve.EditorTools.EmberdelveAttributeSkillGate.Run
-    /// Exit 0 only when every check passed.
+    /// D4d1 candidate migration of the established AttributeSkill real-play gate. NOT COMPILED/RUN.
+    /// Captured authored WIS power is exercised through real dash movement/wall stopping, BattleCry
+    /// flat damage and scaled status deltas/durations, accepted-effect snapshot through regear,
+    /// MultiShot/Piercing actual projectile damage exactly once, ordinary sword/bow/rapier and
+    /// enemy negative controls, costs/ammo/hit budgets and unchanged shared definitions.
+    /// Original class scores are preserved. Archer WIS14 natural baseline is tested in addition to
+    /// cursed WIS8, neutral WIS10, WIS16 and WIS24; this retains below/at/above-neutral branches.
+    /// Unchanged CHA8 still supplies C2 cooldown9.27/11.33. Legacy pure CHA helper tests remain
+    /// separately historical. Rebase onto accepted C2 fixture repairs before integration.
     /// </summary>
     [InitializeOnLoad]
     public static class EmberdelveAttributeSkillGate
@@ -198,7 +161,7 @@ namespace Emberdelve.EditorTools
             /// The damage one Battle Cry victim's pool actually loses, fixture arithmetic from the accepted
             /// runtime rather than a query of it: the skill's authored flat 14 x the instigator multiplier
             /// LocalCombatAuthority reads from the warrior (STR 16 -> modifier 3 -> 1 + 0.04*3 = 1.12) x its
-            /// Ashen Might passive 1.2 = 18.816, at CHA 8, 10, 18 and 30 alike, because BattleCryBehavior
+            /// Ashen Might passive 1.2 = 18.816, at WIS 8, 10, 18 and 30 alike, because BattleCryBehavior
             /// scales only the two statuses and builds its SkillIntent with the default effect scale 1.
             /// </summary>
             private const float ExpectedCryDamage = 18.816f;
@@ -244,7 +207,7 @@ namespace Emberdelve.EditorTools
             private readonly List<GameObject> _targets = new List<GameObject>(24);
             private readonly List<ItemData> _tempItems = new List<ItemData>(12);
             private ItemCatalog _testCatalog;
-            private int _charmSerial;
+            private int _wisrmSerial;
             private readonly List<DamageInfo> _captured = new List<DamageInfo>(8);
             private readonly List<TestTarget> _subscribed = new List<TestTarget>(8);
 
@@ -522,7 +485,7 @@ namespace Emberdelve.EditorTools
             /// <summary>
             /// The helper band itself. These are the only helper-only assertions in the pass, and they exist
             /// to pin the two clamps a legal score can never reach on its own (the 1..30 score band caps the
-            /// CHA modifier at +10 / -5). Everything else below is measured from casted gameplay.
+            /// WIS modifier at +10 / -5). Everything else below is measured from casted gameplay.
             /// </summary>
             private void CheckAttributeRuleBand()
             {
@@ -683,9 +646,9 @@ namespace Emberdelve.EditorTools
                 Check(dash != null && dash.skillId == "warrior_dash", $"warrior active 1 is Dash ({SkillName(dash)})");
                 Check(cry != null && cry.skillId == "warrior_battle_cry", $"warrior active 2 is Battle Cry ({SkillName(cry)})");
 
-                CheckInt("warrior CHA score", 10, _warrior.AttributeStats.GetAttribute(SixAttribute.Charisma), "authored 16/10/14/8/10/10");
-                CheckInt("warrior CHA modifier", 0, _warrior.AttributeStats.GetModifier(SixAttribute.Charisma), "floor((10-10)/2) = 0");
-                CheckClose("warrior ability scale query at CHA 10", 1f, _warrior.AttributeStats.GetAbilityEffectScale(), "neutral");
+                CheckInt("warrior WIS score", 10, _warrior.AttributeStats.GetAttribute(SixAttribute.Wisdom), "authored 16/10/14/8/10/10");
+                CheckInt("warrior WIS modifier", 0, _warrior.AttributeStats.GetModifier(SixAttribute.Wisdom), "floor((10-10)/2) = 0");
+                CheckClose("warrior ability scale query at WIS 10", 1f, _warrior.AttributeStats.GetAbilityEffectScale(), "neutral");
 
                 CheckClose("Dash asset authored distance", 4.6f, dash.dashDistance, "the gate reads the asset, it never writes it");
                 CheckClose("Dash asset authored duration", 0.22f, dash.dashDuration, "the gate reads the asset, it never writes it");
@@ -694,7 +657,7 @@ namespace Emberdelve.EditorTools
 
                 CheckClose("Battle Cry asset radius", 6f, cry.radius, "cast validation is not scaled");
                 CheckInt("Battle Cry target cap", 4, cry.maxTargets, "target count is not scaled");
-                CheckClose("Battle Cry flat damage", 14f, cry.flatDamage, "the cry's own damage number is not CHA data in this slice");
+                CheckClose("Battle Cry flat damage", 14f, cry.flatDamage, "the cry's own damage number is not WIS data in this slice");
                 CheckClose("Battle Cry self magnitude", 1.25f, cry.selfStatusMagnitude, "authored magnitude stays authored");
                 CheckClose("Battle Cry target magnitude", 0.55f, cry.targetStatusMagnitude, "authored magnitude stays authored");
                 CheckClose("Battle Cry self duration", 6f, cry.selfStatusDuration, "authored duration stays authored");
@@ -710,30 +673,30 @@ namespace Emberdelve.EditorTools
                 SkillData dash = _warrior.Skills.ActiveSkill(0);
                 float authoredSpeed = dash.dashDistance / dash.dashDuration;
 
-                yield return MeasureDash("warrior CHA 10 (scale 1.00)", 1f, authoredSpeed);
+                yield return MeasureDash("warrior WIS 10 (scale 1.00)", 1f, authoredSpeed);
 
-                EquipCharm(_warrior, "u2a5_warrior_cha8", EquipmentSlot.Head, 8);
-                CheckInt("warrior CHA 18 after the charm", 18, _warrior.AttributeStats.GetAttribute(SixAttribute.Charisma), "10 + 8");
-                CheckClose("warrior ability scale query at CHA 18", 1.16f, _warrior.AttributeStats.GetAbilityEffectScale(), "modifier 4");
-                yield return MeasureDash("warrior CHA 18 (scale 1.16)", 1.16f, authoredSpeed);
+                EquipCharm(_warrior, "u2a5_warrior_wis8", EquipmentSlot.Head, 8);
+                CheckInt("warrior WIS 18 after the charm", 18, _warrior.AttributeStats.GetAttribute(SixAttribute.Wisdom), "10 + 8");
+                CheckClose("warrior ability scale query at WIS 18", 1.16f, _warrior.AttributeStats.GetAbilityEffectScale(), "modifier 4");
+                yield return MeasureDash("warrior WIS 18 (scale 1.16)", 1.16f, authoredSpeed);
 
-                CheckClose("dash duration at CHA 18 is 1.16x the measured baseline", _dashDurationBaseline * 1.16f,
+                CheckClose("dash duration at WIS 18 is 1.16x the measured baseline", _dashDurationBaseline * 1.16f,
                     _dashDurationMeasured, DurationTolerance, "the same skill's duration grew by the scale and nothing else");
-                CheckClose("ground covered at CHA 18 is 1.16x the measured baseline", _dashDistanceBaseline * 1.16f,
+                CheckClose("ground covered at WIS 18 is 1.16x the measured baseline", _dashDistanceBaseline * 1.16f,
                     _dashDistanceMeasured, DistanceTolerance, "the same skill's distance grew by the same scale");
 
                 UnequipAll(_warrior);
-                EquipCharm(_warrior, "u2a5_warrior_cha10_head", EquipmentSlot.Head, 10);
-                EquipCharm(_warrior, "u2a5_warrior_cha10_chest", EquipmentSlot.Chest, 10);
-                CheckInt("warrior CHA clamped to the legal 30", 30, _warrior.AttributeStats.GetAttribute(SixAttribute.Charisma), "10 + 10 + 10, score ceiling 30");
+                EquipCharm(_warrior, "u2a5_warrior_wis10_head", EquipmentSlot.Head, 10);
+                EquipCharm(_warrior, "u2a5_warrior_wis10_chest", EquipmentSlot.Chest, 10);
+                CheckInt("warrior WIS clamped to the legal 30", 30, _warrior.AttributeStats.GetAttribute(SixAttribute.Wisdom), "10 + 10 + 10, score ceiling 30");
                 CheckClose("warrior ability scale query at the 1.4 ceiling", AttributeRules.MaxEffectScale,
                     _warrior.AttributeStats.GetAbilityEffectScale(), "the highest scale a legal score can reach");
-                yield return MeasureDash("warrior CHA 30 (scale 1.40)", 1.4f, authoredSpeed);
+                yield return MeasureDash("warrior WIS 30 (scale 1.40)", 1.4f, authoredSpeed);
 
                 UnequipAll(_warrior);
-                CheckInt("warrior CHA back to 10", 10, _warrior.AttributeStats.GetAttribute(SixAttribute.Charisma),
+                CheckInt("warrior WIS back to 10", 10, _warrior.AttributeStats.GetAttribute(SixAttribute.Wisdom),
                     "recomputed from the pristine base, nothing stacked");
-                yield return MeasureDash("warrior CHA 10 again (scale 1.00, no stacking)", 1f, authoredSpeed);
+                yield return MeasureDash("warrior WIS 10 again (scale 1.00, no stacking)", 1f, authoredSpeed);
 
                 yield return RunDashBlocked();
 
@@ -772,9 +735,9 @@ namespace Emberdelve.EditorTools
                 Check(caster.TryCastSlot(0), $"{label}: Dash accepted through SkillCaster.TryCastSlot");
                 Check(rig.Movement.IsDashing, $"{label}: PlayerMovement reports a dash in progress");
                 CheckClose($"{label}: Dash spent exactly its authored mana", dash.EffectiveManaCost,
-                    manaBefore - rig.Mana.CurrentMana, "CHA never touches mana cost");
-                CheckClose($"{label}: Dash started its authored cooldown", dash.EffectiveCooldown,
-                    caster.CooldownRemaining(0), "CHA never touches cooldown");
+                    manaBefore - rig.Mana.CurrentMana, "WIS never touches mana cost");
+                CheckClose($"{label}: Dash accepted cooldown at unchanged CHA10", 7f,
+                    caster.CooldownRemaining(0), "WIS never touches cooldown");
 
                 yield return null;
 
@@ -866,7 +829,7 @@ namespace Emberdelve.EditorTools
                 SkillData dash = caster.ActiveSkill(0);
 
                 UnequipAll(rig);
-                EquipCharm(rig, "u2a5_warrior_cha8_blocked", EquipmentSlot.Head, 8);
+                EquipCharm(rig, "u2a5_warrior_wis8_blocked", EquipmentSlot.Head, 8);
 
                 DeactivateTargets();
                 rig.Movement.CancelDash();
@@ -881,7 +844,7 @@ namespace Emberdelve.EditorTools
 
                 Vector3 start = Flat(rig.transform.position);
                 float castTime = Time.time;
-                Check(caster.TryCastSlot(0), "blocked Dash cast accepted at CHA 18");
+                Check(caster.TryCastSlot(0), "blocked Dash cast accepted at WIS 18");
 
                 // R6: the same finish-bound wait MeasureDash uses. The old fixed 40-frame wait asserted
                 // ~0.013s into a 0.2552s dash (measured: 0.27m moved), i.e. while the dash was still running
@@ -913,28 +876,28 @@ namespace Emberdelve.EditorTools
 
             private IEnumerator RunBattleCryFlow()
             {
-                yield return CastBattleCry("warrior CHA 10 (scale 1.00)", 1f, 3);
+                yield return CastBattleCry("warrior WIS 10 (scale 1.00)", 1f, 3);
 
-                EquipCharm(_warrior, "u2a5_warrior_cha8_cry", EquipmentSlot.Head, 8);
-                yield return CastBattleCry("warrior CHA 18 (scale 1.16)", 1.16f, 3);
-
-                UnequipAll(_warrior);
-                EquipCharm(_warrior, "u2a5_warrior_chaneg2_cry", EquipmentSlot.Head, -2);
-                CheckInt("warrior CHA 8 after the cursed charm", 8, _warrior.AttributeStats.GetAttribute(SixAttribute.Charisma), "10 - 2");
-                CheckClose("warrior ability scale query at CHA 8", 0.96f, _warrior.AttributeStats.GetAbilityEffectScale(), "modifier -1");
-                yield return CastBattleCry("warrior CHA 8 (scale 0.96)", 0.96f, 3);
+                EquipCharm(_warrior, "u2a5_warrior_wis8_cry", EquipmentSlot.Head, 8);
+                yield return CastBattleCry("warrior WIS 18 (scale 1.16)", 1.16f, 3);
 
                 UnequipAll(_warrior);
-                EquipCharm(_warrior, "u2a5_warrior_cha10_head_cry", EquipmentSlot.Head, 10);
-                EquipCharm(_warrior, "u2a5_warrior_cha10_chest_cry", EquipmentSlot.Chest, 10);
-                CheckClose("warrior ability scale query at CHA 30", AttributeRules.MaxEffectScale,
+                EquipCharm(_warrior, "u2a5_warrior_wisneg2_cry", EquipmentSlot.Head, -2);
+                CheckInt("warrior WIS 8 after the cursed charm", 8, _warrior.AttributeStats.GetAttribute(SixAttribute.Wisdom), "10 - 2");
+                CheckClose("warrior ability scale query at WIS 8", 0.95f, _warrior.AttributeStats.GetAbilityEffectScale(), "modifier -1");
+                yield return CastBattleCry("warrior WIS 8 (scale 0.95)", 0.95f, 3);
+
+                UnequipAll(_warrior);
+                EquipCharm(_warrior, "u2a5_warrior_wis10_head_cry", EquipmentSlot.Head, 10);
+                EquipCharm(_warrior, "u2a5_warrior_wis10_chest_cry", EquipmentSlot.Chest, 10);
+                CheckClose("warrior ability scale query at WIS 30", AttributeRules.MaxEffectScale,
                     _warrior.AttributeStats.GetAbilityEffectScale(), "clamped band ceiling");
-                yield return CastBattleCry("warrior CHA 30 (scale 1.40)", 1.4f, 3);
+                yield return CastBattleCry("warrior WIS 30 (scale 1.40)", 1.4f, 3);
 
                 UnequipAll(_warrior);
-                yield return CastBattleCry("warrior CHA 10 again (scale 1.00, no stacking)", 1f, 3);
+                yield return CastBattleCry("warrior WIS 10 again (scale 1.00, no stacking)", 1f, 3);
 
-                yield return CastBattleCry("warrior CHA 10 target cap (six hosts inside the radius)", 1f, 6);
+                yield return CastBattleCry("warrior WIS 10 target cap (six hosts inside the radius)", 1f, 6);
             }
 
             /// <summary>
@@ -998,8 +961,8 @@ namespace Emberdelve.EditorTools
 
                 CheckClose($"{label}: Battle Cry spent exactly its authored mana", cry.EffectiveManaCost,
                     manaBefore - rig.Mana.CurrentMana, "Docs/Design/ATTRIBUTES.md: effect_scale never scales mana cost");
-                CheckClose($"{label}: Battle Cry started its authored cooldown", cry.EffectiveCooldown,
-                    caster.CooldownRemaining(1), "effect_scale never scales cooldown");
+                CheckClose($"{label}: Battle Cry accepted cooldown at unchanged CHA10", 14f,
+                    caster.CooldownRemaining(1), "independent CHA10 cooldown literal");
                 Check(Mathf.Abs(playerHealthBefore - rig.CurrentHealth) < 0.001f,
                     $"{label}: the cry did not damage its own caster ({playerHealthBefore:F1} -> {rig.CurrentHealth:F1})");
 
@@ -1036,13 +999,13 @@ namespace Emberdelve.EditorTools
                     // -> DamageResolver.ResolveSkill multiplies the skill's authored flat 14 by the instigator
                     // multiplier it reads from the warrior (STR 16 -> modifier 3 -> 1.12) and by the Ashen
                     // Might passive 1.2, and BattleCryBehavior builds its SkillIntent with the default effect
-                    // scale 1, so the resolved number is 14 * 1.12 * 1.2 = 18.816 at every CHA. The asset's 14
+                    // scale 1, so the resolved number is 14 * 1.12 * 1.2 = 18.816 at every WIS. The asset's 14
                     // is asserted unchanged below and the resolver is untouched. The pool is 100000, whose
                     // float ulp is 0.0078125, so the subtraction can read 18.8125 - 0.0035 of quantization,
                     // inside the gate's own Exact band. Same Exact, same assertion, no tolerance widened.
                     CheckClose($"{label}: host {i} took the cry's resolved damage on its pool", ExpectedCryDamage,
                         hostHealth[i] - host.CurrentHealth,
-                        $"14 authored flat x 1.12 (STR modifier 3) x 1.2 (Ashen Might) = 18.816, identical at every CHA " +
+                        $"14 authored flat x 1.12 (STR modifier 3) x 1.2 (Ashen Might) = 18.816, identical at every WIS " +
                         $"because this mapping scales the cry's two statuses and not its flat number " +
                         $"({hostHealth[i]:F4} -> {host.CurrentHealth:F4})");
                     Check(host.HasStatus(StatusKind.Slow), $"{label}: host {i} is slowed");
@@ -1069,8 +1032,8 @@ namespace Emberdelve.EditorTools
                 if (!Mathf.Approximately(scale, 1f))
                 {
                     // R6: the exclusion threshold has to be the gate's own exactness band, not a looser
-                    // constant. At scale 0.96 the hypotheses are 1 + 0.25*0.96 = 1.24 (correct) against
-                    // 1.25*0.96 = 1.20, and 1 - 0.45*0.96 = 0.568 against 0.55*0.96 = 0.528: both separated by
+                    // constant. At scale 0.95 the hypotheses are 1 + 0.25*0.95 = 1.24 (correct) against
+                    // 1.25*0.95 = 1.20, and 1 - 0.45*0.95 = 0.568 against 0.55*0.95 = 0.528: both separated by
                     // |1 - scale| = 0.04, so a >0.05 test was mathematically incapable of telling them apart
                     // and failed the correct runtime. 0.04 > Exact 0.011 (and 0.16 at 1.16, 0.40 at 1.40), and
                     // the exact expected-value checks above still pin the measured number itself.
@@ -1100,7 +1063,7 @@ namespace Emberdelve.EditorTools
             }
 
             /// <summary>
-            /// The snapshot rule: a scale belongs to the cast that took it. Equipping CHA gear while a buff is
+            /// The snapshot rule: a scale belongs to the cast that took it. Equipping WIS gear while a buff is
             /// already running must not retroactively resize that buff, the next accepted cast must pick the
             /// new number up, and taking the gear off must give the old number back exactly.
             /// </summary>
@@ -1121,7 +1084,7 @@ namespace Emberdelve.EditorTools
                 yield return WaitFrames(2);
 
                 yield return SpaceForNextCryCast(caster.ActiveSkill(1));
-                Check(caster.TryCastSlot(1), "snapshot Battle Cry accepted at CHA 10");
+                Check(caster.TryCastSlot(1), "snapshot Battle Cry accepted at WIS 10");
                 _cryCastsTaken++;
 
                 float buffBefore = rig.Status.OutgoingDamageMultiplier;
@@ -1129,10 +1092,10 @@ namespace Emberdelve.EditorTools
                 float slowBefore = host.Status.SpeedMultiplier;
                 float slowDurationBefore = host.Status.RemainingOf(StatusKind.Slow);
 
-                CheckClose("snapshot buff at CHA 10 is the authored 1.25", 1.25f, buffBefore, Exact, "scale 1");
+                CheckClose("snapshot buff at WIS 10 is the authored 1.25", 1.25f, buffBefore, Exact, "scale 1");
 
-                EquipCharm(rig, "u2a5_warrior_cha10_snapshot", EquipmentSlot.Head, 10);
-                CheckClose("CHA 20 query now reports scale 1.2", 1.2f, rig.AttributeStats.GetAbilityEffectScale(), Exact, "modifier 5");
+                EquipCharm(rig, "u2a5_warrior_wis10_snapshot", EquipmentSlot.Head, 10);
+                CheckClose("WIS 20 query now reports scale 1.2", 1.2f, rig.AttributeStats.GetAbilityEffectScale(), Exact, "modifier 5");
 
                 CheckClose("the running self buff was not retroactively resized (magnitude)", buffBefore,
                     rig.Status.OutgoingDamageMultiplier, Exact, "the effect already in force keeps its cast's snapshot");
@@ -1150,7 +1113,7 @@ namespace Emberdelve.EditorTools
                 yield return WaitFrames(2);
 
                 yield return SpaceForNextCryCast(caster.ActiveSkill(1));
-                Check(caster.TryCastSlot(1), "second Battle Cry accepted at CHA 20");
+                Check(caster.TryCastSlot(1), "second Battle Cry accepted at WIS 20");
                 _cryCastsTaken++;
                 CheckClose("the next accepted cast picked up the new buff delta", 1.3f, rig.Status.OutgoingDamageMultiplier, Exact,
                     "1 + 0.25 * 1.2");
@@ -1273,14 +1236,14 @@ namespace Emberdelve.EditorTools
                 _captured.Add(info);
             }
 
-            // -------------------------------------------------------------- ephemeral CHA gear
+            // -------------------------------------------------------------- ephemeral WIS gear
 
             /// <summary>
-            /// One CHA-only charm, created as an instance, carried in the bag, then worn through the real
+            /// One WIS-only charm, created as an instance, carried in the bag, then worn through the real
             /// Equipment path. Never saved, never a project asset, destroyed with the pass. The bonus is a
             /// single AttributeBonusEntry: no statModifiers, so nothing else can move while the charm is on.
             /// </summary>
-            private void EquipCharm(PlayerRig rig, string id, EquipmentSlot slot, int charismaBonus)
+            private void EquipCharm(PlayerRig rig, string id, EquipmentSlot slot, int wisdomBonus)
             {
                 if (rig == null || rig.Inventory == null || rig.Equipment == null)
                 {
@@ -1295,16 +1258,16 @@ namespace Emberdelve.EditorTools
                 // several times with the same label for different bonuses (for example the cursed -2 charm in two
                 // scenarios). The label stays in every message; the definition's own id gets a serial so each
                 // ephemeral charm is a distinct catalog entry.
-                charm.itemId = id + "_" + (++_charmSerial);
-                charm.displayName = "U2A5 CHA " + (charismaBonus >= 0 ? "+" : string.Empty) + charismaBonus;
-                charm.description = "Ephemeral U2A5 gate item: one authored CHA bonus, no other modifiers.";
+                charm.itemId = id + "_" + (++_wisrmSerial);
+                charm.displayName = "U2A5 WIS " + (wisdomBonus >= 0 ? "+" : string.Empty) + wisdomBonus;
+                charm.description = "Ephemeral U2A5 gate item: one authored WIS bonus, no other modifiers.";
                 charm.kind = ItemKind.Armor;
                 charm.equipSlot = slot;
                 charm.gridFootprint = new Vector2Int(1, 1);
                 charm.maxStack = 1;
                 charm.value = 1;
                 charm.statModifiers = null;
-                charm.attributeBonuses = new[] { new AttributeBonusEntry(SixAttribute.Charisma, charismaBonus) };
+                charm.attributeBonuses = new[] { new AttributeBonusEntry(SixAttribute.Wisdom, wisdomBonus) };
 
                 // R3 fixture: the charm is an ad-hoc definition, not a production catalog entry, so the bag mints
                 // against an explicit TEST catalog (production items + this charm).
@@ -1634,11 +1597,11 @@ namespace Emberdelve.EditorTools
             }
 
             /// <summary>
-            /// Wears exactly the CHA gear a scenario needs and nothing else. The authored item band is
+            /// Wears exactly the WIS gear a scenario needs and nothing else. The authored item band is
             /// -10..+10 per item, so a +20 experiment is two charms. UnequipAll runs first, which is also what
             /// keeps a removed charm from leaving a residue in the next measurement.
             /// </summary>
-            private void EquipCharisma(PlayerRig rig, int bonus, string idPrefix)
+            private void EquipWisdom(PlayerRig rig, int bonus, string idPrefix)
             {
                 UnequipAll(rig);
                 if (rig == null || bonus == 0) return;
@@ -1671,9 +1634,9 @@ namespace Emberdelve.EditorTools
             /// The warrior's ordinary attack, driven through the real MeleeCombat state machine (BeginSwing ->
             /// windup -> authority TryBeginMeleeSwing -> swept sweep through the host hit volumes) and
             /// asserted from the DamageInfo the authority actually produced, captured on the host before it
-            /// reaches the health pool. Docs/Design/ATTRIBUTES.md gives CHA no part in an ordinary attack, so
+            /// reaches the health pool. Docs/Design/ATTRIBUTES.md gives WIS no part in an ordinary attack, so
             /// 26 base x 1.12 (STR 16 -> modifier 3 -> 1 + 0.04*3) x 1.2 (Ashen Might) = 34.944 has to come out
-            /// the same way at CHA 8, 10, 18 and 30.
+            /// the same way at WIS 8, 10, 18 and 30.
             /// </summary>
             private IEnumerator RunWarriorOrdinaryAttackUnchanged()
             {
@@ -1688,21 +1651,21 @@ namespace Emberdelve.EditorTools
                 Check(melee != null && melee.enabled, "MeleeCombat is live because the class put a melee weapon in the main hand");
                 Check(rig.MainHandWeapon == _sword, "the Ashen Short Sword the class asset authored is what the warrior holds");
                 Check(_sword.DamageScale == WeaponDamageScale.Melee, "the sword scales off STR from its own definition, not from a name");
-                CheckClose("warrior outgoing multiplier with no CHA gear worn", 1.344f, rig.GetOutgoingDamageMultiplier(_sword),
-                    "STR 1.12 x Ashen Might 1.2 x no status: the ordinary damage picture before any CHA experiment");
+                CheckClose("warrior outgoing multiplier with no WIS gear worn", 1.344f, rig.GetOutgoingDamageMultiplier(_sword),
+                    "STR 1.12 x Ashen Might 1.2 x no status: the ordinary damage picture before any WIS experiment");
 
-                yield return SwingWarriorSword("warrior sword at CHA 10 (ability scale 1.00)", 0, 10, 1f);
-                yield return SwingWarriorSword("warrior sword at CHA 18 (ability scale 1.16)", 8, 18, 1.16f);
-                yield return SwingWarriorSword("warrior sword at CHA 8 (ability scale 0.96)", -2, 8, 0.96f);
-                yield return SwingWarriorSword("warrior sword at CHA 30 (ability scale 1.40)", 20, 30, 1.4f);
-                yield return SwingWarriorSword("warrior sword again at CHA 10 (nothing stacked)", 0, 10, 1f);
+                yield return SwingWarriorSword("warrior sword at WIS 10 (ability scale 1.00)", 0, 10, 1f);
+                yield return SwingWarriorSword("warrior sword at WIS 18 (ability scale 1.16)", 8, 18, 1.16f);
+                yield return SwingWarriorSword("warrior sword at WIS 8 (ability scale 0.95)", -2, 8, 0.95f);
+                yield return SwingWarriorSword("warrior sword at WIS 30 (ability scale 1.40)", 20, 30, 1.4f);
+                yield return SwingWarriorSword("warrior sword again at WIS 10 (nothing stacked)", 0, 10, 1f);
 
                 UnequipAll(rig);
                 DeactivateTargets();
                 yield return WaitFrames(1);
             }
 
-            private IEnumerator SwingWarriorSword(string label, int charmBonus, int expectedCha, float expectedScale)
+            private IEnumerator SwingWarriorSword(string label, int charmBonus, int expectedWis, float expectedScale)
             {
                 const float expected = 34.944f;
 
@@ -1710,7 +1673,7 @@ namespace Emberdelve.EditorTools
                 MeleeCombat melee = rig.GetComponent<MeleeCombat>();
 
                 DeactivateTargets();
-                EquipCharisma(rig, charmBonus, "u2a5_warrior_sword_gear");
+                EquipWisdom(rig, charmBonus, "u2a5_warrior_sword_gear");
                 rig.Movement.CancelDash();
                 rig.ClearStatuses();
                 rig.SetGuardHeld(false);
@@ -1723,12 +1686,12 @@ namespace Emberdelve.EditorTools
                 Physics.SyncTransforms();
                 yield return WaitFrames(2);
 
-                CheckInt($"{label}: CHA score", expectedCha, rig.AttributeStats.GetAttribute(SixAttribute.Charisma),
+                CheckInt($"{label}: WIS score", expectedWis, rig.AttributeStats.GetAttribute(SixAttribute.Wisdom),
                     "pristine class 10 plus the charm, recomputed from the class base every time");
                 CheckClose($"{label}: ability scale query", expectedScale, rig.AttributeStats.GetAbilityEffectScale(),
-                    "clamp(1 + 0.04 * CHA modifier, 0.6, 1.4)");
+                    "captured authored WIS score curve bounded.6..1.4");
                 CheckClose($"{label}: outgoing multiplier the authority reads", 1.344f, rig.GetOutgoingDamageMultiplier(_sword),
-                    "identical at every CHA level: CHA is not part of an ordinary attack");
+                    "identical at every WIS level: WIS is not part of an ordinary attack");
                 Check(!rig.IsGuarding, $"{label}: the warrior is not guarding, so no block reduction can hide inside the number");
 
                 ClearCaptured();
@@ -1747,7 +1710,7 @@ namespace Emberdelve.EditorTools
                 {
                     DamageInfo damage = _captured[0];
                     CheckClose($"{label}: resolved damage", expected, damage.Amount,
-                        "26 * 1.12 (STR modifier 3) * 1.2 (Ashen Might), the same whatever CHA is worn");
+                        "26 * 1.12 (STR modifier 3) * 1.2 (Ashen Might), the same whatever WIS is worn");
                     Check(damage.SourceCombatId == rig.CombatId && damage.SourceKind == EntityKind.LocalPlayer,
                         $"{label}: attributed to the warrior that swung it ({damage.SourceKind} #{damage.SourceCombatId})");
                     Check(damage.Type == _sword.damageType, $"{label}: the damage type still comes from the sword definition ({damage.Type})");
@@ -1764,7 +1727,7 @@ namespace Emberdelve.EditorTools
                 Check(_sword.baseDamage == 26f && _sword.reach == 2.3f && _sword.hitSphereRadius == 0.6f,
                     $"{label}: the sword definition still holds its authored numbers");
 
-                Debug.Log($"{Tag} {label}: cha={rig.AttributeStats.GetAttribute(SixAttribute.Charisma)} " +
+                Debug.Log($"{Tag} {label}: cha={rig.AttributeStats.GetAttribute(SixAttribute.Wisdom)} " +
                           $"scale={rig.AttributeStats.GetAbilityEffectScale():F4} damage={(hostHealthBefore - host.CurrentHealth):F4} " +
                           $"authority(accepted={_authority.AcceptedCount}, rejected={_authority.RejectedCount})");
 
@@ -1777,7 +1740,7 @@ namespace Emberdelve.EditorTools
             /// A real Hollow Servitor, built the way the level builds one (real EnemyAgent + EnemyData +
             /// NavGridData + GameConfig through the same serialized wiring the level builder uses), walking,
             /// seeing, winding up and submitting its own attack through the authority. The damage it deals is
-            /// the authored 15 of its claw at every CHA level the victim wears, because the authority reads the
+            /// the authored 15 of its claw at every WIS level the victim wears, because the authority reads the
             /// outgoing multipliers from the instigator and an enemy has no six-attribute component at all.
             /// </summary>
             private IEnumerator RunEnemyAttackUnchanged()
@@ -1812,9 +1775,9 @@ namespace Emberdelve.EditorTools
                 CheckClose("the enemy's outgoing multiplier is status-only (1)", 1f, _enemy.GetOutgoingDamageMultiplier(_claw),
                     "an entity with no six-attribute component contributes no attribute factor at all");
 
-                yield return TakeEnemyHit("servitor claw against the warrior at CHA 10", 0, 10, 1f);
-                yield return TakeEnemyHit("servitor claw against the warrior at CHA 18 (CHA gear worn)", 8, 18, 1.16f);
-                yield return TakeEnemyHit("servitor claw against the warrior at CHA 8 (cursed CHA gear)", -2, 8, 0.96f);
+                yield return TakeEnemyHit("servitor claw against the warrior at WIS 10", 0, 10, 1f);
+                yield return TakeEnemyHit("servitor claw against the warrior at WIS 18 (WIS gear worn)", 8, 18, 1.16f);
+                yield return TakeEnemyHit("servitor claw against the warrior at WIS 8 (cursed WIS gear)", -2, 8, 0.95f);
 
                 UnequipAll(rig);
                 if (_enemy != null) _enemy.enabled = false;
@@ -1822,14 +1785,14 @@ namespace Emberdelve.EditorTools
                 yield return WaitFrames(1);
             }
 
-            private IEnumerator TakeEnemyHit(string label, int charmBonus, int expectedCha, float expectedScale)
+            private IEnumerator TakeEnemyHit(string label, int charmBonus, int expectedWis, float expectedScale)
             {
                 PlayerRig rig = _warrior;
 
                 if (_enemy != null) _enemy.enabled = true;
 
                 DeactivateTargets();
-                EquipCharisma(rig, charmBonus, "u2a5_warrior_enemy_gear");
+                EquipWisdom(rig, charmBonus, "u2a5_warrior_enemy_gear");
                 rig.ClearStatuses();
                 rig.SetGuardHeld(false);
                 rig.transform.position = _warriorSpawn;
@@ -1838,12 +1801,12 @@ namespace Emberdelve.EditorTools
                 Physics.SyncTransforms();
                 yield return WaitFrames(2);
 
-                CheckInt($"{label}: CHA score", expectedCha, rig.AttributeStats.GetAttribute(SixAttribute.Charisma),
-                    "the victim's own CHA, which the authority never consults for incoming damage");
+                CheckInt($"{label}: WIS score", expectedWis, rig.AttributeStats.GetAttribute(SixAttribute.Wisdom),
+                    "the victim's own WIS, which the authority never consults for incoming damage");
                 CheckClose($"{label}: ability scale query", expectedScale, rig.AttributeStats.GetAbilityEffectScale(),
-                    "clamp(1 + 0.04 * CHA modifier, 0.6, 1.4)");
+                    "captured authored WIS score curve bounded.6..1.4");
                 CheckClose($"{label}: the victim's own outgoing multiplier", 1.344f, rig.GetOutgoingDamageMultiplier(_sword),
-                    "unchanged by its CHA gear, so nothing about the victim rescales the hit it receives");
+                    "unchanged by its WIS gear, so nothing about the victim rescales the hit it receives");
                 Check(!rig.IsGuarding, $"{label}: the warrior is not guarding, so no block reduction is folded into the incoming number");
 
                 ClearCaptured();
@@ -1856,7 +1819,7 @@ namespace Emberdelve.EditorTools
                 // within a few millimetres of depth of each other, and which one wins depends on the rig's exact height and the
                 // sample grid, so the gate does NOT pin Body vs Arms from a prediction here (the exact predictor-vs-authority equality
                 // is pinned in EnemySweepGate on static volumes). It pins what this gate is about: the damage is 15 x the literal
-                // factor of the location the authority reports, once, unaffected by the victim's CHA; the location is a torso or arm
+                // factor of the location the authority reports, once, unaffected by the victim's WIS; the location is a torso or arm
                 // contact. The prediction is only logged.
                 float windupDeadline = Time.time + ResolveTimeout;
                 while (_enemy != null && !_enemy.IsWindingUp && Time.time < windupDeadline) yield return null;
@@ -1876,7 +1839,7 @@ namespace Emberdelve.EditorTools
 
                 Check(_captured.Count >= 1, $"{label}: the enemy's swing came back through GameEvents.PlayerDamaged");
                 CheckClose($"{label}: incoming health loss", 15f * factor, delta,
-                    $"the authored 15 of the Hollow Claw x the literal {hitLocation} factor {factor:F1}, applied once, whatever CHA the victim wears");
+                    $"the authored 15 of the Hollow Claw x the literal {hitLocation} factor {factor:F1}, applied once, whatever WIS the victim wears");
                 Check(_authority.AcceptedCount == acceptedBefore + 1,
                     $"{label}: the authority accepted exactly one enemy attack ({acceptedBefore} -> {_authority.AcceptedCount})");
                 Check(_authority.RejectedCount == rejectedBefore,
@@ -1894,7 +1857,7 @@ namespace Emberdelve.EditorTools
                         $"{label}: unguarded hit, so no block touched it and Headshot is true only for a Head contact");
                 }
 
-                Debug.Log($"{Tag} {label}: victimCHA={rig.AttributeStats.GetAttribute(SixAttribute.Charisma)} " +
+                Debug.Log($"{Tag} {label}: victimWIS={rig.AttributeStats.GetAttribute(SixAttribute.Wisdom)} " +
                           $"scale={rig.AttributeStats.GetAbilityEffectScale():F4} incoming={delta:F4} " +
                           $"authority(accepted={_authority.AcceptedCount}, rejected={_authority.RejectedCount})");
 
@@ -1906,9 +1869,9 @@ namespace Emberdelve.EditorTools
             /// <summary>
             /// Multi-shot through the real kit: SkillCaster.TryCastSlot -> MultiShotBehavior -> RangedCombat
             /// magazine -> RangedSkillUtility.FireOne -> authority-owned projectile flight -> DamageResolver.
-            /// Each of the three authored arrows resolves its own live flight, sequence and impact, and carries the cast's CHA scale exactly
+            /// Each of the three authored arrows resolves its own live flight, sequence and impact, and carries the cast's WIS scale exactly
             /// once: 34 flat-band bow damage x 0.7 skill multiplier x 1.3216 instigator multipliers (DEX 1.12 x
-            /// Farshot 1.18) x the scale. Count, spread, range, ammo, mana and cooldown are identical at 0.96,
+            /// Farshot 1.18) x the scale. Count, spread, range, ammo, mana and cooldown are identical at 0.95,
             /// 1.00 and 1.16.
             /// </summary>
             private IEnumerator RunMultiShotFlow()
@@ -1916,7 +1879,7 @@ namespace Emberdelve.EditorTools
                 SkillData multi = _archer.Skills.ActiveSkill(0);
 
                 Check(multi != null && multi.skillId == "archer_multi_shot", $"archer active 1 is Multi-shot ({SkillName(multi)})");
-                CheckInt("Multi-shot authored projectile count", 3, multi.projectileCount, "three arrows, and CHA never changes it");
+                CheckInt("Multi-shot authored projectile count", 3, multi.projectileCount, "three arrows, and WIS never changes it");
                 CheckClose("Multi-shot authored spread", 26f, multi.spreadDegrees, "the fan angle is authored data");
                 CheckClose("Multi-shot authored weapon multiplier", 0.7f, multi.damageMultiplier, "each arrow carries 0.7 of the bow");
                 CheckInt("Multi-shot authored mana cost", 26, multi.EffectiveManaCost, "cost is not attribute data");
@@ -1926,9 +1889,11 @@ namespace Emberdelve.EditorTools
                 Check(_archer.MainHandWeapon == _bow, "the Hollow Bow the class asset authored is what the archer holds");
                 Check(_bow.DamageScale == WeaponDamageScale.Ranged, "the bow scales off DEX from its own definition");
 
-                yield return CastMultiShot("archer CHA 8 (scale 0.96, the class's own CHA)", 0, 8, 0.96f, 30.1959168f);
-                yield return CastMultiShot("archer CHA 10 (scale 1.00)", 2, 10, 1f, 31.45408f);
-                yield return CastMultiShot("archer CHA 18 (scale 1.16)", 10, 18, 1.16f, 36.4867328f);
+                yield return CastMultiShot("archer WIS14 natural baseline", 0, 14, 1.08f, 33.9704064f);
+                yield return CastMultiShot("archer WIS8 cursed below-neutral", -6, 8, .95f, 29.881376f);
+                yield return CastMultiShot("archer WIS10 neutral", -4, 10, 1f, 31.45408f);
+                yield return CastMultiShot("archer WIS16 with+2 charm", 2, 16, 1.12f, 35.2285696f);
+                yield return CastMultiShot("archer WIS24 with+10 charm", 10, 24, 1.28f, 40.2612224f);
 
                 CheckInt("Multi-shot projectile count still authored after every scaled cast", 3, multi.projectileCount, "shared SkillData never mutated");
                 CheckClose("Multi-shot spread still authored after every scaled cast", 26f, multi.spreadDegrees, "shared SkillData never mutated");
@@ -1939,7 +1904,7 @@ namespace Emberdelve.EditorTools
                 DeactivateTargets();
             }
 
-            private IEnumerator CastMultiShot(string label, int charmBonus, int expectedCha, float expectedScale, float expectedArrow)
+            private IEnumerator CastMultiShot(string label, int charmBonus, int expectedWis, float expectedScale, float expectedArrow)
             {
                 PlayerRig rig = _archer;
                 SkillCaster caster = rig.Skills;
@@ -1948,7 +1913,7 @@ namespace Emberdelve.EditorTools
                 float unscaled = _bow.baseDamage * multi.damageMultiplier * 1.3216f;
 
                 DeactivateTargets();
-                EquipCharisma(rig, charmBonus, "u2a5_archer_multi_gear");
+                EquipWisdom(rig, charmBonus, "u2a5_archer_multi_gear");
                 rig.ClearStatuses();
                 rig.transform.position = _archerSpawn;
                 rig.transform.rotation = Quaternion.LookRotation(Vector3.forward);
@@ -1976,12 +1941,12 @@ namespace Emberdelve.EditorTools
                 Physics.SyncTransforms();
                 yield return WaitFrames(2);
 
-                CheckInt($"{label}: CHA score", expectedCha, rig.AttributeStats.GetAttribute(SixAttribute.Charisma),
-                    "authored 8 plus the charm, recomputed from the class base");
+                CheckInt($"{label}: WIS score", expectedWis, rig.AttributeStats.GetAttribute(SixAttribute.Wisdom),
+                    "authored WIS14 plus the charm, recomputed from the class base");
                 CheckClose($"{label}: ability scale query", expectedScale, rig.AttributeStats.GetAbilityEffectScale(),
-                    "clamp(1 + 0.04 * CHA modifier, 0.6, 1.4)");
+                    "captured authored WIS score curve bounded.6..1.4");
                 CheckClose($"{label}: outgoing multiplier the authority reads", 1.3216f, rig.GetOutgoingDamageMultiplier(_bow),
-                    "DEX 1.12 x Farshot 1.18, identical at every CHA level: CHA cannot ride in through it twice");
+                    "DEX 1.12 x Farshot 1.18, identical at every WIS level: WIS cannot ride in through it twice");
 
                 float manaBefore = rig.Mana.CurrentMana;
                 int magazineBefore = ranged.Magazine;
@@ -1996,10 +1961,10 @@ namespace Emberdelve.EditorTools
                 Check(caster.TryCastSlot(0), $"{label}: Multi-shot accepted through SkillCaster.TryCastSlot");
                 CheckClose($"{label}: Multi-shot spent exactly its authored mana", multi.EffectiveManaCost,
                     manaBefore - rig.Mana.CurrentMana, "effect_scale never scales mana cost");
-                CheckClose($"{label}: Multi-shot started its authored cooldown", multi.EffectiveCooldown,
+                CheckClose($"{label}: Multi-shot accepted cooldown at unchanged CHA8", 9.27f,
                     caster.CooldownRemaining(0), "effect_scale never scales cooldown");
                 CheckInt($"{label}: Multi-shot spent exactly its authored arrows", shots, magazineBefore - ranged.Magazine,
-                    "projectile count is not scaled by CHA");
+                    "projectile count is not scaled by WIS");
 
                 // Step the authority-owned flights before changing any target, aim or gear in this fixture.
                 _authority.AdvanceProjectiles(_bow.rangedRange / Mathf.Max(2f, _bow.projectileSpeed) + 0.02f);
@@ -2016,7 +1981,7 @@ namespace Emberdelve.EditorTools
                     CheckClose($"{label}: arrow {i} health delta", expectedArrow, healthBefore[i] - host.CurrentHealth,
                         $"34 x 0.7 x 1.3216 x {expectedScale:F2}, applied once to this host and to no other");
                     Check(!host.HasStatus(StatusKind.Slow) && !host.HasStatus(StatusKind.Empowered),
-                        $"{label}: arrow {i} carries no status (the skill asset applies none, and CHA adds none)");
+                        $"{label}: arrow {i} carries no status (the skill asset applies none, and WIS adds none)");
                 }
 
                 for (int i = 0; i < _captured.Count; i++)
@@ -2045,7 +2010,7 @@ namespace Emberdelve.EditorTools
                           $"authority(accepted={_authority.AcceptedCount}, rejected={_authority.RejectedCount})");
 
                 DeactivateTargets();
-                yield return WaitSeconds(multi.EffectiveCooldown + AuthorityClockSlack);
+                yield return WaitSeconds(9.27f + AuthorityClockSlack);
             }
 
             /// <summary>
@@ -2060,15 +2025,17 @@ namespace Emberdelve.EditorTools
                 SkillData pierce = _archer.Skills.ActiveSkill(1);
 
                 Check(pierce != null && pierce.skillId == "archer_piercing_shot", $"archer active 2 is Piercing Shot ({SkillName(pierce)})");
-                CheckInt("Piercing Shot authored targets per projectile", 2, pierce.projectileMaxTargets, "one arrow through two bodies, and CHA never changes it");
+                CheckInt("Piercing Shot authored targets per projectile", 2, pierce.projectileMaxTargets, "one arrow through two bodies, and WIS never changes it");
                 CheckInt("Piercing Shot authored projectile count", 1, pierce.projectileCount, "one arrow");
                 CheckClose("Piercing Shot authored weapon multiplier", 1.35f, pierce.damageMultiplier, "the heavy arrow carries 1.35 of the bow");
                 CheckInt("Piercing Shot authored mana cost", 22, pierce.EffectiveManaCost, "cost is not attribute data");
                 CheckClose("Piercing Shot authored cooldown", 11f, pierce.EffectiveCooldown, "cooldown is not attribute data");
 
-                yield return CastPiercing("archer CHA 8 (scale 0.96, the class's own CHA)", 0, 8, 0.96f, 58.2349824f);
-                yield return CastPiercing("archer CHA 10 (scale 1.00)", 2, 10, 1f, 60.66144f);
-                yield return CastPiercing("archer CHA 18 (scale 1.16)", 10, 18, 1.16f, 70.3672704f);
+                yield return CastPiercing("archer WIS14 natural baseline", 0, 14, 1.08f, 65.5143552f);
+                yield return CastPiercing("archer WIS8 cursed below-neutral", -6, 8, .95f, 57.628368f);
+                yield return CastPiercing("archer WIS10 neutral", -4, 10, 1f, 60.66144f);
+                yield return CastPiercing("archer WIS16 with+2 charm", 2, 16, 1.12f, 67.9408128f);
+                yield return CastPiercing("archer WIS24 with+10 charm", 10, 24, 1.28f, 77.6466432f);
 
                 CheckInt("Piercing Shot target cap still authored after every scaled cast", 2, pierce.projectileMaxTargets, "shared SkillData never mutated");
                 CheckClose("Piercing Shot weapon multiplier still authored", 1.35f, pierce.damageMultiplier, "shared SkillData never mutated");
@@ -2076,7 +2043,7 @@ namespace Emberdelve.EditorTools
                 DeactivateTargets();
             }
 
-            private IEnumerator CastPiercing(string label, int charmBonus, int expectedCha, float expectedScale, float expectedHit)
+            private IEnumerator CastPiercing(string label, int charmBonus, int expectedWis, float expectedScale, float expectedHit)
             {
                 PlayerRig rig = _archer;
                 SkillCaster caster = rig.Skills;
@@ -2085,7 +2052,7 @@ namespace Emberdelve.EditorTools
                 float unscaled = _bow.baseDamage * pierce.damageMultiplier * 1.3216f;
 
                 DeactivateTargets();
-                EquipCharisma(rig, charmBonus, "u2a5_archer_pierce_gear");
+                EquipWisdom(rig, charmBonus, "u2a5_archer_pierce_gear");
                 rig.ClearStatuses();
                 rig.transform.position = _archerSpawn;
                 rig.transform.rotation = Quaternion.LookRotation(Vector3.forward);
@@ -2103,10 +2070,10 @@ namespace Emberdelve.EditorTools
                 Physics.SyncTransforms();
                 yield return WaitFrames(2);
 
-                CheckInt($"{label}: CHA score", expectedCha, rig.AttributeStats.GetAttribute(SixAttribute.Charisma), "authored 8 plus the charm");
-                CheckClose($"{label}: ability scale query", expectedScale, rig.AttributeStats.GetAbilityEffectScale(), "clamp(1 + 0.04 * CHA modifier, 0.6, 1.4)");
+                CheckInt($"{label}: WIS score", expectedWis, rig.AttributeStats.GetAttribute(SixAttribute.Wisdom), "authored WIS14 plus the charm");
+                CheckClose($"{label}: ability scale query", expectedScale, rig.AttributeStats.GetAbilityEffectScale(), "captured authored WIS score curve bounded.6..1.4");
                 CheckClose($"{label}: outgoing multiplier the authority reads", 1.3216f, rig.GetOutgoingDamageMultiplier(_bow),
-                    "DEX 1.12 x Farshot 1.18, identical at every CHA level");
+                    "DEX 1.12 x Farshot 1.18, identical at every WIS level");
 
                 float manaBefore = rig.Mana.CurrentMana;
                 int magazineBefore = ranged.Magazine;
@@ -2123,9 +2090,9 @@ namespace Emberdelve.EditorTools
                 _authority.AdvanceProjectiles(_bow.rangedRange / Mathf.Max(2f, _bow.projectileSpeed) + 0.02f);
                 CheckClose($"{label}: Piercing Shot spent exactly its authored mana", pierce.EffectiveManaCost,
                     manaBefore - rig.Mana.CurrentMana, "effect_scale never scales mana cost");
-                CheckClose($"{label}: Piercing Shot started its authored cooldown", pierce.EffectiveCooldown,
+                CheckClose($"{label}: Piercing Shot accepted cooldown at unchanged CHA8", 11.33f,
                     caster.CooldownRemaining(1), "effect_scale never scales cooldown");
-                CheckInt($"{label}: Piercing Shot spent exactly one arrow", 1, magazineBefore - ranged.Magazine, "one projectile whatever CHA says");
+                CheckInt($"{label}: Piercing Shot spent exactly one arrow", 1, magazineBefore - ranged.Magazine, "one projectile whatever WIS says");
 
                 Check(_captured.Count == pierce.projectileMaxTargets,
                     $"{label}: one arrow resolved as exactly {pierce.projectileMaxTargets} hits (got {_captured.Count})");
@@ -2165,39 +2132,37 @@ namespace Emberdelve.EditorTools
                           $"authority(accepted={_authority.AcceptedCount}, rejected={_authority.RejectedCount})");
 
                 DeactivateTargets();
-                yield return WaitSeconds(pierce.EffectiveCooldown + AuthorityClockSlack);
+                yield return WaitSeconds(11.33f + AuthorityClockSlack);
             }
 
             // ------------------------------------------ the archer's ordinary attacks (U2A5-R3)
 
             /// <summary>
-            /// The archer's ordinary attacks, both of them, at CHA 8 / 10 / 18: a full-charge bow shot, a
+            /// The archer's ordinary attacks, both of them, at WIS 8 / 10 / 18: a full-charge bow shot, a
             /// half-charge bow shot, a shot out into the bow's authored falloff ramp, and a swing with the
             /// finesse secondary the class asset authors. They run through the real RangedCombat.Fire and the
             /// real MeleeCombat swing state machine, and every one of them keeps its own authored factors -
             /// DEX 1.12, Farshot 1.18, the charge lerp, the distance falloff, the finesse pick of the better of
-            /// STR 0 and DEX 3 - and gains nothing from CHA.
+            /// STR 0 and DEX 3 - and gains nothing from WIS.
             /// </summary>
             private IEnumerator RunArcherOrdinaryAttackUnchanged()
             {
                 PlayerRig rig = _archer;
 
-                yield return ShootArcherBow("archer full-charge bow shot at 10 m, CHA 8 (the class's own CHA)",
-                    0, 8, 0.96f, 1f, 44.9344f, ShotDistance);
-                yield return ShootArcherBow("archer full-charge bow shot at 10 m, CHA 10", 2, 10, 1f, 1f, 44.9344f, ShotDistance);
-                yield return ShootArcherBow("archer full-charge bow shot at 10 m, CHA 18", 10, 18, 1.16f, 1f, 44.9344f, ShotDistance);
-
-                yield return ShootArcherBow("archer half-charge bow shot at 10 m, CHA 10", 2, 10, 1f, 0.5f, 31.45408f, ShotDistance);
-                yield return ShootArcherBow("archer half-charge bow shot at 10 m, CHA 18", 10, 18, 1.16f, 0.5f, 31.45408f, ShotDistance);
-
-                yield return ShootArcherBow("archer bow shot at 25 m (inside the authored falloff ramp), CHA 10",
-                    2, 10, 1f, 1f, 38.97658f, 25f);
-                yield return ShootArcherBow("archer bow shot at 25 m (inside the authored falloff ramp), CHA 18",
-                    10, 18, 1.16f, 1f, 38.97658f, 25f);
-
-                yield return SwingArcherRapier("archer finesse rapier swing at CHA 8", 0, 8, 0.96f);
-                yield return SwingArcherRapier("archer finesse rapier swing at CHA 10", 2, 10, 1f);
-                yield return SwingArcherRapier("archer finesse rapier swing at CHA 18", 10, 18, 1.16f);
+                yield return ShootArcherBow("archer full-charge natural WIS14", 0, 14, 1.08f, 1f, 44.9344f, ShotDistance);
+                yield return ShootArcherBow("archer full-charge WIS8", -6, 8, .95f, 1f, 44.9344f, ShotDistance);
+                yield return ShootArcherBow("archer full-charge WIS10", -4, 10, 1f, 1f, 44.9344f, ShotDistance);
+                yield return ShootArcherBow("archer full-charge WIS16", 2, 16, 1.12f, 1f, 44.9344f, ShotDistance);
+                yield return ShootArcherBow("archer full-charge WIS24", 10, 24, 1.28f, 1f, 44.9344f, ShotDistance);
+                yield return ShootArcherBow("archer half-charge WIS10", -4, 10, 1f, .5f, 31.45408f, ShotDistance);
+                yield return ShootArcherBow("archer half-charge WIS18", 4, 18, 1.16f, .5f, 31.45408f, ShotDistance);
+                yield return ShootArcherBow("archer falloff25m WIS10", -4, 10, 1f, 1f, 38.97658f, 25f);
+                yield return ShootArcherBow("archer falloff25m WIS18", 4, 18, 1.16f, 1f, 38.97658f, 25f);
+                yield return SwingArcherRapier("archer rapier natural WIS14", 0, 14, 1.08f);
+                yield return SwingArcherRapier("archer rapier WIS8", -6, 8, .95f);
+                yield return SwingArcherRapier("archer rapier WIS10", -4, 10, 1f);
+                yield return SwingArcherRapier("archer rapier WIS16", 2, 16, 1.12f);
+                yield return SwingArcherRapier("archer rapier WIS24", 10, 24, 1.28f);
 
                 Check(rig.Loadout.SwitchToSlot(0), "the archer is left holding the bow the class asset authored");
                 Check(rig.MainHandWeapon == _bow, "the bow is back in the archer's main hand");
@@ -2207,14 +2172,14 @@ namespace Emberdelve.EditorTools
                 yield return WaitFrames(1);
             }
 
-            private IEnumerator ShootArcherBow(string label, int charmBonus, int expectedCha, float expectedScale,
+            private IEnumerator ShootArcherBow(string label, int charmBonus, int expectedWis, float expectedScale,
                 float charge, float expectedDamage, float distance)
             {
                 PlayerRig rig = _archer;
                 RangedCombat ranged = _archerRanged;
 
                 DeactivateTargets();
-                EquipCharisma(rig, charmBonus, "u2a5_archer_bow_gear");
+                EquipWisdom(rig, charmBonus, "u2a5_archer_bow_gear");
                 rig.ClearStatuses();
                 rig.transform.position = _archerSpawn;
                 rig.transform.rotation = Quaternion.LookRotation(Vector3.forward);
@@ -2226,12 +2191,12 @@ namespace Emberdelve.EditorTools
                 Physics.SyncTransforms();
                 yield return WaitFrames(2);
 
-                CheckInt($"{label}: CHA score", expectedCha, rig.AttributeStats.GetAttribute(SixAttribute.Charisma),
-                    "authored 8 plus the charm, recomputed from the class base");
+                CheckInt($"{label}: WIS score", expectedWis, rig.AttributeStats.GetAttribute(SixAttribute.Wisdom),
+                    "authored WIS14 plus the charm, recomputed from the class base");
                 CheckClose($"{label}: ability scale query", expectedScale, rig.AttributeStats.GetAbilityEffectScale(),
-                    "clamp(1 + 0.04 * CHA modifier, 0.6, 1.4)");
+                    "captured authored WIS score curve bounded.6..1.4");
                 CheckClose($"{label}: outgoing multiplier the authority reads", 1.3216f, rig.GetOutgoingDamageMultiplier(_bow),
-                    "DEX 1.12 x Farshot 1.18: the same number at CHA 8, 10 and 18, so CHA is not in it");
+                    "DEX 1.12 x Farshot 1.18: the same number at WIS 8, 10 and 18, so WIS is not in it");
 
                 // Predict both independent collision representations. The authority orders its analytic
                 // capsule and physical collider by swept projectile-centre travel, then uses the nearer one.
@@ -2298,9 +2263,9 @@ namespace Emberdelve.EditorTools
                 }
 
                 CheckClose($"{label}: resolved damage", expectedDamage, healthBefore - host.CurrentHealth,
-                    $"charge {charge:F2}: authored falloff band x 1.3216 instigator multipliers, and no CHA term anywhere");
+                    $"charge {charge:F2}: authored falloff band x 1.3216 instigator multipliers, and no WIS term anywhere");
                 CheckInt($"{label}: the shot spent exactly one arrow", 1, magazineBefore - ranged.Magazine,
-                    "an ordinary shot spends one round whatever CHA says");
+                    "an ordinary shot spends one round whatever WIS says");
                 Check(_authority.AcceptedCount == acceptedBefore + 1,
                     $"{label}: the authority accepted exactly one shot ({acceptedBefore} -> {_authority.AcceptedCount})");
                 Check(_authority.RejectedCount == rejectedBefore,
@@ -2323,7 +2288,7 @@ namespace Emberdelve.EditorTools
                 yield return WaitSeconds(WeaponAttackSpacing);
             }
 
-            private IEnumerator SwingArcherRapier(string label, int charmBonus, int expectedCha, float expectedScale)
+            private IEnumerator SwingArcherRapier(string label, int charmBonus, int expectedWis, float expectedScale)
             {
                 const float expected = 21.28f;
 
@@ -2331,7 +2296,7 @@ namespace Emberdelve.EditorTools
                 MeleeCombat melee = rig.GetComponent<MeleeCombat>();
 
                 DeactivateTargets();
-                EquipCharisma(rig, charmBonus, "u2a5_archer_rapier_gear");
+                EquipWisdom(rig, charmBonus, "u2a5_archer_rapier_gear");
 
                 if (!rig.Loadout.UsingSecondary)
                 {
@@ -2355,10 +2320,10 @@ namespace Emberdelve.EditorTools
                 Physics.SyncTransforms();
                 yield return WaitFrames(2);
 
-                CheckInt($"{label}: CHA score", expectedCha, rig.AttributeStats.GetAttribute(SixAttribute.Charisma), "authored 8 plus the charm");
-                CheckClose($"{label}: ability scale query", expectedScale, rig.AttributeStats.GetAbilityEffectScale(), "clamp(1 + 0.04 * CHA modifier, 0.6, 1.4)");
+                CheckInt($"{label}: WIS score", expectedWis, rig.AttributeStats.GetAttribute(SixAttribute.Wisdom), "authored WIS14 plus the charm");
+                CheckClose($"{label}: ability scale query", expectedScale, rig.AttributeStats.GetAbilityEffectScale(), "captured authored WIS score curve bounded.6..1.4");
                 CheckClose($"{label}: outgoing multiplier the authority reads", 1.12f, rig.GetOutgoingDamageMultiplier(rapier),
-                    "finesse picks the better of STR modifier 0 and DEX modifier 3, and this class has no melee passive: no CHA term");
+                    "finesse picks the better of STR modifier 0 and DEX modifier 3, and this class has no melee passive: no WIS term");
 
                 float healthBefore = host.CurrentHealth;
                 int acceptedBefore = _authority.AcceptedCount;
@@ -2371,7 +2336,7 @@ namespace Emberdelve.EditorTools
 
                 Check(_captured.Count == 1, $"{label}: the swing resolved as exactly one DamageInfo from the authority (got {_captured.Count})");
                 CheckClose($"{label}: resolved damage", expected, healthBefore - host.CurrentHealth,
-                    "19 x 1.12 (finesse, DEX modifier 3), the same at CHA 8, 10 and 18");
+                    "19 x 1.12 (finesse, DEX modifier 3), the same at WIS 8, 10 and 18");
                 Check(_authority.AcceptedCount == acceptedBefore + 1,
                     $"{label}: the authority accepted exactly one swing ({acceptedBefore} -> {_authority.AcceptedCount})");
                 Check(_authority.RejectedCount == rejectedBefore,

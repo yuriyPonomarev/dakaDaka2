@@ -3,7 +3,7 @@ using Emberdelve.Stats;
 
 namespace Emberdelve.Data
 {
-    /// <summary>Authored DEX locomotion and action curves. Captured once when a class is initialized.</summary>
+    /// <summary>Authored attribute curves for locomotion, action, interaction, cooldown and skill power. Captured once when a class is initialized.</summary>
     [CreateAssetMenu(menuName = "Emberdelve/Attribute Curve Profile", fileName = "AttributeCurveProfile")]
     public sealed class AttributeCurveProfile : ScriptableObject
     {
@@ -12,6 +12,15 @@ namespace Emberdelve.Data
 
         [Tooltip("DEX score to swept-melee, reload and local ordinary draw rate. Positive finite factors; no skill scaling.")]
         public CurvePoint[] action = ActionSpeedCurveDefaults.CreatePoints();
+
+        [Tooltip("CHA score to chest-opening rate. Positive finite factors; extraction and other holds are unchanged.")]
+        public CurvePoint[] interaction = InteractionCurveDefaults.CreatePoints();
+
+        [Tooltip("CHA score to skill cooldown duration multiplier. Positive finite values; minimum.4 enforces at most60% reduction.")]
+        public CurvePoint[] skillCooldown = SkillCooldownCurveDefaults.CreatePoints();
+
+        [Tooltip("WIS score to beneficial skill magnitude/duration. Positive finite factors, bounded.6..1.4 at runtime.")]
+        public CurvePoint[] skillPower = SkillPowerCurveDefaults.CreatePoints();
 
         public bool TryCaptureMovement(out PiecewiseLinearCurve curve, out string error)
         {
@@ -57,5 +66,68 @@ namespace Emberdelve.Data
                 "': " + error + " Using D4a defaults.", profile);
             return MovementCurveDefaults.Curve;
         }
+
+        public bool TryCaptureInteraction(out PiecewiseLinearCurve curve, out string error)
+        {
+            if (!PiecewiseLinearCurve.TryCreate(interaction, out curve, out error)) return false;
+            for (int i = 0; i < curve.Count; i++)
+            {
+                if (curve.GetPoint(i).value > 0f) continue;
+                curve = null;
+                error = "Interaction factors must be positive.";
+                return false;
+            }
+            return true;
+        }
+
+        public static PiecewiseLinearCurve CaptureInteraction(AttributeCurveProfile profile)
+        {
+            if (profile == null) return InteractionCurveDefaults.Curve;
+            if (profile.TryCaptureInteraction(out PiecewiseLinearCurve curve, out string error)) return curve;
+            Debug.LogWarning("[Emberdelve][AttributeCurve] Invalid interaction profile '" + profile.name +
+                "': " + error + " Using D4c1 defaults.", profile);
+            return InteractionCurveDefaults.Curve;
+        }
+
+        public bool TryCaptureSkillCooldown(out PiecewiseLinearCurve curve, out string error)
+        {
+            if (!PiecewiseLinearCurve.TryCreate(skillCooldown, out curve, out error)) return false;
+            for (int i = 0; i < curve.Count; i++)
+            {
+                if (curve.GetPoint(i).value > 0f) continue;
+                curve = null; error = "Skill cooldown multipliers must be positive."; return false;
+            }
+            return true;
+        }
+
+        public static PiecewiseLinearCurve CaptureSkillCooldown(AttributeCurveProfile profile)
+        {
+            if (profile == null) return SkillCooldownCurveDefaults.Curve;
+            if (profile.TryCaptureSkillCooldown(out PiecewiseLinearCurve curve, out string error)) return curve;
+            Debug.LogWarning("[Emberdelve][AttributeCurve] Invalid skill cooldown profile '" + profile.name +
+                "': " + error + " Using D4c2 defaults.", profile);
+            return SkillCooldownCurveDefaults.Curve;
+        }
+
+        public bool TryCaptureSkillPower(out PiecewiseLinearCurve curve, out string error)
+        {
+            if (!PiecewiseLinearCurve.TryCreate(skillPower, out curve, out error)) return false;
+            for (int i = 0; i < curve.Count; i++)
+            {
+                if (curve.GetPoint(i).value > 0f) continue;
+                curve = null; error = "Skill power factors must be positive."; return false;
+            }
+            return true;
+        }
+
+        public static PiecewiseLinearCurve CaptureSkillPower(AttributeCurveProfile profile)
+        {
+            if (profile == null) return SkillPowerCurveDefaults.Curve;
+            if (profile.TryCaptureSkillPower(out PiecewiseLinearCurve curve, out string error)) return curve;
+            Debug.LogWarning("[Emberdelve][AttributeCurve] Invalid skill power profile '" + profile.name +
+                "': " + error + " Using D4d1 defaults.", profile);
+            return SkillPowerCurveDefaults.Curve;
+        }
+
     }
 }

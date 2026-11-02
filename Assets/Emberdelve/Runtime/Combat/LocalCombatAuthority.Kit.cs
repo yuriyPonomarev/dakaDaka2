@@ -89,7 +89,7 @@ namespace Emberdelve.Combat
             if (_skillStamps.TryGetValue(combatId, out Dictionary<string, SkillStamp> stamps)
                 && stamps.TryGetValue(skillId, out SkillStamp stamp) && stamp.Epoch == kit.Epoch)
             {
-                remaining = Mathf.Max(0f, stamp.Time + skill.EffectiveCooldown - Now);
+                remaining = Mathf.Max(0f, stamp.Time + stamp.Cooldown - Now);
             }
             return true;
         }
