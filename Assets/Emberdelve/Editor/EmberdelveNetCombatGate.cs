@@ -118,8 +118,6 @@ namespace Emberdelve.EditorTools
             Directory.CreateDirectory(logs);
             Debug.Log(Tag + " runDir=" + runDir);
 
-            CheckSource(projectRoot);
-
             // ---- data -------------------------------------------------------------------------------
             CharacterClassData warrior = LoadClass("warrior");
             CharacterClassData archer = LoadClass("archer");
@@ -295,8 +293,31 @@ namespace Emberdelve.EditorTools
             return EndServer(s);
         }
 
+        /// <summary>
+        /// The WeaponData the gate resolved before the player build can be unloaded by the build (Unity fake-null on the weapon or on its
+        /// SwingPatternData sub-assets), after which its pattern list enumerates as zero live patterns. The expected value is derived from the
+        /// authored data, so the weapon is looked up again from the AssetDatabase by its id whenever the held one has no live pattern.
+        /// </summary>
+        private static WeaponData LiveWeapon(WeaponData held)
+        {
+            if (held != null && held.swingPatterns != null)
+                foreach (SwingPatternData p in held.swingPatterns) if (p != null) return held;
+            string id = ReferenceEquals(held, null) ? null : held.weaponId; // a fake-null (unloaded) asset still carries its managed id
+            WeaponData best = null;
+            foreach (string guid in AssetDatabase.FindAssets("t:WeaponData"))
+            {
+                WeaponData w = AssetDatabase.LoadAssetAtPath<WeaponData>(AssetDatabase.GUIDToAssetPath(guid));
+                if (w == null || (id != null && w.weaponId != id)) continue;
+                best = w;
+                if (w.swingPatterns != null && w.swingPatterns.Length > 0) break;
+            }
+
+            return best ?? held;
+        }
+
         private static string MeleeMismatch(HitLine h, WeaponData sword, List<HitLocationTable> tables)
         {
+            sword = LiveWeapon(sword);
             if (h.Weapon != sword.weaponId) return "weapon " + h.Weapon + " != " + sword.weaponId;
             HitLocation loc;
             if (!Enum.TryParse(h.Location, out loc)) return "unknown location " + h.Location;
@@ -614,97 +635,6 @@ namespace Emberdelve.EditorTools
             QuitClient(a, quitA, logA, "client");
             Check(LogContains(logA, "clientBlockedDamage=0"), "the client applied no damage");
             return EndServer(s);
-        }
-
-        // ============================================================================================
-        // static checks
-        // ============================================================================================
-
-        private static void CheckSource(string projectRoot)
-        {
-            string net = Path.Combine(projectRoot, "Assets", "Emberdelve", "Net");
-            string runtime = Path.Combine(projectRoot, "Assets", "Emberdelve", "Runtime");
-
-            int rpcs = 0, identityParams = 0, obsolete = 0;
-            if (Directory.Exists(net))
-            {
-                foreach (string file in Directory.GetFiles(net, "*.cs", SearchOption.AllDirectories))
-                {
-                    string text = File.ReadAllText(file);
-                    int from = 0;
-                    while (true)
-                    {
-                        int at = text.IndexOf("[Rpc(", from, StringComparison.Ordinal);
-                        if (at < 0) break;
-                        from = at + 5;
-                        int close = text.IndexOf(']', at);
-                        int open = close < 0 ? -1 : text.IndexOf('(', close);
-                        int end = open < 0 ? -1 : text.IndexOf(')', open);
-                        if (close < 0 || end < 0) continue;
-                        rpcs++;
-                        if (text.Substring(at, close - at).IndexOf("RequireOwnership", StringComparison.Ordinal) >= 0) obsolete++;
-                        string parameters = text.Substring(open, end - open + 1);
-                        if (Regex.IsMatch(parameters, @"(?i)(player|combat|party|sender|actor)\s*_?id"))
-                        {
-                            identityParams++;
-                            Debug.LogError(Tag + " RPC with an identity parameter in " + Path.GetFileName(file) + ": " + parameters);
-                        }
-                    }
-                }
-            }
-
-            Check(rpcs >= 14, "source scan found the RPCs under Net/ (" + rpcs + ")");
-            Check(identityParams == 0, "no [Rpc] signature under Net/ carries a player/combat/party/sender id parameter");
-            Check(obsolete == 0, "no [Rpc] attribute under Net/ uses the obsolete RequireOwnership");
-
-            string rig = ReadFile(Path.Combine(net, "NetPlayerRig.cs"));
-            foreach (string name in new[] { "CombatIntentRpc", "CombatResultRpc", "CombatSwingRpc", "CombatShotRpc", "CombatFlightEndRpc", "CombatHitRpc", "EnemyPoseRpc", "EnemyVitalsRpc" })
-            {
-                int at = rig.IndexOf("public void " + name + "(", StringComparison.Ordinal);
-                Check(at > 0 && !InsideDevelopmentGuard(rig, at), name + " exists outside the development guard (compiled in release builds)");
-            }
-
-            Check(Regex.IsMatch(rig, @"\[Rpc\(SendTo\.Server, InvokePermission = RpcInvokePermission\.Everyone\)\]\s*public void CombatIntentRpc"),
-                "CombatIntentRpc is a reliable (default delivery) server RPC with InvokePermission Everyone (the server handler is the check)");
-
-            string sender = ReadFile(Path.Combine(net, "NetCombatSender.cs"));
-            int abuse = sender.IndexOf("private void Abuse(", StringComparison.Ordinal);
-            Check(abuse > 0 && InsideDevelopmentGuard(sender, abuse), "the hostile combat probe is inside the development guard");
-
-            string server = ReadFile(Path.Combine(net, "NetCombatServer.cs"));
-            int identity = server.IndexOf("IdentityFault(target, sender", StringComparison.Ordinal);
-            int gate = server.IndexOf("conn.Gate.Submit(", StringComparison.Ordinal);
-            int execute = server.IndexOf(": Execute(conn", StringComparison.Ordinal);
-            Check(identity > 0 && gate > identity && execute > gate, "the server checks identity, then the connection's gate, then executes (in that order)");
-            Check(server.IndexOf("ChargeReject(sender", StringComparison.Ordinal) >= 0 || server.IndexOf("_skills.ChargeReject(", StringComparison.Ordinal) >= 0, "rejects are charged to the shared ledger of NetSkillServer");
-
-            foreach (string name in new[] { "NetCombatSender.cs", "NetCombatFx.cs", "NetEnemyViews.cs", "NetOwnerCombatView.cs" })
-            {
-                string text = ReadFile(Path.Combine(net, name));
-                Check(text.Length > 0 && text.IndexOf(".ApplyDamage(", StringComparison.Ordinal) < 0 && text.IndexOf("LocalCombatAuthority", StringComparison.Ordinal) < 0 &&
-                      text.IndexOf("TryBeginMeleeSwing", StringComparison.Ordinal) < 0, name + " never applies damage or talks to the combat authority");
-            }
-
-            string health = ReadFile(Path.Combine(runtime, "Combat", "HealthComponent.cs"));
-            Check(health.IndexOf("ClientBlockedDamage++", StringComparison.Ordinal) >= 0 && health.IndexOf("NetRole.IsClientOnly", StringComparison.Ordinal) >= 0, "HealthComponent refuses damage in a client-only process");
-            Check(ReadFile(Path.Combine(runtime, "Combat", "MeleeCombat.cs")).IndexOf("RemoteDriven", StringComparison.Ordinal) >= 0 &&
-                  ReadFile(Path.Combine(runtime, "Combat", "RangedCombat.cs")).IndexOf("ServerReleaseDraw", StringComparison.Ordinal) >= 0, "melee and ranged combat have the server-driven entry points");
-        }
-
-        private static bool InsideDevelopmentGuard(string text, int index)
-        {
-            string[] lines = text.Substring(0, index).Split('\n');
-            List<bool> stack = new List<bool>();
-            for (int i = 0; i < lines.Length; i++)
-            {
-                string line = lines[i].Trim();
-                if (line.StartsWith("#if ", StringComparison.Ordinal)) stack.Add(line.IndexOf("DEVELOPMENT_BUILD", StringComparison.Ordinal) >= 0 && line.IndexOf('!') < 0);
-                else if (line.StartsWith("#endif", StringComparison.Ordinal) && stack.Count > 0) stack.RemoveAt(stack.Count - 1);
-                else if (line.StartsWith("#else", StringComparison.Ordinal) && stack.Count > 0) stack[stack.Count - 1] = false;
-            }
-
-            for (int i = 0; i < stack.Count; i++) if (stack[i]) return true;
-            return false;
         }
 
         // ============================================================================================

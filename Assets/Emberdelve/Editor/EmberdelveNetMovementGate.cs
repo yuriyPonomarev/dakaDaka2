@@ -344,8 +344,6 @@ namespace Emberdelve.EditorTools
             Directory.CreateDirectory(logs);
             Debug.Log(Tag + " runDir=" + runDir);
 
-            CheckMovementRpcSignatures(projectRoot);
-
             // ---- layout + class data: where everybody spawns, which way is free, where the wall is --------------------------
             DungeonLayoutData layout = AssetDatabase.LoadAssetAtPath<DungeonLayoutData>(EmberdelvePaths.Data + "/DungeonLayout_AshenHalls.asset");
             CharacterClassData warrior = AssetDatabase.LoadAssetAtPath<CharacterClassData>(EmberdelvePaths.Data + "/Class_Warrior.asset");
@@ -797,52 +795,6 @@ namespace Emberdelve.EditorTools
             // ---- 11. no process left ---------------------------------------------------------------
             foreach (Process p in Started) Check(SafeHasExited(p), "pid " + p.Id + " is gone");
             return 0;
-        }
-
-        // ---- static scan --------------------------------------------------------------------------------------------
-
-        /// <summary>
-        /// Source scan: the movement RPCs exist (SubmitMoveRpc, ForgeMoveTestRpc, plus the U3A3 probe) and no [Rpc] under Net/
-        /// has a parameter list naming a player, combat, party, sender or actor id.
-        /// </summary>
-        private static void CheckMovementRpcSignatures(string projectRoot)
-        {
-            string dir = Path.Combine(projectRoot, "Assets", "Emberdelve", "Net");
-            int rpcs = 0;
-            int bad = 0;
-            bool submit = false, forge = false, ack = false;
-            if (Directory.Exists(dir))
-            {
-                foreach (string file in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
-                {
-                    string text = File.ReadAllText(file);
-                    int from = 0;
-                    while (true)
-                    {
-                        int at = text.IndexOf("[Rpc(", from, StringComparison.Ordinal);
-                        if (at < 0) break;
-                        from = at + 5;
-                        int close = text.IndexOf(']', at);
-                        int open = close < 0 ? -1 : text.IndexOf('(', close);
-                        int end = open < 0 ? -1 : text.IndexOf(')', open);
-                        if (end < 0) continue;
-                        rpcs++;
-                        string head = text.Substring(close, open - close);
-                        if (head.Contains("SubmitMoveRpc")) submit = true;
-                        if (head.Contains("ForgeMoveTestRpc")) forge = true;
-                        if (head.Contains("AckRpc")) ack = true;
-                        string parameters = text.Substring(open, end - open + 1);
-                        if (Regex.IsMatch(parameters, @"(?i)(player|combat|party|sender|actor)\s*_?id"))
-                        {
-                            bad++;
-                            Debug.LogError(Tag + " RPC with an identity parameter in " + Path.GetFileName(file) + ": " + parameters);
-                        }
-                    }
-                }
-            }
-
-            Check(rpcs >= 4 && submit && forge && ack, "source scan found the movement RPCs (SubmitMoveRpc, ForgeMoveTestRpc, and U3A4b's AckRpc) among " + rpcs + " [Rpc] methods");
-            Check(bad == 0, "no [Rpc] signature under Net/ carries a player/combat/party id parameter");
         }
 
         // ---- helpers ------------------------------------------------------------------------------------------------

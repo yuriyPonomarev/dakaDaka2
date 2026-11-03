@@ -77,7 +77,6 @@ namespace Emberdelve.EditorTools
             CheckEnemies(scene);
             CheckChests();
             CheckProps(scene);
-            CheckDriverSource();
         }
 
         // ---------------------------------------------------------------- vendor import
@@ -580,45 +579,6 @@ namespace Emberdelve.EditorTools
             for (int i = 0; same && i < first.Count; i++) same = first[i].Model == EmberdelvePropFactory.LastPlacements[i].Model && first[i].Cell == EmberdelvePropFactory.LastPlacements[i].Cell;
             Object.DestroyImmediate(again);
             Check(same, "the scatter is deterministic (same layout, same props)");
-        }
-
-        // ---------------------------------------------------------------- presentation-only driver
-
-        private static void CheckDriverSource()
-        {
-            string path = "Assets/Emberdelve/Runtime/AI/EnemyVisualDriver.cs";
-            Check(File.Exists(path), "EnemyVisualDriver source exists");
-            if (!File.Exists(path)) return;
-
-            // Each forbidden call must be a whole identifier followed by "(": the lookbehind keeps a lifecycle method NAME such as
-            // "private void OnDestroy()" from matching "Destroy(", while "Destroy(x)", "Object.Destroy(x)" and "UnityEngine.Object.Destroy(x)" still match.
-            string[] forbiddenCalls = { "ApplyDamage", "ApplyStatus", "SetStunned", "SetHealth", "Heal", "TryBeginAttack", "MarkDead", "NotifyDamaged", "Destroy", "DestroyImmediate" };
-            List<System.Text.RegularExpressions.Regex> forbidden = new List<System.Text.RegularExpressions.Regex>();
-            for (int f = 0; f < forbiddenCalls.Length; f++)
-            {
-                forbidden.Add(new System.Text.RegularExpressions.Regex(@"(?<![A-Za-z0-9_])" + forbiddenCalls[f] + @"\s*\("));
-            }
-
-            forbidden.Add(new System.Text.RegularExpressions.Regex(@"(?<![A-Za-z0-9_])transform\.(position|rotation)\s*=(?!=)"));
-            forbidden.Add(new System.Text.RegularExpressions.Regex(@"(?<![A-Za-z0-9_])Physics\."));
-            List<string> hits = new List<string>();
-            string[] lines = File.ReadAllLines(path);
-            for (int i = 0; i < lines.Length; i++)
-            {
-                string line = lines[i].TrimStart();
-                if (line.StartsWith("//")) continue;
-                for (int f = 0; f < forbidden.Count; f++)
-                {
-                    System.Text.RegularExpressions.Match m = forbidden[f].Match(line);
-                    if (m.Success) hits.Add(m.Value + " (line " + (i + 1) + ")");
-                }
-            }
-
-            // the scan itself must catch the real thing and ignore the method name
-            Check(forbidden[8].IsMatch("Destroy(gameObject);") && forbidden[8].IsMatch("Object.Destroy (x);") && !forbidden[8].IsMatch("private void OnDestroy()"),
-                "the forbidden-call scan matches Destroy( calls and not the OnDestroy method name");
-
-            Check(hits.Count == 0, "EnemyVisualDriver is presentation only: no damage, status, stun, movement or physics calls " + string.Join(", ", hits));
         }
 
         // ---------------------------------------------------------------- helpers

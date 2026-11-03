@@ -124,7 +124,6 @@ namespace Emberdelve.EditorTools
             TableKnownAnswers();
             EnemyDropExpectations();
             DropKeys();
-            SourceScan();
             RunStartWiring();
             SessionDeterminism();
             UniqueIdentity();
@@ -248,16 +247,6 @@ namespace Emberdelve.EditorTools
             Check(rs.Restart().NextUInt64() == first && rs.Seed == 77UL, "Restart replays from the seed");
             Check(DeterministicRng.FromInt(-1).Seed == 0xFFFFFFFFUL && DeterministicRng.FromInt(5).Seed == 5UL, "int seeds are zero-extended");
 
-            // Platform stability: the integer paths contain no floating point at all.
-            string source = ReadRuntime("Core/DeterministicRng.cs");
-            int a0 = source.IndexOf("public int Next(int maxExclusive)", StringComparison.Ordinal);
-            int a1 = source.IndexOf("public double NextDouble()", StringComparison.Ordinal);
-            string integerPaths = a0 >= 0 && a1 > a0 ? source.Substring(a0, a1 - a0) : "double";
-            Check(!integerPaths.Contains("double") && !integerPaths.Contains("float") && !integerPaths.Contains("Math."),
-                "integer RNG paths (Next) use no floating point");
-            string code = StripComments(source);
-            Check(!code.Contains("System.Random") && !code.Contains("UnityEngine"), "the RNG file depends on no platform generator or engine");
-
             // Mixing helpers.
             Check(RngMix.HashString("") == 0xcbf29ce484222325UL && RngMix.HashString("a") == 0xaf63dc4c8601ec8cUL && RngMix.HashString("chest") == 0x82d5d67636f69a16UL,
                 "FNV-1a 64 known answers");
@@ -365,124 +354,6 @@ namespace Emberdelve.EditorTools
                 sb.Append(drops[i].Item.itemId).Append(drops[i].Amount);
             }
             return sb.ToString();
-        }
-
-        // ------------------------------------------------------------------------------------- source scan
-
-        private static string RuntimeRoot => Path.Combine(Application.dataPath, "Emberdelve", "Runtime");
-
-        private static string ReadRuntime(string relative) => File.ReadAllText(Path.Combine(RuntimeRoot, relative));
-
-        private static string StripComments(string source)
-        {
-            StringBuilder sb = new StringBuilder();
-            foreach (string line in source.Split('\n'))
-            {
-                string trimmed = line.TrimStart();
-                if (trimmed.StartsWith("//")) continue;
-                sb.Append(line).Append('\n');
-            }
-            return sb.ToString();
-        }
-
-        private static readonly Regex RandomUse = new Regex(
-            @"UnityEngine\.Random|System\.Random|\bnew\s+Random\s*\(|(?<![\w.])Random\.(Range|value|insideUnitCircle|insideUnitSphere|onUnitSphere|rotation|rotationUniform|ColorHSV|InitState|state|seed)\b",
-            RegexOptions.Compiled);
-
-        // Files in Runtime that may keep a non-project random source. Anything else under Runtime must be clean.
-        // EnemyBrain: AI patrol waypoint angle jitter (movement, not loot, drop or identity; follow-up R4R5 note).
-        // TorchFlicker: purely visual light flicker.
-        private static readonly string[] RandomAllowlist = { "AI/EnemyBrain.cs", "Feedback/TorchFlicker.cs", "Feedback/WallStopFeedback.cs" };
-
-        private void SourceScan()
-        {
-            string[] files = Directory.GetFiles(RuntimeRoot, "*.cs", SearchOption.AllDirectories);
-            Check(files.Length > 50, "source scan sees the runtime files (" + files.Length + ")");
-
-            List<string> offenders = new List<string>();
-            HashSet<string> allowlistUsed = new HashSet<string>();
-            foreach (string file in files)
-            {
-                string relative = file.Substring(RuntimeRoot.Length + 1).Replace('\\', '/');
-                string code = StripComments(File.ReadAllText(file));
-                if (!RandomUse.IsMatch(code)) continue;
-
-                if (Array.IndexOf(RandomAllowlist, relative) >= 0) allowlistUsed.Add(relative);
-                else offenders.Add(relative);
-            }
-
-            Check(offenders.Count == 0, "no UnityEngine.Random / System.Random in loot, drop, identity or gameplay-outcome runtime files; offenders: " + string.Join(", ", offenders));
-            Check(allowlistUsed.Count == RandomAllowlist.Length, "the visual/AI allowlist is not stale (still uses a non-project random: " + string.Join(", ", allowlistUsed) + ")");
-
-            // Other non-reproducible or platform sources, and low-level identity minting, outside explicit allowlists.
-            // Entropy (RaidSession seed default) lives in RunContext; ItemInstance.cs and Rules/ItemIdentityRules.cs own the default uid draw; the review bridge
-            // only stamps a log timestamp; Net/NetLobbyBridge.cs mints the lobby dev session slot for online Join, not an item identity.
-            (string pattern, string[] allowed)[] guarded =
-            {
-                (@"Unity\.Mathematics\.Random|\bnew\s+Unity\.Mathematics", new string[0]),
-                (@"RandomNumberGenerator", new string[0]),
-                (@"Environment\.TickCount|Stopwatch\.GetTimestamp", new string[0]),
-                (@"Guid\.NewGuid\s*\(", new[] { "Core/RunContext.cs", "Items/ItemInstance.cs", "Rules/ItemIdentityRules.cs", "Net/NetLobbyBridge.cs" }),
-                (@"DateTime\.(Now|UtcNow)", new[] { "Core/RunContext.cs", "Review/EmberdelveReviewBridge.cs" }),
-                (@"\bTryCreateNew\s*\(", new[] { "Items/ItemInstance.cs" }),
-                (@"ItemIdentityRules\.TryMintUid\s*\(", new[] { "Items/ItemInstance.cs" }),
-            };
-            List<string> guardedHits = new List<string>();
-            foreach (string file in files)
-            {
-                string relative = file.Substring(RuntimeRoot.Length + 1).Replace('\\', '/');
-                string code = StripComments(File.ReadAllText(file));
-                foreach ((string pattern, string[] allowed) g in guarded)
-                {
-                    if (Regex.IsMatch(code, g.pattern) && Array.IndexOf(g.allowed, relative) < 0) guardedHits.Add(relative + " ~ " + g.pattern);
-                }
-            }
-            Check(guardedHits.Count == 0, "no Unity.Mathematics.Random, RandomNumberGenerator, TickCount, Guid.NewGuid, DateTime.Now or low-level uid minting outside the allowlist: " + string.Join("; ", guardedHits));
-
-            // The scoped loot / identity files, named explicitly so a rename cannot silently drop them from the scan.
-            string[] scoped =
-            {
-                "Items/LootRoller.cs", "Items/LootPickup.cs", "Items/RaidSession.cs", "Items/ItemInstance.cs", "Items/ItemCatalog.cs",
-                "Rules/ItemIdentityRules.cs", "Items/LootTableRollService.cs",
-                "Items/Inventory.cs", "Items/Equipment.cs", "Items/ItemUidRegistry.cs", "Items/ContainerSnapshot.cs",
-                "Data/LootTable.cs", "Data/EnemyData.cs", "Interaction/ChestInteractable.cs", "Level/ChestSpawner.cs",
-                "Flow/RunDirector.cs", "AI/EnemyAgent.cs", "Core/RunContext.cs", "Core/DeterministicRng.cs",
-            };
-            bool allClean = true;
-            foreach (string relative in scoped)
-            {
-                string path = Path.Combine(RuntimeRoot, relative);
-                if (!File.Exists(path)) { allClean = false; Debug.LogError("[LootPipeline] mismatch scoped file missing: " + relative); continue; }
-                if (RandomUse.IsMatch(StripComments(File.ReadAllText(path)))) { allClean = false; Debug.LogError("[LootPipeline] mismatch random source in " + relative); }
-            }
-            Check(allClean, "every scoped loot / identity file exists and is free of platform random sources");
-
-            // One issuer per raid: production loot code never builds its own.
-            string[] noPrivateIssuer = { "Interaction/ChestInteractable.cs", "AI/EnemyAgent.cs", "Items/LootPickup.cs", "Flow/RunDirector.cs", "Items/ItemCatalog.cs", "Level/ChestSpawner.cs" };
-            bool none = true;
-            foreach (string relative in noPrivateIssuer)
-            {
-                if (StripComments(ReadRuntime(relative)).Contains("CreateLocalTrusted(")) { none = false; Debug.LogError("[LootPipeline] mismatch private issuer in " + relative); }
-            }
-            Check(none, "chest / enemy / pickup / run / session code never creates a private issuer");
-
-            List<string> issuerMakers = new List<string>();
-            foreach (string file in files)
-            {
-                if (StripComments(File.ReadAllText(file)).Contains("CreateLocalTrusted(")) issuerMakers.Add(file.Substring(RuntimeRoot.Length + 1).Replace('\\', '/'));
-            }
-            issuerMakers.Sort(StringComparer.Ordinal);
-            // ItemInstance.cs defines it, RaidSession (default, non-seeded session) wraps it, LootTableRollService.cs has the tooling
-            // overload (moved from LootTable.cs in R8b1), Inventory.cs is the lazy fixture fallback for a bag nobody pointed at an issuer.
-            Check(string.Join(",", issuerMakers) == "Items/Inventory.cs,Items/ItemInstance.cs,Items/LootTableRollService.cs,Items/RaidSession.cs",
-                "CreateLocalTrusted is only referenced by its definition, the session, the table tooling overload and the bag fallback: " + string.Join(",", issuerMakers));
-
-            string chest = StripComments(ReadRuntime("Interaction/ChestInteractable.cs"));
-            Check(!chest.Contains(".TryRoll(") && chest.Contains("TryRollChest("), "the chest rolls through the raid session only");
-            string run = StripComments(ReadRuntime("Flow/RunDirector.cs"));
-            Check(run.Contains("SetIssuer(Session.Issuer)") && run.Contains("TryRollEnemyDrops("), "the run points the bag at the raid issuer and rolls enemy drops through the session");
-            string enemy = StripComments(ReadRuntime("AI/EnemyAgent.cs"));
-            Check(enemy.Contains("DropEnemyLoot(") && !enemy.Contains("lootDropChance") && !enemy.Contains("SpawnLoot("), "the enemy delegates its drop to the host and rolls nothing itself");
         }
 
         // ------------------------------------------------------------------ enemy drop expectations

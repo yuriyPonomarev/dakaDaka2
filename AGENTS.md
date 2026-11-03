@@ -1,15 +1,43 @@
-# Emberdelve / Cryptbound — Unity project instructions
+# Emberdelve (DakaDaka) — agent instructions
 
-The user authorized continued development in this existing Unity project on19October2026. Latest user instruction31 October2026, reaffirmed1 November2026: Codex develops the game; the existing local Pi/Strata model with HIGH thinking reviews changes and runs all compilation, unit tests, gameplay gates and builds. The local tester reports defects; Codex makes source fixes. See Docs/LOCAL_TESTING.md. This supersedes the former local-implementer/manager-runs-tests role. Godot development is superseded; do not resume or edit that project.
+Unity 6000.2.5f1, URP 17.2, NGO 2.7, C#, new Input System. Game root: `Assets/Emberdelve` (namespaces `Emberdelve.*`). D&D-style PvPvE extraction game. Design target: `Docs/Design/UNITY_DESIGN.md`. Plan: `Docs/ROADMAP.md`. Current state: `Docs/CURRENT_WORK.md` (one page, overwritten, not appended).
 
-Unity version6000.2.5f1, URP17.2.0, C#, new Input System. Preserve existing M1–M4 functionality and unfinished M5 working-tree changes. No engine/package upgrade, resetting/cleaning the working tree, or modifying unrelated template assets. Keep Assets/Emberdelve as the game feature root. The user prefers a playable complete loop and editable scenes/prefabs, with focused independent verification.
+## Roles (user, 3 Nov 2026)
+- **Claude (orchestrator):** splits work into slices, writes briefs, integrates, runs the fast check loop, commits.
+- **Sonnet sub-agent (executor):** implements a slice and must compile + run the fast loop itself before handing back.
+- **Run-All.ps1 on the mirror:** deterministic full verification (no LLM). The local Pi/Strata model is optional: only to analyse failures when the cause is unclear.
+- **User:** plays builds, makes design decisions.
 
-Current task handoff is Docs/CURRENT_WORK.md; local QA queue/state is Logs/local-testing. C:/Users/yrapa/.pi/agent/projects/unity-emberdelve/active-task.json, manager-state.json and ORCHESTRATION.md describe obsolete paused U2B10 orchestration; do not resume it or treat it as the current task. Current roadmap: Docs/ROADMAP.md. Functional target: Docs/Design/UNITY_DESIGN.md; six attributes and item-affix amendments there remain required. Read the sections relevant to the assigned task; a narrow fixture repair is not permission to implement the entire roadmap.
+## Hard rules
+- NEVER close the user's Unity Editor. Never `EditorApplication.Exit` interactively. Batch Unity runs only on the mirror `..\DakaDaka_ci`.
+- One slice = one feature = one commit. No combined slices.
+- No engine/package upgrades, no resetting the working tree, no monolithic runtime-generated game: wire scenes/prefabs with the existing editor builders (`EmberdelveBootstrapMenu.BuildEverything`).
+- Server authority: client input is intent only; the server decides damage/items/outcomes. Shields never parry. Shared ScriptableObjects immutable at runtime; item UID/rolls are per instance.
+- Never weaken a test to make it pass. Fix a proven wrong expectation and say why. Expectations are derived from data, never hardcoded numbers.
+- New checks go in NUnit EditMode tests (`Assets/Emberdelve/Tests/EditMode`) when possible. No new source-text grep checks in gates; architecture lint lives in `EmberdelveSourceLint` and only warns.
+- Assets: free/CC0 only, record license + source in `Docs/ASSET_PLAN.md`.
 
-The original project calls itself Emberdelve. Keep names/namespaces intact unless assigned a rename. Shared ScriptableObject definitions are immutable at runtime; item UID/rolls are per-instance data. Final gameplay authority belongs to the server: input/client intent is not a trusted health/damage/item outcome. The present LocalCombatAuthority is an offline implementation, not proof of networking. Shields never parry. Combat, inventories, extraction/death and stash must be integrated and independently tested before final acceptance.
+## Fast loop (minutes, in the user's open Editor via Unity MCP)
+1. Write files (`asset_write_text` or System.IO in `script_eval`), then `AssetDatabase.Refresh()`.
+2. Wait `editor_status.compiling=false`; `console_get level=error` must be empty.
+3. EditMode tests: `test_run mode=editor filter=Emberdelve filter_type=assembly` (≈5 s, 555 tests). Its output is large — read only `summary`.
+4. Logic gates: `script_eval` → `Emberdelve.EditorTools.EmberdelveGateSuite.StartInteractive("fast", "<project>/Logs/quick/<stamp>")`, then poll `EmberdelveGateSuite.Status()` / `summary.txt` (≈7 s). Sets live in `Tools/gate-sets.json`.
+5. Gates that open scenes / enter Play mode / spawn processes (sets `combat`, `net`, `visual`) are NOT run in the user's editor — use Run-All.
 
-The local QA worker may read source, run authorized PowerShell/Unity/tests, and write evidence/reports; it must not edit game/test source or fix failed expectations. Codex implements and handles fixes, without running its own tests. Freeze the tested live source until the local job settles; develop the next slice in isolated drafts outside Assets. One local controller and one Unity process on the project at a time. No automatic wall-clock task timeout. Do not create scratch projects, change global Pi/Strata/model settings, upgrade dependencies or send external messages. Only gracefully close or stop verified owned processes. Verify C# APIs in nearby source. Save coherent edits early; on an exact-text mismatch reread the affected function.
+## Full verification (mirror, no LLM)
+`powershell -ExecutionPolicy Bypass -File Tools\Run-All.ps1 -Set all -EditMode [-Build]`
+- Syncs main → `DakaDaka_ci` (robocopy), runs EditMode + all gates in ONE batch Unity, optional Windows player build.
+- Output: `Logs/runs/<stamp>/summary.txt` + `run.json`. Exit 0 = green. Refuses if the mirror is locked.
+- Launch it detached from `script_eval` (`cmd /c powershell ... > log 2>&1`) and poll the output file.
+- Run before every commit of a slice that touches combat/net/scenes; the fast loop is enough for pure-logic slices.
 
-Use existing editor builders to wire saved scenes/data; do not replace the project with a monolithic runtime-generated game. Do not weaken or remove a test to make it green. Correct a proven wrong fixture expectation with an explanation and preserved coverage. Engine exit0 alone is not success: smoke logs currently may contain FAIL despite exit0. Do not claim unexecuted checks passed.
+## Delivering code
+Write files directly in the project through Unity MCP. No zip/SendUserFile round trips. git via `script_eval` → `cmd /c git ...`. Do not commit `Art/Materials/*.mat` drift or `ProjectSettings/Packages/com.unity.pipeline/`.
 
-Write a concise Docs/Tasks/<TASK_ID>.md report with changed files, actual behavior, pending checks and blockers. No remote publication, payments or external messages. Licensed assets may be curated by Codex; keep license/source/hash records and reuse already downloaded assets.
+## Playable builds
+Every 2–3 slices: `Run-All.ps1 -Build` → `Builds/Playable/<stamp>/EmberdelveNet.exe`; tell the user what to try. Network launch: `Docs/NETWORK_PLAY.md`.
+
+## Docs
+- `Docs/CURRENT_WORK.md`: ≤ 1 page, rewritten each slice (state, next, blockers).
+- `Docs/Tasks/<ID>.md`: short slice report (changed files, behaviour, checks actually run).
+- History: `Docs/Archive/`. Don't read it unless needed.

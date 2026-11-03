@@ -7,6 +7,7 @@ namespace Emberdelve.EditorTools
     {
         public static void Exit(int code)
         {
+            if (EmberdelveGateSuite.Active) { EmberdelveGateSuite.NotifyExit(code); return; }
             if (Application.isBatchMode)
             {
                 EditorApplication.Exit(code);

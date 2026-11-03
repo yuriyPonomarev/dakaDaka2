@@ -482,7 +482,9 @@ namespace Emberdelve.EditorTools
                 // 4.6225 * 1.15 = 5.315875, i.e. DEX counted exactly once.
                 CheckClose("archer walk speed 4.3 * 1.075 * 1.15 Fleet Footing x bow held factor", 5.315875f * (1f - bow.heldMoveSpeedPenalty / 300f), rig.Movement.ResolveGroundSpeed(false, false), "authored 4.3, DEX modifier 3, Fleet Footing 1.15, x B1 ranged held factor (bow 4 points of 300 = 0.98667)");
                 CheckClose("archer attribute move-speed query 4.3 * 1.075", 4.6225f, rig.AttributeStats.MoveSpeed, "DEX modifier 3, query only, no passive folded in");
-                CheckClose("archer ability effect scale 0.96 (1 + 0.04*-1)", 0.96f, rig.AttributeStats.GetAbilityEffectScale(), "CHA modifier -1, query only");
+                // D4d1 moved ability effect scale from CHA to the class' authored WIS skill-power curve; expectation derived from that data.
+                float archerSkillPower = SkillPowerRules.SanitizeFactor(AttributeCurveProfile.CaptureSkillPower(archer.attributeCurveProfile).Evaluate(rig.AttributeStats.GetAttribute(SixAttribute.Wisdom)));
+                CheckClose("archer ability effect scale = authored WIS skill-power curve", archerSkillPower, rig.AttributeStats.GetAbilityEffectScale(), "WIS " + rig.AttributeStats.GetAttribute(SixAttribute.Wisdom) + ", query only");
                 CheckClose("archer bow damage query 34 * 1.12", 38.08f, rig.AttributeStats.GetWeaponDamage(bow), "DEX modifier 3, attacks unchanged");
 
                 CarryItem(rig, cuirass);

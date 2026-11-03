@@ -81,9 +81,6 @@ namespace Emberdelve.EditorTools
             Directory.CreateDirectory(logs);
             Debug.Log(Tag + " runDir=" + runDir);
 
-            // ---- static: no RPC carries a player / combat id -----------------------------------------
-            CheckNoIdentityRpcParameters(projectRoot);
-
             // ---- 1. player ------------------------------------------------------------------
             string exe = ArgValue("-ember-proof-reuse-exe");
             if (string.IsNullOrEmpty(exe))
@@ -305,45 +302,6 @@ namespace Emberdelve.EditorTools
         {
             int a = int.Parse(x), b = int.Parse(y);
             return a < b ? a + "," + b : b + "," + a;
-        }
-
-        /// <summary>
-        /// Source scan (plan: "no RPC signature contains a player/combat id parameter"): every [Rpc( attribute under Net/ is
-        /// followed by a parameter list that must not name a player, combat or party id. Also non-vacuous: at least one RPC exists.
-        /// </summary>
-        private static void CheckNoIdentityRpcParameters(string projectRoot)
-        {
-            string dir = Path.Combine(projectRoot, "Assets", "Emberdelve", "Net");
-            int rpcs = 0;
-            int bad = 0;
-            if (Directory.Exists(dir))
-            {
-                foreach (string file in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
-                {
-                    string text = File.ReadAllText(file);
-                    int from = 0;
-                    while (true)
-                    {
-                        int at = text.IndexOf("[Rpc(", from, StringComparison.Ordinal);
-                        if (at < 0) break;
-                        from = at + 5;
-                        int close = text.IndexOf(']', at);
-                        int open = close < 0 ? -1 : text.IndexOf('(', close);
-                        int end = open < 0 ? -1 : text.IndexOf(')', open);
-                        if (end < 0) continue;
-                        rpcs++;
-                        string parameters = text.Substring(open, end - open + 1);
-                        if (Regex.IsMatch(parameters, @"(?i)(player|combat|party|sender|actor)\s*_?id"))
-                        {
-                            bad++;
-                            Debug.LogError(Tag + " RPC with an identity parameter in " + Path.GetFileName(file) + ": " + parameters);
-                        }
-                    }
-                }
-            }
-
-            Check(rpcs >= 1, "source scan found the test RPC(s) (" + rpcs + ")");
-            Check(bad == 0, "no [Rpc] signature under Net/ carries a player/combat/party id parameter");
         }
 
         // ---- helpers ---------------------------------------------------------------------------

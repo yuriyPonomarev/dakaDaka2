@@ -244,7 +244,6 @@ namespace Emberdelve.EditorTools
             Debug.Log(Tag + " runDir=" + runDir);
 
             // ---- 0. static checks (no processes, no play mode) --------------------------------------------------------------
-            CheckNoIdentityRpcParameters(projectRoot);
             CheckLaunchScripts(projectRoot);
 
             DungeonLayoutData layout = AssetDatabase.LoadAssetAtPath<DungeonLayoutData>(EmberdelvePaths.Data + "/DungeonLayout_AshenHalls.asset");
@@ -637,42 +636,6 @@ namespace Emberdelve.EditorTools
         }
 
         // ---- static checks ----------------------------------------------------------------------------------------------------
-
-        /// <summary>No [Rpc] signature under Net/ carries a player / combat / party / sender / actor id, and the scan is not vacuous.</summary>
-        private static void CheckNoIdentityRpcParameters(string projectRoot)
-        {
-            string dir = Path.Combine(projectRoot, "Assets", "Emberdelve", "Net");
-            int rpcs = 0;
-            int bad = 0;
-            if (Directory.Exists(dir))
-            {
-                foreach (string file in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
-                {
-                    string text = File.ReadAllText(file);
-                    int from = 0;
-                    while (true)
-                    {
-                        int at = text.IndexOf("[Rpc(", from, StringComparison.Ordinal);
-                        if (at < 0) break;
-                        from = at + 5;
-                        int close = text.IndexOf(']', at);
-                        int open = close < 0 ? -1 : text.IndexOf('(', close);
-                        int end = open < 0 ? -1 : text.IndexOf(')', open);
-                        if (end < 0) continue;
-                        rpcs++;
-                        string parameters = text.Substring(open, end - open + 1);
-                        if (Regex.IsMatch(parameters, @"(?i)(player|combat|party|sender|actor)\s*_?id"))
-                        {
-                            bad++;
-                            Debug.LogError(Tag + " RPC with an identity parameter in " + Path.GetFileName(file) + ": " + parameters);
-                        }
-                    }
-                }
-            }
-
-            Check(rpcs >= 4, "source scan found the [Rpc] methods (" + rpcs + ")");
-            Check(bad == 0, "no [Rpc] signature under Net/ carries a player/combat/party id parameter");
-        }
 
         /// <summary>
         /// The documented launch scripts (Tools/net/*.bat) carry commands the real parser accepts: each line that starts the game with

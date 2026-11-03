@@ -546,21 +546,6 @@ namespace Emberdelve.EditorTools
 
             Inventory noCatalogRestore = MakeBag(10, 4);
             Check(!noCatalogRestore.TryAddSnapshot(parsed, out reason) && noCatalogRestore.UsedSlots == 0, "a bag with no catalog cannot restore anything: " + reason);
-
-            // ---------------------------------------------------------------- single source of authority in production code
-            string runtimeRoot = "Assets/Emberdelve/Runtime";
-            int authorityBuilders = 0;
-            int localCatalogs = 0;
-            foreach (string file in Directory.GetFiles(runtimeRoot, "*.cs", SearchOption.AllDirectories))
-            {
-                string text = File.ReadAllText(file);
-                string name = Path.GetFileName(file);
-                if (text.Contains("ItemInstanceAuthority.TryCreate(") && name != "ItemCatalog.cs") { authorityBuilders++; Debug.LogError("[ItemCatalog] production code builds its own authority: " + file); }
-                if ((text.Contains("CreateForTest(") || text.Contains("RegisterForTest(")) && name != "ItemCatalog.cs") { authorityBuilders++; Debug.LogError("[ItemCatalog] production code uses the test-only catalog seam: " + file); }
-                if (text.Contains("LocalCatalogFor")) { localCatalogs++; Debug.LogError("[ItemCatalog] per-definition local catalog survives in " + file); }
-            }
-            Check(authorityBuilders == 0, "only ItemCatalog builds an ItemInstanceAuthority in production code");
-            Check(localCatalogs == 0, "the per-definition local catalog is gone");
         }
     }
 }

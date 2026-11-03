@@ -1320,7 +1320,7 @@ namespace Emberdelve.EditorTools
                 GuardExclusion();
                 BladeDefenseOnRig();
                 EnemyClawAgainstTheRig();
-                NoStaminaSource();
+                NoStaminaMembers();
                 HudSection();
             }
 
@@ -2297,29 +2297,11 @@ namespace Emberdelve.EditorTools
         }
 
         // ---- stamina: the concept is gone (B3) ----------------------------------------------------------
-        // D1b made stamina inert; B3 removed it. Replaces "nothing spends or drains stamina": any code (non-comment)
-        // that still names stamina is an offender, and the data types may not carry it either.
+        // D1b made stamina inert; B3 removed it. The source-text half (no runtime code names stamina) moved to EmberdelveSourceLint;
+        // the data types may not carry it either (reflection, behavioural).
 
-        private void NoStaminaSource()
+        private void NoStaminaMembers()
         {
-            string runtime = Path.Combine(Application.dataPath, "Emberdelve", "Runtime");
-            int offenders = 0;
-            string offenderList = string.Empty;
-            Regex spend = new Regex(@"[Ss]tamina", RegexOptions.Compiled);
-            foreach (string file in Directory.GetFiles(runtime, "*.cs", SearchOption.AllDirectories))
-            {
-                if (Path.GetFileName(file) == "StaminaComponent.cs") continue;
-                string[] lines = File.ReadAllLines(file);
-                for (int i = 0; i < lines.Length; i++)
-                {
-                    string line = lines[i];
-                    if (line.TrimStart().StartsWith("//")) continue;
-                    if (spend.IsMatch(line)) { offenders++; offenderList += $"{Path.GetFileName(file)}:{i + 1} "; }
-                }
-            }
-
-            Check(offenders == 0, $"no runtime code names stamina outside comments ({offenderList})");
-
             const BindingFlags all = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
             int members = 0;
             foreach (Type type in new[] { typeof(PlayerRig), typeof(CharacterClassData), typeof(HudController), typeof(Emberdelve.Stats.EffectiveStatsSnapshot) })

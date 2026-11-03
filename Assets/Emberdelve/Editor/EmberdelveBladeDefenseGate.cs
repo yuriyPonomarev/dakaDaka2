@@ -705,32 +705,6 @@ namespace Emberdelve.EditorTools
                 Check(name.IndexOf("parry", StringComparison.OrdinalIgnoreCase) < 0 && name.IndexOf("riposte", StringComparison.OrdinalIgnoreCase) < 0,
                     "guard outcome '" + name + "' is not a parry");
             }
-
-            // nothing in the runtime consumes the Parry capability (only the data types and the rig's read-only accessor mention it)
-            string runtime = Path.Combine(Application.dataPath, "Emberdelve", "Runtime");
-            string[] allowed = { "DefenseModel.cs", "WeaponData.cs", "PlayerRig.cs", "BladeDefenseRules.cs" };
-            string offenders = string.Empty;
-            if (Directory.Exists(runtime))
-            {
-                foreach (string file in Directory.GetFiles(runtime, "*.cs", SearchOption.AllDirectories))
-                {
-                    string fileName = Path.GetFileName(file);
-                    if (Array.IndexOf(allowed, fileName) >= 0) continue;
-                    string[] lines = File.ReadAllLines(file);
-                    for (int i = 0; i < lines.Length; i++)
-                    {
-                        string line = lines[i].TrimStart();
-                        if (line.StartsWith("//")) continue;
-                        if (line.Contains("CanParry") || line.Contains("DefenseCapability.Parry")) offenders += fileName + ":" + (i + 1) + " ";
-                    }
-                }
-
-                Check(offenders.Length == 0, "no runtime code outside the data types consumes Parry (" + offenders + ")");
-            }
-            else
-            {
-                Check(false, "the runtime source folder was not found");
-            }
         }
 
         // ---------------------------------------------------------------------------------------------

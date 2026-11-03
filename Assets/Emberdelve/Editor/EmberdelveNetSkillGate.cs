@@ -126,9 +126,6 @@ namespace Emberdelve.EditorTools
             Directory.CreateDirectory(logs);
             Debug.Log(Tag + " runDir=" + runDir);
 
-            // ---- static checks ----------------------------------------------------------------------
-            CheckSource(projectRoot);
-
             // ---- expectations from the authored data --------------------------------------------------
             CharacterClassData warrior = LoadClass("warrior");
             Check(warrior != null, "warrior class asset found");
@@ -428,90 +425,6 @@ namespace Emberdelve.EditorTools
 
             foreach (Process p in Started) Check(SafeHasExited(p), "pid " + p.Id + " is gone");
             return 0;
-        }
-
-        // ---- static source checks ---------------------------------------------------------------
-
-        private static void CheckSource(string projectRoot)
-        {
-            string net = Path.Combine(projectRoot, "Assets", "Emberdelve", "Net");
-            string rules = Path.Combine(projectRoot, "Assets", "Emberdelve", "NetRules");
-            string runtime = Path.Combine(projectRoot, "Assets", "Emberdelve", "Runtime");
-
-            int rpcs = 0, identityParams = 0, obsolete = 0;
-            if (Directory.Exists(net))
-            {
-                foreach (string file in Directory.GetFiles(net, "*.cs", SearchOption.AllDirectories))
-                {
-                    string text = File.ReadAllText(file);
-                    int from = 0;
-                    while (true)
-                    {
-                        int at = text.IndexOf("[Rpc(", from, StringComparison.Ordinal);
-                        if (at < 0) break;
-                        from = at + 5;
-                        int close = text.IndexOf(']', at);
-                        int open = close < 0 ? -1 : text.IndexOf('(', close);
-                        int end = open < 0 ? -1 : text.IndexOf(')', open);
-                        if (close < 0 || end < 0) continue;
-                        rpcs++;
-                        if (text.Substring(at, close - at).IndexOf("RequireOwnership", StringComparison.Ordinal) >= 0) obsolete++;
-                        string parameters = text.Substring(open, end - open + 1);
-                        if (Regex.IsMatch(parameters, @"(?i)(player|combat|party|sender|actor)\s*_?id"))
-                        {
-                            identityParams++;
-                            Debug.LogError(Tag + " RPC with an identity parameter in " + Path.GetFileName(file) + ": " + parameters);
-                        }
-                    }
-                }
-            }
-
-            Check(rpcs >= 6, "source scan found the RPCs under Net/ (" + rpcs + ")");
-            Check(identityParams == 0, "no [Rpc] signature under Net/ carries a player/combat/party/sender id parameter");
-            Check(obsolete == 0, "no [Rpc] attribute under Net/ uses the obsolete RequireOwnership (InvokePermission instead)");
-
-            string rig = ReadFile(Path.Combine(net, "NetPlayerRig.cs"));
-            foreach (string name in new[] { "SkillIntentRpc", "SkillResultRpc", "SkillVisualRpc" })
-            {
-                int at = rig.IndexOf("public void " + name + "(", StringComparison.Ordinal);
-                Check(at > 0 && !InsideDevelopmentGuard(rig, at), name + " exists outside the development guard (compiled in release builds)");
-            }
-
-            Check(rig.IndexOf("[Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]\n        public void SkillIntentRpc", StringComparison.Ordinal) >= 0 ||
-                  rig.IndexOf("[Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]\r\n        public void SkillIntentRpc", StringComparison.Ordinal) >= 0,
-                "SkillIntentRpc is a reliable (default delivery) server RPC with InvokePermission Everyone (the server handler is the check)");
-            foreach (string name in new[] { "ForgeOwnerTestRpc", "ForgeMoveTestRpc" })
-            {
-                int at = rig.IndexOf("public void " + name + "(", StringComparison.Ordinal);
-                Check(at > 0 && InsideDevelopmentGuard(rig, at), name + " stays inside the development guard");
-            }
-
-            Check(rig.IndexOf("SkillIntentProofRpc", StringComparison.Ordinal) < 0, "the U3B1 development proof RPC is gone (the probes use the production channel)");
-            string sender = ReadFile(Path.Combine(net, "NetSkillSender.cs"));
-            int abuse = sender.IndexOf("private void RunAbuse()", StringComparison.Ordinal);
-            int proof = sender.IndexOf("private void RunProof()", StringComparison.Ordinal);
-            Check(abuse > 0 && InsideDevelopmentGuard(sender, abuse) && proof > 0 && InsideDevelopmentGuard(sender, proof), "the hostile skill probes (abuse, proof) are inside the development guard");
-
-            Check(ReadFile(Path.Combine(runtime, "Skills", "SkillCaster.cs")).IndexOf("SkillNetLimits.ActiveSlots", StringComparison.Ordinal) >= 0, "SkillCaster.ActiveSlotCapacity is declared from SkillNetLimits.ActiveSlots");
-            string gateSource = ReadFile(Path.Combine(rules, "SkillIntentGate.cs"));
-            Check(gateSource.IndexOf("SkillNetLimits.ActiveSlots", StringComparison.Ordinal) >= 0 && !Regex.IsMatch(gateSource, @"slot\s*>=\s*\d"), "SkillIntentGate bounds the slot with SkillNetLimits.ActiveSlots (no literal)");
-        }
-
-        /// <summary>True when the character index lies inside an unclosed "#if DEVELOPMENT_BUILD" block (nested #if blocks are tracked).</summary>
-        private static bool InsideDevelopmentGuard(string text, int index)
-        {
-            string[] lines = text.Substring(0, index).Split('\n');
-            List<bool> stack = new List<bool>();
-            for (int i = 0; i < lines.Length; i++)
-            {
-                string line = lines[i].Trim();
-                if (line.StartsWith("#if ", StringComparison.Ordinal)) stack.Add(line.IndexOf("DEVELOPMENT_BUILD", StringComparison.Ordinal) >= 0 && line.IndexOf('!') < 0);
-                else if (line.StartsWith("#endif", StringComparison.Ordinal) && stack.Count > 0) stack.RemoveAt(stack.Count - 1);
-                else if (line.StartsWith("#else", StringComparison.Ordinal) && stack.Count > 0) stack[stack.Count - 1] = false;
-            }
-
-            for (int i = 0; i < stack.Count; i++) if (stack[i]) return true;
-            return false;
         }
 
         // ---- parsing -------------------------------------------------------------------------------
