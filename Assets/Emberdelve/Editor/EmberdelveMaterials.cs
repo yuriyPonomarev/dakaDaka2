@@ -96,6 +96,10 @@ namespace Emberdelve.EditorTools
             ChestSealedLid = Create("Chest_SealedLid", new Color(0.34f, 0.34f, 0.46f), 0.6f, new Color(0.2f, 0.2f, 0.5f));
             SwingTrailMat = CreateAdditive("Swing_Trail", new Color(1f, 0.74f, 0.32f, 0.7f));
             FlameMat = CreateFlame("Torch_Flame");
+
+            // V2: copy the KayKit packs from Logs/v2_assets (idempotent, once per domain) and build their materials. A missing
+            // source folder only logs; the level then keeps the V1 procedural look.
+            EmberdelveVendorImport.EnsureImported(false);
         }
 
         /// <summary>
@@ -125,7 +129,8 @@ namespace Emberdelve.EditorTools
             if (normalMap != null)
             {
                 SetPropertyTexture(material, "_BumpMap", normalMap);
-                SetPropertyFloat(material, "_BumpScale", 1f);
+                // V2: 0.8 (was 1): the normal maps are Point filtered 512 px now; a softer scale keeps the blocky relief calm.
+                SetPropertyFloat(material, "_BumpScale", 0.8f);
                 material.EnableKeyword("_NORMALMAP");
             }
             else
@@ -205,7 +210,9 @@ namespace Emberdelve.EditorTools
                 material = new Material(shader) { name = name };
             }
 
-            Color hdr = new Color(3.12f, 1.43f, 0.455f, 1f);
+            // V2: warmer yellow-orange and a much smaller HDR value than V1 (3.12 / 1.43 / 0.455): bright additive red-orange quads
+            // went pink through ACES + bloom up close. Max component 1.8 still reads as HDR for the bloom threshold.
+            Color hdr = new Color(1.8f, 1.15f, 0.5f, 1f);
             SetPropertyColor(material, "_BaseColor", hdr);
             SetPropertyColor(material, "_Color", hdr);
             SetPropertyColor(material, "_EmissionColor", Color.black);

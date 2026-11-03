@@ -117,6 +117,7 @@ namespace Emberdelve.Player
         private void Update()
         {
             if (_rig == null || _rig.IsDead) return;
+            if (Emberdelve.Core.NetRole.IsClientOnly) return; // U3B3: a network client asks the server to swap (NetCombatSender); it never swaps locally
 
             EmberdelveInput input = _rig.Input;
             if (input == null) return;

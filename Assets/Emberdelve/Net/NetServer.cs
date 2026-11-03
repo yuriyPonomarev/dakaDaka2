@@ -63,6 +63,7 @@ namespace Emberdelve.Net
 
         private NetMovementServer _movement;
         private NetSkillServer _skills;
+        private NetCombatServer _combat;
         private RunDirector _director;
         private bool _sceneRequested;
         private bool _sceneFailed;
@@ -92,6 +93,7 @@ namespace Emberdelve.Net
             NetIdentityTable.Current = _table;
             _movement = new NetMovementServer(_nm, _table, _log, _logError);
             _skills = new NetSkillServer(_nm, _table, _args.SkillAbusePolicy, SlotOfClient, _log, _logError);
+            _combat = new NetCombatServer(_nm, _table, _skills, _log, _logError); // U3B3: shares the skill channel's reject ledger
         }
 
         /// <summary>The dev slot a connection was approved or admitted with ("" when unknown): the key of the skill abuse memory.</summary>
@@ -117,6 +119,7 @@ namespace Emberdelve.Net
 
             if (_movement != null) _movement.EnsureSubscribed();
             if (_skills != null) _skills.Tick(now);
+            if (_combat != null) _combat.Tick(now);
 
             if (!_sceneRequested) RequestDungeonScene(now);
 
@@ -166,6 +169,12 @@ namespace Emberdelve.Net
             if (GameServices.TryGet(out RunDirector director) && director != null && director.State == RunState.Running)
             {
                 _director = director;
+                if (_args.PartySizeOverride > 0)
+                {
+                    director.SetPartySizeOverride(_args.PartySizeOverride); // U3B3 proof switch: one player per party makes players hostile
+                    _log("party size override=" + _args.PartySizeOverride);
+                }
+
                 _log("ready scene=" + GameConfig.DefaultDungeonSceneName + " " + CountsText() + " maxPlayers=" + _args.MaxPlayers +
                      " enemies=" + (NetRole.EnemiesDisabled ? "off" : "on"));
                 return;
@@ -373,6 +382,7 @@ namespace Emberdelve.Net
 
             // U3B2: the connection's skill gate and reject ledger (on probation when the slot was disconnected for abuse recently).
             if (_skills != null) _skills.OnAdmitted(row);
+            if (_combat != null) _combat.OnAdmitted(row);
         }
 
         private void RefuseAfterApproval(ulong clientId, string reason)
@@ -389,12 +399,14 @@ namespace Emberdelve.Net
                 if (_pending[i].ClientId == clientId) _pending.RemoveAt(i);
 
             if (_table.RemoveByClient(clientId, out NetIdentity row)) RemoveActor(row, "disconnect");
+            if (_combat != null) _combat.OnClosed(clientId);
             if (_skills != null) _skills.OnClosed(clientId); // a connection that never got an actor still has a ledger
         }
 
         private void RemoveActor(NetIdentity row, string reason)
         {
             if (_movement != null) _movement.Unregister(row.PlayerId, reason);
+            if (_combat != null) _combat.OnClosed(row.ClientId);
             if (_skills != null) _skills.OnClosed(row.ClientId);
             if (_director != null) _director.RemovePlayer(row.PlayerId, reason, false);
 
@@ -434,6 +446,12 @@ namespace Emberdelve.Net
             {
                 _movement.Dispose();
                 _movement = null;
+            }
+
+            if (_combat != null)
+            {
+                _combat.Dispose();
+                _combat = null;
             }
 
             if (_skills != null)

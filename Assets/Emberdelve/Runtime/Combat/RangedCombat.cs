@@ -4,6 +4,7 @@ using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.InputLayer;
+using Emberdelve.Net.Rules;
 using Emberdelve.Player;
 using Emberdelve.Stats;
 
@@ -12,8 +13,12 @@ namespace Emberdelve.Combat
     /// <summary>
     /// Archer draw-and-release state machine plus ammunition bookkeeping. It produces a launch intent;
     /// the authority owns projectile travel, ordered collision, and impact damage.
-    /// Ordinary draw charging is LOCAL and the existing launch path still accepts its charge. U3B must own
-    /// server-clock begin/cancel records before this can count as network combat acceptance.
+    /// Ordinary draw charging is LOCAL and the existing launch path still accepts its charge.
+    ///
+    /// U3B3: on a SERVER the rig of a remote player is <see cref="RemoteDriven"/>. The draw is then the server's own record
+    /// (<see cref="ServerDraw"/>, stamped on the server clock by <see cref="ServerBeginDraw"/>), the release carries no charge, and
+    /// <see cref="ServerReleaseDraw"/> measures it from that record and fires through the same <see cref="Fire(float)"/> path
+    /// (and so the same authority validation) the offline game uses. Update never reads the input device of a remote-driven rig.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(PlayerRig))]
@@ -42,6 +47,14 @@ namespace Emberdelve.Combat
 
         public event Action<AttackIntent> AttackStarted;
         public event Action ShotFired;
+
+        private readonly ServerDrawTimer _serverDraw = new ServerDrawTimer();
+
+        /// <summary>U3B3: true on the server rig of a remote player (the draw is driven by network intents, see the class summary).</summary>
+        public bool RemoteDriven { get; set; }
+
+        /// <summary>U3B3: the server's record of the running draw (idle for a locally driven rig).</summary>
+        public ServerDrawTimer ServerDraw => _serverDraw;
 
         public WeaponData Weapon => _weapon;
         public int Magazine => _magazine;
@@ -120,6 +133,7 @@ namespace Emberdelve.Combat
 
         private void Update()
         {
+            if (RemoteDriven) { UpdateRemoteDriven(); return; }
             if (_weapon == null || !_weapon.IsRanged || rig == null) { CancelDraw(); return; }
 
             EmberdelveInput input = rig.Input;
@@ -179,6 +193,77 @@ namespace Emberdelve.Combat
                 rig.SetDrawVisual(0f);
                 rig.SetAimingPenalty(1f);
             }
+        }
+
+        /// <summary>U3B3: per-frame upkeep of a remote-driven rig: the server draw dies with the weapon, the wielder, a reload or an abandoned client.</summary>
+        private void UpdateRemoteDriven()
+        {
+            if (_weapon == null || !_weapon.IsRanged || rig == null || rig.IsDead || _reloading) { CancelDraw(); return; }
+            if (_drawing && (_drawWeapon != _weapon || _serverDraw.IsStale(Time.time))) CancelDraw();
+
+            if (_drawing)
+            {
+                rig.SetDrawVisual(Charge);
+                rig.SetAimingPenalty(0.55f);
+            }
+            else
+            {
+                rig.SetDrawVisual(0f);
+                rig.SetAimingPenalty(1f);
+            }
+        }
+
+        /// <summary>
+        /// U3B3, server: the wielder pressed the primary button with a ranged weapon. Starts the SERVER's draw clock (the same duration the
+        /// offline press resolves: weapon draw time and the wielder's action speed). False with a reason when nothing started.
+        /// </summary>
+        public bool ServerBeginDraw(out CombatRefusalCode refusal)
+        {
+            refusal = CombatRefusalCode.None;
+            if (!RemoteDriven) { refusal = CombatRefusalCode.Unsupported; return false; }
+            if (rig == null || _weapon == null || !_weapon.IsRanged) { refusal = CombatRefusalCode.WrongWeapon; return false; }
+            if (rig.IsDead) { refusal = CombatRefusalCode.Dead; return false; }
+            if (_reloading || _magazine <= 0) { refusal = CombatRefusalCode.NoAmmo; return false; }
+            if (_drawing) { refusal = CombatRefusalCode.AlreadyDrawing; return false; }
+
+            float authored = _weapon.drawTime;
+            float duration = ActionSpeedRules.DrawDuration(authored, rig.ActionSpeedFactor);
+            if (!_serverDraw.Begin(Time.time, duration, _weapon.minChargeToFire)) { refusal = CombatRefusalCode.Unsupported; return false; }
+
+            _drawWeapon = _weapon;
+            _drawAuthoredTime = authored;
+            _drawDuration = duration;
+            _drawing = true;
+            _drawStartedAt = Time.time;
+            return true;
+        }
+
+        /// <summary>
+        /// U3B3, server: the wielder released the primary button. The charge is measured from the server's own draw record; a release before
+        /// the weapon's minimum charge fires nothing and spends nothing. A release that qualifies goes through <see cref="Fire(float)"/>,
+        /// i.e. the authority's launch validation (sequence, cooldown, ammunition, aim, muzzle). <paramref name="charge"/> is the measured
+        /// charge in every outcome; <paramref name="authorityReason"/> is the authority's refusal text when it refused the launch.
+        /// </summary>
+        public bool ServerReleaseDraw(out CombatRefusalCode refusal, out float charge, out string authorityReason)
+        {
+            refusal = CombatRefusalCode.None;
+            charge = 0f;
+            authorityReason = string.Empty;
+            if (!RemoteDriven) { refusal = CombatRefusalCode.Unsupported; return false; }
+            if (!_drawing || !_serverDraw.IsDrawing) { CancelDraw(); refusal = CombatRefusalCode.NotDrawing; return false; }
+
+            WeaponData drawn = _drawWeapon;
+            DrawReleaseResult result = _serverDraw.Release(Time.time);
+            charge = result.Charge;
+            CancelDraw();
+
+            if (rig == null || rig.IsDead) { refusal = CombatRefusalCode.Dead; return false; }
+            if (result.Outcome == DrawReleaseOutcome.NotDrawing) { refusal = CombatRefusalCode.NotDrawing; return false; }
+            if (result.Outcome == DrawReleaseOutcome.TooEarly) { refusal = CombatRefusalCode.TooEarly; return false; }
+            if (drawn == null || drawn != _weapon) { refusal = CombatRefusalCode.WrongWeapon; return false; }
+
+            if (!FireCore(result.Charge, out authorityReason)) { refusal = CombatRefusalCode.Authority; return false; }
+            return true;
         }
 
         private bool CanReload => _magazine < _weapon.magazineSize && _reserve > 0;
@@ -280,6 +365,7 @@ namespace Emberdelve.Combat
         /// <summary>Abandons an in-progress draw, e.g. because a skill is about to fire instead.</summary>
         public void CancelDraw()
         {
+            _serverDraw.Cancel();
             _drawing = false;
             _drawWeapon = null;
             _drawStartedAt = _drawAuthoredTime = _drawDuration = 0f;
@@ -296,6 +382,13 @@ namespace Emberdelve.Combat
         /// </summary>
         public void Fire(float charge = 1f)
         {
+            FireCore(charge, out _);
+        }
+
+        /// <summary>The body of <see cref="Fire(float)"/>; returns whether the authority accepted the launch and, if not, its reason text.</summary>
+        private bool FireCore(float charge, out string rejectReason)
+        {
+            rejectReason = string.Empty;
             // Sequence is allocated per combat id, not per component: swapping between a bow and a
             // rapier must not make the second weapon's first attack look like a replayed command.
             int sequence = CombatRegistry.NextSequence(rig.CombatId);
@@ -306,7 +399,7 @@ namespace Emberdelve.Combat
             AttackIntent intent = new AttackIntent(rig.CombatId, rig.Kind, _weapon, charge, muzzle, direction,
                 range, sequence, Time.time);
             bool accepted = GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
-                            && authority.LaunchProjectile(rig.CombatSender, intent, out _);
+                            && authority.LaunchProjectile(rig.CombatSender, intent, out rejectReason);
 
             CombatDiagnostics.Log("ranged-shot",
                 $"[RangedCombat] projectile #{sequence} ({_weapon.weaponId}) charge {charge:F2}, accepted={accepted}", this);
@@ -328,6 +421,7 @@ namespace Emberdelve.Combat
             ShotFired?.Invoke();
 
             if (_magazine == 0) GameEvents.RaiseToast(OwnerId, $"Out of {(_weapon != null && !string.IsNullOrEmpty(_weapon.ammoDisplayName) ? _weapon.ammoDisplayName : "ammo")} - press R to reload");
+            return accepted;
         }
 
         private void OnDisable()

@@ -10,6 +10,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using Emberdelve.InputLayer;
 using Emberdelve.AI;
+using Emberdelve.BladeDefense;
 using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.Items;
@@ -1317,6 +1318,7 @@ namespace Emberdelve.EditorTools
                 MovePhases();
                 GuardBreak();
                 GuardExclusion();
+                BladeDefenseOnRig();
                 EnemyClawAgainstTheRig();
                 NoStaminaSource();
                 HudSection();
@@ -1457,7 +1459,7 @@ namespace Emberdelve.EditorTools
             justUnder.impactPower = 19.9f;
             WeaponData buckler = UnityEngine.Object.Instantiate(_shield);
             _cleanup.Add(buckler);
-            buckler.impactResist = 12f;
+            buckler.impactResist = _sword.impactResist + 1f;   // a buckler guards better than the bare blade kit, below the heater shield
 
             // control: no guard raised
             DamageInfo? control = SwingAtRig(_sword, true);
@@ -1543,16 +1545,16 @@ namespace Emberdelve.EditorTools
             Cooldown(3f);
             _clock += 2f;
 
-            // 5. buckler (resist 12): sword (10) blocks, heavy (30) breaks
+            // 5. buckler (resist above the blade kit's): sword (10) blocks, heavy (30) breaks
             _rig.SetOffhandWeapon(buckler);
-            Near(12f, _rig.Defense.ImpactResist, 1e-4f, "buckler: the kit's impact resist is 12");
+            Near(buckler.impactResist, _rig.Defense.ImpactResist, 1e-4f, "buckler: the kit's impact resist is the buckler's " + buckler.impactResist);
             _rig.SetGuardHeld(true);
             DamageInfo? swordVsBuckler = SwingAtRig(_sword, true);
-            Check(swordVsBuckler.HasValue && swordVsBuckler.Value.Blocked && !swordVsBuckler.Value.GuardBroken, "sword (10) vs buckler (12): blocked");
+            Check(swordVsBuckler.HasValue && swordVsBuckler.Value.Blocked && !swordVsBuckler.Value.GuardBroken, "sword (10) vs buckler: blocked");
             Cooldown(3f);
             _rig.SetGuardHeld(true);
             DamageInfo? heavyVsBuckler = SwingAtRig(heavy, true);
-            Check(heavyVsBuckler.HasValue && heavyVsBuckler.Value.GuardBroken, "heavy (30) vs buckler (12): broken");
+            Check(heavyVsBuckler.HasValue && heavyVsBuckler.Value.GuardBroken, "heavy (30) vs buckler: broken");
             Cooldown(3f);
             _clock += 2f;
             _rig.SetOffhandWeapon(null);
@@ -1667,6 +1669,93 @@ namespace Emberdelve.EditorTools
             _rig.SetGuardHeld(false);
             _rig.Health.Heal(1000f);
             Cooldown(3f);
+        }
+
+        // ---- U3C: directional height / endurance guard on the real rig --------------------------------------------
+
+        private void BladeDefenseOnRig()
+        {
+            _authority.SetClock(() => _clock);
+            _clock += 3f;
+            _authority.StepSwings();
+            _rig.Health.Heal(1000f);
+            _rig.SetGuardHeld(true);
+            Check(_rig.IsGuarding, "U3C rig: the guard is up");
+
+            DefenseProfile kit = _rig.Defense;
+            float impact = kit.ImpactResist * 0.5f;            // below the resist: never a guard break in this section
+            Vector3 ahead = _rig.transform.position + _rig.transform.forward * 2f;
+            Vector3 behind = _rig.transform.position - _rig.transform.forward * 2f;
+            CombatFlowTuning free = new CombatFlowTuning();
+            BladeHeight band = _rig.CurrentGuardHeight(free);
+            Check(band != BladeHeight.Unspecified, "U3C rig: the guard has a height band from the view pitch (" + band + ")");
+
+            // front, same band: held with the kit's own reduction
+            bool front = _rig.TryResolveGuard(U3cHit(ahead, -_rig.transform.forward, impact, band), free, out GuardResult held);
+            Check(front && !held.Broken, "U3C rig: a frontal hit in the guard's own band is blocked");
+            Near(kit.BlockReduction, held.Reduction, 1e-4f, "U3C rig: ... with the kit's reduction");
+            Check(_rig.LastGuardOutcome == GuardOutcome.Blocked, "U3C rig: outcome Blocked (" + _rig.LastGuardOutcome + ")");
+
+            // back: the guard is ignored, in every band
+            foreach (BladeHeight attack in new[] { BladeHeight.Low, BladeHeight.Mid, BladeHeight.High })
+            {
+                Check(!_rig.TryResolveGuard(U3cHit(behind, _rig.transform.forward, impact, attack), free, out _), "U3C rig: a hit from behind is not blocked (" + attack + ")");
+                Check(_rig.LastGuardOutcome == GuardOutcome.OutsideArc, "U3C rig: ... outcome OutsideArc (" + _rig.LastGuardOutcome + ")");
+            }
+
+            // wrong height: with zero tolerance any other band goes through, the same band is held
+            CombatFlowTuning strict = new CombatFlowTuning();
+            strict.bladeHeightTolerance = 0;
+            strict.shieldHeightTolerance = 0;
+            BladeHeight other = band == BladeHeight.High ? BladeHeight.Low : BladeHeight.High;
+            Check(!_rig.TryResolveGuard(U3cHit(ahead, -_rig.transform.forward, impact, other), strict, out _), "U3C rig: a frontal hit in another band goes through (" + band + " guard vs " + other + ")");
+            Check(_rig.LastGuardOutcome == GuardOutcome.WrongHeight, "U3C rig: ... outcome WrongHeight (" + _rig.LastGuardOutcome + ")");
+            Check(_rig.TryResolveGuard(U3cHit(ahead, -_rig.transform.forward, impact, band), strict, out _), "U3C rig: the guard's own band is still held with zero tolerance");
+            Check(_rig.TryResolveGuard(U3cHit(ahead, -_rig.transform.forward, impact, BladeHeight.Unspecified), strict, out _), "U3C rig: a hit with no height (skill, arrow) is covered");
+
+            // free blocking (the shipped tuning): the pool is never touched, however many hits land
+            for (int i = 0; i < 6; i++)
+            {
+                Check(_rig.TryResolveGuard(U3cHit(ahead, -_rig.transform.forward, impact, band), free, out _), "U3C rig: free block #" + i);
+            }
+
+            Check(!free.GuardEnduranceEnabled, "U3C rig: the default tuning has no endurance pool (blocking is free)");
+
+            // endurance: an empty pool cannot block; it refills with the authority clock
+            CombatFlowTuning pooled = new CombatFlowTuning();
+            pooled.guardEnduranceRegenPerSecond = 25f;
+            pooled.guardEnduranceRegenDelay = 1f;
+            float cost = BladeGuardRules.BlockCost(impact, pooled.guardBlockCostBase, pooled.guardBlockCostPerImpact);
+            Check(cost > 0f, "U3C rig: a held hit has a positive cost (" + cost + ")");
+            pooled.guardEnduranceMax = cost * 2.5f;
+            int affordable = Mathf.FloorToInt(pooled.guardEnduranceMax / cost);
+            int heldCount = 0;
+            for (int i = 0; i < affordable + 2; i++)
+            {
+                if (_rig.TryResolveGuard(U3cHit(ahead, -_rig.transform.forward, impact, band), pooled, out _)) heldCount++;
+            }
+
+            Check(heldCount == affordable, "U3C rig: exactly " + affordable + " hits are held from a full pool (" + heldCount + ")");
+            Check(_rig.LastGuardOutcome == GuardOutcome.Exhausted, "U3C rig: the next hit finds an empty pool: Exhausted (" + _rig.LastGuardOutcome + ")");
+            Near(pooled.guardEnduranceMax - affordable * cost, _rig.GuardEnduranceCurrent, 1e-3f, "U3C rig: each held hit paid its cost exactly once");
+
+            float missing = cost - _rig.GuardEnduranceCurrent;
+            _clock += pooled.guardEnduranceRegenDelay + missing / pooled.guardEnduranceRegenPerSecond + 0.05f;
+            Check(_rig.TryResolveGuard(U3cHit(ahead, -_rig.transform.forward, impact, band), pooled, out _), "U3C rig: after the regeneration delay and time the guard holds again");
+
+            // shields never parry
+            Check(!kit.HasShield || !kit.CanParry, "U3C rig: a shield in the kit never parries");
+            Check(!kit.HasShield || !_rig.CanParry, "U3C rig: ... nor does the rig report a parry");
+
+            _rig.SetGuardHeld(false);
+            _rig.Health.Heal(1000f);
+            Cooldown(3f);
+        }
+
+        private DamageInfo U3cHit(Vector3 sourcePosition, Vector3 direction, float impact, BladeHeight attackHeight)
+        {
+            return new DamageInfo(20f, _rig.CombatCenter, direction, sourcePosition, 999, EntityKind.Enemy,
+                DamageType.Physical, false, false, 0f, HitLocation.Body, impact, false, false, false, attackHeight);
         }
 
         // ---- weapon swap is blocked during an attack -----------------------------------------------------

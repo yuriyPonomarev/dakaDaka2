@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Emberdelve.BladeDefense;
 using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.Stats;
@@ -69,7 +70,7 @@ namespace Emberdelve.Combat
             float s = float.IsNaN(scale) || scale < 0f ? 0f : scale;
             return new DamageInfo(Mathf.Max(1f, info.Amount * s), info.Point, info.Direction, info.SourcePosition,
                 info.SourceCombatId, info.SourceKind, info.Type, info.Blocked, info.Headshot, info.BlockReduction,
-                info.Location, info.ImpactPower, info.GuardBroken, info.RangedProjectile, info.GuardBladeContact);
+                info.Location, info.ImpactPower, info.GuardBroken, info.RangedProjectile, info.GuardBladeContact, info.AttackHeight);
         }
 
         /// <summary>
@@ -92,8 +93,12 @@ namespace Emberdelve.Combat
             amount *= Mathf.Max(0f, zoneMultiplier);
 
             float impact = weapon.impactPower * (pattern != null ? Mathf.Max(0.01f, pattern.impactPowerScale) : 1f);
+            // U3C: the height band is the committed trajectory's, from the pattern data and the tuning table (never from an intent).
+            BladeHeight height = pattern != null
+                ? BladeTrajectories.HeightOf(pattern.kind, tuning ?? CombatFlowTuning.Default)
+                : BladeHeight.Unspecified;
             return Finalize(amount, weapon, intent.Direction, intent.Origin, intent.InstigatorCombatId,
-                intent.InstigatorKind, hit, target, null, location, impact, tuning);
+                intent.InstigatorKind, hit, target, null, location, impact, tuning, attackHeight: height);
         }
 
         /// <summary>
@@ -186,7 +191,8 @@ namespace Emberdelve.Combat
             int instigatorCombatId, EntityKind instigatorKind, in HitCandidate hit, ICombatEntity target,
             DamageType? overrideType = null, HitLocation location = HitLocation.Unspecified,
             float impactPower = 0f, CombatFlowTuning tuning = null, bool rangedProjectile = false,
-            bool guardBladeContact = false, bool locationAuthoritative = false)
+            bool guardBladeContact = false, bool locationAuthoritative = false,
+            BladeHeight attackHeight = BladeHeight.Unspecified)
         {
             DamageType type = overrideType ?? (source != null ? source.damageType : DamageType.Physical);
 
@@ -194,6 +200,7 @@ namespace Emberdelve.Combat
                 instigatorCombatId, instigatorKind, type, false,
                 locationAuthoritative ? location == HitLocation.Head : hit.Headshot, 0f, location, impactPower);
             if (rangedProjectile) info = info.WithProjectileGuardContact(guardBladeContact);
+            if (attackHeight != BladeHeight.Unspecified) info = info.WithAttackHeight(attackHeight);
 
             // D1b: a defender whose guard can break answers with the reduction AND whether the hit's impact power
             // reached its impact resist (reduced mitigation). Other defenders keep the plain directional guard.
@@ -262,7 +269,7 @@ namespace Emberdelve.Combat
 
             return new DamageInfo(final, info.Point, info.Direction, info.SourcePosition, info.SourceCombatId,
                 info.SourceKind, info.Type, info.Blocked, info.Headshot, info.BlockReduction, info.Location,
-                info.ImpactPower, info.GuardBroken, info.RangedProjectile, info.GuardBladeContact);
+                info.ImpactPower, info.GuardBroken, info.RangedProjectile, info.GuardBladeContact, info.AttackHeight);
         }
     }
 

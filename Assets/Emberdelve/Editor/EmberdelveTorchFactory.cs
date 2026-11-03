@@ -9,6 +9,11 @@ namespace Emberdelve.EditorTools
     /// The root is still a child called "Sconce" of the torch light object: TorchFlicker finds it by that name at
     /// runtime and mounts it on the nearest wall (position + rotation, +Z pointing away from the wall).
     /// Local frame of the sconce: wall surface at z = -0.12, +Z out into the room, +Y up.
+    ///
+    /// V2: when the KayKit torch_mounted model is imported it replaces the procedural cubes/cylinders (same child name
+    /// "Sconce", same frame, no colliders, no shadow casting); the model is fitted from its renderer bounds (back against the
+    /// wall plane, 0.62 m tall, centred on the arm) and the flame is placed at its top. Without the model the V1 procedural
+    /// sconce is built exactly as before. The flame was retuned: warmer, smaller, softer (see BuildFlame).
     /// </summary>
     internal static class EmberdelveTorchFactory
     {
@@ -25,6 +30,25 @@ namespace Emberdelve.EditorTools
             sconce.transform.localRotation = Quaternion.identity;
             Transform root = sconce.transform;
 
+            Vector3 flamePosition = new Vector3(0f, 0.37f, 0.262f);
+            GameObject kayKitTorch = EmberdelveVendorImport.LoadDungeonModel("torch_mounted");
+            if (kayKitTorch == null || !TryBuildKayKitSconce(root, kayKitTorch, out flamePosition))
+            {
+                flamePosition = new Vector3(0f, 0.37f, 0.262f);
+                BuildProceduralSconce(root);
+            }
+
+            Transform flame = BuildFlame(root, EmberdelveMaterials.FlameMat, flamePosition);
+
+            if (flicker != null) WireFlicker(flicker, flame);
+        }
+
+        public const string ModelName = "Torch_Model";
+        private const float ModelHeight = 0.62f;
+
+        /// <summary>The V1 sconce: wall plate, arm, collar, wooden handle, iron band, glowing coal.</summary>
+        private static void BuildProceduralSconce(Transform root)
+        {
             Material iron = EmberdelveMaterials.IronDark;
             Material wood = EmberdelveMaterials.Wood;
             Material coal = EmberdelveMaterials.TorchMat;
@@ -38,10 +62,62 @@ namespace Emberdelve.EditorTools
             AddPart(root, "Handle", PrimitiveType.Cylinder, new Vector3(0f, 0.12f, 0.205f), new Vector3(12f, 0f, 0f), new Vector3(0.05f, 0.22f, 0.05f), wood);
             AddPart(root, "Band", PrimitiveType.Cylinder, new Vector3(0f, 0.237f, 0.23f), new Vector3(12f, 0f, 0f), new Vector3(0.065f, 0.01f, 0.065f), iron);
             AddPart(root, "Coal", PrimitiveType.Sphere, new Vector3(0f, 0.34f, 0.255f), Vector3.zero, new Vector3(0.08f, 0.08f, 0.08f), coal);
+        }
 
-            Transform flame = BuildFlame(root, EmberdelveMaterials.FlameMat);
+        /// <summary>
+        /// Instantiates the KayKit torch under the sconce root and fits it from its bounds: 0.62 m tall, back face on the wall
+        /// plane (z = -0.12), centred on x, bottom at y = -0.10. Assumes the model's front is +Z (the usual Blender -> Unity
+        /// import); a flipped model would show its back to the room (checked by the graphical review). The sconce root is at
+        /// identity rotation/scale and the torch object has none either at build time, so world bounds minus the root position
+        /// are sconce-local bounds. Returns the flame position (top of the model).
+        /// </summary>
+        private static bool TryBuildKayKitSconce(Transform root, GameObject asset, out Vector3 flamePosition)
+        {
+            flamePosition = new Vector3(0f, 0.37f, 0.262f);
 
-            if (flicker != null) WireFlicker(flicker, flame);
+            GameObject model = (GameObject)PrefabUtility.InstantiatePrefab(asset, root);
+            model.name = ModelName;
+            model.transform.localPosition = Vector3.zero;
+            model.transform.localRotation = Quaternion.identity;
+            model.transform.localScale = Vector3.one;
+
+            Collider[] colliders = model.GetComponentsInChildren<Collider>(true);
+            for (int i = 0; i < colliders.Length; i++) Object.DestroyImmediate(colliders[i]);
+
+            Renderer[] renderers = model.GetComponentsInChildren<Renderer>(true);
+            if (renderers.Length == 0 || !TryGetBounds(renderers, out Bounds bounds) || bounds.size.y < 0.01f)
+            {
+                Object.DestroyImmediate(model);
+                return false;
+            }
+
+            // The parts sit right next to the light; their shadows would only be streaks and acne.
+            for (int i = 0; i < renderers.Length; i++) renderers[i].shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+
+            model.transform.localScale = Vector3.one * (ModelHeight / bounds.size.y);
+            TryGetBounds(renderers, out bounds);
+
+            Vector3 min = bounds.min - root.position;
+            Vector3 max = bounds.max - root.position;
+            Vector3 shift = new Vector3(-(min.x + max.x) * 0.5f, -0.10f - min.y, -0.12f - min.z);
+            model.transform.localPosition += shift;
+
+            flamePosition = new Vector3(0f, -0.10f + ModelHeight - 0.07f, (min.z + max.z) * 0.5f + shift.z);
+            return true;
+        }
+
+        private static bool TryGetBounds(Renderer[] renderers, out Bounds bounds)
+        {
+            bounds = new Bounds();
+            bool any = false;
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] == null) continue;
+                if (!any) { bounds = renderers[i].bounds; any = true; }
+                else bounds.Encapsulate(renderers[i].bounds);
+            }
+
+            return any;
         }
 
         private static GameObject AddPart(Transform parent, string name, PrimitiveType type, Vector3 localPosition, Vector3 euler, Vector3 localScale, Material material)
@@ -69,11 +145,17 @@ namespace Emberdelve.EditorTools
             return part;
         }
 
-        private static Transform BuildFlame(Transform parent, Material flameMaterial)
+        /// <summary>
+        /// V2 retune of the V1 flame (it read as a red/pink blob up close): smaller, shorter-lived soft quads (0.09-0.17 m,
+        /// 0.35-0.6 s), a yellow-white core that cools through orange to a still-orange tip (V1 ended in dark red, which ACES +
+        /// bloom turned pink), lower alpha, and an HDR material colour of 1.8 max instead of 3.1. Still additive with the soft
+        /// radial sprite, 55/s, max 40 particles.
+        /// </summary>
+        private static Transform BuildFlame(Transform parent, Material flameMaterial, Vector3 localPosition)
         {
             GameObject flameGo = new GameObject(FlameName);
             flameGo.transform.SetParent(parent, false);
-            flameGo.transform.localPosition = new Vector3(0f, 0.37f, 0.262f);
+            flameGo.transform.localPosition = localPosition;
             flameGo.transform.localRotation = Quaternion.Euler(-90f, 0f, 0f); // cone axis (+Z) points up
 
             ParticleSystem ps = flameGo.AddComponent<ParticleSystem>();
@@ -84,11 +166,11 @@ namespace Emberdelve.EditorTools
             main.playOnAwake = true;
             main.duration = 1f;
             main.simulationSpace = ParticleSystemSimulationSpace.Local;
-            main.startLifetime = new ParticleSystem.MinMaxCurve(0.45f, 0.8f);
-            main.startSpeed = new ParticleSystem.MinMaxCurve(0.25f, 0.5f);
-            main.startSize = new ParticleSystem.MinMaxCurve(0.16f, 0.288f);
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.35f, 0.6f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(0.2f, 0.4f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.09f, 0.17f);
             main.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
-            main.startColor = new ParticleSystem.MinMaxGradient(new Color(1f, 0.78f, 0.4f, 0.8f));
+            main.startColor = new ParticleSystem.MinMaxGradient(new Color(1f, 0.9f, 0.55f, 0.6f));
             main.gravityModifier = new ParticleSystem.MinMaxCurve(-0.05f);
             main.maxParticles = 40;
 
@@ -102,22 +184,22 @@ namespace Emberdelve.EditorTools
             shape.angle = 7f;
             shape.radius = 0.025f;
 
-            // yellow-white core -> orange -> dark red, fading in and out
+            // yellow-white core -> yellow-orange -> orange, fading in and out (never through red)
             ParticleSystem.ColorOverLifetimeModule colour = ps.colorOverLifetime;
             colour.enabled = true;
             Gradient gradient = new Gradient();
             gradient.SetKeys(
                 new[]
                 {
-                    new GradientColorKey(new Color(1f, 0.9f, 0.55f), 0f),
-                    new GradientColorKey(new Color(1f, 0.45f, 0.1f), 0.4f),
-                    new GradientColorKey(new Color(0.5f, 0.06f, 0.02f), 1f)
+                    new GradientColorKey(new Color(1f, 0.95f, 0.7f), 0f),
+                    new GradientColorKey(new Color(1f, 0.7f, 0.22f), 0.4f),
+                    new GradientColorKey(new Color(0.95f, 0.45f, 0.08f), 1f)
                 },
                 new[]
                 {
                     new GradientAlphaKey(0f, 0f),
-                    new GradientAlphaKey(1f, 0.12f),
-                    new GradientAlphaKey(0.6f, 0.6f),
+                    new GradientAlphaKey(0.9f, 0.12f),
+                    new GradientAlphaKey(0.5f, 0.55f),
                     new GradientAlphaKey(0f, 1f)
                 });
             colour.color = new ParticleSystem.MinMaxGradient(gradient);
@@ -178,8 +260,8 @@ namespace Emberdelve.EditorTools
             gradient.SetKeys(
                 new[]
                 {
-                    new GradientColorKey(new Color(1f, 0.7f, 0.3f), 0f),
-                    new GradientColorKey(new Color(0.8f, 0.15f, 0.03f), 1f)
+                    new GradientColorKey(new Color(1f, 0.8f, 0.4f), 0f),
+                    new GradientColorKey(new Color(0.95f, 0.45f, 0.08f), 1f)
                 },
                 new[]
                 {

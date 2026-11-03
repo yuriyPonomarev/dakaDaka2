@@ -1,0 +1,590 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using Emberdelve.BladeDefense;
+using Emberdelve.Combat;
+using Emberdelve.Core;
+using Emberdelve.Data;
+using Emberdelve.Net.Rules;
+using Emberdelve.Player;
+using Unity.Netcode;
+using UnityEngine;
+
+namespace Emberdelve.Net
+{
+    /// <summary>
+    /// U3B3, server only (owned by NetServer): weapon combat for networked players. The owner's NetCombatSender sends INTENTS
+    /// (<see cref="CombatIntentKind"/>: attack press, guard down / up, draw start / release, weapon-set swap) through
+    /// NetPlayerRig.CombatIntentRpc (reliable, ordered); everything else is decided here by the code the offline game already runs.
+    ///
+    /// Receive order (same as U3B2's skill channel):
+    ///   1. IDENTITY FIRST: the connection that carried the message must be the owner of the object the call was made on and that object
+    ///      must be its admitted player. Nothing of the object's state is read when this fails; the SENDER is charged.
+    ///   2. The connection's own CombatIntentGate (kind, sequence, rate) on the server's monotonic clock.
+    ///   3. EXECUTION on the sender's server rig (row.Rig): MeleeCombat.TryBeginSwing / RangedCombat.ServerBeginDraw / ServerReleaseDraw /
+    ///      PlayerRig guard / ClassLoadout.RequestWeaponSetSwap, all of which end in LocalCombatAuthority (swept hit detection, guard,
+    ///      hit location, damage, armor, falloff, teams and friendly fire). Both players and enemies are targets exactly as offline.
+    ///      A draw's CHARGE is measured by the server's clock (ServerDrawTimer), never sent.
+    ///   4. FEEDBACK: the owner gets one CombatResultRpc per request that passed the gate; observers get swing / shot / hit events
+    ///      (presentation only); health and death are NetworkVariables; enemies are published as snapshots.
+    ///
+    /// SHARED ABUSE ACCOUNTING. Every reject is charged to the connection's SkillRejectLedger owned by NetSkillServer (one budget per
+    /// connection, skill and combat traffic add up; log tag "combat"), so a flood on either channel ends in the same disconnect.
+    ///
+    /// AIM AND LATENCY. The swing / shot direction is the rig's current pose, i.e. the last SANITIZED movement frame NetMovementServer
+    /// stepped; the intent carries no aim. Movement is unreliable and intents are reliable, so an action is resolved with the aim of the
+    /// newest input frame the server had when the intent was dequeued, which can be older than the client's key press by the input's
+    /// network delay (log field inputAgeTicks). A client cannot be favoured by sending a different aim: it has none to send.
+    ///
+    /// Server log lines (server tag from NetBootstrap):
+    ///   combat-server ready ...
+    ///   combat-spawn client=.. id=.. party=.. x=.. y=.. z=.. yaw=..
+    ///   combat-intent client=.. id=.. kind=.. seq=.. outcome=.. reason=.. charge=.. aimYaw=.. aimPitch=.. inputAgeTicks=..
+    ///   combat reject=KIND client=..  (via the shared ledger)
+    ///   combat-swing id=.. weapon=.. pattern=.. step=.. windup=.. active=.. recovery=..
+    ///   combat-shot id=.. serial=.. weapon=.. ox oy oz dx dy dz speed gravity maxTime range charge ..
+    ///   combat-hit src=.. attacker=.. target=.. targetKind=.. weapon=.. amount=.. loc=.. locMult=.. blocked=.. blockReduction=.. ... dist=..
+    ///   combat-flight-end serial=.. target=.. air=.. x y z
+    ///   combat-vitals id=.. health=.. max=.. dead=..
+    ///   combat-conn final client=.. accepted=.. refused=.. gate counters ...
+    /// </summary>
+    internal sealed class NetCombatServer
+    {
+        private const float PublishSeconds = 0.1f;
+        private const float EnemyPoseSeconds = 0.2f;
+
+        private sealed class Conn
+        {
+            public ulong ClientId;
+            public int PlayerId;
+            public CombatIntentGate Gate;
+            public NetPlayerRig NetRig;
+            public PlayerRig Rig;
+            public MeleeCombat Melee;
+            public RangedCombat Ranged;
+            public Action<MeleeSwingIntent> SwingHandler;
+            public int Accepted;
+            public int Refused;
+            public bool Published;
+            public CombatVitalsData LastVitals;
+            public bool EnemiesSynced;
+        }
+
+        public static NetCombatServer Current { get; private set; }
+
+        private readonly NetworkManager _nm;
+        private readonly NetIdentityTable _table;
+        private readonly NetSkillServer _skills;
+        private readonly Action<string> _log;
+        private readonly Action<string> _logError;
+        private readonly Dictionary<ulong, Conn> _conns = new Dictionary<ulong, Conn>();
+        private readonly Dictionary<int, Conn> _byCombatId = new Dictionary<int, Conn>();
+        private readonly Dictionary<int, CombatVitalsData> _enemyVitals = new Dictionary<int, CombatVitalsData>();
+        private readonly List<ulong> _scratch = new List<ulong>();
+        private readonly List<int> _scratchIds = new List<int>();
+        private LocalCombatAuthority _subscribed;
+        private float _nextPublish;
+        private float _nextEnemyPose;
+
+        public NetCombatServer(NetworkManager nm, NetIdentityTable table, NetSkillServer skills, Action<string> log, Action<string> logError)
+        {
+            _nm = nm;
+            _table = table;
+            _skills = skills;
+            _log = log;
+            _logError = logError;
+            Current = this;
+            _log("combat-server ready kinds=" + CombatNetLimits.KindMax +
+                 " gateBurst=" + F(CombatIntentGate.Burst) + " gateRate=" + F(CombatIntentGate.RequestsPerSecond) +
+                 " maxOverhold=" + F(CombatNetLimits.MaxDrawOverholdSeconds) + " sharedLedger=1");
+        }
+
+        private static double Now => Time.realtimeSinceStartupAsDouble;
+
+        public int ConnectionCount => _conns.Count;
+
+        public void Dispose()
+        {
+            Unsubscribe();
+            _conns.Clear();
+            _byCombatId.Clear();
+            _enemyVitals.Clear();
+            if (Current == this) Current = null;
+        }
+
+        // ---- lifecycle -------------------------------------------------------------------------
+
+        /// <summary>A player was admitted and spawned: its rig becomes remote driven (a server rig has no input device) and gets a gate.</summary>
+        public void OnAdmitted(NetIdentity row)
+        {
+            if (row == null || row.Rig == null) return;
+
+            Conn conn = new Conn
+            {
+                ClientId = row.ClientId,
+                PlayerId = row.PlayerId,
+                Rig = row.Rig,
+                NetRig = row.Object != null ? row.Object.GetComponent<NetPlayerRig>() : null,
+                Melee = row.Rig.GetComponent<MeleeCombat>(),
+                Ranged = row.Rig.GetComponent<RangedCombat>()
+            };
+
+            int strikes = _skills != null ? _skills.StrikesOf(row.ClientId) : 0;
+            conn.Gate = strikes > 0 ? new CombatIntentGate(0.0, Now) : new CombatIntentGate();
+
+            bool remote = row.ClientId != NetworkManager.ServerClientId;
+            if (remote)
+            {
+                if (conn.Melee != null) conn.Melee.RemoteDriven = true;
+                if (conn.Ranged != null) conn.Ranged.RemoteDriven = true;
+            }
+
+            if (conn.Melee != null)
+            {
+                Conn captured = conn;
+                conn.SwingHandler = intent => OnSwingStarted(captured, intent);
+                conn.Melee.AttackStarted += conn.SwingHandler;
+            }
+
+            _conns[row.ClientId] = conn;
+            _byCombatId[row.Rig.CombatId] = conn;
+
+            Vector3 p = row.Rig.transform.position;
+            _log("combat-spawn client=" + row.ClientId + " id=" + row.PlayerId + " party=" + row.PartyId +
+                 " x=" + F(p.x) + " y=" + F(p.y) + " z=" + F(p.z) + " yaw=" + F(row.Rig.transform.eulerAngles.y) +
+                 " remote=" + (remote ? 1 : 0) + " strikes=" + strikes);
+        }
+
+        public void OnClosed(ulong clientId)
+        {
+            if (!_conns.TryGetValue(clientId, out Conn conn)) return;
+            _conns.Remove(clientId);
+            if (conn.Rig != null) _byCombatId.Remove(conn.Rig.CombatId);
+            if (conn.Melee != null && conn.SwingHandler != null) conn.Melee.AttackStarted -= conn.SwingHandler;
+
+            CombatIntentGate g = conn.Gate;
+            _log("combat-conn final client=" + clientId + " id=" + conn.PlayerId + " accepted=" + conn.Accepted + " refused=" + conn.Refused +
+                 " gateAccepted=" + g.Accepted + " invalid=" + g.Invalid + " replay=" + g.Replay + " flood=" + g.Flood);
+        }
+
+        // ---- receive ---------------------------------------------------------------------------
+
+        public void Receive(NetPlayerRig target, ulong sender, int kind, uint sequence)
+        {
+            if (_skills != null && _skills.DropIfDisconnecting(sender)) return;
+            double now = Now;
+
+            // 1. identity first.
+            string fault = IdentityFault(target, sender, out NetIdentity row);
+            if (fault != null)
+            {
+                string detail = " fault=" + fault + " targetNet=" + (target != null && target.NetworkObject != null ? target.NetworkObject.NetworkObjectId : 0UL);
+                Charge(sender, SkillRejectKind.Identity, detail, false);
+                return;
+            }
+
+            if (!_conns.TryGetValue(sender, out Conn conn))
+            {
+                Charge(sender, SkillRejectKind.Identity, " fault=no-combat-state", false);
+                return;
+            }
+
+            // 2. the connection's own gate.
+            SkillIntentVerdict verdict = conn.Gate.Submit(kind, sequence, now);
+            if (verdict != SkillIntentVerdict.Accepted)
+            {
+                SkillRejectKind rejectKind = verdict == SkillIntentVerdict.Invalid ? SkillRejectKind.Invalid
+                    : verdict == SkillIntentVerdict.Replay ? SkillRejectKind.Replay : SkillRejectKind.Flood;
+                Charge(sender, rejectKind, " seq=" + sequence + " kind=" + kind, conn.Gate.Exhausted);
+                return;
+            }
+
+            // 3. execution on the server's rig.
+            CombatIntentKind intent = (CombatIntentKind)kind;
+            PlayerRig rig = conn.Rig;
+            float charge = 0f;
+            string authorityReason = "";
+            CombatRefusalCode refusal = sender == NetworkManager.ServerClientId
+                ? CombatRefusalCode.ClientRole
+                : Execute(conn, rig, intent, out charge, out authorityReason);
+            bool accepted = refusal == CombatRefusalCode.None;
+            if (accepted) conn.Accepted++; else conn.Refused++;
+
+            long age = -1;
+            NetMovementServer movement = NetMovementServer.Current;
+            if (movement != null) movement.TryGetInputAge(rig.PlayerId, out age);
+            float pitch = rig.Look != null ? rig.Look.Pitch : 0f;
+
+            _log("combat-intent client=" + sender + " id=" + rig.PlayerId + " kind=" + intent + " seq=" + sequence +
+                 " outcome=" + (accepted ? CombatOutcome.Accepted : CombatOutcome.Refused) + " reason=" + refusal +
+                 " charge=" + F(charge) + " aimYaw=" + F(rig.transform.eulerAngles.y) + " aimPitch=" + F(pitch) +
+                 " inputAgeTicks=" + age + (string.IsNullOrEmpty(authorityReason) ? "" : " authority='" + Safe(authorityReason) + "'"));
+
+            // 4. feedback to the owner (the host's own player never uses this channel).
+            if (sender == NetworkManager.ServerClientId) return;
+            try
+            {
+                target.CombatResultRpc(new CombatResultWire
+                {
+                    Sequence = sequence,
+                    Kind = (byte)kind,
+                    Outcome = (byte)(accepted ? CombatOutcome.Accepted : CombatOutcome.Refused),
+                    Reason = (byte)refusal,
+                    Charge = charge
+                });
+            }
+            catch (Exception e)
+            {
+                _logError("combat feedback threw for client " + sender + ": " + e.Message);
+            }
+        }
+
+        private CombatRefusalCode Execute(Conn conn, PlayerRig rig, CombatIntentKind intent, out float charge, out string authorityReason)
+        {
+            charge = 0f;
+            authorityReason = "";
+            if (rig == null) return CombatRefusalCode.NoKit;
+            if (rig.IsDead) return CombatRefusalCode.Dead;
+
+            MeleeCombat melee = conn.Melee;
+            RangedCombat ranged = conn.Ranged;
+            bool meleeActive = melee != null && melee.isActiveAndEnabled && melee.Weapon != null && !melee.Weapon.IsRanged;
+            bool rangedActive = ranged != null && ranged.isActiveAndEnabled && ranged.Weapon != null && ranged.Weapon.IsRanged;
+
+            switch (intent)
+            {
+                case CombatIntentKind.AttackPress:
+                    if (!meleeActive) return rangedActive ? CombatRefusalCode.WrongWeapon : CombatRefusalCode.NoKit;
+                    if (melee.RemoteGuardWanted || rig.IsGuarding) return CombatRefusalCode.Guarding;
+                    if (melee.IsSwinging || melee.CooldownRemaining > 0f) return CombatRefusalCode.TooEarly;
+                    return melee.TryBeginSwing() ? CombatRefusalCode.None : CombatRefusalCode.Authority;
+
+                case CombatIntentKind.GuardDown:
+                    if (!meleeActive) return CombatRefusalCode.WrongWeapon;
+                    if (!rig.CanGuard) return CombatRefusalCode.CannotGuard;
+                    melee.SetRemoteGuard(true);
+                    return CombatRefusalCode.None;
+
+                case CombatIntentKind.GuardUp:
+                    if (melee != null) melee.SetRemoteGuard(false);
+                    return CombatRefusalCode.None;
+
+                case CombatIntentKind.DrawStart:
+                    if (!rangedActive) return meleeActive ? CombatRefusalCode.WrongWeapon : CombatRefusalCode.NoKit;
+                    {
+                        ranged.ServerBeginDraw(out CombatRefusalCode begin);
+                        return begin;
+                    }
+
+                case CombatIntentKind.DrawRelease:
+                    if (ranged == null) return CombatRefusalCode.NoKit;
+                    {
+                        ranged.ServerReleaseDraw(out CombatRefusalCode release, out charge, out authorityReason);
+                        return release;
+                    }
+
+                case CombatIntentKind.SwapWeapon:
+                    if (rig.Loadout == null) return CombatRefusalCode.NoKit;
+                    if (melee != null) melee.SetRemoteGuard(false);
+                    return rig.Loadout.RequestWeaponSetSwap() ? CombatRefusalCode.None : CombatRefusalCode.SwapRefused;
+
+                default:
+                    return CombatRefusalCode.Unsupported;
+            }
+        }
+
+        private string IdentityFault(NetPlayerRig target, ulong sender, out NetIdentity row)
+        {
+            row = null;
+            if (target == null) return "no-target";
+            if (_table == null || !_table.TryGetByClient(sender, out row) || row == null) return "no-player";
+
+            NetworkObject obj = target.NetworkObject;
+            if (obj == null || !obj.IsSpawned) return "not-spawned";
+            if (!ReferenceEquals(obj, row.Object)) return "not-your-object";
+            if (row.ClientId != sender || obj.OwnerClientId != sender) return "not-owner";
+
+            PlayerRig rig = row.Rig;
+            if (rig == null || !ReferenceEquals(target.Rig, rig) || row.PlayerId != rig.PlayerId) return "rig-mismatch";
+            return null;
+        }
+
+        private void Charge(ulong sender, SkillRejectKind kind, string detail, bool exhausted)
+        {
+            if (_skills != null) _skills.ChargeReject(sender, kind, "combat", detail, exhausted);
+        }
+
+        // ---- authority events ------------------------------------------------------------------
+
+        private void EnsureSubscribed()
+        {
+            if (_subscribed != null) return;
+            if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)) return;
+            LocalCombatAuthority local = authority as LocalCombatAuthority;
+            if (local == null) return;
+            _subscribed = local;
+            local.HitResolved += OnHit;
+            local.ProjectileLaunched += OnLaunch;
+            local.FlightEnded += OnFlightEnd;
+        }
+
+        private void Unsubscribe()
+        {
+            if (_subscribed == null) return;
+            _subscribed.HitResolved -= OnHit;
+            _subscribed.ProjectileLaunched -= OnLaunch;
+            _subscribed.FlightEnded -= OnFlightEnd;
+            _subscribed = null;
+        }
+
+        private void OnSwingStarted(Conn conn, MeleeSwingIntent intent)
+        {
+            MeleeCombat melee = conn.Melee;
+            SwingPatternData pattern = melee != null ? melee.ActivePattern : null;
+            SwingTiming timing = melee != null ? melee.ActiveTiming : default(SwingTiming);
+            string patternId = pattern != null && pattern.patternId != null ? pattern.patternId : "";
+
+            // U3C: the committed trajectory is the authority's own record of this swing (the same data its sweep uses), never the intent's.
+            BladeWarning warning = default(BladeWarning);
+            bool aimCommitted = false;
+            if (melee != null && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority swingAuthority)
+                && swingAuthority.TryGetMeleeSwingStatus(melee.LastSwingId, out MeleeSwingStatus swingStatus))
+            {
+                warning = swingStatus.Warning;
+                aimCommitted = swingStatus.AimCommitted;
+            }
+
+            _log("combat-swing id=" + conn.PlayerId + " weapon=" + Dash(intent.WeaponId) + " pattern=" + Dash(patternId) + " step=" + intent.ComboStep +
+                 " windup=" + F(timing.Windup) + " active=" + F(timing.Active) + " recovery=" + F(timing.Recovery) +
+                 " trajectory=" + warning.Trajectory + " height=" + warning.Height + " yaw=" + F(warning.AimYaw) + " pitch=" + F(warning.AimPitch) +
+                 " minyaw=" + F(warning.MinBladeYaw) + " maxyaw=" + F(warning.MaxBladeYaw) + " reach=" + F(warning.Reach) +
+                 " committed=" + (aimCommitted ? 1 : 0));
+
+            if (conn.NetRig == null || !conn.NetRig.IsSpawned) return;
+            try
+            {
+                CombatSwingWire wire = new CombatSwingWire
+                {
+                    WeaponId = intent.WeaponId,
+                    PatternId = patternId,
+                    ComboStep = (byte)Mathf.Clamp(intent.ComboStep, 0, 255),
+                    Windup = timing.Windup,
+                    Active = timing.Active,
+                    Recovery = timing.Recovery
+                };
+                wire.SetWarning(in warning, aimCommitted);
+                conn.NetRig.CombatSwingRpc(wire);
+            }
+            catch (Exception e) { _logError("combat swing event threw: " + e.Message); }
+        }
+
+        private void OnLaunch(CombatLaunchReport r)
+        {
+            _byCombatId.TryGetValue(r.InstigatorId, out Conn conn);
+            int id = conn != null ? conn.PlayerId : 0;
+            _log("combat-shot id=" + id + " combat=" + r.InstigatorId + " serial=" + r.Serial + " weapon=" + Dash(r.WeaponId) +
+                 " ox=" + F(r.Origin.x) + " oy=" + F(r.Origin.y) + " oz=" + F(r.Origin.z) +
+                 " dx=" + F(r.Direction.x) + " dy=" + F(r.Direction.y) + " dz=" + F(r.Direction.z) +
+                 " speed=" + F(r.Speed) + " gravity=" + F(r.Gravity) + " maxTime=" + F(r.MaxFlightTime) + " range=" + F(r.Range) +
+                 " charge=" + F(r.Charge) + " radius=" + F(r.Radius) + " length=" + F(r.Length));
+
+            NetPlayerRig carrier = conn != null ? conn.NetRig : null;
+            if (carrier == null || !carrier.IsSpawned) return; // an enemy's arrow: not replicated (documented split)
+            try
+            {
+                carrier.CombatShotRpc(new CombatShotWire
+                {
+                    Serial = (uint)Mathf.Max(0, r.Serial),
+                    WeaponId = r.WeaponId,
+                    OriginX = r.Origin.x, OriginY = r.Origin.y, OriginZ = r.Origin.z,
+                    DirX = r.Direction.x, DirY = r.Direction.y, DirZ = r.Direction.z,
+                    Speed = r.Speed,
+                    Gravity = r.Gravity,
+                    MaxFlightTime = r.MaxFlightTime,
+                    Range = r.Range,
+                    Charge = r.Charge,
+                    Radius = r.Radius,
+                    Length = r.Length
+                });
+            }
+            catch (Exception e) { _logError("combat shot event threw: " + e.Message); }
+        }
+
+        private void OnFlightEnd(CombatFlightEnd end)
+        {
+            _log("combat-flight-end serial=" + end.Serial + " instigator=" + end.InstigatorId + " target=" + end.TargetId + " air=" + F(end.AirTime) +
+                 " x=" + F(end.Position.x) + " y=" + F(end.Position.y) + " z=" + F(end.Position.z));
+
+            if (!_byCombatId.TryGetValue(end.InstigatorId, out Conn conn) || conn.NetRig == null || !conn.NetRig.IsSpawned) return;
+            try
+            {
+                conn.NetRig.CombatFlightEndRpc(new CombatFlightEndWire
+                {
+                    Serial = (uint)Mathf.Max(0, end.Serial),
+                    X = end.Position.x, Y = end.Position.y, Z = end.Position.z,
+                    AirTime = end.AirTime
+                });
+            }
+            catch (Exception e) { _logError("combat flight event threw: " + e.Message); }
+        }
+
+        private void OnHit(CombatHitReport r)
+        {
+            CombatRegistry.TryGet(r.AttackerId, out ICombatEntity attacker);
+            CombatRegistry.TryGet(r.TargetId, out ICombatEntity victim);
+            bool targetIsEnemy = victim != null && victim.Kind == EntityKind.Enemy;
+            float dist = attacker != null && victim != null ? Vector3.Distance(attacker.CombatCenter, victim.CombatCenter) : -1f;
+
+            _byCombatId.TryGetValue(r.AttackerId, out Conn attackerConn);
+            _byCombatId.TryGetValue(r.TargetId, out Conn targetConn);
+            int attackerId = attackerConn != null ? attackerConn.PlayerId : 0;
+            int targetId = targetConn != null ? targetConn.PlayerId : 0;
+
+            _log("combat-hit src=" + r.Source + " attacker=" + attackerId + " attackerCombat=" + r.AttackerId +
+                 " target=" + targetId + " targetCombat=" + r.TargetId + " targetKind=" + (targetIsEnemy ? "Enemy" : "Player") +
+                 " weapon=" + Dash(r.WeaponId) + " amount=" + F(r.Amount) + " loc=" + r.Location + " locMult=" + F(r.LocationMultiplier) +
+                 " blocked=" + r.Blocked + " blockReduction=" + F(r.BlockReduction) + " guardBroken=" + r.GuardBroken + " killed=" + r.Killed +
+                 " outMult=" + F(r.OutgoingMultiplier) + " flat=" + F(r.FlatBonus) + " armor=" + F(r.ArmorRating) +
+                 " step=" + F(r.StepMultiplier) + " zone=" + F(r.ZoneMultiplier) + " contactT=" + F(r.ContactT) +
+                 " charge=" + F(r.Charge) + " air=" + F(r.AirTime) + " airScale=" + F(r.AirTimeScale) + " dist=" + F(dist) +
+                 " px=" + F(r.Point.x) + " py=" + F(r.Point.y) + " pz=" + F(r.Point.z));
+
+            NetPlayerRig carrier = attackerConn != null ? attackerConn.NetRig : (targetConn != null ? targetConn.NetRig : null);
+            if (carrier == null || !carrier.IsSpawned) return;
+            try
+            {
+                carrier.CombatHitRpc(new CombatHitWire
+                {
+                    Source = (byte)r.Source,
+                    Attacker = attackerId,
+                    Target = targetIsEnemy ? r.TargetId : targetId,
+                    TargetIsEnemy = targetIsEnemy,
+                    Amount = r.Amount,
+                    Location = (byte)r.Location,
+                    Blocked = r.Blocked,
+                    GuardBroken = r.GuardBroken,
+                    Killed = r.Killed
+                });
+            }
+            catch (Exception e) { _logError("combat hit event threw: " + e.Message); }
+        }
+
+        // ---- replicated state --------------------------------------------------------------------
+
+        /// <summary>Called every frame by NetServer: subscribes to the authority once it exists, publishes vitals, enemy snapshots, stale draws.</summary>
+        public void Tick(float now)
+        {
+            EnsureSubscribed();
+            if (now < _nextPublish) return;
+            _nextPublish = now + PublishSeconds;
+
+            _scratch.Clear();
+            foreach (KeyValuePair<ulong, Conn> pair in _conns) _scratch.Add(pair.Key);
+            for (int i = 0; i < _scratch.Count; i++)
+            {
+                if (!_conns.TryGetValue(_scratch[i], out Conn conn)) continue;
+                if (conn.Rig == null) continue;
+
+                RangedCombat ranged = conn.Ranged;
+                if (ranged != null && ranged.IsDrawing && ranged.ServerDraw.IsStale(Time.time)) ranged.CancelDraw();
+
+                PublishVitals(conn);
+            }
+
+            if (now >= _nextEnemyPose)
+            {
+                _nextEnemyPose = now + EnemyPoseSeconds;
+                PublishEnemies();
+            }
+        }
+
+        private void PublishVitals(Conn conn)
+        {
+            NetPlayerRig netRig = conn.NetRig;
+            if (netRig == null || !netRig.IsSpawned) return;
+
+            CombatVitalsData vitals = new CombatVitalsData(conn.Rig.CurrentHealth, conn.Rig.MaxHealth, conn.Rig.IsDead).Quantized();
+            if (conn.Published && vitals.Equals(conn.LastVitals)) return;
+            conn.Published = true;
+            conn.LastVitals = vitals;
+            netRig.Vitals.Value = CombatVitalsWire.From(in vitals);
+            _log("combat-vitals id=" + conn.PlayerId + " health=" + F(vitals.Health) + " max=" + F(vitals.MaxHealth) + " dead=" + vitals.Dead);
+        }
+
+        /// <summary>
+        /// Enemies are not NetworkObjects (the dungeon's enemy spawner is scene-authored and client processes have none); the server sends each
+        /// client a snapshot through the client's own player object: poses a few times a second (unreliable) and health / death on change
+        /// (reliable). A client that just joined gets every enemy's vitals once. Presentation: proxy capsules (NetEnemyViews).
+        /// </summary>
+        private void PublishEnemies()
+        {
+            if (NetRole.EnemiesDisabled) return;
+            IReadOnlyList<ICombatEntity> all = CombatRegistry.All;
+
+            _scratchIds.Clear();
+            bool anyChange = false;
+            for (int i = 0; i < all.Count; i++)
+            {
+                ICombatEntity entity = all[i];
+                if (entity == null || entity.Kind != EntityKind.Enemy) continue;
+                CombatVitalsData current = new CombatVitalsData(entity.CurrentHealth, entity.MaxHealth, entity.IsDead).Quantized();
+                int id = entity.CombatId;
+                _scratchIds.Add(id);
+                bool known = _enemyVitals.TryGetValue(id, out CombatVitalsData prior);
+                if (!known || !prior.Equals(current))
+                {
+                    _enemyVitals[id] = current;
+                    anyChange = true;
+                    if (!known || prior.Dead != current.Dead || current.Health < prior.Health)
+                        _log("combat-enemy id=" + id + " health=" + F(current.Health) + " max=" + F(current.MaxHealth) + " dead=" + current.Dead);
+                }
+            }
+
+            foreach (KeyValuePair<ulong, Conn> pair in _conns)
+            {
+                Conn conn = pair.Value;
+                if (conn.ClientId == NetworkManager.ServerClientId) continue;
+                NetPlayerRig carrier = conn.NetRig;
+                if (carrier == null || !carrier.IsSpawned) continue;
+
+                try
+                {
+                    bool full = !conn.EnemiesSynced;
+                    for (int i = 0; i < _scratchIds.Count; i++)
+                    {
+                        int id = _scratchIds[i];
+                        if (!CombatRegistry.TryGet(id, out ICombatEntity entity)) continue;
+                        CombatVitalsData v = _enemyVitals[id];
+                        if (full || anyChange)
+                        {
+                            // vitals are small and rare; resending all on any change keeps the client trivially consistent
+                            carrier.EnemyVitalsRpc(new EnemyVitalsWire { Enemy = id, Health = v.Health, MaxHealth = v.MaxHealth, Dead = v.Dead });
+                        }
+
+                        if (v.Dead) continue;
+                        Vector3 pos = entity.CombatCenter;
+                        Component comp = entity as Component;
+                        float yaw = comp != null ? comp.transform.eulerAngles.y : 0f;
+                        carrier.EnemyPoseRpc(new EnemyPoseWire { Enemy = id, X = pos.x, Y = pos.y, Z = pos.z, Yaw = yaw });
+                    }
+
+                    conn.EnemiesSynced = true;
+                }
+                catch (Exception e) { _logError("enemy snapshot threw: " + e.Message); }
+            }
+        }
+
+        // ---- helpers ---------------------------------------------------------------------------
+
+        private static string Dash(string text) { return string.IsNullOrEmpty(text) ? "-" : text; }
+
+        private static string Safe(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            string t = text.Length > 80 ? text.Substring(0, 80) : text;
+            return t.Replace('\n', ' ').Replace('\r', ' ').Replace('\'', '`');
+        }
+
+        internal static string F(double value) { return value.ToString("F3", CultureInfo.InvariantCulture); }
+    }
+}

@@ -1,3 +1,9 @@
+# CURRENT WORK — 3 November 2026 (orchestrator Claude)
+
+- U3B2 committed 5311bb6f after local QA R1 (13 gates 0 failures; Docs/Reviews/LOCAL_U3B2-R1-20261103.md).
+- Applied, uncommitted, under local QA job COMBO-local-20261103: U3B3 network weapon combat (Docs/Tasks/U3B3.md), U3C1 committed blade trajectory + directional height guard rules (Docs/Tasks/U3C.md; guard endurance pool shipped OFF per the no-stamina decision), V2 dark retro visual slice (KayKit CC0 import, skeleton enemies, retro full-screen pass; user allowed it without QA).
+- Next: commit when green; then U3C2 (visual commit of swing aim, observer warning render), U4A contested chest transactions.
+
 # PAUSED BY USER — 2 November 2026 ~19:20
 
 User: "глуши локалку, останавливаем разработку, продолжим позже". Roles since 2 Nov (user): Claude orchestrates/integrates/commits, a Sonnet sub-agent implements, the local Pi/Strata model runs ALL compilation/tests (on the mirror ..\DakaDaka_ci so the user's open Editor is never closed).

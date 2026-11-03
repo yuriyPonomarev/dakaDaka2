@@ -54,7 +54,8 @@ namespace Emberdelve.EditorTools
             for (int i = 0; i < guids.Length; i++)
             {
                 string path = AssetDatabase.GUIDToAssetPath(guids[i]);
-                if (!path.StartsWith(EmberdelveTextureImport.TextureRoot) && path != EmberdelveTextureImport.FlameTexturePath) continue;
+                if (!path.StartsWith(EmberdelveTextureImport.TextureRoot) && !path.StartsWith(EmberdelveTextureImport.KayKitRoot)
+                    && path != EmberdelveTextureImport.FlameTexturePath) continue;
 
                 TextureImporter importer = AssetImporter.GetAtPath(path) as TextureImporter;
                 if (importer == null) continue;
@@ -221,9 +222,10 @@ namespace Emberdelve.EditorTools
             tonemapping.mode.Override(TonemappingMode.ACES);
 
             Bloom bloom = GetOrAdd<Bloom>(profile);
-            bloom.threshold.Override(1.0f);
-            bloom.intensity.Override(0.5f);
-            bloom.scatter.Override(0.6f);
+            // V2: slightly less bloom than V1 (0.5 / 1.0 / 0.6); the retro pass wants crisper highlights.
+            bloom.threshold.Override(1.1f);
+            bloom.intensity.Override(0.32f);
+            bloom.scatter.Override(0.5f);
             bloom.tint.Override(new Color(1f, 0.82f, 0.62f, 1f));
             bloom.highQualityFiltering.Override(true);
 
@@ -235,8 +237,9 @@ namespace Emberdelve.EditorTools
 
             Vignette vignette = GetOrAdd<Vignette>(profile);
             vignette.color.Override(Color.black);
-            vignette.intensity.Override(0.35f);
-            vignette.smoothness.Override(0.4f);
+            // V2: stronger vignette than V1 (0.35 / 0.4).
+            vignette.intensity.Override(0.5f);
+            vignette.smoothness.Override(0.45f);
             vignette.rounded.Override(false);
 
             FilmGrain grain = GetOrAdd<FilmGrain>(profile);
@@ -340,6 +343,9 @@ namespace Emberdelve.EditorTools
             }
 
             if (anyChanged) AssetDatabase.SaveAssets();
+
+            // V2: the retro full-screen pass goes onto the PC renderers together with the other render settings.
+            EmberdelveRetroSetup.Apply();
 
             RenderPipelineAsset active = QualitySettings.renderPipeline != null ? QualitySettings.renderPipeline : GraphicsSettings.defaultRenderPipeline;
             Debug.Log("[Emberdelve][Visual] active render pipeline asset: " + (active != null ? AssetDatabase.GetAssetPath(active) : "none"));

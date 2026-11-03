@@ -1955,7 +1955,9 @@ namespace Emberdelve.EditorTools
                 Sword.hitSlowDuration = 0.6f;
                 Sword.heldMoveSpeedPenalty = 10f;
                 Sword.impactPower = 10f;
-                Sword.impactResist = 8f;
+                // U3C: a sword guard holds against sword hits (Dark and Darker): resist above the strongest sword pattern (overhead 10 x 1.2 = 12),
+                // below the heavy weapons (maul 30). Plain assignment, so existing assets are updated on every build.
+                Sword.impactResist = 15f;
                 EditorUtility.SetDirty(Sword);
             }
 
@@ -2120,7 +2122,10 @@ namespace Emberdelve.EditorTools
             Config.hitMask = LayerMask.GetMask(GameConfig.PlayerLayerName, GameConfig.EnemyLayerName);
             Config.projectileMask = LayerMask.GetMask(GameConfig.ProjectileLayerName);
 
+            // FIX1: the whole flow block (the U3C1 tuning fields included) is serialized from the in-memory object, so dirtying + saving here
+            // writes every field of CombatFlowTuning into the committed asset, an asset saved before they existed included.
             EditorUtility.SetDirty(Config);
+            AssetDatabase.SaveAssets();
         }
     }
 }

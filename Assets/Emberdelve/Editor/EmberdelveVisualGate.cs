@@ -91,7 +91,10 @@ namespace Emberdelve.EditorTools
             Check(importer.textureType == type, path + " type " + type + " (was " + importer.textureType + ")");
             if (type != TextureImporterType.NormalMap) Check(importer.sRGBTexture == srgb, path + " sRGB=" + srgb + " (was " + importer.sRGBTexture + ")");
             Check(importer.wrapMode == TextureWrapMode.Repeat, path + " wrap Repeat (was " + importer.wrapMode + ")");
-            Check(importer.anisoLevel == 8, path + " aniso 8 (was " + importer.anisoLevel + ")");
+            // V2 (intentional change, see Docs/Tasks/V2.md): V1 expected aniso 8 / Trilinear / 2048; the retro look is aniso 1 / Point / <= 512.
+            Check(importer.anisoLevel == 1, path + " aniso 1 (V2 retro; was 8 in V1) (was " + importer.anisoLevel + ")");
+            Check(importer.filterMode == FilterMode.Point, path + " Point filter (V2 retro) (was " + importer.filterMode + ")");
+            Check(importer.maxTextureSize <= 512, path + " max size <= 512 (V2 retro) (was " + importer.maxTextureSize + ")");
             Check(importer.mipmapEnabled, path + " mipmaps on");
         }
 

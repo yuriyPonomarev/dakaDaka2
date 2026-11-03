@@ -79,6 +79,8 @@ namespace Emberdelve.Net
         private readonly Action<string> _logError;
         private readonly Dictionary<ulong, Conn> _conns = new Dictionary<ulong, Conn>();
         private readonly List<ulong> _scratch = new List<ulong>();
+        // FIX1: transport disconnects decided during a receive are carried out by the next Tick, not inside the handler.
+        private readonly List<KeyValuePair<ulong, string>> _pendingDisconnects = new List<KeyValuePair<ulong, string>>();
         private float _nextPublish;
 
         public NetSkillServer(NetworkManager nm, NetIdentityTable table, SkillAbusePolicy policy, Func<ulong, string> resolveSlot,
@@ -107,6 +109,7 @@ namespace Emberdelve.Net
         public void Dispose()
         {
             _conns.Clear();
+            _pendingDisconnects.Clear();
             if (Current == this) Current = null;
         }
 
@@ -262,12 +265,51 @@ namespace Emberdelve.Net
 
         // ---- abuse -----------------------------------------------------------------------------
 
-        private void Reject(Conn conn, SkillRejectKind kind, double now, string detail)
+        // ---- shared ledger (U3B3) ------------------------------------------------------------------
+
+        /// <summary>
+        /// U3B3: the combat channel (NetCombatServer) shares THIS connection ledger, so skill and combat rejects add up toward one
+        /// disconnect decision (one abuse budget per connection, whatever channel the traffic used). True when the connection is already
+        /// marked for disconnect (the caller drops the message unseen; the drop is counted here).
+        /// </summary>
+        internal bool DropIfDisconnecting(ulong clientId)
+        {
+            Conn conn = GetConn(clientId, Now, null);
+            if (!conn.Disconnecting) return false;
+            conn.IgnoredAfterDisconnect++;
+            return true;
+        }
+
+        /// <summary>U3B3: strikes on record for the connection's slot (the combat gate starts empty on probation, like the skill gate).</summary>
+        internal int StrikesOf(ulong clientId)
+        {
+            return GetConn(clientId, Now, null).Ledger.Strikes;
+        }
+
+        /// <summary>
+        /// U3B3: charges one reject of another channel to the sender's ledger (tagged with <paramref name="channel"/> in the log line).
+        /// <paramref name="exhausted"/> ends the connection for a used-up sequence space (not an abuse strike).
+        /// </summary>
+        internal void ChargeReject(ulong clientId, SkillRejectKind kind, string channel, string detail, bool exhausted)
+        {
+            double now = Now;
+            Conn conn = GetConn(clientId, now, null);
+            if (conn.Disconnecting)
+            {
+                conn.IgnoredAfterDisconnect++;
+                return;
+            }
+
+            Reject(conn, kind, now, detail, channel);
+            if (exhausted && !conn.Disconnecting) EndConnection(conn, channel + " sequence exhausted", false, now);
+        }
+
+        private void Reject(Conn conn, SkillRejectKind kind, double now, string detail, string channel = "skill")
         {
             SkillRejectAction action = conn.Ledger.Record(kind, now);
             if (conn.Ledger.ShouldLog(kind))
             {
-                _log("skill reject=" + kind + " client=" + conn.ClientId + " slot=" + Dash(conn.Slot) + detail +
+                _log(channel + " reject=" + kind + " client=" + conn.ClientId + " slot=" + Dash(conn.Slot) + detail +
                      " count=" + conn.Ledger.Count(kind) + " total=" + conn.Ledger.Total + " excess=" + conn.Ledger.Excess);
             }
 
@@ -290,8 +332,25 @@ namespace Emberdelve.Net
                  " memorySeconds=" + F(_policy.MemorySeconds) + (host ? " host=1 (not disconnected)" : ""));
 
             if (host || _nm == null) return;
-            try { _nm.DisconnectClient(conn.ClientId, reason); }
-            catch (Exception e) { _logError("skill disconnect threw for client " + conn.ClientId + ": " + e.Message); }
+
+            // FIX1: the DECISION is immediate (Disconnecting is set above, so every later message of this connection is dropped unseen and counted),
+            // the transport disconnect is carried out by the next Tick. Disconnecting inside the receive handler despawns the sender's player object
+            // while the rest of the same network batch is still being dispatched, so those messages never reached the drop path at all
+            // (ignored=0 in the combat-abuse gate) and the "dropped after the decision" rule could not be observed.
+            _pendingDisconnects.Add(new KeyValuePair<ulong, string>(conn.ClientId, reason));
+        }
+
+        private void FlushPendingDisconnects()
+        {
+            if (_pendingDisconnects.Count == 0) return;
+            for (int i = 0; i < _pendingDisconnects.Count; i++)
+            {
+                KeyValuePair<ulong, string> pending = _pendingDisconnects[i];
+                try { if (_nm != null) _nm.DisconnectClient(pending.Key, pending.Value); }
+                catch (Exception e) { _logError("skill disconnect threw for client " + pending.Key + ": " + e.Message); }
+            }
+
+            _pendingDisconnects.Clear();
         }
 
         // ---- replicated state --------------------------------------------------------------------
@@ -299,6 +358,7 @@ namespace Emberdelve.Net
         /// <summary>Called every frame by NetServer: publishes each owner's mana / cooldown picture a few times a second when it changed.</summary>
         public void Tick(float now)
         {
+            FlushPendingDisconnects();
             if (now < _nextPublish) return;
             _nextPublish = now + PublishSeconds;
 

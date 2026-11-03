@@ -37,6 +37,11 @@ namespace Emberdelve.EditorTools
             EmberdelveAssetLibrary.BuildAll();
             EmberdelveVisualSetup.ApplyRenderSettings();
 
+            // V2: KayKit models (enemy prefabs + animator controllers, chest model set). Each step is skipped, with a warning,
+            // when the models are not imported, and the level then keeps the blockout cubes.
+            EmberdelveEnemyVisualFactory.EnsureAll(false);
+            EmberdelvePropFactory.EnsureChestVisualSet();
+
             DungeonLayoutData layout = EmberdelveAssetLibrary.Layout;
             GameConfig config = EmberdelveAssetLibrary.Config;
 
@@ -50,6 +55,7 @@ namespace Emberdelve.EditorTools
 
             BuildLoot(layout, director);
             BuildEnemies(layout, config, director);
+            EmberdelvePropFactory.BuildProps(layout);
             BuildExtractionGate(layout, config, director);
             BuildNetSceneRoles(master, rig);
 
@@ -564,6 +570,9 @@ namespace Emberdelve.EditorTools
                 SetReference(agent, "headCollider", head.GetComponent<Collider>());
                 SetReference(agent, "bodyTransform", body.transform);
                 SetReference(agent, "groundHeight", 0f);
+
+                // V2: skeleton model as the child "Visual"; the Body/Head cubes (and their colliders) stay, only their renderers go off.
+                EmberdelveEnemyVisualFactory.Attach(enemy, spec.enemy, i);
             }
         }
 

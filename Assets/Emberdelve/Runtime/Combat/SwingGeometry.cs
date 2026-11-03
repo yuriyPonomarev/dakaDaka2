@@ -43,6 +43,28 @@ namespace Emberdelve.Combat
         }
 
         /// <summary>
+        /// U3C: the weapon segment of a pattern at normalised active time <paramref name="u"/> (0..1) in an aim frame. This is THE path
+        /// function: the authority's sweep samples it, and the committed-trajectory warning (<see cref="BladeWarning"/>) samples it, so
+        /// what is warned and what is swept are one computation.
+        /// </summary>
+        public static void PathSegment(in SwingFrame frame, SwingPatternData pattern, float bladeLength, float u,
+            out Vector3 baseWorld, out Vector3 tipWorld)
+        {
+            BladeSegment(frame, pattern.ActivePose(u), bladeLength, out baseWorld, out tipWorld);
+        }
+
+        /// <summary>
+        /// U3C: penetration depth of the swept segment into one hit capsule: capsule radius + sweep radius - segment/segment distance
+        /// (>= 0 means the sweep touches it). The authority's contact test and the warning's "inside the sweep" test both use this.
+        /// </summary>
+        public static float SweepDepth(Vector3 bladeBase, Vector3 bladeTip, Vector3 shapeA, Vector3 shapeB,
+            float shapeRadius, float sweepRadius, out Vector3 onBlade)
+        {
+            float distance = SegmentDistance(bladeBase, bladeTip, shapeA, shapeB, out onBlade);
+            return shapeRadius + sweepRadius - distance;
+        }
+
+        /// <summary>
         /// Number of equal time steps the ACTIVE phase is sampled in, for the default turn ceiling. See the
         /// three-argument overload; this is what the authority uses with a default (or old) <c>CombatFlowTuning</c>.
         /// </summary>

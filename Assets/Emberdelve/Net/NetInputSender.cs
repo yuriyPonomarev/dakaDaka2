@@ -61,6 +61,28 @@ namespace Emberdelve.Net
         private float _spawnedAt;
         private long _sentBatches;
 
+        // U3B3: the scripted combat drivers (NetCombatSender) steer the movement stream: forward axis, view yaw and pitch.
+        private bool _combatDrive;
+        private float _driveMoveY;
+
+        /// <summary>The view yaw / pitch the stream is sending right now (what the server will aim with).</summary>
+        public float ViewYaw => _yaw;
+        public float ViewPitch => _pitch;
+
+        /// <summary>
+        /// U3B3: a scripted combat client sets what its movement stream carries from now on: the forward axis (-1..1), the view yaw and the
+        /// view pitch (degrees, positive = down). The frame still goes through the same aggregator, prediction and RPC as any other, so the
+        /// server sees ordinary input; the combat actions themselves travel on the combat channel.
+        /// </summary>
+        public void DriveFromCombatScript(float moveY, float yawDegrees, float pitchDegrees)
+        {
+            if (float.IsNaN(moveY) || float.IsNaN(yawDegrees) || float.IsNaN(pitchDegrees)) return;
+            _combatDrive = true;
+            _driveMoveY = Mathf.Clamp(moveY, -1f, 1f);
+            _yaw = MoveInputFrame.WrapDegrees(yawDegrees);
+            _pitch = MoveInputFrame.ClampPitch(pitchDegrees);
+        }
+
         public void Configure(NetPlayerRig owner, NetLaunchArgs args)
         {
             _owner = owner;
@@ -102,6 +124,7 @@ namespace Emberdelve.Net
             if (!_viewInitialized) InitializeView();
 
             if (_spec != null) SampleScript();
+            else if (_combatDrive) _aggregator.Sample(0f, _driveMoveY, false, false, false, _yaw, _pitch);
             else if (_useRealInput) SampleRealInput();
             else _aggregator.Sample(0f, 0f, false, false, false, _yaw, _pitch);
         }

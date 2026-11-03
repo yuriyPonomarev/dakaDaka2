@@ -1,0 +1,255 @@
+{
+    "schema": "emberdelve-vendor-manifest/1",
+    "packs": [
+        {
+            "name": "KayKit Character Pack: Skeletons",
+            "version": "1.0",
+            "source_repo": "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0",
+            "creator": "Kay Lousberg (www.kaylousberg.com)",
+            "license": "CC0-1.0",
+            "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+            "license_file": "Assets/Emberdelve/Art/ThirdParty/KayKit/Skeletons/LICENSE.txt",
+            "local_source": "Logs/v2_assets/skeletons",
+            "modifications": "None. Files are copied byte for byte; the import settings (rig, loop flags, material remap, Point filtering, 256 px atlas) are applied by EmberdelveKayKitImport / EmberdelveTextureImport.",
+            "usage": "Skeleton_Minion/Warrior/Rogue/Mage rigged characters with embedded animations, plus Blade, Axe, small Shield and Crossbow.",
+            "files": [
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Skeletons/LICENSE.txt",
+                    "source": "Logs/v2_assets/skeletons/LICENSE.txt",
+                    "sha256": "5d822abca4e08c5a91d329e5372b3dc605cba8d994f752cb0f7dfdb7a0a79954",
+                    "bytes": 914
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Skeletons/Characters/fbx/skeleton_texture.png",
+                    "source": "Logs/v2_assets/skeletons/Characters/fbx/skeleton_texture.png",
+                    "sha256": "15741a25c53e04fa9bf3beac3bc0de442359404b1ff9be863b892cb551ad3657",
+                    "bytes": 17037
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Skeletons/Characters/fbx/Skeleton_Minion.fbx",
+                    "source": "Logs/v2_assets/skeletons/Characters/fbx/Skeleton_Minion.fbx",
+                    "sha256": "440381230027cb691d8a57c923b41d90ed66236f7a867fff86f5fb51a5315723",
+                    "bytes": 21911932
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Skeletons/Characters/fbx/Skeleton_Warrior.fbx",
+                    "source": "Logs/v2_assets/skeletons/Characters/fbx/Skeleton_Warrior.fbx",
+                    "sha256": "783d88baface5b5aec4be3a1bdfe360e12e091dae753b3968161e7a69bd0c279",
+                    "bytes": 22402076
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Skeletons/Characters/fbx/Skeleton_Rogue.fbx",
+                    "source": "Logs/v2_assets/skeletons/Characters/fbx/Skeleton_Rogue.fbx",
+                    "sha256": "2961f9cb6640f4627db4b9213b7b349270dc737a4c9b5f7aa5f078203887f78d",
+                    "bytes": 22790796
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Skeletons/Characters/fbx/Skeleton_Mage.fbx",
+                    "source": "Logs/v2_assets/skeletons/Characters/fbx/Skeleton_Mage.fbx",
+                    "sha256": "a5b6a9e9c690b2c23f52aa7a18aef411b56e9c660229c7e2d0f217f78752573c",
+                    "bytes": 22295116
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Skeletons/Assets/fbx/Skeleton_Blade.fbx",
+                    "source": "Logs/v2_assets/skeletons/Assets/fbx/Skeleton_Blade.fbx",
+                    "sha256": "16c3d747dcbb0fc12902f4d99a31edee06c02348815308dc19a02ac1955ee515",
+                    "bytes": 34508
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Skeletons/Assets/fbx/Skeleton_Axe.fbx",
+                    "source": "Logs/v2_assets/skeletons/Assets/fbx/Skeleton_Axe.fbx",
+                    "sha256": "b921180f7cc55306c4907e51676d3f7b6cecf0ab2f90095e269ba807e023f55c",
+                    "bytes": 37324
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Skeletons/Assets/fbx/Skeleton_Shield_Small_A.fbx",
+                    "source": "Logs/v2_assets/skeletons/Assets/fbx/Skeleton_Shield_Small_A.fbx",
+                    "sha256": "5bec95be571aa131bda1c66eefcfd172b84ccb7d710e635d2eca0064dcaea256",
+                    "bytes": 35004
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Skeletons/Assets/fbx/Skeleton_Crossbow.fbx",
+                    "source": "Logs/v2_assets/skeletons/Assets/fbx/Skeleton_Crossbow.fbx",
+                    "sha256": "51f4262edab36a36a854f63d96ed7085de818cc606e91e5b48c4a5028eae0491",
+                    "bytes": 39548
+                }
+            ]
+        },
+        {
+            "name": "KayKit Dungeon Remastered",
+            "version": "1.0",
+            "source_repo": "https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0",
+            "creator": "Kay Lousberg (www.kaylousberg.com)",
+            "license": "CC0-1.0",
+            "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+            "license_file": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/LICENSE.txt",
+            "local_source": "Logs/v2_assets/dungeon",
+            "modifications": "None. Files are copied byte for byte; the import settings (rig, loop flags, material remap, Point filtering, 256 px atlas) are applied by EmberdelveKayKitImport / EmberdelveTextureImport.",
+            "usage": "Dungeon props: wall torch, chests, barrels, crates, pillars, banners, candles, rubble, shelves and similar.",
+            "files": [
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/LICENSE.txt",
+                    "source": "Logs/v2_assets/dungeon/LICENSE.txt",
+                    "sha256": "c5f17abf619731f57f6bbff450f6484214605c13aa96bb75bbcfc70930941ff7",
+                    "bytes": 829
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/texture/dungeon_texture.png",
+                    "source": "Logs/v2_assets/dungeon/texture/dungeon_texture.png",
+                    "sha256": "f9ae182518f908bd09461a56a430b9ca7369812ac10890224cc6f32e7da3e1ee",
+                    "bytes": 15794
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/torch_mounted.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/torch_mounted.fbx",
+                    "sha256": "edd053866ec82f441d0ee3239075f9c6a1fa9e0d4da8d881caa112ba0180560b",
+                    "bytes": 28460
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/torch_lit.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/torch_lit.fbx",
+                    "sha256": "72b808e123a01a2ed16eb0748cc9215ce5266b6e73abb28580800fe5d3808be5",
+                    "bytes": 27404
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/chest.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/chest.fbx",
+                    "sha256": "c3da5bf539ad78365b51392318b5967bf9708fdfcdbadb20631d50505d155f62",
+                    "bytes": 42364
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/chest_gold.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/chest_gold.fbx",
+                    "sha256": "672f98242543b2ba3a51ba33109d82101d961de127690f3846270e2430fe8d01",
+                    "bytes": 67148
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/trunk_medium_A.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/trunk_medium_A.fbx",
+                    "sha256": "ccde8cc22d2bae59441ca0d740fa4241619356689b0cbc48fd17aa05b576dcc1",
+                    "bytes": 23580
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/barrel_large.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/barrel_large.fbx",
+                    "sha256": "da828b2bcbfb12148b49e40d4937c0c58b135eba7c15b823caee49fb54ef2fa9",
+                    "bytes": 36012
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/barrel_small_stack.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/barrel_small_stack.fbx",
+                    "sha256": "828a1460eb9b952fff51198e7235a9f7013a3d1b11374a42ec16653f30b13998",
+                    "bytes": 53436
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/box_stacked.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/box_stacked.fbx",
+                    "sha256": "f361663efc4660ab5e0875c611628eebcb4d029b808950d57c53367348cab3d1",
+                    "bytes": 91900
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/crates_stacked.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/crates_stacked.fbx",
+                    "sha256": "73e5c7443b1ce29c63d1b77cfc911fe0fc7835afe1f9417f0ff7ae3a0678e933",
+                    "bytes": 62076
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/pillar.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/pillar.fbx",
+                    "sha256": "b99d1ff953edb9a932156c8b427aa25d30230cf3a5f607b0a428ee2410cbd55d",
+                    "bytes": 22140
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/pillar_decorated.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/pillar_decorated.fbx",
+                    "sha256": "1f2af46f6954630664637a5074dda2535a75e284d25c9b95be313bba978aeaa7",
+                    "bytes": 44652
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/column.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/column.fbx",
+                    "sha256": "1684a020001824097a8589e9112d97f58292e7c158dca961d852c787b8243688",
+                    "bytes": 20076
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/banner_red.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/banner_red.fbx",
+                    "sha256": "73052ab54aa9c2a9b2fe4ab1d682cf3a947eaa2d201d6f9b4088000e9188be04",
+                    "bytes": 22140
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/banner_patternA_red.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/banner_patternA_red.fbx",
+                    "sha256": "7102e30281fa30237c2965f525bfa0a9a8b7ad60b4e1894876e1cb9be8d5865f",
+                    "bytes": 22652
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/candle_lit.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/candle_lit.fbx",
+                    "sha256": "c0910a846c5931da72af1e5c6627e56a69e28a6093b8549ffb335c90f7d1657a",
+                    "bytes": 22652
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/candle_triple.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/candle_triple.fbx",
+                    "sha256": "071916e5bb4131e8721f1b84e27a75dd5f666a028e1e2940a56c4123317212a9",
+                    "bytes": 25308
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/rubble_large.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/rubble_large.fbx",
+                    "sha256": "95e9539420308fa1fd4a4336a81ce994cd329e7b8fc048afab93a2a1027badb6",
+                    "bytes": 54220
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/rubble_half.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/rubble_half.fbx",
+                    "sha256": "86a238199deffe508bb8c2b51d0734a148642ac8af798df9cb4a92a11e27cf17",
+                    "bytes": 36780
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/shelf_small_candles.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/shelf_small_candles.fbx",
+                    "sha256": "8a89845a09cab80ebbb145dd0393f6ab8361ca31b09508a7215bf4b56f6ad139",
+                    "bytes": 26332
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/table_long_broken.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/table_long_broken.fbx",
+                    "sha256": "42b4ebfb228c1cef9ff156fefdd00eea521a8ece9decbabb72409892925bb1a7",
+                    "bytes": 38908
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/keyring_hanging.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/keyring_hanging.fbx",
+                    "sha256": "d9bbf51cd6c4b64f8ab1baf14444099a84fe38682ad499f11e88f3010fb1797f",
+                    "bytes": 41628
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/sword_shield_broken.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/sword_shield_broken.fbx",
+                    "sha256": "e68bd19a1b709c2e85ccdfaf4d5faaead04900f79dcb117cc35fadffcc5e9ac0",
+                    "bytes": 35420
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/coin_stack_small.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/coin_stack_small.fbx",
+                    "sha256": "a3a7b0cee44a60a5a2225bde5c47baeb499ba06a2d0853b9bd27ff5bd4550ade",
+                    "bytes": 31436
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/bottle_A_green.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/bottle_A_green.fbx",
+                    "sha256": "692f4f430a0d632d125755a0976a911ddcc46de07fa3a257ff57ca3c1d44e27b",
+                    "bytes": 24028
+                },
+                {
+                    "path": "Assets/Emberdelve/Art/ThirdParty/KayKit/Dungeon/fbx/floor_tile_big_spikes.fbx",
+                    "source": "Logs/v2_assets/dungeon/fbx/floor_tile_big_spikes.fbx",
+                    "sha256": "019edcbae7f9514704ba207c94bc74bc19ca2894ef36d6938aac433d281154c1",
+                    "bytes": 36332
+                }
+            ]
+        }
+    ]
+}

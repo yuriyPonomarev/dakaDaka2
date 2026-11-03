@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Emberdelve.BladeDefense;
 using Emberdelve.Core;
 using Emberdelve.Combat;
 using Emberdelve.Data;
@@ -877,10 +878,13 @@ namespace Emberdelve.Player
         }
 
         /// <summary>
-        /// D1b guard: the same frontal-arc rule as before (a hit from behind is never blocked, shields never parry),
-        /// then the impact check. A hit whose impact power reaches the kit's impact resist BREAKS the guard: only
-        /// <c>guardBreakReductionScale</c> of the normal mitigation applies and the authority staggers the guard. No
-        /// stamina concept exists anywhere in this path.
+        /// Guard (D1b + U3C): the decision is the pure rule <see cref="BladeGuardRules.Resolve"/>, fed with what this rig knows:
+        /// the guard flag and kit (as before), the bearing to the attacker (a hit from behind is never blocked), the guard height from
+        /// the view pitch against the height band of the incoming swing, the impact check (a hit whose impact power reaches the kit's
+        /// impact resist BREAKS the guard: only <c>guardBreakReductionScale</c> of the mitigation applies and the authority staggers the
+        /// guard) and, when the tuning enables it, the guard endurance pool (an empty pool cannot block; a held hit pays exactly once).
+        /// Shields and blades share the rule and neither parries. With the shipped tuning (no pool, bands only differ for a lowered
+        /// guard against an overhead) the outcome is the D1b outcome.
         /// </summary>
         public bool TryResolveGuard(in DamageInfo incoming, CombatFlowTuning tuning, out GuardResult result)
         {
@@ -890,30 +894,71 @@ namespace Emberdelve.Player
             // A contributing shield keeps the existing directional block semantics.
             if (incoming.RangedProjectile && !defense.HasShield && _mainHand != null && _mainHand.CanBlock
                 && !incoming.GuardBladeContact) return false;
-            if (!TryGetArcReduction(incoming, defense, out float reduction)) return false;
 
-            bool broken = CombatFlowRules.IsGuardBroken(incoming.ImpactPower, defense.ImpactResist);
-            float scale = tuning != null ? tuning.guardBreakReductionScale : CombatFlowTuning.DefaultGuardBreakReductionScale;
-            result = new GuardResult(broken ? reduction * Mathf.Clamp01(scale) : reduction, broken);
+            CombatFlowTuning flow = tuning ?? CombatFlowTuning.Default;
+            bool enduranceOn = flow.GuardEnduranceEnabled;
+            float now = AuthorityClock();
+            if (enduranceOn) _guardEndurance.Refresh(now, flow.guardEnduranceMax, flow.guardEnduranceRegenPerSecond, flow.guardEnduranceRegenDelay);
+
+            GuardInput input = new GuardInput
+            {
+                Raised = IsGuardingWithDefense(defense),
+                BlockReduction = defense.BlockReduction,
+                ArcDegrees = defense.BlockArcDegrees,
+                BearingDegrees = BearingToSource(incoming),
+                HasShield = defense.HasShield,
+                GuardHeight = CurrentGuardHeight(flow),
+                AttackHeight = incoming.AttackHeight,
+                HeightTolerance = defense.HasShield ? flow.shieldHeightTolerance : flow.bladeHeightTolerance,
+                ImpactPower = incoming.ImpactPower,
+                ImpactResist = defense.ImpactResist,
+                BreakReductionScale = tuning != null ? tuning.guardBreakReductionScale : CombatFlowTuning.DefaultGuardBreakReductionScale,
+                EnduranceEnabled = enduranceOn,
+                EnduranceCurrent = _guardEndurance.Current,
+                EnduranceCost = enduranceOn
+                    ? BladeGuardRules.BlockCost(incoming.ImpactPower, flow.guardBlockCostBase, flow.guardBlockCostPerImpact)
+                    : 0f
+            };
+
+            GuardVerdict verdict = BladeGuardRules.Resolve(in input);
+            LastGuardOutcome = verdict.Outcome;
+            if (enduranceOn && verdict.EnduranceSpent > 0f) _guardEndurance.Spend(verdict.EnduranceSpent, now);
+            if (!verdict.Mitigated) return false;
+
+            result = new GuardResult(verdict.Reduction, verdict.Broken);
             return true;
         }
 
-        private bool TryGetArcReduction(in DamageInfo incoming, DefenseProfile defense, out float reduction)
-        {
-            reduction = 0f;
-            if (!IsGuardingWithDefense(defense)) return false;
+        /// <summary>U3C: what the guard did to the last hit it was asked about (NotGuarding until the first hit). Read by gates and the HUD.</summary>
+        public GuardOutcome LastGuardOutcome { get; private set; }
 
+        /// <summary>U3C: guard endurance left (0 while the tuning has no pool). The pool is the authority clock's: it regenerates between hits.</summary>
+        public float GuardEnduranceCurrent => _guardEndurance.Current;
+
+        /// <summary>U3C: the guard band the view pitch puts this rig's guard in (Mid when the aim pose is unavailable).</summary>
+        public BladeHeight CurrentGuardHeight(CombatFlowTuning flow)
+        {
+            CombatFlowTuning tuning = flow ?? CombatFlowTuning.Default;
+            if (!TryGetAimPose(out _, out _, out float pitch)) return BladeHeight.Mid;
+            return BladeGuardRules.GuardHeightFromPitch(pitch, tuning.guardHighPitchDegrees, tuning.guardLowPitchDegrees);
+        }
+
+        private readonly GuardEnduranceState _guardEndurance = new GuardEnduranceState();
+
+        private static float AuthorityClock()
+        {
+            if (GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) && authority is LocalCombatAuthority local) return local.Now;
+            return Time.time;
+        }
+
+        /// <summary>Angle in degrees between this rig's facing and the horizontal direction to the attacker (0 ahead, 180 behind).</summary>
+        private float BearingToSource(in DamageInfo incoming)
+        {
             Vector3 toSource = incoming.SourcePosition - transform.position;
             toSource.y = 0f;
             if (toSource.sqrMagnitude < 0.0001f) toSource = -incoming.Direction;
             toSource.Normalize();
-
-            // Direction-aware block: the guard only holds inside the kit's own arc towards the source.
-            float angle = Vector3.Angle(transform.forward, toSource);
-            if (angle > defense.BlockArcDegrees * 0.5f) return false;
-
-            reduction = Mathf.Clamp01(defense.BlockReduction);
-            return true;
+            return Vector3.Angle(transform.forward, toSource);
         }
 
         // D1c5: the guard flag does not reduce incoming damage while this rig's own swing runs on the authority (the

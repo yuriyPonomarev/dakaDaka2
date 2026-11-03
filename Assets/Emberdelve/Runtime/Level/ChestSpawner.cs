@@ -42,6 +42,7 @@ namespace Emberdelve.Level
             if (layout == null || layout.chestSpawns == null || layout.chestSpawns.Count == 0) return;
 
             int interactLayer = LayerMask.NameToLayer(GameConfig.InteractLayerName);
+            bool[,] walkable = layout.BuildWalkableGrid();
             GameObject root = new GameObject("Chests");
             root.transform.SetParent(lootHost.transform, false);
 
@@ -81,10 +82,30 @@ namespace Emberdelve.Level
                 chest.Configure(spec.variant, spec.lootTable, spec.seed, lootHost);
                 chest.ConfigureBody(size, lid.transform);
 
+                // V2: dress the blockout cubes with a model (visual only; colliders, layers and wiring above are untouched).
+                ChestVisualSet.Attach(chest, body, lid, spec.variant, size, FacingYaw(layout, walkable, spec.cell));
+
                 _chests.Add(chest);
             }
 
             Debug.Log($"[Emberdelve][ChestSpawner] spawned {_chests.Count} chest(s) from layout '{layout.levelName}'");
+        }
+
+        /// <summary>
+        /// V2: which way a chest model faces. The box collider stays axis aligned, so the model only turns by 0 or 180 degrees:
+        /// 180 when its back is against a wall on the +Z side, 0 otherwise.
+        /// </summary>
+        private static float FacingYaw(DungeonLayoutData layout, bool[,] walkable, Vector2Int cell)
+        {
+            bool north = IsBlocked(walkable, cell.x, cell.y + 1);
+            bool south = IsBlocked(walkable, cell.x, cell.y - 1);
+            return north && !south ? 180f : 0f;
+        }
+
+        private static bool IsBlocked(bool[,] walkable, int x, int y)
+        {
+            if (x < 0 || y < 0 || x >= walkable.GetLength(0) || y >= walkable.GetLength(1)) return true;
+            return !walkable[x, y];
         }
 
         public static Vector3 SizeFor(ChestVariant variant)

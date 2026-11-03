@@ -45,8 +45,8 @@ namespace Emberdelve.Combat
         /// </summary>
         public static bool IsGuardBroken(float impactPower, float impactResist)
         {
-            if (float.IsNaN(impactPower) || float.IsNaN(impactResist)) return false;
-            return impactPower > 0f && impactPower >= impactResist;
+            // U3C: one rule for the pure layer and the runtime (Emberdelve.BladeDefense.BladeGuardRules).
+            return Emberdelve.BladeDefense.BladeGuardRules.IsGuardBroken(impactPower, impactResist);
         }
 
         /// <summary>Move-speed factor of held gear: 1 - (main-hand penalty + a contributing off-hand shield's) / 300, floored.</summary>

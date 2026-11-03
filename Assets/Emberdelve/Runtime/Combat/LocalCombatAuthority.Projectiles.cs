@@ -173,6 +173,7 @@ namespace Emberdelve.Combat
             _lastAttackTime[instigator.CombatId] = Now;
             _projectiles.Add(flight);
             flight.Visual = ProjectileVisual.SpawnArrow(origin, origin + direction * range, weapon, true);
+            ReportLaunch(flight);
             AcceptedCount++;
             LastAttackRejectReason = string.Empty;
             return true;
@@ -602,6 +603,7 @@ namespace Emberdelve.Combat
             ProjectileEnded?.Invoke(new ProjectileEndReport(flight.Serial, flight.InstigatorId, reason, targetId,
                 flight.Origin, flight.Position, flight.ImpactPoint, flight.Steps,
                 flight.Steps * ProjectileBallistics.StepSeconds, flight.Traveled));
+            ReportFlightEnd(flight, targetId);
         }
 
         private bool TryFindProjectileContact(ProjectileFlight flight, Vector3 start, Vector3 end,
@@ -874,6 +876,8 @@ namespace Emberdelve.Combat
                 target.ApplyDamage(damage);
                 ApplyHitEffects(target, damage, flight.Weapon);
                 PublishProjectileFeedback(instigator, target, point, damage);
+                ReportHit(CombatHitSource.Projectile, instigator, target, flight.Weapon, damage, location, locationMultiplier, 1f, 1f, 0f,
+                    flight.Attack.Charge, airTime, airTimeFalloff);
                 return;
             }
 
@@ -897,6 +901,8 @@ namespace Emberdelve.Combat
             flight.HitCount++;
             activation.Hits++;
             PublishProjectileFeedback(instigator, target, point, skillDamage);
+            ReportHit(CombatHitSource.SkillProjectile, instigator, target, flight.Weapon, skillDamage, location, locationMultiplier, 1f, 1f, 0f,
+                1f, airTime, airTimeFalloff);
         }
 
         private void PublishProjectileFeedback(ICombatEntity instigator, ICombatEntity target,

@@ -235,12 +235,20 @@ namespace Emberdelve.Combat
         public readonly Vector3 WallNormal;
         public readonly bool HasWallPoint;
 
+        /// <summary>U3C: the trajectory this swing committed to when it began (the victim-visible warning). The sweep samples the same path function.</summary>
+        public readonly BladeWarning Warning;
+
+        /// <summary>U3C: true when the sweep keeps the aim the swing began with (CombatFlowTuning.commitSwingAim); false = it follows the live aim at the turn ceiling.</summary>
+        public readonly bool AimCommitted;
+
         public MeleeSwingStatus(int swingId, int instigatorCombatId, SwingPhase phase, SwingEndReason endReason,
             float elapsed, int samplesProcessed, int sampleCount, int wallContactSample, IReadOnlyList<MeleeSwingHit> hits,
             int comboStep = 0, float stepMultiplier = 1f, Emberdelve.Data.SwingTiming timing = default,
             float turnClampedDegrees = 0f, Vector3 wallPoint = default, Vector3 wallNormal = default, bool hasWallPoint = false,
-            float repeatInterval = 0f, float actionSpeedFactor = 1f)
+            float repeatInterval = 0f, float actionSpeedFactor = 1f, BladeWarning warning = default, bool aimCommitted = false)
         {
+            Warning = warning;
+            AimCommitted = aimCommitted;
             WallPoint = wallPoint;
             WallNormal = wallNormal;
             HasWallPoint = hasWallPoint;

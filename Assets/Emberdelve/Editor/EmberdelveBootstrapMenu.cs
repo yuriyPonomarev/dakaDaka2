@@ -28,6 +28,9 @@ namespace Emberdelve.EditorTools
 
             AssetDatabase.Refresh();
 
+            // V2: KayKit packs from Logs/v2_assets first (idempotent), so the lobby and dungeon builders find the models.
+            EmberdelveVendorImport.EnsureImported(false);
+
             EmberdelveAssetLibrary.BuildAll();
 
             EmberdelveLobbyBuilder.Build();

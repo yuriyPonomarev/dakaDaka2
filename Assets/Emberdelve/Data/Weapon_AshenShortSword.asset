@@ -55,7 +55,7 @@ MonoBehaviour:
   hitSlowDuration: 0.6
   heldMoveSpeedPenalty: 10
   impactPower: 10
-  impactResist: 8
+  impactResist: 15
   twoHanded: 0
   ammoDisplayName: Ammo
   rangedRange: 42

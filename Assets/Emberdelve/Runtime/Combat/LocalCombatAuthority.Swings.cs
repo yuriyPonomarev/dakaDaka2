@@ -88,6 +88,11 @@ namespace Emberdelve.Combat
             public float LastPitch;
             public float TurnCeiling = float.PositiveInfinity;
             public float TurnClamped;
+            // U3C: the trajectory this swing committed to at begin (warning data) and, when the tuning commits the aim, the aim the sweep keeps.
+            public BladeWarning Warning;
+            public bool CommitAim;
+            public float CommitYaw;
+            public float CommitPitch;
             public SwingPhase Phase;
             public SwingEndReason EndReason;
             public float EndTs;
@@ -355,8 +360,12 @@ namespace Emberdelve.Combat
                 LastEye = eye,
                 LastYaw = yaw,
                 LastPitch = pitch,
+                CommitAim = FlowTuning.commitSwingAim,
+                CommitYaw = yaw,
+                CommitPitch = pitch,
                 Phase = timing.Windup > 0f ? SwingPhase.Windup : SwingPhase.Active
             };
+            record.Warning = BladeWarning.Describe(pattern, weapon, eye, yaw, pitch, FlowTuning, record.SampleCount);
 
             _swingsById[record.Id] = record;
             _swingByInstigator[record.InstigatorId] = record;
@@ -386,7 +395,8 @@ namespace Emberdelve.Combat
             if (r.HitsView == null) r.HitsView = r.Hits.AsReadOnly();
             status = new MeleeSwingStatus(r.Id, r.InstigatorId, r.Phase, r.EndReason, elapsed,
                 Mathf.Min(r.NextSample, r.SampleCount + 1), r.SampleCount, r.WallSample, r.HitsView,
-                r.ComboStep, r.StepMultiplier, r.Timing, r.TurnClamped, r.WallPoint, r.WallNormal, r.HasWallPoint, r.RepeatInterval, r.ActionSpeedFactor);
+                r.ComboStep, r.StepMultiplier, r.Timing, r.TurnClamped, r.WallPoint, r.WallNormal, r.HasWallPoint, r.RepeatInterval, r.ActionSpeedFactor,
+                r.Warning, r.CommitAim);
             return true;
         }
 
@@ -653,6 +663,13 @@ namespace Emberdelve.Combat
                 pitch = rec.LastPitch;
             }
 
+            // U3C: a committed swing keeps the aim it began with (eye still follows the body): the warning stays exact, nothing tracks.
+            if (rec.CommitAim)
+            {
+                yaw = rec.CommitYaw;
+                pitch = rec.CommitPitch;
+            }
+
             // D1c2: the turn ceiling. The pose the sweep uses is a rate-limited FOLLOWER of the reported pose: from the last
             // step it may advance at most ceiling x dt degrees in yaw (shortest way round) and in pitch, in every phase of
             // the swing. What is held back is discarded (never banked), so a flick cannot be "paid back" later; a turn
@@ -722,8 +739,7 @@ namespace Emberdelve.Combat
         private void ProcessSample(SwingRecord rec, int sample, float sampleTime, in SwingFrame frame)
         {
             SwingPatternData pattern = rec.Pattern;
-            SwingPose pose = pattern.ActivePose(sample / (float)rec.SampleCount);
-            SwingGeometry.BladeSegment(frame, pose, rec.BladeLength, out Vector3 bladeBase, out Vector3 bladeTip);
+            SwingGeometry.PathSegment(frame, pattern, rec.BladeLength, sample / (float)rec.SampleCount, out Vector3 bladeBase, out Vector3 bladeTip);
 
             Vector3 axis = bladeTip - bladeBase;
             float length = axis.magnitude;
@@ -799,8 +815,7 @@ namespace Emberdelve.Combat
                 for (int s = 0; s < _shapeBuffer.Count; s++)
                 {
                     HitShape shape = _shapeBuffer[s];
-                    float distance = SwingGeometry.SegmentDistance(bladeBase, clippedTip, shape.A, shape.B, out Vector3 onBlade);
-                    float depth = shape.Radius + sweepRadius - distance;
+                    float depth = SwingGeometry.SweepDepth(bladeBase, clippedTip, shape.A, shape.B, shape.Radius, sweepRadius, out Vector3 onBlade);
                     if (depth < 0f) continue;
 
                     if (IsBetterContact(depth, shape.Location, bestDepth, bestLocation))
@@ -942,9 +957,13 @@ namespace Emberdelve.Combat
             // D1b impact zone: the weapon's bands applied to the contact parameter the sweep measured.
             float zone = ImpactZonesEnabled ? rec.Weapon.ImpactMultiplier(contact.T) : 1f;
 
+            // FIX1: read the provider-side factors ONCE; the resolver and the hit report use the same values.
+            float outgoing = OutgoingMultiplier(instigator, rec.Weapon);
+            float flatBonus = FlatWeaponBonus(instigator, rec.Weapon);
+            float armorRating = target is IArmorRatingProvider armorProvider ? DamageResolver.SanitizeArmorRating(armorProvider.GetArmorRating()) : 0f;
             DamageInfo damage = DamageResolver.ResolveSwing(rec.Weapon, rec.Pattern, resolved, resolvedHit,
-                contact.Location, multiplier, target, OutgoingMultiplier(instigator, rec.Weapon),
-                FlatWeaponBonus(instigator, rec.Weapon), rec.StepMultiplier, zone, FlowTuning);
+                contact.Location, multiplier, target, outgoing,
+                flatBonus, rec.StepMultiplier, zone, FlowTuning);
             if (!damage.IsValid) return;
 
             rec.Hit.Add(target.CombatId);
@@ -958,6 +977,8 @@ namespace Emberdelve.Combat
                 target.IsDead, target.Kind, damage.Location);
 
             PublishCombatFeedback(instigator, target, feedback, damage);
+            ReportHit(CombatHitSource.Melee, instigator, target, rec.Weapon, damage, contact.Location, multiplier, rec.StepMultiplier, zone,
+                contact.T, 1f, 0f, -1f, outgoing, flatBonus, armorRating);
         }
 
         private void FinishSwing(SwingRecord rec, SwingEndReason reason, float endTs)

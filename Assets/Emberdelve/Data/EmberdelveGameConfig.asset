@@ -35,6 +35,19 @@ MonoBehaviour:
     guardStaggerSeconds: 0.8
     guardStaggerMoveMultiplier: 0.6
     swingTurnCeilingDegPerSec: 720
+    horizontalHeight: 2
+    overheadHeight: 3
+    thrustHeight: 2
+    bladeHeightTolerance: 1
+    shieldHeightTolerance: 2
+    guardHighPitchDegrees: 25
+    guardLowPitchDegrees: 25
+    guardEnduranceMax: 0
+    guardEnduranceRegenPerSecond: 20
+    guardEnduranceRegenDelay: 1
+    guardBlockCostBase: 10
+    guardBlockCostPerImpact: 0.5
+    commitSwingAim: 0
   levelMask:
     serializedVersion: 2
     m_Bits: 16384

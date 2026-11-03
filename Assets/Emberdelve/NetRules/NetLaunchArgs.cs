@@ -103,6 +103,8 @@ namespace Emberdelve.Net.Rules
     ///   -ember-net-skill-disconnect-after N  server: excess rejects that disconnect the client (default 8, 1..100000); a slot
     ///                                        returning on probation needs N shifted right once per remembered strike (min 1)
     ///   -ember-net-skill-memory-seconds S    server: how long a slot disconnected for abuse is remembered (default 120, 0..86400; 0 = never)
+    ///   -ember-net-party-size N              server/host (U3B3 proof): lowers the largest party to N players (1..3); 1 puts every player in a party
+    ///                                        of their own, so players are hostile to each other (PvP). Default: the authored GameConfig value
     /// </summary>
     public sealed class NetLaunchArgs
     {
@@ -142,6 +144,8 @@ namespace Emberdelve.Net.Rules
         public double SkillRejectRate { get; private set; } = SkillAbusePolicy.DefaultRejectRefillPerSecond;
         public int SkillDisconnectAfter { get; private set; } = SkillAbusePolicy.DefaultDisconnectExcess;
         public double SkillMemorySeconds { get; private set; } = SkillAbusePolicy.DefaultMemorySeconds;
+        /// <summary>U3B3 server: largest party size override (1..3); 0 = keep the authored value.</summary>
+        public int PartySizeOverride { get; private set; }
 
         /// <summary>The abuse policy these arguments describe.</summary>
         public SkillAbusePolicy SkillAbusePolicy
@@ -244,6 +248,7 @@ namespace Emberdelve.Net.Rules
                 case "ember-net-skill-reject-rate":
                 case "ember-net-skill-disconnect-after":
                 case "ember-net-skill-memory-seconds":
+                case "ember-net-party-size":
                     return true;
                 default:
                     return false;
@@ -363,6 +368,10 @@ namespace Emberdelve.Net.Rules
                 case "ember-net-skill-memory-seconds":
                     if (TryDouble(value, out double memorySeconds) && memorySeconds >= 0.0 && memorySeconds <= 86400.0) SkillMemorySeconds = memorySeconds;
                     else _errors.Add("invalid skill memory seconds '" + value + "' (0..86400)");
+                    break;
+                case "ember-net-party-size":
+                    if (TryInt(value, out int partySize) && partySize >= 1 && partySize <= 3) PartySizeOverride = partySize;
+                    else _errors.Add("invalid party size '" + value + "' (1..3)");
                     break;
                 case "ember-net-script":
                     {

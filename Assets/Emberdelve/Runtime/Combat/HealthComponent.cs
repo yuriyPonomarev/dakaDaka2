@@ -7,6 +7,10 @@ namespace Emberdelve.Combat
     /// <summary>
     /// Health pool for any combat entity. Damage only arrives through an authority
     /// (see LocalCombatAuthority); nothing in this class computes damage.
+    ///
+    /// U3B3: in a client-only network process this pool is a DISPLAY of the server's numbers. <see cref="ApplyDamage"/> does nothing there
+    /// (it only counts the attempt in <see cref="ClientBlockedDamage"/>), the local regeneration is off, and the only writer is
+    /// <see cref="ApplyReplicatedState"/>, which is itself refused in every other process role. Offline, host and server behaviour is unchanged.
     /// </summary>
     public sealed class HealthComponent : MonoBehaviour, IDamageable
     {
@@ -22,6 +26,10 @@ namespace Emberdelve.Combat
         public event Action Died;
 
         public bool IsDead { get; private set; }
+
+        /// <summary>U3B3: damage applications refused because this process is a network client (a client never resolves combat). Process-wide counter for logs and gates.</summary>
+        public static int ClientBlockedDamage { get; private set; }
+
         public float CurrentHealth => _current;
         public float MaxHealth => maxHealth;
         public bool IsRegenerating => !IsDead && regenPerSecond > 0f && _timeSinceDamage >= regenDelay;
@@ -69,6 +77,12 @@ namespace Emberdelve.Combat
 
         public void ApplyDamage(DamageInfo damage)
         {
+            if (NetRole.IsClientOnly)
+            {
+                ClientBlockedDamage++;
+                return;
+            }
+
             if (IsDead) return;
 
             _current = Mathf.Max(0f, _current - Mathf.Max(0f, damage.Amount));
@@ -81,6 +95,26 @@ namespace Emberdelve.Combat
                 IsDead = true;
                 Died?.Invoke();
             }
+        }
+
+        /// <summary>
+        /// U3B3, client-only processes: shows the server's replicated health (current, maximum, dead). Returns false and changes nothing in
+        /// any other role, so no server, host or offline code path can be handed a number this way. Raises Changed, and Died the first time
+        /// the server reports the body dead.
+        /// </summary>
+        public bool ApplyReplicatedState(float current, float max, bool dead)
+        {
+            if (!NetRole.IsClientOnly) return false;
+            if (float.IsNaN(current) || float.IsNaN(max) || float.IsInfinity(current) || float.IsInfinity(max)) return false;
+
+            maxHealth = Mathf.Max(1, Mathf.RoundToInt(max));
+            _current = Mathf.Clamp(current, 0f, maxHealth);
+            bool wasDead = IsDead;
+            IsDead = dead || _current <= 0f;
+            if (IsDead) _current = 0f;
+            GameEventTransaction.Publish(Changed, _current, (float)maxHealth);
+            if (IsDead && !wasDead) Died?.Invoke();
+            return true;
         }
 
         /// <summary>Sets the pool directly. Used by verification flows that need a known starting number.</summary>
@@ -106,6 +140,7 @@ namespace Emberdelve.Combat
         private void Update()
         {
             if (IsDead || regenPerSecond <= 0f) return;
+            if (NetRole.IsClientOnly) return; // U3B3: a client shows the server's number, it does not regenerate its own
             if (_current >= maxHealth) return;
 
             _timeSinceDamage += Time.deltaTime;

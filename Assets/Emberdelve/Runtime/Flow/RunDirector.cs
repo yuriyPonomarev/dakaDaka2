@@ -440,6 +440,7 @@ namespace Emberdelve.Flow
         {
             reason = null;
             int cap = config != null ? Mathf.Clamp(config.maxPartySize, 1, 3) : CombatTeams.DefaultMaxPartySize;
+            if (_partySizeOverride > 0) cap = Mathf.Min(cap, _partySizeOverride); // U3B3 proof switch (-ember-net-party-size)
             party = requestedParty;
             if (party < 0)
             {
@@ -455,6 +456,18 @@ namespace Emberdelve.Flow
             }
 
             return true;
+        }
+
+        private int _partySizeOverride;
+
+        /// <summary>
+        /// U3B3 proof switch, server only (NetServer, from -ember-net-party-size): lowers the largest party. 1 puts every joining player in a
+        /// party of their own, so two networked players are hostile to each other. Never raises the authored cap; 0 removes the override.
+        /// The offline game never calls it.
+        /// </summary>
+        public void SetPartySizeOverride(int size)
+        {
+            _partySizeOverride = Mathf.Clamp(size, 0, 3);
         }
 
         private int PartySize(int partyId)

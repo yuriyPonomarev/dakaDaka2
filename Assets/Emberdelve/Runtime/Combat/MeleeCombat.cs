@@ -20,6 +20,11 @@ namespace Emberdelve.Combat
     /// (<see cref="ICombatAuthority.TryGetExpectedComboStep"/>), requests that step with the chain's pattern and plays
     /// the visual for the pattern and timing the authority accepted. A press during the recovery is remembered for a
     /// moment so the next step can start the instant the swing is over.
+    ///
+    /// U3B3: on a SERVER the rig of a remote player is <see cref="RemoteDriven"/>: the button is not read here (its gameplay input is off),
+    /// the network layer calls <see cref="TryBeginSwing()"/> for an attack-press intent and <see cref="SetRemoteGuard"/> for the guard
+    /// level, and this component keeps doing what it always did with them (ask the authority, keep the phase timers, hold the guard flag
+    /// down while a swing runs). Nothing else about the flow changes, so the swing the server resolves is the one the offline game resolves.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(PlayerRig))]
@@ -57,6 +62,20 @@ namespace Emberdelve.Combat
 
         public WeaponData Weapon => _weapon;
         public bool IsSwinging => _phase != Phase.Idle;
+
+        /// <summary>U3B3: true on the server rig of a remote player. The guard level then comes from <see cref="SetRemoteGuard"/>, not from the input device.</summary>
+        public bool RemoteDriven { get; set; }
+
+        /// <summary>U3B3: the guard level the network layer asked for (the guard flag still obeys the swing and the death rules).</summary>
+        public bool RemoteGuardWanted => _remoteGuard;
+
+        private bool _remoteGuard;
+
+        /// <summary>U3B3: guard button level of a remote player. Takes effect on the next Update; ignored unless <see cref="RemoteDriven"/>.</summary>
+        public void SetRemoteGuard(bool wanted)
+        {
+            _remoteGuard = RemoteDriven && wanted;
+        }
 
         /// <summary>The pattern of the swing in progress (or the last one).</summary>
         public SwingPatternData ActivePattern => _pattern;
@@ -116,26 +135,31 @@ namespace Emberdelve.Combat
             if (_weapon == null || rig == null) return;
 
             EmberdelveInput input = rig.Input;
-            if (input == null) return;
+            if (input == null && !RemoteDriven) return;
 
             if (rig.IsDead)
             {
+                _remoteGuard = false;
                 rig.SetGuardHeld(false);
                 _phase = Phase.Idle;
                 return;
             }
 
-            rig.SetGuardHeld(input.SecondaryHeld && !IsSwinging);
+            // U3B3: a remote-driven rig has no device; the network layer supplies the guard level and presses arrive as TryBeginSwing calls.
+            bool primaryPressed = !RemoteDriven && input.PrimaryPressed;
+            bool secondaryHeld = RemoteDriven ? _remoteGuard : input.SecondaryHeld;
+
+            rig.SetGuardHeld(secondaryHeld && !IsSwinging);
 
             float dt = Time.deltaTime;
 
             // A press while the swing is still recovering is queued, so chaining the next step feels immediate.
-            if (_phase == Phase.Recovery && input.PrimaryPressed) _bufferedUntil = Time.time + PressBuffer;
+            if (_phase == Phase.Recovery && primaryPressed) _bufferedUntil = Time.time + PressBuffer;
 
             switch (_phase)
             {
                 case Phase.Idle:
-                    if ((input.PrimaryPressed || Time.time <= _bufferedUntil) && !input.SecondaryHeld && Time.time >= _readyTime)
+                    if ((primaryPressed || Time.time <= _bufferedUntil) && !secondaryHeld && Time.time >= _readyTime)
                     {
                         // The buffered press is spent only when the authority accepts the begin: a refusal (its cooldown clock a hair
                         // behind this one) keeps it for the rest of its 0.5 s.
@@ -300,6 +324,7 @@ namespace Emberdelve.Combat
 
         private void OnDisable()
         {
+            _remoteGuard = false;
             if (rig != null) rig.SetGuardHeld(false);
             _phase = Phase.Idle;
             // B1: a press buffered during a recovery must not outlive the weapon in hand (it would fire on the next melee swap-in).

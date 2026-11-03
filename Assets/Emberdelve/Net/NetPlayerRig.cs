@@ -90,6 +90,14 @@ namespace Emberdelve.Net
         public readonly NetworkVariable<SkillStateWire> SkillState = new NetworkVariable<SkillStateWire>(
             default(SkillStateWire), NetworkVariableReadPermission.Owner, NetworkVariableWritePermission.Server);
 
+        /// <summary>
+        /// U3B3: the server's health, maximum and death flag of this player, readable by everyone, written by the server only (see
+        /// NetCombatServer.Tick, a few times a second while it changes). Clients show it through HealthComponent.ApplyReplicatedState and never
+        /// compute it. Same NGO usage as <see cref="SkillState"/> with Everyone read permission.
+        /// </summary>
+        public readonly NetworkVariable<CombatVitalsWire> Vitals = new NetworkVariable<CombatVitalsWire>(
+            default(CombatVitalsWire), NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+
         private static readonly List<NetPlayerRig> SpawnedRigs = new List<NetPlayerRig>();
 
         /// <summary>Every spawned player object this process knows (the server: all admitted; a client: all views, owned or not).</summary>
@@ -122,6 +130,10 @@ namespace Emberdelve.Net
                 ServerPlayerId.OnValueChanged += OnServerPlayerIdChanged;
                 ServerPartyId.OnValueChanged += OnServerPartyIdChanged;
                 ApplyClientView();
+
+                // U3B3: the server's health / death (observers and owner alike), and the line the gate reads.
+                Vitals.OnValueChanged += OnVitalsChanged;
+                if (Vitals.Value.MaxHealth > 0f) OnVitalsChanged(default(CombatVitalsWire), Vitals.Value);
             }
 
             if (!SpawnedRigs.Contains(this)) SpawnedRigs.Add(this);
@@ -140,6 +152,12 @@ namespace Emberdelve.Net
 
                 if (GetComponent<NetSkillSender>() == null)
                     gameObject.AddComponent<NetSkillSender>().Configure(this, NetBootstrap.LaunchArgs);
+
+                // U3B3: the owner's combat intents (real input, or a script in proof runs) and the server's answers.
+                if (GetComponent<NetOwnerCombatView>() == null)
+                    gameObject.AddComponent<NetOwnerCombatView>().Configure(this);
+                if (GetComponent<NetCombatSender>() == null)
+                    gameObject.AddComponent<NetCombatSender>().Configure(this, NetBootstrap.LaunchArgs);
 
                 if (GetComponent<NetOwnerPrediction>() == null)
                 {
@@ -164,6 +182,18 @@ namespace Emberdelve.Net
 
             MoveParams.OnValueChanged -= OnMoveParamsChanged;
             SkillState.OnValueChanged -= OnSkillStateChanged;
+            Vitals.OnValueChanged -= OnVitalsChanged;
+
+            NetCombatSender combatSender = GetComponent<NetCombatSender>();
+            if (combatSender != null)
+            {
+                combatSender.LogFinal();
+                Destroy(combatSender);
+            }
+
+            NetOwnerCombatView combatView = GetComponent<NetOwnerCombatView>();
+            if (combatView != null) Destroy(combatView);
+            if (Role == NetPlayerRole.Owner) NetEnemyViews.Clear();
 
             NetSkillSender skillSender = GetComponent<NetSkillSender>();
             if (skillSender != null)
@@ -276,6 +306,90 @@ namespace Emberdelve.Net
         {
             NetOwnerSkillView view = GetComponent<NetOwnerSkillView>();
             if (view != null) view.OnState(current);
+        }
+
+        // ---- U3B3: weapon combat --------------------------------------------------------------------------------
+
+        /// <summary>
+        /// U3B3, client to server, RELIABLE and ordered: "I did combat action <paramref name="kind"/>" (CombatIntentKind: attack press, guard
+        /// down / up, draw start / release, weapon-set swap). <paramref name="sequence"/> is the connection's one shared counter. The call
+        /// carries no identity, aim, charge, target, damage or time: the sender is the connection that delivered it, the object must be that
+        /// connection's own player, the clock, the charge and the aim are the server's. InvokePermission is Everyone ON PURPOSE (a modified
+        /// client can call this on anybody's object; NetCombatServer.Receive is the one place that rejects, counts and, through the
+        /// shared skill / combat ledger, disconnects). Compiled in every build.
+        /// </summary>
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void CombatIntentRpc(int kind, uint sequence, RpcParams rpcParams = default)
+        {
+            NetCombatServer combat = NetCombatServer.Current;
+            if (combat == null) return;
+            combat.Receive(this, rpcParams.Receive.SenderClientId, kind, sequence);
+        }
+
+        /// <summary>U3B3, server to owner, reliable: the server's answer to one combat request that passed the wire gate (see CombatResultWire).</summary>
+        [Rpc(SendTo.Owner)]
+        public void CombatResultRpc(CombatResultWire result)
+        {
+            NetOwnerCombatView view = GetComponent<NetOwnerCombatView>();
+            if (view != null) view.OnResult(result);
+        }
+
+        /// <summary>U3B3, server to clients, reliable: a melee swing began on this player's object (presentation only; hits arrive as CombatHitRpc).</summary>
+        [Rpc(SendTo.ClientsAndHost)]
+        public void CombatSwingRpc(CombatSwingWire swing)
+        {
+            if (!NetRole.IsClientOnly) return;
+            NetCombatFx.OnSwing(this, in swing);
+        }
+
+        /// <summary>U3B3, server to clients, reliable: a projectile was launched by this player's object (the parameters the D2 integrator needs).</summary>
+        [Rpc(SendTo.ClientsAndHost)]
+        public void CombatShotRpc(CombatShotWire shot)
+        {
+            if (!NetRole.IsClientOnly) return;
+            NetCombatFx.OnShot(this, in shot);
+        }
+
+        /// <summary>U3B3, server to clients, reliable: that projectile's flight ended where the server says.</summary>
+        [Rpc(SendTo.ClientsAndHost)]
+        public void CombatFlightEndRpc(CombatFlightEndWire end)
+        {
+            if (!NetRole.IsClientOnly) return;
+            NetCombatFx.OnFlightEnd(this, in end);
+        }
+
+        /// <summary>U3B3, server to clients, reliable: a hit the server resolved (feedback only: health arrives through <see cref="Vitals"/> / enemy vitals).</summary>
+        [Rpc(SendTo.ClientsAndHost)]
+        public void CombatHitRpc(CombatHitWire hit)
+        {
+            if (!NetRole.IsClientOnly) return;
+            NetCombatFx.OnHit(this, in hit);
+        }
+
+        /// <summary>U3B3, server to the owner, unreliable: where one enemy is (a snapshot; the client draws a proxy, it simulates nothing).</summary>
+        [Rpc(SendTo.Owner, Delivery = RpcDelivery.Unreliable)]
+        public void EnemyPoseRpc(EnemyPoseWire pose)
+        {
+            if (!NetRole.IsClientOnly) return;
+            NetEnemyViews.OnPose(in pose);
+        }
+
+        /// <summary>U3B3, server to the owner, reliable: one enemy's health and death flag.</summary>
+        [Rpc(SendTo.Owner)]
+        public void EnemyVitalsRpc(EnemyVitalsWire vitals)
+        {
+            if (!NetRole.IsClientOnly) return;
+            NetEnemyViews.OnVitals(in vitals);
+        }
+
+        private void OnVitalsChanged(CombatVitalsWire previous, CombatVitalsWire current)
+        {
+            if (_rig == null || _rig.Health == null) return;
+            bool applied = _rig.Health.ApplyReplicatedState(current.Health, current.MaxHealth, current.Dead);
+            Debug.Log(Emberdelve.Net.Rules.NetTuning.LogPrefix + "[client] vitals id=" + ServerPlayerId.Value +
+                      " health=" + current.Health.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) +
+                      " max=" + current.MaxHealth.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) +
+                      " dead=" + current.Dead + " owned=" + IsOwner + " applied=" + applied);
         }
 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR

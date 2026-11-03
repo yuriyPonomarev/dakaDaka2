@@ -1,4 +1,5 @@
 using UnityEngine;
+using Emberdelve.BladeDefense;
 
 namespace Emberdelve.Core
 {
@@ -59,11 +60,15 @@ namespace Emberdelve.Core
         /// <summary>True when that projectile physically intersected the defender's guarding blade.</summary>
         public readonly bool GuardBladeContact;
 
+        /// <summary>U3C: the height band the swing's committed trajectory arrives in (Unspecified for arrows, skills and legacy hits). Set by the authority from the pattern data, read by the defender's guard.</summary>
+        public readonly BladeHeight AttackHeight;
+
         public DamageInfo(float amount, Vector3 point, Vector3 direction, Vector3 sourcePosition,
             int sourceCombatId, EntityKind sourceKind, DamageType type, bool blocked, bool headshot, float blockReduction,
             HitLocation location = HitLocation.Unspecified, float impactPower = 0f, bool guardBroken = false,
-            bool rangedProjectile = false, bool guardBladeContact = false)
+            bool rangedProjectile = false, bool guardBladeContact = false, BladeHeight attackHeight = BladeHeight.Unspecified)
         {
+            AttackHeight = attackHeight;
             ImpactPower = impactPower;
             GuardBroken = guardBroken;
             RangedProjectile = rangedProjectile;
@@ -92,17 +97,22 @@ namespace Emberdelve.Core
             blocked = reduction > 0f;
             return new DamageInfo(Mathf.Max(1f, Amount * (1f - Mathf.Clamp01(reduction))), Point, Direction,
                 SourcePosition, SourceCombatId, SourceKind, Type, blocked, Headshot, Mathf.Clamp01(reduction), Location,
-                ImpactPower, guardBroken && blocked, RangedProjectile, GuardBladeContact);
+                ImpactPower, guardBroken && blocked, RangedProjectile, GuardBladeContact, AttackHeight);
         }
 
         /// <summary>The same hit carrying the attacker's impact power (the resolver sets it before the defender's guard is asked).</summary>
         public DamageInfo WithImpactPower(float impactPower) =>
             new DamageInfo(Amount, Point, Direction, SourcePosition, SourceCombatId, SourceKind, Type, Blocked, Headshot,
-                BlockReduction, Location, impactPower, GuardBroken, RangedProjectile, GuardBladeContact);
+                BlockReduction, Location, impactPower, GuardBroken, RangedProjectile, GuardBladeContact, AttackHeight);
 
         public DamageInfo WithProjectileGuardContact(bool bladeContact) =>
             new DamageInfo(Amount, Point, Direction, SourcePosition, SourceCombatId, SourceKind, Type, Blocked,
-                Headshot, BlockReduction, Location, ImpactPower, GuardBroken, true, bladeContact);
+                Headshot, BlockReduction, Location, ImpactPower, GuardBroken, true, bladeContact, AttackHeight);
+
+        /// <summary>U3C: the same hit carrying the height band of the swing that produced it (the resolver sets it before the defender's guard is asked).</summary>
+        public DamageInfo WithAttackHeight(BladeHeight attackHeight) =>
+            new DamageInfo(Amount, Point, Direction, SourcePosition, SourceCombatId, SourceKind, Type, Blocked,
+                Headshot, BlockReduction, Location, ImpactPower, GuardBroken, RangedProjectile, GuardBladeContact, attackHeight);
     }
 
     public readonly struct HitFeedback
