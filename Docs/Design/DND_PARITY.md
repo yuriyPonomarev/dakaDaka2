@@ -277,3 +277,7 @@ Mechanics, rules and number *shapes* are game systems. The items below are expre
 - Steam community discussions on player counts and circle changes (2024), blocking and parry (2022–2024); flagged [F]
 - Gamepressure, Dot Esports, TheGamer and Deltia's extraction guides (portal behaviour); flagged [F]
 - Everything marked [U] is from memory and needs checking before tuning.
+
+## Rule: empty Battle Cry (decided in U3B2, P12)
+
+Battle Cry still costs its full mana and starts its cooldown when it hits zero targets. It is a self-buff plus an area effect, so the buff always applies and the cast is never "empty" in the sense of doing nothing. The networked channel therefore does not add a minimum-target check: the server reports the cast as accepted and the owner pays mana. A client that burns its own pool on a cast that hits nothing only hurts itself. Revisit only if Battle Cry loses its self-buff.

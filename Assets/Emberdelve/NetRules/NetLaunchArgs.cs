@@ -97,6 +97,12 @@ namespace Emberdelve.Net.Rules
     ///   -ember-net-udp-reset-fix [true|false] legacy spelling: true = scan, false = stock (an explicit -ember-net-udp-path wins)
     ///   -ember-net-client-linger-ms MS       client: after a requested shutdown finished, wait this long before the process quits
     ///                                        (default 250; 0 = quit at once)
+    ///   -ember-net-skill-reject-burst N      server (U3B2): rejected skill requests one connection may send for free before they count
+    ///                                        as excess (token bucket size, default 8, 1..1000)
+    ///   -ember-net-skill-reject-rate R       server: that allowance refills R rejects per second (default 1, 0..1000)
+    ///   -ember-net-skill-disconnect-after N  server: excess rejects that disconnect the client (default 8, 1..100000); a slot
+    ///                                        returning on probation needs N shifted right once per remembered strike (min 1)
+    ///   -ember-net-skill-memory-seconds S    server: how long a slot disconnected for abuse is remembered (default 120, 0..86400; 0 = never)
     /// </summary>
     public sealed class NetLaunchArgs
     {
@@ -131,6 +137,17 @@ namespace Emberdelve.Net.Rules
         public bool UdpResetFix { get { return UdpPath == NetUdpPath.Scan; } }
         /// <summary>Client side: extra wait after a requested shutdown before the process quits (ms, default 250, 0 = off).</summary>
         public int ClientLingerMs { get; private set; } = NetTuning.DefaultClientLingerMs;
+        /// <summary>U3B2 server abuse numbers (see <see cref="SkillAbusePolicy"/>).</summary>
+        public double SkillRejectBurst { get; private set; } = SkillAbusePolicy.DefaultRejectBurst;
+        public double SkillRejectRate { get; private set; } = SkillAbusePolicy.DefaultRejectRefillPerSecond;
+        public int SkillDisconnectAfter { get; private set; } = SkillAbusePolicy.DefaultDisconnectExcess;
+        public double SkillMemorySeconds { get; private set; } = SkillAbusePolicy.DefaultMemorySeconds;
+
+        /// <summary>The abuse policy these arguments describe.</summary>
+        public SkillAbusePolicy SkillAbusePolicy
+        {
+            get { return new SkillAbusePolicy(SkillRejectBurst, SkillRejectRate, SkillDisconnectAfter, SkillMemorySeconds); }
+        }
 
         /// <summary>The client test scripts this build knows (empty = none).</summary>
         public const string ScriptForgeOwner = "forge-owner";
@@ -223,6 +240,10 @@ namespace Emberdelve.Net.Rules
                 case "ember-net-udp-reset-fix":
                 case "ember-net-udp-path":
                 case "ember-net-client-linger-ms":
+                case "ember-net-skill-reject-burst":
+                case "ember-net-skill-reject-rate":
+                case "ember-net-skill-disconnect-after":
+                case "ember-net-skill-memory-seconds":
                     return true;
                 default:
                     return false;
@@ -327,6 +348,22 @@ namespace Emberdelve.Net.Rules
                     if (TryInt(value, out int linger) && linger >= 0 && linger <= 5000) ClientLingerMs = linger;
                     else _errors.Add("invalid client linger '" + value + "' (0..5000)");
                     break;
+                case "ember-net-skill-reject-burst":
+                    if (TryDouble(value, out double rejectBurst) && rejectBurst >= 1.0 && rejectBurst <= 1000.0) SkillRejectBurst = rejectBurst;
+                    else _errors.Add("invalid skill reject burst '" + value + "' (1..1000)");
+                    break;
+                case "ember-net-skill-reject-rate":
+                    if (TryDouble(value, out double rejectRate) && rejectRate >= 0.0 && rejectRate <= 1000.0) SkillRejectRate = rejectRate;
+                    else _errors.Add("invalid skill reject rate '" + value + "' (0..1000)");
+                    break;
+                case "ember-net-skill-disconnect-after":
+                    if (TryInt(value, out int disconnectAfter) && disconnectAfter >= 1 && disconnectAfter <= 100000) SkillDisconnectAfter = disconnectAfter;
+                    else _errors.Add("invalid skill disconnect-after '" + value + "' (1..100000)");
+                    break;
+                case "ember-net-skill-memory-seconds":
+                    if (TryDouble(value, out double memorySeconds) && memorySeconds >= 0.0 && memorySeconds <= 86400.0) SkillMemorySeconds = memorySeconds;
+                    else _errors.Add("invalid skill memory seconds '" + value + "' (0..86400)");
+                    break;
                 case "ember-net-script":
                     {
                         string scriptText = value.Trim().ToLowerInvariant();
@@ -370,6 +407,12 @@ namespace Emberdelve.Net.Rules
                     else _errors.Add("invalid protocol override '" + value + "'");
                     break;
             }
+        }
+
+        private static bool TryDouble(string value, out double result)
+        {
+            return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out result) &&
+                   !double.IsNaN(result) && !double.IsInfinity(result);
         }
 
         private static bool TryInt(string value, out int result)

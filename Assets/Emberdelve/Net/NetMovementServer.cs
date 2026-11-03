@@ -204,6 +204,18 @@ namespace Emberdelve.Net
                  " pos=" + P(state.LastPos) + " tick=" + _tick);
         }
 
+        /// <summary>
+        /// U3B2: server ticks since this player's last real input frame, i.e. the age of the aim pose a skill cast resolves with (the rig's
+        /// yaw / pitch are the last sanitized frame's). False for a player that is not simulated here (the host's own, or already removed).
+        /// </summary>
+        public bool TryGetInputAge(int playerId, out long ticks)
+        {
+            ticks = -1;
+            if (!_states.TryGetValue(playerId, out MoveState state)) return false;
+            ticks = _tick - state.LastFrameTick;
+            return true;
+        }
+
         public void Unregister(int playerId, string reason)
         {
             if (!_states.TryGetValue(playerId, out MoveState state)) return;

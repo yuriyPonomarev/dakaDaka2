@@ -62,6 +62,7 @@ namespace Emberdelve.Net
         private readonly Dictionary<string, int> _lastRemovedBySlot = new Dictionary<string, int>();
 
         private NetMovementServer _movement;
+        private NetSkillServer _skills;
         private RunDirector _director;
         private bool _sceneRequested;
         private bool _sceneFailed;
@@ -90,6 +91,14 @@ namespace Emberdelve.Net
             _nm.ConnectionApprovalCallback = Approve;
             NetIdentityTable.Current = _table;
             _movement = new NetMovementServer(_nm, _table, _log, _logError);
+            _skills = new NetSkillServer(_nm, _table, _args.SkillAbusePolicy, SlotOfClient, _log, _logError);
+        }
+
+        /// <summary>The dev slot a connection was approved or admitted with ("" when unknown): the key of the skill abuse memory.</summary>
+        private string SlotOfClient(ulong clientId)
+        {
+            if (_table.TryGetByClient(clientId, out NetIdentity row) && row != null) return row.Slot ?? "";
+            return _approved.TryGetValue(clientId, out Approved info) && info.Slot != null ? info.Slot : "";
         }
 
         /// <summary>Players / sender bindings / combat entities right now, in the status-line format.</summary>
@@ -107,6 +116,7 @@ namespace Emberdelve.Net
             if (_nm == null || !_nm.IsListening) return;
 
             if (_movement != null) _movement.EnsureSubscribed();
+            if (_skills != null) _skills.Tick(now);
 
             if (!_sceneRequested) RequestDungeonScene(now);
 
@@ -360,6 +370,9 @@ namespace Emberdelve.Net
                 _log("rejoin slot=" + row.Slot + " newId=" + row.PlayerId + " previousId=" + previousId +
                      " (admitted as a new actor; nothing carried over)");
             }
+
+            // U3B2: the connection's skill gate and reject ledger (on probation when the slot was disconnected for abuse recently).
+            if (_skills != null) _skills.OnAdmitted(row);
         }
 
         private void RefuseAfterApproval(ulong clientId, string reason)
@@ -376,11 +389,13 @@ namespace Emberdelve.Net
                 if (_pending[i].ClientId == clientId) _pending.RemoveAt(i);
 
             if (_table.RemoveByClient(clientId, out NetIdentity row)) RemoveActor(row, "disconnect");
+            if (_skills != null) _skills.OnClosed(clientId); // a connection that never got an actor still has a ledger
         }
 
         private void RemoveActor(NetIdentity row, string reason)
         {
             if (_movement != null) _movement.Unregister(row.PlayerId, reason);
+            if (_skills != null) _skills.OnClosed(row.ClientId);
             if (_director != null) _director.RemovePlayer(row.PlayerId, reason, false);
 
             NetworkObject netObject = row.Object;
@@ -419,6 +434,12 @@ namespace Emberdelve.Net
             {
                 _movement.Dispose();
                 _movement = null;
+            }
+
+            if (_skills != null)
+            {
+                _skills.Dispose();
+                _skills = null;
             }
 
             if (NetIdentityTable.Current == _table) NetIdentityTable.Current = null;

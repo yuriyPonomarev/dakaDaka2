@@ -27,7 +27,12 @@ namespace Emberdelve.Net.Rules
         SeqJump = 11,
         /// <summary>Movement frames sent on ANOTHER player's object through the development RPC (RequireOwnership off).</summary>
         ForgeMove = 12,
-        SkillProof = 13
+        /// <summary>Development probe (U3B1): forged / own / replayed / malformed / cooling-down skill requests. Never chained.</summary>
+        SkillProof = 13,
+        /// <summary>U3B2: a scripted key press, the production path: slot 0, slot 0 again (refused while cooling down), slot 1. Never chained.</summary>
+        SkillCast = 14,
+        /// <summary>U3B2 development probe: forged, replayed, malformed and flooded skill requests until the server disconnects the client. Never chained.</summary>
+        SkillAbuse = 15
     }
 
     /// <summary>One step of a client test script: <c>name[:seconds][@yawDegrees]</c>.</summary>
@@ -51,8 +56,8 @@ namespace Emberdelve.Net.Rules
 
     /// <summary>
     /// Parsed <c>-ember-net-script</c>: one step or a comma separated chain, e.g. <c>walk-forward:3@90,sprint-forward:1.5@270,jump</c>.
-    /// Names: forge-owner, walk-forward, walk-square, sprint-forward, jump, flood-input, flood-run, replay-seq, nan-input, big-move,
-    /// seq-jump, forge-move. <c>:seconds</c> overrides the default duration, <c>@yaw</c> the view yaw (absolute degrees, world Y;
+    /// Names: forge-owner, skill-proof, skill-cast, skill-abuse (single-step probes), walk-forward, walk-square, sprint-forward, jump,
+    /// flood-input, flood-run, replay-seq, nan-input, big-move, seq-jump, forge-move. <c>:seconds</c> overrides the default duration, <c>@yaw</c> the view yaw (absolute degrees, world Y;
     /// 0 looks along +Z, 90 along +X). A chain idles <see cref="GapSeconds"/> between steps so a server can tell the movements apart.
     /// Pure data (no engine dependency).
     /// </summary>
@@ -70,6 +75,30 @@ namespace Emberdelve.Net.Rules
 
         public bool IsForgeOwnerOnly => _steps.Count == 1 && _steps[0].Kind == NetScriptKind.ForgeOwner;
         public bool IsSkillProofOnly => _steps.Count == 1 && _steps[0].Kind == NetScriptKind.SkillProof;
+        public bool IsSkillCastOnly => _steps.Count == 1 && _steps[0].Kind == NetScriptKind.SkillCast;
+        public bool IsSkillAbuseOnly => _steps.Count == 1 && _steps[0].Kind == NetScriptKind.SkillAbuse;
+
+        /// <summary>True for the scripts that drive an RPC probe or the skill channel instead of the movement stream (always a single step).</summary>
+        public bool IsProbeOnly => _steps.Count == 1 && IsProbeKind(_steps[0].Kind);
+
+        /// <summary>True for the scripts that run on the skill sender (not the movement sender).</summary>
+        public bool IsSkillScript => IsSkillProofOnly || IsSkillCastOnly || IsSkillAbuseOnly;
+
+        /// <summary>The kinds that stand alone: no duration, no yaw semantics, never part of a chain.</summary>
+        public static bool IsProbeKind(NetScriptKind kind)
+        {
+            return kind == NetScriptKind.ForgeOwner || kind == NetScriptKind.SkillProof ||
+                   kind == NetScriptKind.SkillCast || kind == NetScriptKind.SkillAbuse;
+        }
+
+        /// <summary>
+        /// Probe kinds that only exist in development builds and the Editor (hostile traffic): a release build must say so instead of
+        /// pretending. SkillCast is a plain scripted key press on the production path and is available everywhere.
+        /// </summary>
+        public static bool IsDevelopmentOnly(NetScriptKind kind)
+        {
+            return kind == NetScriptKind.ForgeOwner || kind == NetScriptKind.SkillProof || kind == NetScriptKind.SkillAbuse;
+        }
 
         /// <summary>Seconds from the start until the last step and its trailing gap are over.</summary>
         public float TotalSeconds
@@ -88,6 +117,8 @@ namespace Emberdelve.Net.Rules
             {
                 case NetScriptKind.ForgeOwner: return "forge-owner";
                 case NetScriptKind.SkillProof: return "skill-proof";
+                case NetScriptKind.SkillCast: return "skill-cast";
+                case NetScriptKind.SkillAbuse: return "skill-abuse";
                 case NetScriptKind.WalkForward: return "walk-forward";
                 case NetScriptKind.WalkSquare: return "walk-square";
                 case NetScriptKind.SprintForward: return "sprint-forward";
@@ -110,6 +141,8 @@ namespace Emberdelve.Net.Rules
             {
                 case "forge-owner": kind = NetScriptKind.ForgeOwner; defaultSeconds = 0f; return true;
                 case "skill-proof": kind = NetScriptKind.SkillProof; defaultSeconds = 0f; return true;
+                case "skill-cast": kind = NetScriptKind.SkillCast; defaultSeconds = 0f; return true;
+                case "skill-abuse": kind = NetScriptKind.SkillAbuse; defaultSeconds = 0f; return true;
                 case "walk-forward": kind = NetScriptKind.WalkForward; defaultSeconds = 3f; return true;
                 case "walk-square": kind = NetScriptKind.WalkSquare; defaultSeconds = 1f; return true;
                 case "sprint-forward": kind = NetScriptKind.SprintForward; defaultSeconds = 3f; return true;
@@ -165,7 +198,7 @@ namespace Emberdelve.Net.Rules
                 if (secondsText != null)
                 {
                     float parsed = 0f;
-                    if (kind == NetScriptKind.ForgeOwner || kind == NetScriptKind.SkillProof ||
+                    if (IsProbeKind(kind) ||
                         !TryFloat(secondsText, out parsed) || parsed <= 0f || parsed > MaxStepSeconds)
                     {
                         error = "invalid seconds '" + secondsText + "' for " + part + " (0.." + MaxStepSeconds + ")";
@@ -195,7 +228,7 @@ namespace Emberdelve.Net.Rules
             {
                 for (int i = 0; i < result._steps.Count; i++)
                 {
-                    if (result._steps[i].Kind == NetScriptKind.ForgeOwner || result._steps[i].Kind == NetScriptKind.SkillProof)
+                    if (IsProbeKind(result._steps[i].Kind))
                     {
                         error = result._steps[i].Name + " cannot be chained";
                         return false;

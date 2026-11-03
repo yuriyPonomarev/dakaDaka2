@@ -71,8 +71,10 @@ namespace Emberdelve.Net
             _spawnedAt = Time.unscaledTime;
 
             NetScriptSpec spec = args != null ? args.ScriptSpec : null;
-            _spec = spec != null && !spec.IsForgeOwnerOnly && !spec.IsSkillProofOnly ? spec : null; // probe scripts are not movement scripts
-            _useRealInput = _spec == null && !Application.isBatchMode && _rig != null && _rig.Input != null;
+            _spec = spec != null && !spec.IsProbeOnly ? spec : null; // probe scripts (forge-owner, skill-*) are not movement scripts
+            // U3B2: a client that was given ANY script is a scripted client and takes no real input, even in a window (a probe script
+            // used to leave the keyboard live because _spec was nulled above).
+            _useRealInput = spec == null && !Application.isBatchMode && _rig != null && _rig.Input != null;
             if (_useRealInput) _rig.SetInputEnabled(true);
 
             if (_nm != null && _nm.NetworkTickSystem != null)
@@ -275,19 +277,10 @@ namespace Emberdelve.Net
             return new MoveInputFrame { Seq = seq, MoveX = moveX, MoveY = moveY, Yaw = yaw, Pitch = pitch, Flags = flags };
         }
 
-        /// <summary>Another player's object: the one with the highest server player id that this client does not own.</summary>
-        private NetPlayerRig FindVictim()
+        /// <summary>Another player's object: the shared probe rule (NetPlayerRig.FindProbeVictim, the same one NetClientProbe and NetSkillSender use).</summary>
+        private static NetPlayerRig FindVictim()
         {
-            NetPlayerRig best = null;
-            System.Collections.Generic.IReadOnlyList<NetPlayerRig> rigs = NetPlayerRig.Spawned;
-            for (int i = 0; i < rigs.Count; i++)
-            {
-                NetPlayerRig rig = rigs[i];
-                if (rig == null || !rig.IsSpawned || rig.IsOwner) continue;
-                if (best == null || rig.ServerPlayerId.Value > best.ServerPlayerId.Value) best = rig;
-            }
-
-            return best;
+            return NetPlayerRig.FindProbeVictim();
         }
 #endif
 

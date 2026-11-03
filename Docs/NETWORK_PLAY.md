@@ -60,6 +60,6 @@ Class: the id string only (`warrior`, `archer`); the server resolves everything 
 
 ## 7. Proof gates (batch Editor, `Tools\Run-EmberdelveGates.ps1 -Methods ...`)
 
-`Emberdelve.EditorTools.EmberdelveNetFinalGate.Run` is the roadmap acceptance (build, server max-players 3, A+B, walk, cheats, late join through the lobby Join path, full refusal, hard kill, retry, rejoin, graceful quits, offline retention, no leftover processes). The earlier gates stay separate entries: `EmberdelveNetProofGate`, `EmberdelveNetAdmissionGate`, `EmberdelveNetMovementGate`, `EmberdelveNetSeamsGate`. Each ends with `PASS|FAIL checks=N failures=M`.
+`Emberdelve.EditorTools.EmberdelveNetFinalGate.Run` is the roadmap acceptance (build, server max-players 3, A+B, walk, cheats, late join through the lobby Join path, full refusal, hard kill, retry, rejoin, graceful quits, offline retention, no leftover processes). The earlier gates stay separate entries: `EmberdelveNetProofGate`, `EmberdelveNetAdmissionGate`, `EmberdelveNetMovementGate`, `EmberdelveNetSeamsGate`, `EmberdelveNetSkillGate` (U3B2: server-owned active skills, abuse control; see `Docs/Tasks/U3B2.md`). Each ends with `PASS|FAIL checks=N failures=M`.
 
 `Emberdelve.EditorTools.EmberdelveUtpResetProbe.Run` is a diagnostic gate, not part of the acceptance set: it loops a leaving client against a staying one and reports whether the dedicated server keeps receiving (A/B of the two UTP reset mitigations). Run it with `-TimeoutSeconds 3600`. How to read it: `Docs/Tasks/UTP_RESET.md`.

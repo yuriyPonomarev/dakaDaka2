@@ -4,6 +4,7 @@ using Emberdelve.Combat;
 using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.InputLayer;
+using Emberdelve.Net.Rules;
 using Emberdelve.Player;
 using Emberdelve.Stats;
 
@@ -22,11 +23,18 @@ namespace Emberdelve.Skills
     ///   damage itself is only ever applied by the combat authority.
     /// - Cooldowns here are the local prediction. The authority independently validates the same cooldown
     ///   per skill, so a client cannot shorten it.
+    /// - U3B2: a client-only network process never casts. Its key presses are sent to the server as skill intents
+    ///   (NetSkillSender) and the server's own caster, on the server's rig, decides; <see cref="TryCastSlot(int)"/> returns false there
+    ///   and counts the attempt in <see cref="ClientRoleBlocks"/>. The host and offline paths are unchanged.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class SkillCaster : MonoBehaviour
     {
-        public const int ActiveSlotCapacity = 2;
+        /// <summary>
+        /// Declared from the one shared constant (U3B2): the wire gate, the replicated state and this kit must agree on the slot count,
+        /// and the network rules assembly cannot see this class, so the dependency runs this way.
+        /// </summary>
+        public const int ActiveSlotCapacity = SkillNetLimits.ActiveSlots;
         public const int PassiveSlotCapacity = 2;
 
         [Header("Wiring")]
@@ -50,6 +58,9 @@ namespace Emberdelve.Skills
 
         private CharacterClassData appliedClass;
         private bool kitValid;
+
+        /// <summary>U3B2 diagnostics: casts a client-only process was asked to run and refused (the server owns them).</summary>
+        public static int ClientRoleBlocks { get; private set; }
 
         public CharacterStatStack Stats => _stats;
         public IReadOnlyList<SkillData> ActiveSkills => _active;
@@ -183,6 +194,9 @@ namespace Emberdelve.Skills
 
             if (rig.IsDead) return;
 
+            // U3B2: a client-only process sends its skill key presses to the server instead (NetSkillSender); it must not cast here too.
+            if (NetRole.IsClientOnly) return;
+
             EmberdelveInput input = rig.Input;
             if (input == null) return;
 
@@ -201,11 +215,19 @@ namespace Emberdelve.Skills
         /// </summary>
         public bool CanCastSlot(int slot, out string reason)
         {
+            return CanCastCore(slot, out reason, out _);
+        }
+
+        /// <summary>The rules behind <see cref="CanCastSlot"/> plus a stable machine code for the refusal (the network layer sends it to the owner).</summary>
+        private bool CanCastCore(int slot, out string reason, out SkillRefusalCode code)
+        {
             reason = null;
+            code = SkillRefusalCode.None;
 
             if (slot < 0 || slot >= ActiveSlotCapacity)
             {
                 reason = "no such skill slot";
+                code = SkillRefusalCode.NoSuchSlot;
                 return false;
             }
 
@@ -213,36 +235,42 @@ namespace Emberdelve.Skills
             if (skill == null)
             {
                 reason = "no skill equipped there";
+                code = SkillRefusalCode.NoSkill;
                 return false;
             }
 
             if (rig == null)
             {
                 reason = "no caster";
+                code = SkillRefusalCode.NoCaster;
                 return false;
             }
 
             if (rig.IsDead)
             {
                 reason = "dead";
+                code = SkillRefusalCode.Dead;
                 return false;
             }
 
             if (_cooldownRemaining[slot] > 0f)
             {
                 reason = $"on cooldown ({_cooldownRemaining[slot]:F1}s)";
+                code = SkillRefusalCode.Cooldown;
                 return false;
             }
 
             if (mana == null)
             {
                 reason = "no mana pool";
+                code = SkillRefusalCode.NoMana;
                 return false;
             }
 
             if (!mana.HasAmount(skill.EffectiveManaCost))
             {
                 reason = $"not enough mana (needs {skill.EffectiveManaCost})";
+                code = SkillRefusalCode.Mana;
                 return false;
             }
 
@@ -250,6 +278,7 @@ namespace Emberdelve.Skills
             if (behavior == null)
             {
                 reason = $"no behavior for effect '{skill.effect}'";
+                code = SkillRefusalCode.NoBehavior;
                 return false;
             }
 
@@ -258,6 +287,7 @@ namespace Emberdelve.Skills
             if (authority == null)
             {
                 reason = "no combat authority in the scene";
+                code = SkillRefusalCode.NoAuthority;
                 return false;
             }
 
@@ -266,16 +296,24 @@ namespace Emberdelve.Skills
             if (skill.requiresRangedWeapon && !_context.HasRangedInHand)
             {
                 reason = "needs a ranged weapon in hand";
+                code = SkillRefusalCode.Requirement;
                 return false;
             }
 
             if (skill.requiresMeleeWeapon && !_context.HasMeleeInHand)
             {
                 reason = "needs a melee weapon in hand";
+                code = SkillRefusalCode.Requirement;
                 return false;
             }
 
-            return behavior.CanCast(_context, out reason);
+            if (!behavior.CanCast(_context, out reason))
+            {
+                code = SkillRefusalCode.Behavior;
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -284,7 +322,25 @@ namespace Emberdelve.Skills
         /// </summary>
         public bool TryCastSlot(int slot)
         {
-            if (!CanCastSlot(slot, out string reason))
+            return TryCastSlot(slot, out _);
+        }
+
+        /// <summary>
+        /// <see cref="TryCastSlot(int)"/> that also says why a refused cast was refused (<see cref="SkillRefusalCode.None"/> when it cast).
+        /// A refusal spends nothing, whatever the code. In a client-only network process this never casts (code ClientRole).
+        /// </summary>
+        public bool TryCastSlot(int slot, out SkillRefusalCode code)
+        {
+            code = SkillRefusalCode.None;
+
+            if (NetRole.IsClientOnly)
+            {
+                ClientRoleBlocks++;
+                code = SkillRefusalCode.ClientRole;
+                return false;
+            }
+
+            if (!CanCastCore(slot, out string reason, out code))
             {
                 Reject(slot, reason);
                 return false;
@@ -299,6 +355,7 @@ namespace Emberdelve.Skills
             // is the one the authority hands back.
             if (!authority.TryBeginSkillCast(rig.CombatSender, rig.CombatId, skill.skillId, out int activationId, out string authorityReason))
             {
+                code = SkillRefusalCode.Authority;
                 Reject(slot, authorityReason);
                 return false;
             }
@@ -318,6 +375,7 @@ namespace Emberdelve.Skills
 
             if (!performed)
             {
+                code = SkillRefusalCode.Failed;
                 Debug.LogError($"[SkillCaster] '{skill.skillId}' passed CanCast but its effect did not run; the cast stays spent.", this);
                 _cooldownRemaining[slot] = acceptedCooldown;
                 _castableCache[slot] = false;

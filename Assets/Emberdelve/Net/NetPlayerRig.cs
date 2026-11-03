@@ -44,12 +44,21 @@ namespace Emberdelve.Net
     /// U3A4a: carries the movement stream. The owning client (NetInputSender) calls <see cref="SubmitMoveRpc"/> once per network
     /// tick with its last three input frames; the server hands the batch to NetMovementServer together with the connection that
     /// delivered it (RpcParams.Receive.SenderClientId, never a payload field). A development-only twin,
-    /// <c>ForgeMoveTestRpc</c>, has RequireOwnership off so a client can try to feed ANOTHER player's object; the same server path
+    /// <c>ForgeMoveTestRpc</c>, has InvokePermission Everyone so a client can try to feed ANOTHER player's object; the same server path
     /// rejects and counts it. No movement RPC parameter names a player, combat or party id.
     ///
     /// U3A4b: the way back. The server tells the owner what it reached (<see cref="AckRpc"/>, unreliable, owner only, every second
     /// tick) and publishes the movement numbers it resolved for this player (<see cref="MoveParams"/>, owner-read), and the owner
     /// predicts with them (NetOwnerPrediction). Observers are unchanged: they interpolate the server's NetworkTransform.
+    ///
+    /// U3B2: the first production combat channel, active skills (slots 0 and 1). The owner's NetSkillSender calls
+    /// <see cref="SkillIntentRpc"/> (reliable, ordered) with a slot and a per-connection sequence; NetSkillServer decides everything
+    /// (identity first, the connection's gate, the server's own SkillCaster) and answers the owner with <see cref="SkillResultRpc"/>
+    /// (cast or refused + reason, the server's mana and cooldowns), publishes the owner's mana / cooldowns in the owner-read
+    /// <see cref="SkillState"/> variable and tells every other client about a cast with <see cref="SkillVisualRpc"/>. No skill RPC
+    /// parameter names a player, combat or party id, and no client applies a gameplay outcome. All three exist in release builds; only
+    /// the hostile probes below stay development-only. The two hostile-probe RPCs use InvokePermission (RequireOwnership is obsolete in
+    /// NGO 2.x): Everyone, because the server's handler is the check, exactly as before.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(PlayerRig))]
@@ -72,6 +81,14 @@ namespace Emberdelve.Net
         /// </summary>
         public readonly NetworkVariable<MoveParamsWire> MoveParams = new NetworkVariable<MoveParamsWire>(
             default(MoveParamsWire), NetworkVariableReadPermission.Owner, NetworkVariableWritePermission.Server);
+
+        /// <summary>
+        /// U3B2: the server's mana and cooldown picture of this player, readable by the owner only, written by the server only (a few
+        /// times a second while anything changes, see NetSkillServer.Tick). The owner's NetOwnerSkillView shows these numbers; it never
+        /// regenerates or counts down mana itself.
+        /// </summary>
+        public readonly NetworkVariable<SkillStateWire> SkillState = new NetworkVariable<SkillStateWire>(
+            default(SkillStateWire), NetworkVariableReadPermission.Owner, NetworkVariableWritePermission.Server);
 
         private static readonly List<NetPlayerRig> SpawnedRigs = new List<NetPlayerRig>();
 
@@ -113,6 +130,17 @@ namespace Emberdelve.Net
             // U3A4b: and predicts it locally (the prediction exists first so the sender can hand it every frame).
             if (Role == NetPlayerRole.Owner)
             {
+                // U3B2: the server's skill picture for this player, and the sender of its skill key presses.
+                if (GetComponent<NetOwnerSkillView>() == null)
+                {
+                    gameObject.AddComponent<NetOwnerSkillView>().Configure(this);
+                    SkillState.OnValueChanged += OnSkillStateChanged;
+                    if (SkillState.Value.MaxMana > 0f) OnSkillStateChanged(default(SkillStateWire), SkillState.Value);
+                }
+
+                if (GetComponent<NetSkillSender>() == null)
+                    gameObject.AddComponent<NetSkillSender>().Configure(this, NetBootstrap.LaunchArgs);
+
                 if (GetComponent<NetOwnerPrediction>() == null)
                 {
                     gameObject.AddComponent<NetOwnerPrediction>().Configure(this);
@@ -135,6 +163,17 @@ namespace Emberdelve.Net
             SpawnedRigs.Remove(this);
 
             MoveParams.OnValueChanged -= OnMoveParamsChanged;
+            SkillState.OnValueChanged -= OnSkillStateChanged;
+
+            NetSkillSender skillSender = GetComponent<NetSkillSender>();
+            if (skillSender != null)
+            {
+                skillSender.LogFinal();
+                Destroy(skillSender);
+            }
+
+            NetOwnerSkillView skillView = GetComponent<NetOwnerSkillView>();
+            if (skillView != null) Destroy(skillView);
 
             NetInputSender sender = GetComponent<NetInputSender>();
             if (sender != null) Destroy(sender);
@@ -164,7 +203,7 @@ namespace Emberdelve.Net
 
         /// <summary>
         /// The movement stream (client to server, once per network tick, unreliable: the batch carries the last three frames so a
-        /// lost packet is covered by the next). RequireOwnership stays ON: only the owning connection may call it on this object,
+        /// lost packet is covered by the next). the default InvokePermission (Owner) stays: only the owning connection may call it on this object,
         /// and the server handler re-derives the sender from the connection anyway. No identity parameter exists.
         /// </summary>
         [Rpc(SendTo.Server, Delivery = RpcDelivery.Unreliable)]
@@ -195,53 +234,74 @@ namespace Emberdelve.Net
             if (data.IsValid) prediction.OnParamsChanged(in data);
         }
 
+        /// <summary>
+        /// U3B2, client to server, RELIABLE and ordered (NGO's default delivery): "I pressed the key of active skill <paramref name="slot"/>".
+        /// <paramref name="sequence"/> is the connection's one shared counter (1, 2, 3 ... across both slots). The call carries no
+        /// identity, aim, outcome or time: the sender is the connection that delivered it, the object must be that connection's own
+        /// player, the clock is the server's and the aim is the server rig's. InvokePermission is Everyone ON PURPOSE: a modified client
+        /// can call this on anybody's object, and NetSkillServer.Receive (identity first, then the gate) is the one place that rejects,
+        /// counts and, past a threshold, disconnects it. Compiled in every build.
+        /// </summary>
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void SkillIntentRpc(int slot, uint sequence, RpcParams rpcParams = default)
+        {
+            NetSkillServer skills = NetSkillServer.Current;
+            if (skills == null) return;
+            skills.Receive(this, rpcParams.Receive.SenderClientId, slot, sequence);
+        }
+
+        /// <summary>
+        /// U3B2, server to owner, reliable: the server's answer to one request that passed the wire gate (see SkillResultWire). Runs on
+        /// the owning client; anywhere else it does nothing. The owner records it; nothing here changes gameplay.
+        /// </summary>
+        [Rpc(SendTo.Owner)]
+        public void SkillResultRpc(SkillResultWire result)
+        {
+            NetOwnerSkillView view = GetComponent<NetOwnerSkillView>();
+            if (view != null) view.OnResult(result);
+        }
+
+        /// <summary>
+        /// U3B2, server to every client but the owner, reliable: this player's object just cast a skill (see SkillVisualWire). Presentation
+        /// only; a dedicated server ignores it.
+        /// </summary>
+        [Rpc(SendTo.NotOwner)]
+        public void SkillVisualRpc(SkillVisualWire visual)
+        {
+            if (NetRole.Current == NetRoleKind.DedicatedServer) return;
+            NetSkillCastFlash.Show(this, visual);
+        }
+
+        private void OnSkillStateChanged(SkillStateWire previous, SkillStateWire current)
+        {
+            NetOwnerSkillView view = GetComponent<NetOwnerSkillView>();
+            if (view != null) view.OnState(current);
+        }
+
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
         /// <summary>
-        /// Development proof only: exercise the future server skill receiver across real
-        /// connections. Deliberately allows a forged call through NGO so the common server
-        /// path must reject it. Not an exposed production skill channel or client input.
+        /// DEVELOPMENT-ONLY (U3B2, P11): the one rule both probes use to pick the object they attack: another player's object, the one
+        /// with the highest server player id that this client does not own. Deterministic with any number of players.
         /// </summary>
-        [Rpc(SendTo.Server, RequireOwnership = false)]
-        public void SkillIntentProofRpc(int slot, uint sequence, RpcParams rpcParams = default)
+        internal static NetPlayerRig FindProbeVictim()
         {
-            ulong sender = rpcParams.Receive.SenderClientId;
-            NetIdentityTable table = NetIdentityTable.Current;
-            if (!IsServer || !IsSpawned || table == null ||
-                !table.TryGetByClient(sender, out NetIdentity row) || row == null ||
-                sender != OwnerClientId || row.ClientId != sender || row.Object != NetworkObject ||
-                row.Rig == null || row.Rig != Rig || row.PlayerId != row.Rig.PlayerId ||
-                row.Rig.IsDead || row.Rig.Skills == null)
+            NetPlayerRig best = null;
+            for (int i = 0; i < SpawnedRigs.Count; i++)
             {
-                PlayerRig target = Rig;
-                Debug.Log(NetTuning.LogPrefix + "[server] skill-proof reject=identity sender=" + sender +
-                          " target=" + (target != null ? target.PlayerId : 0) +
-                          " mana=" + (target != null && target.Mana != null ? target.Mana.CurrentMana : -1f));
-                return;
+                NetPlayerRig rig = SpawnedRigs[i];
+                if (rig == null || !rig.IsSpawned || rig.IsOwner) continue;
+                if (best == null || rig.ServerPlayerId.Value > best.ServerPlayerId.Value) best = rig;
             }
 
-            // A connection's single ordered sequence covers both slots. The time and all
-            // gameplay outcomes come from the server; no identity or outcome is in the RPC.
-            SkillIntentVerdict verdict = row.SkillIntents.Submit(slot, sequence, Time.realtimeSinceStartupAsDouble);
-            if (verdict != SkillIntentVerdict.Accepted)
-            {
-                Debug.Log(NetTuning.LogPrefix + "[server] skill-proof reject=" + verdict + " sender=" + sender + " seq=" + sequence);
-                return;
-            }
-
-            float manaBefore = row.Rig.Mana != null ? row.Rig.Mana.CurrentMana : -1f;
-            bool cast = row.Rig.Skills.TryCastSlot(slot);
-            float manaAfter = row.Rig.Mana != null ? row.Rig.Mana.CurrentMana : -1f;
-            Debug.Log(NetTuning.LogPrefix + "[server] skill-proof admitted sender=" + sender + " slot=" + slot +
-                      " seq=" + sequence + " cast=" + cast + " manaBefore=" + manaBefore + " manaAfter=" + manaAfter +
-                      " cooldown=" + row.Rig.Skills.CooldownRemaining(slot));
+            return best;
         }
 
         /// <summary>
         /// DEVELOPMENT-ONLY forged-owner movement probe: the same payload and the same server path as <see cref="SubmitMoveRpc"/>,
-        /// but RequireOwnership is OFF, so a client that does NOT own this object can still deliver it. The server compares the
+        /// but InvokePermission is Everyone, so a client that does NOT own this object can still deliver it. The server compares the
         /// connection that delivered it with the object's owner and rejects, counts and logs the forgery.
         /// </summary>
-        [Rpc(SendTo.Server, RequireOwnership = false, Delivery = RpcDelivery.Unreliable)]
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone, Delivery = RpcDelivery.Unreliable)]
         public void ForgeMoveTestRpc(MoveBatchWire batch, RpcParams rpcParams = default)
         {
             NetMovementServer movement = NetMovementServer.Current;
@@ -256,13 +316,13 @@ namespace Emberdelve.Net
         public static int ForgeRejectCount { get; private set; }
 
         /// <summary>
-        /// DEVELOPMENT-ONLY forged-owner probe. RequireOwnership is deliberately OFF so a client that is NOT this object's owner can
+        /// DEVELOPMENT-ONLY forged-owner probe. InvokePermission is deliberately Everyone so a client that is NOT this object's owner can
         /// still deliver the call; the handler therefore has to do the ownership check itself, from the connection that carried the
         /// message (RpcParams.Receive.SenderClientId) and never from anything in the parameters. A call from another connection is
         /// counted and ignored; the owner's own call writes <see cref="TestProbe"/> so the gate can tell the check discriminates.
         /// The parameter is a free-form number, not an identity: no RPC in this project carries a player or combat id.
         /// </summary>
-        [Rpc(SendTo.Server, RequireOwnership = false)]
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
         public void ForgeOwnerTestRpc(int probe, RpcParams rpcParams = default)
         {
             ulong sender = rpcParams.Receive.SenderClientId;

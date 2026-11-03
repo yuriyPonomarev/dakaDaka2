@@ -12,7 +12,7 @@ namespace Emberdelve.Net
     ///  1. Logs the settled view picture: "[client] owner id=&lt;playerId&gt; views=&lt;k&gt; owned=1 class=.. party=.. ids=a,b". A picture is
     ///     "settled" when it has not changed for <see cref="SettleSeconds"/>; a new line is written each time the settled picture
     ///     changes (a player joins or leaves), so the gate can read both "views=2" and the later drop.
-    ///  2. Runs the optional test script (--ember-net-script). "forge-owner" (development builds / Editor only): once another
+    ///  2. Runs the optional test script (--ember-net-script) "forge-owner" (the skill scripts are NetSkillSender's). It exists in development builds / the Editor only: once another
     ///     player's view exists, call the dev-only test RPC on THAT player's object (2 times) and once on our own object. The server
     ///     must reject the first two (we are not that object's owner) and accept the last.
     ///  3. U3A4a: every half second logs where it sees each OTHER player: "[client] view id=&lt;n&gt; pos=(x,y,z)" (written when the
@@ -134,37 +134,22 @@ namespace Emberdelve.Net
 
         private void RunScript(NetPlayerRig ownedRig, IReadOnlyList<NetPlayerRig> rigs)
         {
-            if (_scriptDone || (_script != NetLaunchArgs.ScriptForgeOwner && _script != "skill-proof")) return;
+            // U3B2: the skill scripts (skill-cast, skill-proof, skill-abuse) run on NetSkillSender; this probe only runs forge-owner.
+            if (_scriptDone || _script != NetLaunchArgs.ScriptForgeOwner) return;
 
-            NetPlayerRig victim = null;
-            for (int i = 0; i < rigs.Count; i++)
-            {
-                NetPlayerRig rig = rigs[i];
-                if (rig != null && rig.IsSpawned && !rig.IsOwner) { victim = rig; break; }
-            }
-
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            NetPlayerRig victim = NetPlayerRig.FindProbeVictim();
             if (victim == null) return; // wait until somebody else's view exists
 
             _scriptDone = true;
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
             int victimId = victim.ServerPlayerId.Value;
-            if (_script == "skill-proof")
-            {
-                // Forge first: it must not consume the real owner's sequence or alter their kit.
-                victim.SkillIntentProofRpc(1, 1);
-                ownedRig.SkillIntentProofRpc(1, 1);
-                ownedRig.SkillIntentProofRpc(1, 1); // replay
-                ownedRig.SkillIntentProofRpc(9, 2); // invalid slot
-                ownedRig.SkillIntentProofRpc(1, 2); // fresh, but same skill is cooling down
-                Debug.Log(NetTuning.LogPrefix + "[client] script skill-proof sent target=" + victimId + " forged=1 self=4");
-                return;
-            }
             victim.ForgeOwnerTestRpc(777);
             victim.ForgeOwnerTestRpc(778);
             ownedRig.ForgeOwnerTestRpc(5);
             Debug.Log(NetTuning.LogPrefix + "[client] script forge-owner sent target=" + victimId + " forged=2 self=1");
 #else
-            Debug.Log(NetTuning.LogPrefix + "[client] script forge-owner unavailable (not a development build)");
+            _scriptDone = true;
+            Debug.Log(NetTuning.LogPrefix + "[client] script " + _script + " unavailable (not a development build)");
 #endif
         }
     }
