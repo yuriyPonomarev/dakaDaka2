@@ -50,6 +50,9 @@ namespace Emberdelve.EditorTools
             AddTorch(root.transform, new Vector3(9f, 2.5f, 7f), 12f);
             AddTorch(root.transform, new Vector3(-9f, 2.5f, -7f), 10f);
             AddTorch(root.transform, new Vector3(9f, 2.5f, -7f), 10f);
+
+            // V3a: Poly Haven set dressing along the walls (visual only, no colliders).
+            EmberdelvePropFactory.BuildLobbyProps();
             EmberdelveVisualSetup.PruneMeshes(MeshPrefix);
 
             EmberdelveVisualSetup.AddGlobalVolume("Post_Volume_Lobby");

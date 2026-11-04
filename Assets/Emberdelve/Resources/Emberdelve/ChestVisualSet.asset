@@ -14,20 +14,20 @@ MonoBehaviour:
   m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Level.ChestVisualSet
   entries:
   - variant: 0
-    model: {fileID: 919132149155446097, guid: 1876580a98c43c542993553803868e63, type: 3}
+    model: {fileID: 919132149155446097, guid: 7862a8fcaeb26014c9e2312d0c39ff4f, type: 3}
     tint: {r: 1, g: 1, b: 1, a: 1}
     lidNameContains: lid
     frontSign: 1
     openAngle: 105
   - variant: 1
-    model: {fileID: 919132149155446097, guid: c26f3331deb77b246809a82b260ddc13, type: 3}
-    tint: {r: 1, g: 0.82, b: 0.62, a: 1}
+    model: {fileID: 919132149155446097, guid: 7862a8fcaeb26014c9e2312d0c39ff4f, type: 3}
+    tint: {r: 1, g: 0.78, b: 0.5, a: 1}
     lidNameContains: lid
     frontSign: 1
     openAngle: 105
   - variant: 2
-    model: {fileID: 919132149155446097, guid: c26f3331deb77b246809a82b260ddc13, type: 3}
-    tint: {r: 0.66, g: 0.7, b: 1, a: 1}
+    model: {fileID: 919132149155446097, guid: 7862a8fcaeb26014c9e2312d0c39ff4f, type: 3}
+    tint: {r: 0.55, g: 0.6, b: 0.9, a: 1}
     lidNameContains: lid
     frontSign: 1
     openAngle: 105

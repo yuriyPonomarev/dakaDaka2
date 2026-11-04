@@ -63,6 +63,7 @@ namespace Emberdelve.EditorTools
             Check(imported, "KayKit import from Logs/v2_assets succeeded");
             CheckVendorFiles();
             CheckImportSettings();
+            CheckPolyHaven();
 
             EmberdelveAssetLibrary.BuildAll();
             EmberdelveEnemyVisualFactory.EnsureAll(true);
@@ -178,11 +179,55 @@ namespace Emberdelve.EditorTools
             Check(remapped, "the Minion's FBX material is remapped to the project KayKit material");
         }
 
+        // ---------------------------------------------------------------- Poly Haven (V3a)
+
+        private static void CheckPolyHaven()
+        {
+            EmberdelvePolyHavenImport.Manifest manifest = EmberdelvePolyHavenImport.ReadManifest();
+            Check(manifest != null && manifest.assets != null && manifest.assets.Count == EmberdelvePolyHavenImport.Catalog.Length,
+                "PolyHaven/manifest.json parses and lists every catalog model (" + (manifest != null ? manifest.assets.Count : 0) + " of " + EmberdelvePolyHavenImport.Catalog.Length + ")");
+            Check(File.Exists(EmberdelvePolyHavenImport.LicensePath) && File.ReadAllText(EmberdelvePolyHavenImport.LicensePath).Contains("CC0"), "PolyHaven/LICENSE_CC0.txt exists and states CC0");
+            if (manifest == null || manifest.assets == null) return;
+
+            int badLicense = 0, badHash = 0, notImported = 0, badMaterial = 0;
+            for (int a = 0; a < manifest.assets.Count; a++)
+            {
+                EmberdelvePolyHavenImport.ManifestAsset asset = manifest.assets[a];
+                if (asset.license != "CC0-1.0" || string.IsNullOrEmpty(asset.authors) || asset.page == null || !asset.page.StartsWith("https://polyhaven.com/a/") || asset.license_url != EmberdelvePolyHavenImport.LicenseUrl) badLicense++;
+                for (int f = 0; f < asset.files.Count; f++)
+                {
+                    EmberdelvePolyHavenImport.ManifestFile file = asset.files[f];
+                    if (!File.Exists(file.path) || EmberdelvePolyHavenImport.Sha256(file.path) != file.sha256 || new FileInfo(file.path).Length != file.bytes) { badHash++; Debug.LogError(Tag + " manifest hash/size mismatch: " + file.path); }
+                }
+
+                ModelImporter importer = AssetImporter.GetAtPath(asset.unity_path) as ModelImporter;
+                GameObject model = AssetDatabase.LoadAssetAtPath<GameObject>(asset.unity_path);
+                if (importer == null || model == null || importer.animationType != ModelImporterAnimationType.None || importer.importAnimation) { notImported++; continue; }
+
+                // every renderer uses a project material from the model's own Materials folder (the FBX remap worked, nothing is pink or default)
+                Renderer[] renderers = model.GetComponentsInChildren<Renderer>(true);
+                for (int r = 0; r < renderers.Length; r++)
+                {
+                    Material[] materials = renderers[r].sharedMaterials;
+                    for (int m = 0; m < materials.Length; m++)
+                    {
+                        string path = materials[m] != null ? AssetDatabase.GetAssetPath(materials[m]) : "";
+                        if (!path.StartsWith(EmberdelvePolyHavenImport.MaterialsFolder(asset.id) + "/") || materials[m].shader == null || materials[m].shader.name != "Universal Render Pipeline/Lit") badMaterial++;
+                    }
+                }
+            }
+
+            Check(badLicense == 0, "every Poly Haven asset is CC0-1.0 with authors, page and license url (" + badLicense + " bad)");
+            Check(badHash == 0, "every Poly Haven manifest sha256 / size matches the file in the project (" + badHash + " bad)");
+            Check(notImported == 0, "every Poly Haven model is imported without rig / animation (" + notImported + " bad)");
+            Check(badMaterial == 0, "every Poly Haven renderer uses a project URP/Lit material of its own model (" + badMaterial + " bad slots)");
+        }
+
         // ---------------------------------------------------------------- textures
 
         private static void CheckTextures()
         {
-            string[] roots = { EmberdelveTextureImport.TextureRoot.TrimEnd('/'), EmberdelveTextureImport.KayKitRoot.TrimEnd('/') };
+            string[] roots = { EmberdelveTextureImport.TextureRoot.TrimEnd('/'), EmberdelveTextureImport.KayKitRoot.TrimEnd('/'), EmberdelvePolyHavenPostprocessor.Root.TrimEnd('/') };
             for (int r = 0; r < roots.Length; r++)
             {
                 string[] guids = AssetDatabase.FindAssets("t:Texture2D", new[] { roots[r] });
@@ -292,7 +337,7 @@ namespace Emberdelve.EditorTools
             Check(torches != null, "Torches root exists");
             if (torches == null) return;
 
-            bool vendorTorch = EmberdelveVendorImport.LoadDungeonModel("torch_mounted") != null;
+            bool vendorTorch = EmberdelvePolyHavenImport.LoadModel("Lantern_01") != null;
             int bad = 0;
             for (int i = 0; i < torches.childCount; i++)
             {
@@ -322,7 +367,7 @@ namespace Emberdelve.EditorTools
             }
 
             Check(torches.childCount > 0 && bad == 0, "every torch has a mesh, a light and particles, no colliders, and the retuned flame (" + bad + " bad of " + torches.childCount + ")");
-            Check(vendorTorch, "KayKit torch_mounted is imported and used for the sconces");
+            Check(vendorTorch, "Poly Haven Lantern_01 is imported and used for the sconces");
 
             Material flameMaterial = EmberdelveMaterials.FlameMat;
             Check(flameMaterial != null && flameMaterial.GetColor("_BaseColor").maxColorComponent <= 2.2f && flameMaterial.GetColor("_BaseColor").maxColorComponent > 1f,
@@ -524,7 +569,7 @@ namespace Emberdelve.EditorTools
                     if (!ok) { bad++; Debug.LogError(Tag + " chest '" + body.name + "' lost its interactable/colliders or has no model with a lid hinge"); }
                 }
 
-                Check(bad == 0, "every chest keeps its ChestInteractable, collider, lid and layer, and has a KayKit model with a lid hinge (" + bad + " bad)");
+                Check(bad == 0, "every chest keeps its ChestInteractable, collider, lid and layer, and has a Poly Haven model with a lid hinge (" + bad + " bad)");
             }
             finally
             {
@@ -543,6 +588,19 @@ namespace Emberdelve.EditorTools
             Check(props.childCount >= 4 && props.childCount == EmberdelvePropFactory.LastPlacements.Count,
                 "props were scattered (" + props.childCount + " built, " + EmberdelvePropFactory.LastPlacements.Count + " recorded)");
             Check(props.GetComponentsInChildren<Collider>(true).Length == 0, "props have no colliders at all (so none on nav-walkable cells)");
+            int vendorSlots = 0;
+            Renderer[] propRenderers = props.GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < propRenderers.Length; i++)
+            {
+                Material[] materials = propRenderers[i].sharedMaterials;
+                for (int m = 0; m < materials.Length; m++)
+                {
+                    string path = materials[m] != null ? AssetDatabase.GetAssetPath(materials[m]) : "";
+                    if (!path.StartsWith(EmberdelvePolyHavenPostprocessor.Root)) vendorSlots++;
+                }
+            }
+
+            Check(vendorSlots == 0, "every prop material is a Poly Haven project material - no KayKit or default material is left on a prop (" + vendorSlots + " bad slots)");
 
             DungeonLayoutData layout = EmberdelveAssetLibrary.Layout;
             bool[,] walkable = layout.BuildWalkableGrid();

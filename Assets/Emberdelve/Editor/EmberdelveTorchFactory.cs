@@ -10,7 +10,7 @@ namespace Emberdelve.EditorTools
     /// runtime and mounts it on the nearest wall (position + rotation, +Z pointing away from the wall).
     /// Local frame of the sconce: wall surface at z = -0.12, +Z out into the room, +Y up.
     ///
-    /// V2: when the KayKit torch_mounted model is imported it replaces the procedural cubes/cylinders (same child name
+    /// V2/V3a: when the Poly Haven Lantern_01 is imported (V3a; V2 used the KayKit torch_mounted) it replaces the procedural cubes/cylinders (same child name
     /// "Sconce", same frame, no colliders, no shadow casting); the model is fitted from its renderer bounds (back against the
     /// wall plane, 0.62 m tall, centred on the arm) and the flame is placed at its top. Without the model the V1 procedural
     /// sconce is built exactly as before. The flame was retuned: warmer, smaller, softer (see BuildFlame).
@@ -31,8 +31,8 @@ namespace Emberdelve.EditorTools
             Transform root = sconce.transform;
 
             Vector3 flamePosition = new Vector3(0f, 0.37f, 0.262f);
-            GameObject kayKitTorch = EmberdelveVendorImport.LoadDungeonModel("torch_mounted");
-            if (kayKitTorch == null || !TryBuildKayKitSconce(root, kayKitTorch, out flamePosition))
+            GameObject lantern = EmberdelvePolyHavenImport.LoadModel("Lantern_01");
+            if (lantern == null || !TryBuildLanternSconce(root, lantern, out flamePosition))
             {
                 flamePosition = new Vector3(0f, 0.37f, 0.262f);
                 BuildProceduralSconce(root);
@@ -64,14 +64,17 @@ namespace Emberdelve.EditorTools
             AddPart(root, "Coal", PrimitiveType.Sphere, new Vector3(0f, 0.34f, 0.255f), Vector3.zero, new Vector3(0.08f, 0.08f, 0.08f), coal);
         }
 
+        private const float LanternHeight = 0.5f;
+        private const float ArmY = 0.36f;
+
         /// <summary>
-        /// Instantiates the KayKit torch under the sconce root and fits it from its bounds: 0.62 m tall, back face on the wall
-        /// plane (z = -0.12), centred on x, bottom at y = -0.10. Assumes the model's front is +Z (the usual Blender -> Unity
-        /// import); a flipped model would show its back to the room (checked by the graphical review). The sconce root is at
-        /// identity rotation/scale and the torch object has none either at build time, so world bounds minus the root position
-        /// are sconce-local bounds. Returns the flame position (top of the model).
+        /// V3a: the Poly Haven Lantern_01 (real size 0.29 m, scaled to 0.38 m) hangs from a dark iron wall bracket (plate + arm, plain
+        /// primitives). Same child name "Sconce", same frame (wall at z = -0.12, +Z into the room), no colliders, no shadow casting. The
+        /// lantern is fitted from its renderer bounds (top at the arm, centred on x, hanging 0.17 m out of the wall) and the flame
+        /// sits in the middle of its glass. The sconce root is at identity rotation/scale and the torch object has none either at build
+        /// time, so world bounds minus the root position are sconce-local bounds. Returns false (-> procedural V1 sconce) without the model.
         /// </summary>
-        private static bool TryBuildKayKitSconce(Transform root, GameObject asset, out Vector3 flamePosition)
+        private static bool TryBuildLanternSconce(Transform root, GameObject asset, out Vector3 flamePosition)
         {
             flamePosition = new Vector3(0f, 0.37f, 0.262f);
 
@@ -91,18 +94,30 @@ namespace Emberdelve.EditorTools
                 return false;
             }
 
-            // The parts sit right next to the light; their shadows would only be streaks and acne.
+            // The parts sit right around the light; their shadows would only be streaks and acne.
             for (int i = 0; i < renderers.Length; i++) renderers[i].shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
 
-            model.transform.localScale = Vector3.one * (ModelHeight / bounds.size.y);
+            model.transform.localScale = Vector3.one * (LanternHeight / bounds.size.y);
             TryGetBounds(renderers, out bounds);
 
             Vector3 min = bounds.min - root.position;
             Vector3 max = bounds.max - root.position;
-            Vector3 shift = new Vector3(-(min.x + max.x) * 0.5f, -0.10f - min.y, -0.12f - min.z);
+            Vector3 shift = new Vector3(-(min.x + max.x) * 0.5f, (ArmY - 0.015f) - max.y, 0.17f - (min.z + max.z) * 0.5f);
             model.transform.localPosition += shift;
 
-            flamePosition = new Vector3(0f, -0.10f + ModelHeight - 0.07f, (min.z + max.z) * 0.5f + shift.z);
+            // dark iron bracket: wall plate, arm to the lantern's ring
+            Material iron = EmberdelveMaterials.IronDark;
+            AddPart(root, "Plate", PrimitiveType.Cube, new Vector3(0f, ArmY - 0.14f, -0.105f), Vector3.zero, new Vector3(0.12f, 0.26f, 0.03f), iron);
+            AddPart(root, "Arm", PrimitiveType.Cube, new Vector3(0f, ArmY, 0.04f), Vector3.zero, new Vector3(0.03f, 0.03f, 0.30f), iron);
+
+            // flame: centre of the glass pane (or of the whole lantern)
+            Vector3 centre = bounds.center + shift;
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i].name.ToLowerInvariant().Contains("glass")) { centre = renderers[i].bounds.center; break; }
+            }
+
+            flamePosition = (renderers.Length > 0 ? centre : bounds.center) - root.position;
             return true;
         }
 

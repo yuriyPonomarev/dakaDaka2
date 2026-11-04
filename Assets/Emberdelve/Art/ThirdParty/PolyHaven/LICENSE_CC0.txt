@@ -1,0 +1,5 @@
+Poly Haven assets in this folder are licensed CC0 1.0 Universal (public domain dedication).
+https://creativecommons.org/publicdomain/zero/1.0/
+Poly Haven license page: https://polyhaven.com/license
+Authors and sources of every model: manifest.json (authors per asset, source URL per file).
+No attribution is required; it is recorded anyway.
