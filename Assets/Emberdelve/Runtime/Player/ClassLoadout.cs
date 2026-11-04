@@ -29,6 +29,9 @@ namespace Emberdelve.Player
         [SerializeField] private Camera targetCamera;
 
         private WeaponVisualRig _visual;
+        private FirstPersonArmsDriver _arms;
+        private WeaponViewModelSet _viewModels;
+        private bool _armsPending;
         private CharacterClassData _appliedClass;
         private PlayerRig _rig;
 
@@ -116,6 +119,7 @@ namespace Emberdelve.Player
 
         private void Update()
         {
+            if (_armsPending && Application.isPlaying) SyncArms(ActiveWeapon);
             if (_rig == null || _rig.IsDead) return;
             if (Emberdelve.Core.NetRole.IsClientOnly) return; // U3B3: a network client asks the server to swap (NetCombatSender); it never swaps locally
 
@@ -422,16 +426,19 @@ namespace Emberdelve.Player
         public void PlaySwingVisual(WeaponData weapon, SwingPatternData pattern)
         {
             if (_visual != null) _visual.PlaySwing(weapon, pattern);
+            if (_arms != null && pattern != null) _arms.PlaySwing(pattern.kind, pattern.Timing.Total);
         }
 
         public void PlaySwingVisual(WeaponData weapon, SwingPatternData pattern, in SwingTiming timing)
         {
             if (_visual != null) _visual.PlaySwing(weapon, pattern, timing);
+            if (_arms != null && pattern != null) _arms.PlaySwing(pattern.kind, timing.Total);
         }
 
         public void PlaySwingRecoil()
         {
             if (_visual != null) _visual.PlayRecoil();
+            if (_arms != null) _arms.PlayRecoil();
         }
 
         /// <summary>The first-person weapon visual (null when nothing is held). Exposed for tools and gates.</summary>
@@ -441,6 +448,8 @@ namespace Emberdelve.Player
         public void DiscardInheritedVisuals()
         {
             _visual = null;
+            _arms = null;
+            _armsPending = false;
             if (weaponAnchor == null) return;
             for (int i = weaponAnchor.childCount - 1; i >= 0; i--) Destroy(weaponAnchor.GetChild(i).gameObject);
         }
@@ -453,6 +462,7 @@ namespace Emberdelve.Player
         public void SetGuardHeldVisual(bool held)
         {
             if (_visual != null) _visual.SetGuardHeld(held);
+            if (_arms != null) _arms.SetBlock(held);
         }
 
         public void RebuildWeaponVisual(WeaponData weapon)
@@ -463,9 +473,39 @@ namespace Emberdelve.Player
                 _visual = null;
             }
 
-            if (weapon == null || weaponAnchor == null) return;
+            if (weaponAnchor == null) return;
+            if (weapon == null) { SyncArms(null); return; }
             Transform aimFrame = _rig != null && _rig.Look != null ? _rig.Look.AimTransform : weaponAnchor;
             _visual = WeaponVisualBuilder.Build(weapon, weaponAnchor, aimFrame);
+            SyncArms(weapon);
+        }
+
+        /// <summary>The first-person arms of the local player (null for other players, servers, tools and weapons without a model).</summary>
+        public FirstPersonArmsDriver Arms => _arms;
+
+        /// <summary>
+        /// V3c: dresses the local player's hands with the weapon model (presentation only). The arms exist only for the local,
+        /// camera-carrying player in play mode; a weapon without a model (bows, the claw) keeps its blockout visual and shows no arms.
+        /// When the rig is not yet known to be local (class applied before the run director assigns control) the attempt is retried.
+        /// </summary>
+        private void SyncArms(WeaponData weapon)
+        {
+            if (_viewModels == null) _viewModels = WeaponViewModelSet.Load();
+            if (_arms == null && Application.isPlaying)
+            {
+                _arms = FirstPersonArmsDriver.Create(weaponAnchor, _rig, targetCamera, _viewModels);
+                _armsPending = _arms == null && _viewModels != null && _viewModels.armsPrefab != null && weapon != null;
+            }
+
+            if (_arms == null) return;
+            _armsPending = false;
+            bool dressed = weapon != null && _arms.SetWeapons(weapon, _rig != null ? _rig.OffhandWeapon : null);
+            _arms.gameObject.SetActive(dressed);
+            if (dressed)
+            {
+                if (_visual != null) _visual.HideBlockoutRenderers();
+                _arms.SetBlock(_rig != null && _rig.IsGuarding);
+            }
         }
 
         /// <summary>Per-weapon ammunition, so a swap cannot quietly refill a half-empty magazine.</summary>

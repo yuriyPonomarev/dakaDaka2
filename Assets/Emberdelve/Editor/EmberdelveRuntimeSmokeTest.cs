@@ -711,7 +711,12 @@ namespace Emberdelve.EditorTools
                 Check(!_rig.IsDead, $"player still alive for the defense tests ({_rig.CurrentHealth:F0}/{_rig.MaxHealth:F0})");
                 if (_rig.IsDead || _authority == null) yield break;
 
-                EnemyAgent enemy = PickAliveEnemy();
+                                // The block expectation below (less than 60% of the weapon damage) is the ordinary guard. An enemy whose weapon out-powers the
+                // player's impact resist (the Ashen Warden's maul) breaks the guard by design and legitimately gets a much smaller reduction
+                // (0.25), so the probe uses the nearest alive enemy that does not break it; which enemy is nearest depends on how far each one
+                // chased during the frame-counted waits (timing), so the pick is made from data, not left to timing.
+                EnemyAgent enemy = PickAliveEnemyWhereGuardHolds();
+                if (enemy == null) enemy = PickAliveEnemy();
                 Check(enemy != null, "an alive enemy is available for the defense tests");
                 if (enemy == null) yield break;
 
@@ -6020,6 +6025,26 @@ namespace Emberdelve.EditorTools
 
             private LootPickup _sceneLoot;
             private readonly List<KeyValuePair<LootPickup, Vector3>> _clearedLoot = new List<KeyValuePair<LootPickup, Vector3>>();
+
+            private EnemyAgent PickAliveEnemyWhereGuardHolds()
+            {
+                EnemyAgent[] all = FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None);
+                EnemyAgent best = null;
+                float bestDistance = float.MaxValue;
+                Vector3 reference = _rig != null ? _rig.transform.position : transform.position;
+                float resist = _rig != null ? _rig.Defense.ImpactResist : 0f;
+
+                for (int i = 0; i < all.Length; i++)
+                {
+                    if (all[i] == null || all[i].IsDead || all[i].Data == null || all[i].Data.attackWeapon == null) continue;
+                    if (all[i].Data.attackWeapon.impactPower > resist) continue;
+
+                    float distance = Vector3.Distance(all[i].transform.position, reference);
+                    if (distance < bestDistance) { bestDistance = distance; best = all[i]; }
+                }
+
+                return best;
+            }
 
             private EnemyAgent PickAliveEnemy()
             {

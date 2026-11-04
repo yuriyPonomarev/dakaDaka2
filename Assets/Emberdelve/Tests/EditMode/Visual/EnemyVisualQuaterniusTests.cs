@@ -237,9 +237,6 @@ namespace Emberdelve.Tests.Visual
         public void Variant_Weapons_SitOnTheHandBones_WithRustyMetal(string name)
         {
             EmberdelveEnemyVisualFactory.Variant v = EmberdelveEnemyVisualFactory.Find(name);
-            Material rust = AssetDatabase.LoadAssetAtPath<Material>(EmberdelveUndeadMaterials.RustyMetalPath);
-            Assert.IsNotNull(rust);
-
             GameObject instance = Instantiate(name);
             try
             {
@@ -248,13 +245,13 @@ namespace Emberdelve.Tests.Visual
                 Assert.IsNotNull(right);
                 Assert.IsNotNull(left);
 
-                CheckHand(right, v.MainHand, rust, name + " main hand");
-                CheckHand(left, v.OffHand, rust, name + " off hand");
+                CheckHand(right, v.MainHand, v.MainHandSource, name + " main hand");
+                CheckHand(left, v.OffHand, v.OffHandSource, name + " off hand");
             }
             finally { Object.DestroyImmediate(instance); }
         }
 
-        private static void CheckHand(Transform hand, string expectedChild, Material rust, string label)
+        private static void CheckHand(Transform hand, string expectedChild, string weaponId, string label)
         {
             if (string.IsNullOrEmpty(expectedChild))
             {
@@ -269,10 +266,15 @@ namespace Emberdelve.Tests.Visual
             for (int i = 0; i < renderers.Length; i++)
             {
                 Material[] materials = renderers[i].sharedMaterials;
-                for (int m = 0; m < materials.Length; m++) Assert.AreSame(rust, materials[m], label + " is rusty metal");
+                for (int m = 0; m < materials.Length; m++)
+                {
+                    // V3c: the Poly Haven weapon materials, rusted copies (Rusty_<source material>.mat in the undead folder)
+                    StringAssert.StartsWith(EmberdelveWeaponModels.RustyFolder + "/Rusty_", AssetDatabase.GetAssetPath(materials[m]), label + " is rusted");
+                }
             }
 
             Assert.AreEqual(0, weapon.GetComponentsInChildren<Collider>(true).Length, label + " has no collider");
+            Assert.IsNotNull(EmberdelveWeaponModels.LoadPrefab(weaponId), label + ": the Poly Haven model prefab exists");
         }
 
         // ---------------------------------------------------------------- eyes
@@ -310,7 +312,9 @@ namespace Emberdelve.Tests.Visual
                 Assert.AreSame(glow, right.GetComponent<Renderer>().sharedMaterial);
                 Assert.IsNull(left.GetComponent<Collider>());
                 Assert.IsNull(right.GetComponent<Collider>());
-                Assert.Less(left.position.x, right.position.x, "left eye is left of the right eye (the visual faces +Z)");
+                // The live pose (what the runtime Animator shows) faces the model's +Z; the bind pose faces -Z.
+                EmberdelveFirstPersonArms.Evaluate(animator, EmberdelveEnemyVisualFactory.FindClip(v.Idle), 0f);
+                Assert.Less(left.position.x, right.position.x, "left eye is left of the right eye (the live pose faces +Z)");
             }
             finally { Object.DestroyImmediate(instance); }
         }

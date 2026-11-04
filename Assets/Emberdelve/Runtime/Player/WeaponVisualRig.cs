@@ -103,6 +103,20 @@ namespace Emberdelve.Player
             if (_edge != null) _edge.gameObject.SetActive(false);
         }
 
+        /// <summary>
+        /// V3c: a textured weapon model in the first-person hand replaces the blockout cubes. Only their renderers go: the transforms stay
+        /// (the guard blade box and the muzzle are read from them) and the damage-segment bar (Sweep_Edge) keeps showing the real swing.
+        /// </summary>
+        public void HideBlockoutRenderers()
+        {
+            Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i].gameObject.name == "Sweep_Edge" || renderers[i].GetComponent<SwingTrail>() != null) continue;
+                renderers[i].enabled = false;
+            }
+        }
+
         /// <summary>The guard pose shown to the player and sampled by the authority during projectile flight.</summary>
         public void SetGuardHeld(bool held)
         {

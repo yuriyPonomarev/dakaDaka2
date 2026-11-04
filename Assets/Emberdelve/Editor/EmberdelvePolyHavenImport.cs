@@ -52,14 +52,27 @@ namespace Emberdelve.EditorTools
             new[] { "worn_metal_rack", "armory rack" },
             new[] { "GothicCabinet_01", "furniture scatter" },
             new[] { "rock_moss_set_01", "rubble / mossy rocks" },
-            new[] { "root_cluster_01", "roots in corners" }
+            new[] { "root_cluster_01", "roots in corners" },
+            // V3c: weapons (first person view model and enemy hands)
+            new[] { "antique_estoc", "weapon: sword / rapier view model, enemy rusty blade" },
+            new[] { "sledgehammer_01", "weapon: maul view model" },
+            new[] { "ornate_medieval_mace", "weapon: mace (no WeaponData yet)" },
+            new[] { "ornate_war_hammer", "weapon: war hammer (no WeaponData yet)" },
+            new[] { "ornate_medieval_dagger", "weapon: dagger, enemy rogue" },
+            new[] { "hatchet", "weapon: hatchet / axe, enemy warrior" },
+            new[] { "kite_shield", "weapon: shield view model, enemy warrior" }
         };
+
+        /// <summary>V3c: the weapon models (a subset of <see cref="Catalog"/>).</summary>
+        public static readonly string[] WeaponIds = { "antique_estoc", "sledgehammer_01", "ornate_medieval_mace", "ornate_war_hammer", "ornate_medieval_dagger", "hatchet", "kite_shield" };
 
         public static string ModelPath(string id) { return Root + "/" + id + "/" + id + "_" + Resolution + ".fbx"; }
         public static GameObject LoadModel(string id) { return AssetDatabase.LoadAssetAtPath<GameObject>(ModelPath(id)); }
         public static string MaterialsFolder(string id) { return Root + "/" + id + "/Materials"; }
 
-        private static string ProjectRoot() { return Path.GetDirectoryName(Application.dataPath).Replace('\\', '/'); }
+        private static string _projectRoot;
+        [InitializeOnLoadMethod] private static void CacheProjectRoot() { ProjectRoot(); }
+        private static string ProjectRoot() { if (_projectRoot == null) _projectRoot = Path.GetDirectoryName(Application.dataPath).Replace('\\', '/'); return _projectRoot; }
         private static string Absolute(string assetPath) { return ProjectRoot() + "/" + assetPath; }
 
         // ---------------------------------------------------------------- manifest model
@@ -107,7 +120,7 @@ namespace Emberdelve.EditorTools
         }
 
         /// <summary>Downloads the given ids (skips files already present). Returns a short report.</summary>
-        public static string Fetch(string[] ids)
+        public static string Fetch(string[] ids, bool refresh = true)
         {
             StringBuilder report = new StringBuilder();
             using (HttpClient http = new HttpClient())
@@ -121,7 +134,7 @@ namespace Emberdelve.EditorTools
                 }
             }
 
-            AssetDatabase.Refresh();
+            if (refresh) AssetDatabase.Refresh();
             return report.ToString();
         }
 
@@ -336,6 +349,7 @@ namespace Emberdelve.EditorTools
             }
 
             AssetDatabase.SaveAssets();
+            EmberdelveWeaponModels.ApplyLook(id); // V3c: weapon models get their own base colour, not the prop lift
 
             ModelImporter importer = AssetImporter.GetAtPath(fbx) as ModelImporter;
             if (importer != null && EmberdelvePolyHavenPostprocessor.Apply(importer, fbx)) importer.SaveAndReimport();
@@ -377,6 +391,24 @@ namespace Emberdelve.EditorTools
                 return file.Substring(0, file.IndexOf("_diff_" + Resolution, StringComparison.Ordinal));
             }
 
+            // Several texture sets (kite_shield: body + clamps_trim for the materials clamps_and_bolts / metal_trim): the set whose name shares
+            // the most words with the material, when one set is strictly better than the others.
+            string[] words = materialName.ToLowerInvariant().Split('_');
+            string best = null;
+            int bestScore = 0;
+            bool tie = false;
+            for (int f = 0; f < files.Length; f++)
+            {
+                string file = Path.GetFileName(files[f]);
+                string setName = file.Substring(0, file.IndexOf("_diff_" + Resolution, StringComparison.Ordinal));
+                string[] setWords = setName.ToLowerInvariant().Split('_');
+                int score = 0;
+                for (int w = 0; w < words.Length; w++) if (words[w].Length > 0 && Array.IndexOf(setWords, words[w]) >= 0) score++;
+                if (score > bestScore) { best = setName; bestScore = score; tie = false; }
+                else if (score == bestScore && score > 0) tie = true;
+            }
+
+            if (best != null && !tie) return best;
             return null;
         }
 
@@ -548,7 +580,16 @@ namespace Emberdelve.EditorTools
         public const string Root = "Assets/Emberdelve/Art/ThirdParty/PolyHaven/";
         public const int MaxTextureSize = 512;
 
-        public override uint GetVersion() { return 1; }
+        public override uint GetVersion() { return 2; }
+
+        /// <summary>V3c: the weapon models stay CPU readable (the editor measures their length axis and head end once to build the normalised weapon prefabs).</summary>
+        public static bool KeepReadable(string path)
+        {
+            string file = System.IO.Path.GetFileName(path);
+            for (int i = 0; i < EmberdelvePolyHavenImport.WeaponIds.Length; i++)
+                if (file.StartsWith(EmberdelvePolyHavenImport.WeaponIds[i] + "_", System.StringComparison.Ordinal)) return true;
+            return false;
+        }
 
         private void OnPreprocessModel()
         {
@@ -570,7 +611,7 @@ namespace Emberdelve.EditorTools
             if (importer.importLights) { importer.importLights = false; changed = true; }
             if (importer.importBlendShapes) { importer.importBlendShapes = false; changed = true; }
             if (importer.addCollider) { importer.addCollider = false; changed = true; }
-            if (importer.isReadable) { importer.isReadable = false; changed = true; }
+            if (importer.isReadable != KeepReadable(path)) { importer.isReadable = KeepReadable(path); changed = true; }
             if (importer.animationType != ModelImporterAnimationType.None) { importer.animationType = ModelImporterAnimationType.None; changed = true; }
             if (importer.importAnimation) { importer.importAnimation = false; changed = true; }
             if (importer.meshCompression != ModelImporterMeshCompression.Off) { importer.meshCompression = ModelImporterMeshCompression.Off; changed = true; }

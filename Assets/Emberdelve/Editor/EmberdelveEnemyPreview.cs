@@ -49,7 +49,7 @@ namespace Emberdelve.EditorTools
                     string clipName = pose == "walk" ? variant.Walk : pose == "run" ? variant.Run : pose == "attack" ? variant.Attack : pose == "hit" ? variant.Hit : pose == "death" ? variant.Death : variant.Idle;
                     AnimationClip clip = EmberdelveEnemyVisualFactory.FindClip(clipName);
                     Animator animator = instance.GetComponentInChildren<Animator>();
-                    if (clip != null && animator != null) clip.SampleAnimation(animator.gameObject, clip.length * Mathf.Clamp01(time));
+                    if (clip != null && animator != null) EmberdelveFirstPersonArms.Evaluate(animator, clip, clip.length * Mathf.Clamp01(time));
                 }
 
                 GameObject floor = GameObject.CreatePrimitive(PrimitiveType.Plane);

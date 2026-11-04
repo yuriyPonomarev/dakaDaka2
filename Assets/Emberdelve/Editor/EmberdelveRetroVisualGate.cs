@@ -13,6 +13,7 @@ using Emberdelve.Data;
 using Emberdelve.Feedback;
 using Emberdelve.Interaction;
 using Emberdelve.Level;
+using Emberdelve.Player;
 
 namespace Emberdelve.EditorTools
 {
@@ -65,6 +66,7 @@ namespace Emberdelve.EditorTools
             CheckImportSettings();
             CheckPolyHaven();
             CheckQuaternius();
+            CheckViewModels();
 
             EmberdelveAssetLibrary.BuildAll();
             EmberdelveEnemyVisualFactory.EnsureAll(true);
@@ -222,6 +224,62 @@ namespace Emberdelve.EditorTools
             Check(badHash == 0, "every Poly Haven manifest sha256 / size matches the file in the project (" + badHash + " bad)");
             Check(notImported == 0, "every Poly Haven model is imported without rig / animation (" + notImported + " bad)");
             Check(badMaterial == 0, "every Poly Haven renderer uses a project URP/Lit material of its own model (" + badMaterial + " bad slots)");
+        }
+
+        // ---------------------------------------------------------------- weapon view models and first-person arms (V3c)
+
+        private static void CheckViewModels()
+        {
+            string built = EmberdelveWeaponModels.EnsureAll(false);
+            EmberdelveFirstPersonArms.EnsureAll(false);
+            WeaponViewModelSet set = WeaponViewModelSet.Load();
+            Check(set != null && set.armsPrefab != null, "WeaponViewModelSet exists with the arms prefab (" + built + ")");
+            if (set == null) return;
+
+            // Every WeaponData either has a model or is explicitly unmapped (with a reason).
+            string[] guids = AssetDatabase.FindAssets("t:WeaponData");
+            int unresolved = 0;
+            for (int i = 0; i < guids.Length; i++)
+            {
+                WeaponData weapon = AssetDatabase.LoadAssetAtPath<WeaponData>(AssetDatabase.GUIDToAssetPath(guids[i]));
+                if (weapon == null) continue;
+                bool mapped = set.Find(weapon.weaponId) != null;
+                bool unmapped = set.IsUnmapped(weapon.weaponId);
+                if (mapped == unmapped) { unresolved++; Debug.LogError(Tag + " weapon " + weapon.weaponId + " is " + (mapped ? "both mapped and unmapped" : "neither mapped nor unmapped")); }
+            }
+
+            Check(guids.Length > 0 && unresolved == 0, "every WeaponData ("+ guids.Length + ") maps to a model xor is explicitly unmapped (" + unresolved + " unresolved)");
+
+            // Models: URP Lit materials, no colliders, a real size.
+            int bad = 0;
+            for (int i = 0; i < set.entries.Length; i++)
+            {
+                GameObject prefab = set.entries[i] != null ? set.entries[i].prefab : null;
+                bool ok = prefab != null && prefab.GetComponentsInChildren<Collider>(true).Length == 0 && set.entries[i].length > 0.1f;
+                Renderer[] renderers = prefab != null ? prefab.GetComponentsInChildren<Renderer>(true) : new Renderer[0];
+                ok &= renderers.Length > 0;
+                for (int r = 0; r < renderers.Length; r++)
+                {
+                    Material[] materials = renderers[r].sharedMaterials;
+                    for (int m = 0; m < materials.Length; m++) ok &= materials[m] != null && materials[m].shader.name == "Universal Render Pipeline/Lit";
+                }
+
+                if (!ok) { bad++; Debug.LogError(Tag + " weapon model of " + (set.entries[i] != null ? set.entries[i].weaponId : "null") + " is not URP Lit / has colliders"); }
+            }
+
+            Check(set.entries.Length > 0 && bad == 0, "every weapon model ("+ set.entries.Length + ") has URP Lit materials and no colliders (" + bad + " bad)");
+
+            // Enemy prefabs no longer depend on a KayKit weapon mesh.
+            int kay = 0;
+            for (int v = 0; v < EmberdelveEnemyVisualFactory.Variants.Length; v++)
+            {
+                string path = EmberdelveEnemyVisualFactory.PrefabPath(EmberdelveEnemyVisualFactory.Variants[v].Name);
+                if (AssetDatabase.LoadAssetAtPath<GameObject>(path) == null) continue;
+                string[] dependencies = AssetDatabase.GetDependencies(path, true);
+                for (int d = 0; d < dependencies.Length; d++) if (dependencies[d].Contains("/KayKit/") && dependencies[d].Contains("Skeleton_")) kay++;
+            }
+
+            Check(kay == 0, "no enemy prefab depends on a KayKit Skeleton_* mesh (" + kay + ")");
         }
 
         // ---------------------------------------------------------------- Quaternius (V3b)

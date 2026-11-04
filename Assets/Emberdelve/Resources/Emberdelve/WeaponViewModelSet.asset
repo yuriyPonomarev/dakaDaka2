@@ -1,0 +1,44 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c7de3ab6906d0564d9ba1dce6666e60a, type: 3}
+  m_Name: WeaponViewModelSet
+  m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Player.WeaponViewModelSet
+  entries:
+  - weaponId: ashen_short_sword
+    prefab: {fileID: 508758358834217643, guid: 57fa78e2a0ef1c44d85f06820ac20d39, type: 3}
+    length: 1.15
+    sourceId: antique_estoc
+  - weaponId: ember_rapier
+    prefab: {fileID: 508758358834217643, guid: 57fa78e2a0ef1c44d85f06820ac20d39, type: 3}
+    length: 1.15
+    sourceId: antique_estoc
+  - weaponId: warden_maul
+    prefab: {fileID: 648759674101216598, guid: 2156d4c17fec07b4ab6b7aac313e31a5, type: 3}
+    length: 1
+    sourceId: sledgehammer_01
+  - weaponId: emberbulwark_shield
+    prefab: {fileID: 7798084207747093549, guid: cee3474336fd8da4a8365cfccada88f5, type: 3}
+    length: 0.8
+    sourceId: kite_shield
+  unmapped:
+  - weaponId: ember_crossbow
+    reason: 'ranged: needs draw / reload arm animation (not in the Quaternius libraries);
+      keeps the blockout crossbow and shows no arms'
+  - weaponId: hollow_bow
+    reason: 'ranged: needs draw arm animation (not in the Quaternius libraries);
+      keeps the blockout bow and shows no arms'
+  - weaponId: hollow_claw
+    reason: enemy-only weapon, there is no claw model; keeps its current visual
+  spareModels:
+  - ornate_medieval_mace
+  - ornate_war_hammer
+  armsPrefab: {fileID: 1463284168323612115, guid: cffd7247f8415f24f85afc78d9fb2fdd, type: 3}

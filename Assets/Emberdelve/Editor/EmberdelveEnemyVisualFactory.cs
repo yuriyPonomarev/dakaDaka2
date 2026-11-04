@@ -18,7 +18,10 @@ namespace Emberdelve.EditorTools
     /// mesh + variant material), the weapons on the humanoid hand bones, an EnemyVisualDriver. The level builder attaches the prefab as
     /// the child "Visual" of each enemy and switches the cube renderers off (the cubes stay: they carry the colliders the combat code
     /// uses). Nothing of the visual collides; the swing / windup timing is the brain's, the attack clip speed is matched by the driver.
-    /// Weapon meshes are the KayKit blade / axe / small shield as placeholders (re-skinned with the rusty metal material).
+    /// V3c: the weapons are the Poly Haven CC0 models of the view-model set (estoc, dagger, hatchet, kite shield: <see cref="EmberdelveWeaponModels"/>,
+    /// normalised: grip at the origin, tip along +Y), tinted with rusted copies of their own materials. The model's root yaw is identity: the
+    /// live Animator (root motion off) faces the model's +Z, and the grips are derived in that live frame (V3b had the model turned 180 degrees,
+    /// which showed the animated enemies from behind in Play).
     /// </summary>
     public static class EmberdelveEnemyVisualFactory
     {
@@ -33,9 +36,6 @@ namespace Emberdelve.EditorTools
 
         public const string MaleBody = EmberdelveQuaterniusImport.Ual1Path;
         public const string FemaleBody = EmberdelveQuaterniusImport.MannequinFPath;
-        public const string BladeSource = "Assets/Emberdelve/Art/ThirdParty/KayKit/Skeletons/Assets/fbx/Skeleton_Blade.fbx";
-        public const string AxeSource = "Assets/Emberdelve/Art/ThirdParty/KayKit/Skeletons/Assets/fbx/Skeleton_Axe.fbx";
-        public const string ShieldSource = "Assets/Emberdelve/Art/ThirdParty/KayKit/Skeletons/Assets/fbx/Skeleton_Shield_Small_A.fbx";
 
         public const string EyeNameLeft = "Eye_L";
         public const string EyeNameRight = "Eye_R";
@@ -46,7 +46,7 @@ namespace Emberdelve.EditorTools
             public string Body;            // mannequin FBX (mesh, bones, avatar)
             public string MeshName;        // derived mesh asset
             public string MainHand;        // name of the weapon object under the right hand bone (null = none)
-            public string MainHandSource;
+            public string MainHandSource;  // weapon model id of the view-model set (Poly Haven asset id)
             public float MainHandLength;   // metres, tip to pommel
             public string OffHand;         // name of the shield object under the left hand bone (null = none)
             public string OffHandSource;
@@ -60,12 +60,12 @@ namespace Emberdelve.EditorTools
 
         public static readonly Variant[] Variants =
         {
-            new Variant { Name = "Minion", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyBlade", MainHandSource = BladeSource, MainHandLength = 0.8f,
+            new Variant { Name = "Minion", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyBlade", MainHandSource = "antique_estoc", MainHandLength = 0.85f,
                 Idle = "Zombie_Idle_Loop", Walk = "Zombie_Walk_Fwd_Loop", Run = "Zombie_Walk_Fwd_Loop", RunPlayback = 1.7f, Attack = "Sword_Attack", Hit = "Hit_Chest", Death = "Death01" },
-            new Variant { Name = "Rogue", Body = FemaleBody, MeshName = "Undead_Mannequin_F", MainHand = "Weapon_RustyDagger", MainHandSource = BladeSource, MainHandLength = 0.55f,
+            new Variant { Name = "Rogue", Body = FemaleBody, MeshName = "Undead_Mannequin_F", MainHand = "Weapon_RustyDagger", MainHandSource = "ornate_medieval_dagger", MainHandLength = 0.38f,
                 Idle = "Idle_Loop", Walk = "Walk_Loop", Run = "Jog_Fwd_Loop", Attack = "Sword_Regular_C", Hit = "Hit_Head", Death = "Death01" },
-            new Variant { Name = "Warrior", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyAxe", MainHandSource = AxeSource, MainHandLength = 0.85f,
-                OffHand = "Weapon_RustyShield", OffHandSource = ShieldSource, OffHandSize = 0.5f, Pauldrons = true,
+            new Variant { Name = "Warrior", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyAxe", MainHandSource = "hatchet", MainHandLength = 0.4f,
+                OffHand = "Weapon_RustyShield", OffHandSource = "kite_shield", OffHandSize = 0.7f, Pauldrons = true,
                 Idle = "Idle_Shield_Loop", Walk = "Walk_Formal_Loop", Run = "Jog_Fwd_Loop", Attack = "Sword_Attack", Hit = "Hit_Chest", Death = "Death01" },
             new Variant { Name = "Mage", Body = MaleBody, MeshName = "Undead_Mannequin_M", GlowingEyes = true,
                 Idle = "Spell_Simple_Idle_Loop", Walk = "Walk_Formal_Loop", Run = "Jog_Fwd_Loop", Attack = "Spell_Simple_Shoot", Hit = "Hit_Chest", Death = "Death01" },
@@ -115,9 +115,7 @@ namespace Emberdelve.EditorTools
                 return false;
             }
 
-            // The weapon placeholders are the KayKit meshes; import them from the vendor cache only when absent.
-            if (AssetDatabase.LoadAssetAtPath<GameObject>(BladeSource) == null) EmberdelveVendorImport.EnsureImported(false);
-
+            EmberdelveWeaponModels.EnsureAll(false);
             EmberdelveUndeadMaterials.EnsureAll();
             EmberdelveVisualSetup.EnsureFolder(Folder);
 
@@ -162,10 +160,13 @@ namespace Emberdelve.EditorTools
                 Animator animator = model.GetComponent<Animator>();
 
                 Material rust = EmberdelveUndeadMaterials.Load(EmberdelveUndeadMaterials.RustyMetalPath);
-                if (!string.IsNullOrEmpty(variant.MainHand)) AttachMainHand(variant, fbx, mesh, bodyMaterial, avatar, animator, rust);
-                if (!string.IsNullOrEmpty(variant.OffHand)) AttachOffHand(variant, fbx, mesh, bodyMaterial, avatar, animator, rust);
+                if (!string.IsNullOrEmpty(variant.MainHand)) AttachMainHand(variant, fbx, mesh, bodyMaterial, avatar, animator);
+                if (!string.IsNullOrEmpty(variant.OffHand)) AttachOffHand(variant, fbx, mesh, bodyMaterial, avatar, animator);
                 if (variant.Pauldrons) AddPauldrons(animator, rust);
                 if (variant.GlowingEyes) AddEyes(animator);
+
+                // Built facing +Z (bind pose turned), shipped with identity yaw: the live pose faces +Z by itself.
+                model.transform.localRotation = Quaternion.identity;
 
                 // Pure visuals: nothing of the model may collide.
                 Collider[] colliders = root.GetComponentsInChildren<Collider>(true);
@@ -187,13 +188,13 @@ namespace Emberdelve.EditorTools
             return true;
         }
 
-        private static GameObject CreateModel(GameObject fbx, Transform parent, Mesh mesh, Material material, Avatar avatar, RuntimeAnimatorController controller)
+        private static GameObject CreateModel(GameObject fbx, Transform parent, Mesh mesh, Material material, Avatar avatar, RuntimeAnimatorController controller, float yaw = 180f)
         {
             GameObject model = (GameObject)PrefabUtility.InstantiatePrefab(fbx);
             model.name = "Model";
             model.transform.SetParent(parent, false);
-            // The mannequin faces -Z after the FBX import (toes point to -Z); the visual must face +Z like the enemy root.
-            model.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+            // The bind pose faces -Z (toes point to -Z); the build turns it to +Z to place eyes / pauldrons, the shipped prefab has yaw 0.
+            model.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
             PrefabUtility.UnpackPrefabInstance(model, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
 
             Animator animator = model.GetComponent<Animator>();
@@ -279,13 +280,18 @@ namespace Emberdelve.EditorTools
 
         // ---------------------------------------------------------------- weapons, armour, eyes
 
-        /// <summary>A weapon placeholder: wrapper object (the name the gate / tests look for) around the re-skinned source model, sized in metres.</summary>
-        private static GameObject CreateAccessory(string name, string sourcePath, Material material, float longest, float lateralScale, bool shield)
+        /// <summary>
+        /// A weapon: wrapper object (the name the gate / tests look for) around the Poly Haven model of the view-model set (grip at the origin, tip
+        /// along +Y, face along +Z), sized in metres (uniformly: <paramref name="longest"/> is the length from the grip to the far end, the height
+        /// of a shield) and re-skinned with the rusted copies of its own materials.
+        /// </summary>
+        private static GameObject CreateAccessory(string name, string weaponId, float longest)
         {
-            GameObject source = AssetDatabase.LoadAssetAtPath<GameObject>(sourcePath);
-            if (source == null)
+            GameObject source = EmberdelveWeaponModels.LoadPrefab(weaponId);
+            EmberdelveWeaponModels.Spec spec = EmberdelveWeaponModels.Find(weaponId);
+            if (source == null || spec == null)
             {
-                Debug.LogWarning("[Emberdelve][EnemyVisual] weapon model missing: " + sourcePath);
+                Debug.LogWarning("[Emberdelve][EnemyVisual] weapon model missing: " + weaponId);
                 return null;
             }
 
@@ -294,40 +300,42 @@ namespace Emberdelve.EditorTools
             instance.transform.SetParent(wrapper.transform, false);
             PrefabUtility.UnpackPrefabInstance(instance, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
 
+            Dictionary<string, Material> rusty = EmberdelveWeaponModels.RustyMaterials(weaponId);
             Renderer[] renderers = instance.GetComponentsInChildren<Renderer>(true);
-            Bounds bounds = renderers[0].bounds;
             for (int i = 0; i < renderers.Length; i++)
             {
-                bounds.Encapsulate(renderers[i].bounds);
-                Material[] materials = new Material[renderers[i].sharedMaterials.Length];
-                for (int m = 0; m < materials.Length; m++) materials[m] = material;
+                Material[] materials = renderers[i].sharedMaterials;
+                for (int m = 0; m < materials.Length; m++)
+                {
+                    Material replacement;
+                    if (materials[m] != null && rusty.TryGetValue(materials[m].name, out replacement)) materials[m] = replacement;
+                }
+
                 renderers[i].sharedMaterials = materials;
+                renderers[i].shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
             }
 
             Collider[] colliders = wrapper.GetComponentsInChildren<Collider>(true);
             for (int i = 0; i < colliders.Length; i++) Object.DestroyImmediate(colliders[i]);
 
-            // KayKit axes: blade / axe length along +Y (grip at the origin), the shield's face along +Z.
-            float extent = shield ? Mathf.Max(bounds.size.x, bounds.size.y) : bounds.size.y;
-            float scale = longest / Mathf.Max(0.01f, extent);
-            Vector3 size = shield ? new Vector3(scale, scale, scale * 0.8f) : new Vector3(scale * lateralScale, scale, scale * lateralScale);
-            wrapper.transform.localScale = size;
+            wrapper.transform.localScale = Vector3.one * (longest / Mathf.Max(0.01f, spec.Length));
             return wrapper;
         }
 
         /// <summary>A temporary copy of the model, posed by a humanoid clip, to read where the hand is in the pose the weapon is meant for.</summary>
         private static GameObject PosedCopy(GameObject fbx, Mesh mesh, Material material, Avatar avatar, float scale, string clipName)
         {
-            GameObject copy = CreateModel(fbx, null, mesh, material, avatar, null);
+            GameObject copy = CreateModel(fbx, null, mesh, material, avatar, null, 0f);
             copy.transform.localScale = Vector3.one * scale;
             AnimationClip clip = FindClip(clipName);
-            if (clip != null) clip.SampleAnimation(copy, Mathf.Min(0.2f, clip.length * 0.5f));
+            // The live frame: the pose the runtime Animator shows (faces +Z), see EmberdelveFirstPersonArms.Evaluate.
+            if (clip != null) EmberdelveFirstPersonArms.Evaluate(copy.GetComponent<Animator>(), clip, Mathf.Min(0.2f, clip.length * 0.5f));
             return copy;
         }
 
-        private static void AttachMainHand(Variant variant, GameObject fbx, Mesh mesh, Material material, Avatar avatar, Animator animator, Material rust)
+        private static void AttachMainHand(Variant variant, GameObject fbx, Mesh mesh, Material material, Avatar avatar, Animator animator)
         {
-            GameObject weapon = CreateAccessory(variant.MainHand, variant.MainHandSource, rust, variant.MainHandLength, 0.62f, false);
+            GameObject weapon = CreateAccessory(variant.MainHand, variant.MainHandSource, variant.MainHandLength);
             if (weapon == null) return;
 
             float scale = animator.transform.localScale.x;
@@ -358,9 +366,9 @@ namespace Emberdelve.EditorTools
             }
         }
 
-        private static void AttachOffHand(Variant variant, GameObject fbx, Mesh mesh, Material material, Avatar avatar, Animator animator, Material rust)
+        private static void AttachOffHand(Variant variant, GameObject fbx, Mesh mesh, Material material, Avatar avatar, Animator animator)
         {
-            GameObject shield = CreateAccessory(variant.OffHand, variant.OffHandSource, rust, variant.OffHandSize, 1f, true);
+            GameObject shield = CreateAccessory(variant.OffHand, variant.OffHandSource, variant.OffHandSize);
             if (shield == null) return;
 
             float scale = animator.transform.localScale.x;
