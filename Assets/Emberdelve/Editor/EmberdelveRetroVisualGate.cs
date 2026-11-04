@@ -64,6 +64,7 @@ namespace Emberdelve.EditorTools
             CheckVendorFiles();
             CheckImportSettings();
             CheckPolyHaven();
+            CheckQuaternius();
 
             EmberdelveAssetLibrary.BuildAll();
             EmberdelveEnemyVisualFactory.EnsureAll(true);
@@ -221,6 +222,29 @@ namespace Emberdelve.EditorTools
             Check(badHash == 0, "every Poly Haven manifest sha256 / size matches the file in the project (" + badHash + " bad)");
             Check(notImported == 0, "every Poly Haven model is imported without rig / animation (" + notImported + " bad)");
             Check(badMaterial == 0, "every Poly Haven renderer uses a project URP/Lit material of its own model (" + badMaterial + " bad slots)");
+        }
+
+        // ---------------------------------------------------------------- Quaternius (V3b)
+
+        private static void CheckQuaternius()
+        {
+            EmberdelveQuaterniusImport.Manifest manifest = EmberdelveQuaterniusImport.ReadManifest();
+            Check(manifest != null && manifest.files != null && manifest.files.Count == EmberdelveQuaterniusImport.Files.Length && manifest.license == "CC0-1.0",
+                "Quaternius/manifest.json parses, CC0-1.0, lists every file");
+            Check(File.Exists(EmberdelveQuaterniusImport.Absolute(EmberdelveQuaterniusImport.LicensePath)), "Quaternius/LICENSE_CC0.txt exists");
+
+            int bad = 0;
+            for (int i = 0; i < EmberdelveQuaterniusImport.Files.Length; i++)
+            {
+                string[] file = EmberdelveQuaterniusImport.Files[i];
+                string absolute = EmberdelveQuaterniusImport.Absolute(file[0]);
+                ModelImporter importer = AssetImporter.GetAtPath(file[0]) as ModelImporter;
+                bool ok = File.Exists(absolute) && EmberdelveQuaterniusImport.Sha256(absolute) == file[2];
+                ok &= importer != null && importer.animationType == ModelImporterAnimationType.Human && importer.importAnimation == (file[3] == "1");
+                if (!ok) { bad++; Debug.LogError(Tag + " Quaternius file / hash / Humanoid import: " + file[0]); }
+            }
+
+            Check(bad == 0, "every Quaternius file matches its sha256 and is imported Humanoid (" + bad + " bad)");
         }
 
         // ---------------------------------------------------------------- textures
@@ -416,6 +440,7 @@ namespace Emberdelve.EditorTools
                 bool visualOk = visual != null && driver != null && animator != null && animator.runtimeAnimatorController != null && !animator.applyRootMotion;
                 visualOk &= visual != null && visual.GetComponentsInChildren<Collider>(true).Length == 0 && visual.GetComponentsInChildren<HitVolume>(true).Length == 0;
                 visualOk &= visual != null && visual.GetComponentsInChildren<SkinnedMeshRenderer>(true).Length > 0;
+                visualOk &= animator != null && animator.avatar != null && animator.avatar.isHuman; // V3b: Quaternius Humanoid mannequin
 
                 // the cubes are hidden but still there with their materials (the runtime smoke test reads the Body renderer)
                 Renderer bodyRenderer = body != null ? body.GetComponent<Renderer>() : null;
@@ -452,6 +477,11 @@ namespace Emberdelve.EditorTools
                     }
 
                     variants.Add(expectedVariant);
+
+                    // glowing eyes on the head bone exist exactly where the variant asks for them (the Mage)
+                    Transform headBone = animator != null ? animator.GetBoneTransform(HumanBodyBones.Head) : null;
+                    bool hasEyes = headBone != null && headBone.Find(EmberdelveEnemyVisualFactory.EyeNameLeft) != null && headBone.Find(EmberdelveEnemyVisualFactory.EyeNameRight) != null;
+                    visualOk &= headBone != null && hasEyes == (variant != null && variant.GlowingEyes);
                     float expectedScale = data != null && data.isElite ? EmberdelveEnemyVisualFactory.EliteScale : 1f;
                     visualOk &= Mathf.Abs(visual.localScale.x - expectedScale) < 1e-4f;
                     Bounds bounds = BoundsOf(visual);
@@ -463,7 +493,7 @@ namespace Emberdelve.EditorTools
             }
 
             Check(bad == 0, "every enemy: unchanged gameplay colliders + a Visual with driver, animator and controller (" + bad + " bad of " + agents.Length + ")");
-            Check(variants.Count >= 2, "at least two skeleton variants are in use (" + string.Join(", ", variants) + ")");
+            Check(variants.Count >= 2, "at least two undead variants are in use (" + string.Join(", ", variants) + ")");
         }
 
         private static bool ColliderMatches(Transform enemy, string childName, Vector3 localCentre, Vector3 worldSize, int layer)

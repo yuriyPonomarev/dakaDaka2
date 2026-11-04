@@ -1,0 +1,7 @@
+Quaternius - Universal Animation Library (Standard) 1 and 2, mannequin models and animations.
+Author: Quaternius (https://quaternius.com)
+Sources: https://opengameart.org/node/174563 and https://opengameart.org/content/universal-animation-library-2
+
+License: CC0 1.0 Universal (public domain dedication), https://creativecommons.org/publicdomain/zero/1.0/
+The work may be copied, modified, distributed and used, even commercially, without asking permission. Credit is appreciated, not required.
+The original License.txt files of the packs sit next to the FBX files (UAL1/, UAL2/).
