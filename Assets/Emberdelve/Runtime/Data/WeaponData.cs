@@ -8,6 +8,9 @@ namespace Emberdelve.Data
 {
     public enum WeaponKind { Melee, Ranged }
 
+    /// <summary>U5A: which hands a held item needs. Derived from the weapon data (never a per-instance claim): a shield is off-hand only, a two-handed weapon takes the main hand and blocks the off hand, everything else is one main-hand weapon.</summary>
+    public enum HandUse { OneHanded, TwoHanded, OffHandOnly }
+
     /// <summary>
     /// One step of a weapon's combo chain (D1b). The chain is DATA on the weapon: step k swings
     /// <see cref="WeaponData.swingPatterns"/>[patternIndex] with this step's damage multiplier and optional timing
@@ -129,6 +132,9 @@ namespace Emberdelve.Data
         [Header("Hands")]
         [Tooltip("A two-handed weapon occupies both hands, so an off-hand shield cannot contribute its block while it is held.")]
         public bool twoHanded = false;
+
+        [Tooltip("U5A: the bare-fist weapon used while the main hand is empty. It is never an item: it cannot be dropped, equipped or traded, and it never blocks or parries.")]
+        public bool isUnarmed = false;
 
         [Header("Ranged")]
         [Tooltip("Name used by the HUD ammo readout, e.g. Arrows or Bolts.")]
@@ -345,6 +351,9 @@ namespace Emberdelve.Data
         }
 
         public bool IsShield => defenseRole == DefenseRole.Shield;
+
+        /// <summary>U5A: the hand rule for this weapon, derived from its data (shield role, two-handed flag).</summary>
+        public HandUse Hands => IsShield ? HandUse.OffHandOnly : (twoHanded ? HandUse.TwoHanded : HandUse.OneHanded);
 
         /// <summary>Capabilities this item actually has, with the shield rule already applied.</summary>
         public DefenseCapability EffectiveCapabilities => DefenseProfile.Sanitize(capabilities, IsShield);

@@ -319,6 +319,18 @@ namespace Emberdelve.Items
             GameEvents.RaiseInventoryChanged(OwnerId);
         }
 
+        /// <summary>U5A: mints one Common instance of a catalog gear entry through this bag's issuer (the class kit's starting hand items). The instance is NOT added to the bag.</summary>
+        public bool TryMintKitInstance(ItemData definition, out ItemInstance instance, out string reason)
+        {
+            instance = null;
+            if (_catalog == null)
+            {
+                reason = "this bag has no item catalog (Inventory.SetCatalog), so it cannot mint gear identities";
+                return false;
+            }
+            return TryMintCommonInstance(definition, out instance, out reason);
+        }
+
         public void GiveStartingItems(ItemData[] items)
         {
             if (items == null) return;

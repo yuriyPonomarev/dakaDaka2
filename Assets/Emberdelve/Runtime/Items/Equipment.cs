@@ -359,6 +359,8 @@ namespace Emberdelve.Items
                 return false;
             }
 
+            if (!TryCheckHandRules(item, targetSlot, out int displaceOffIndex, out reason)) return false;
+
             // One identity, one place: the same item cannot be worn in another slot while it is also being
             // picked up out of the bag.
             if (HoldsUid(incoming.Uid))
@@ -375,7 +377,30 @@ namespace Emberdelve.Items
             // The bag half first. Inventory plans the hole for the outgoing item using the space the incoming
             // unit is about to vacate, and commits both moves together. A refusal here has changed nothing, and
             // a success has told nobody yet: the transfer is silent so this component can finish its own half.
-            if (!_inventory.TryEquipTransfer(bagIndex, incoming, previous, out reason)) return false;
+            // U5A: a two-handed weapon needs the off hand of its set free: the worn off-hand item goes to the bag first (the same unequip
+            // every off-hand takes off uses). When the equip itself then fails the off-hand item is put back, so a refusal changes nothing.
+            ItemInstance displacedOff = null;
+            EquipmentSlot displacedSlot = EquipmentSlot.None;
+            if (displaceOffIndex >= 0)
+            {
+                displacedOff = _gear[displaceOffIndex];
+                displacedSlot = (EquipmentSlot)displaceOffIndex;
+                if (!TryUnequipSlotState(displaceOffIndex, out string stowReason))
+                {
+                    reason = $"the off hand cannot be freed for {item.displayName}: {stowReason}";
+                    return false;
+                }
+            }
+
+            if (!_inventory.TryEquipTransfer(bagIndex, incoming, previous, out reason))
+            {
+                if (displacedOff != null)
+                {
+                    int back = _inventory.IndexOfInstance(displacedOff.Uid);
+                    if (back >= 0) TryEquipSelectedState(back, displacedOff, displacedSlot, out _);
+                }
+                return false;
+            }
 
             ApplyToSlot(index, incoming);
             RefreshStats();
@@ -540,6 +565,99 @@ namespace Emberdelve.Items
             return set < 0 || set == _activeSet;
         }
 
+        // ------------------------------------------------------------ U5A: hands as items
+
+        private bool _kitIsItems;
+
+        /// <summary>
+        /// U5A: true once the class kit has been minted into the hand slots as real items (a rig with a class, a catalog and a configured
+        /// bare-fist weapon). From then on an empty hand is empty: no class weapon or shield is quietly put back, the main hand falls back to
+        /// the unarmed fists and the off hand to nothing. A bare bag/equipment pair (a fixture without that wiring) keeps the class fallback.
+        /// </summary>
+        public bool KitIsItems => _kitIsItems;
+
+        private WeaponData Fists => _rig != null && _rig.Loadout != null ? _rig.Loadout.Unarmed : null;
+
+        /// <summary>U5A: starts seeding the class kit: clears the four hand slots (no bag, no revision: a class apply is a run start).</summary>
+        internal void BeginKit()
+        {
+            for (int i = 1; i < SlotCount; i++)
+            {
+                if (EquipmentSlots.SetOf((EquipmentSlot)i) >= 0) _gear[i] = null;
+            }
+            _kitIsItems = true;
+        }
+
+        /// <summary>U5A: puts one minted kit item straight into a hand slot (the loadout already holds the matching weapon).</summary>
+        internal void SeedKitHand(EquipmentSlot slot, ItemInstance instance)
+        {
+            int index = SlotIndex(slot);
+            if (index >= 0 && instance != null && EquipmentSlots.SetOf(slot) >= 0) _gear[index] = instance;
+        }
+
+        /// <summary>U5A: finishes the kit seed: slot views, stats, and the rig's off hand for the live set.</summary>
+        internal void EndKit()
+        {
+            RecomputeSlots();
+            RefreshStats();
+            if (_rig != null) _rig.SetOffhandWeapon(WornOffhandOfSet(_activeSet));
+        }
+
+        /// <summary>
+        /// U5A: the hand rules, derived from the weapon DATA (<see cref="WeaponData.Hands"/>), checked on the server before anything moves.
+        /// A shield goes to an off-hand slot only; a one-handed weapon goes to a main-hand slot only (no dual wielding); a two-handed weapon
+        /// goes to a main hand and needs the off hand of its set empty (a worn off-hand item is moved to the bag by the equip); nothing goes
+        /// to the off hand while the main hand of its set holds a two-handed weapon. The bare fists are never an item.
+        /// </summary>
+        public bool TryCheckHandRules(ItemData item, EquipmentSlot target, out int displaceOffIndex, out string reason)
+        {
+            displaceOffIndex = -1;
+            reason = null;
+
+            WeaponData held = item != null ? item.grantedWeapon : null;
+            int set = EquipmentSlots.SetOf(target);
+            if (held == null || set < 0) return true;
+
+            if (held.isUnarmed)
+            {
+                reason = "bare fists are not an item";
+                return false;
+            }
+
+            bool offSlot = EquipmentSlots.IsOffHand(target);
+            HandUse use = held.Hands;
+            if (use == HandUse.OffHandOnly && !offSlot)
+            {
+                reason = $"{item.displayName} is a shield: it only goes in an off hand";
+                return false;
+            }
+
+            if (use != HandUse.OffHandOnly && offSlot)
+            {
+                reason = $"{item.displayName} is a weapon: it only goes in a main hand (no dual wielding)";
+                return false;
+            }
+
+            int mainIndex = SlotIndex(EquipmentSlots.MainHandOf(set));
+            int offIndex = SlotIndex(EquipmentSlots.OffHandOf(set));
+            if (offSlot)
+            {
+                ItemInstance main = mainIndex >= 0 ? _gear[mainIndex] : null;
+                WeaponData mainWeapon = main != null && main.Definition != null ? main.Definition.grantedWeapon : null;
+                if (mainWeapon != null && mainWeapon.Hands == HandUse.TwoHanded)
+                {
+                    reason = $"{item.displayName} cannot be used: the two-handed {mainWeapon.displayName} fills both hands";
+                    return false;
+                }
+            }
+            else if (use == HandUse.TwoHanded && offIndex >= 0 && _gear[offIndex] != null)
+            {
+                displaceOffIndex = offIndex;
+            }
+
+            return true;
+        }
+
         /// <summary>D3c: the instance worn in a weapon set's main hand slot (null = the class default weapon is in that hand).</summary>
         public ItemInstance MainHandInstance(int set)
         {
@@ -561,6 +679,8 @@ namespace Emberdelve.Items
             if (set < 0 || set >= EquipmentSlots.WeaponSetCount) return null;
             if (wornMainHand != null && wornMainHand.Definition != null && wornMainHand.Definition.grantedWeapon != null)
                 return wornMainHand.Definition.grantedWeapon;
+
+            if (_kitIsItems) return set == 0 ? Fists : null; // U5A: an empty main hand is the bare fists (set 1) or nothing (set 2), never the class weapon
 
             CharacterClassData data = _rig != null ? _rig.Class : null;
             if (data == null) return null;
@@ -592,7 +712,7 @@ namespace Emberdelve.Items
             {
                 WeaponData worn = WornOffhandOfSet(set);
                 CharacterClassData data = _rig.Class;
-                WeaponData effective = worn != null ? worn : (data != null ? data.offhandShield : null);
+                WeaponData effective = worn != null ? worn : (data != null && !_kitIsItems ? data.offhandShield : null);
                 if (!ReferenceEquals(_rig.OffhandWeapon, effective)) _rig.SetOffhandWeapon(worn);
             }
 
@@ -762,12 +882,19 @@ namespace Emberdelve.Items
             return TryUnequipSlot(index, out reason);
         }
 
+        /// <summary>Takes every worn item off the player. In item mode (U5A) a clear is a reset to the starting kit: the class weapons and shield are minted again. <see cref="ClearToBare"/> empties the hands too.</summary>
         public void Clear()
         {
-            using (GameEventTransaction.Defer()) ClearState();
+            using (GameEventTransaction.Defer()) ClearState(true);
         }
 
-        private void ClearState()
+        /// <summary>U5A: removes everything worn, the hand items included: the main hand is the bare fists, the off hand and the second set are empty. Nothing is returned to the bag (this is a reset, not an unequip).</summary>
+        public void ClearToBare()
+        {
+            using (GameEventTransaction.Defer()) ClearState(false);
+        }
+
+        private void ClearState(bool reseedKit)
         {
             bool changed = false;
             for (int i = 0; i < SlotCount; i++) changed |= _gear[i] != null;
@@ -792,6 +919,7 @@ namespace Emberdelve.Items
             RecomputeSlots();
             RefreshStats();
             if (changed) revisionOwner.CommitRevision();
+            if (reseedKit && _kitIsItems && _rig != null && _rig.Loadout != null) _rig.Loadout.ReseedKit(); // U5A: a clear is a reset to the starting kit
         }
 
         /// <summary>
@@ -982,6 +1110,12 @@ namespace Emberdelve.Items
                     validated = null;
                     return false;
                 }
+            }
+
+            if (!TryValidateHandRules(validated, out reason))
+            {
+                validated = null;
+                return false;
             }
 
             if (checkPartner && bag != null)
@@ -1177,6 +1311,12 @@ namespace Emberdelve.Items
 
         private void RestoreClassHand(EquipmentSlot slot)
         {
+            if (_kitIsItems)
+            {
+                RestoreEmptyHand(slot);
+                return;
+            }
+
             CharacterClassData data = _rig != null ? _rig.Class : null;
             if (data == null) return;
 
@@ -1203,6 +1343,178 @@ namespace Emberdelve.Items
                 _quietSetChange++;
                 try { loadout.ClearSecondaryWeapon(); }
                 finally { _quietSetChange--; }
+            }
+        }
+
+        /// <summary>
+        /// U5A: after a weapon or shield has been picked up into the bag, seats it in the matching EMPTY hand of the live weapon set (a shield in the
+        /// off hand, a one-handed or two-handed weapon in the main hand). Never displaces anything: an occupied hand, a refused hand rule or an
+        /// attack in progress leaves the item in the bag. Returns whether the item was seated.
+        /// </summary>
+        public bool TryAutoSeatHand(ItemInstance instance)
+        {
+            if (!_kitIsItems || instance == null || instance.Definition == null || _inventory == null) return false;
+            WeaponData weapon = instance.Definition.grantedWeapon;
+            if (weapon == null) return false;
+
+            EquipmentSlot target = weapon.Hands == HandUse.OffHandOnly
+                ? EquipmentSlots.OffHandOf(_activeSet)
+                : EquipmentSlots.MainHandOf(_activeSet);
+            int index = SlotIndex(target);
+            if (index < 1 || _gear[index] != null) return false;
+            if (!TryCheckHandRules(instance.Definition, target, out int displace, out _) || displace >= 0) return false;
+
+            int bagIndex = _inventory.IndexOfInstance(instance.Uid);
+            return bagIndex >= 0 && TryEquipFromInventory(bagIndex, target, out _);
+        }
+
+        /// <summary>U5A: an emptied hand in item mode: the main hand becomes the bare fists (set 1) or nothing (set 2), the off hand nothing.</summary>
+        private void RestoreEmptyHand(EquipmentSlot slot)
+        {
+            int set = EquipmentSlots.SetOf(slot);
+            if (set < 0 || _rig == null) return;
+
+            if (EquipmentSlots.IsOffHand(slot))
+            {
+                if (set == _activeSet) _rig.SetOffhandWeapon(null);
+                return;
+            }
+
+            ClassLoadout loadout = _rig.Loadout;
+            if (loadout == null) return;
+
+            if (set == 0)
+            {
+                WeaponData fists = Fists;
+                if (fists != null) loadout.TryReplaceWeaponSlot(0, fists);
+            }
+            else
+            {
+                _quietSetChange++;
+                try { loadout.ClearSecondaryWeapon(); }
+                finally { _quietSetChange--; }
+            }
+        }
+
+        /// <summary>U5A: the hand rules applied to a whole saved container (a forged snapshot cannot seat a shield in a main hand, a weapon in an off hand, or a shield next to a two-handed weapon).</summary>
+        private bool TryValidateHandRules(ValidatedContainer validated, out string reason)
+        {
+            reason = null;
+            for (int set = 0; set < EquipmentSlots.WeaponSetCount; set++)
+            {
+                WeaponData main = null;
+                WeaponData off = null;
+                for (int i = 0; i < validated.Entries.Count; i++)
+                {
+                    ValidatedEntry entry = validated.Entries[i];
+                    if (entry.Slot == EquipmentSlots.MainHandOf(set)) main = entry.Definition.grantedWeapon;
+                    else if (entry.Slot == EquipmentSlots.OffHandOf(set)) off = entry.Definition.grantedWeapon;
+                }
+
+                if (main != null && (main.isUnarmed || main.Hands == HandUse.OffHandOnly))
+                {
+                    reason = $"{main.displayName} cannot be held in a main hand";
+                    return false;
+                }
+
+                if (off != null && off.Hands != HandUse.OffHandOnly)
+                {
+                    reason = $"{off.displayName} cannot be held in an off hand";
+                    return false;
+                }
+
+                if (main != null && off != null && main.Hands == HandUse.TwoHanded)
+                {
+                    reason = $"the two-handed {main.displayName} leaves no hand for {off.displayName}";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// U5A: takes a worn item out of its slot and out of the player's model entirely (to be laid on the ground by the authority). The slot
+        /// releases the identity in the same commit the revision moves, the hand falls back to the fists / nothing, the stats are rebuilt.
+        /// The expected uid must be what is worn there. A refusal changes nothing. <see cref="ReattachSlot"/> undoes it when the ground refuses.
+        /// </summary>
+        internal bool TryDetachSlot(EquipmentSlot slot, Guid expectedUid, out ItemInstance detached, out string reason)
+        {
+            using (GameEventTransaction.Defer()) return TryDetachSlotState(slot, expectedUid, out detached, out reason);
+        }
+
+        private bool TryDetachSlotState(EquipmentSlot slot, Guid expectedUid, out ItemInstance detached, out string reason)
+        {
+            detached = null;
+            int index = SlotIndex(slot);
+            if (index < 1)
+            {
+                reason = "no such equipment slot";
+                return false;
+            }
+
+            ItemInstance worn = _gear[index];
+            if (worn == null || worn.Definition == null)
+            {
+                reason = "nothing equipped there";
+                return false;
+            }
+
+            if (worn.Uid != expectedUid)
+            {
+                reason = "the requested gear identity is no longer worn in that slot";
+                return false;
+            }
+
+            if (_rig == null || _rig.IsDead)
+            {
+                reason = "dead players cannot change gear";
+                return false;
+            }
+
+            ItemData item = worn.Definition;
+            if (item.GrantsWeapon && !EquipmentSlots.IsOffHand(slot) && _rig.Loadout != null && _rig.Loadout.IsActionLocked)
+            {
+                reason = "cannot change weapons during an attack";
+                GameEvents.RaiseToast(OwnerId, _rig.Loadout.ActionLockMessage);
+                return false;
+            }
+
+            Inventory revisionOwner = BagPartner();
+            if (revisionOwner == null)
+            {
+                reason = "equipment has no shared inventory revision owner";
+                return false;
+            }
+
+            if (!revisionOwner.CanCommitRevision(out reason)) return false;
+
+            _gear[index] = null;
+            RecomputeSlots();
+            if (item.GrantsWeapon) RestoreClassHand(slot);
+            RefreshStats();
+            revisionOwner.CommitRevision();
+
+            GameEvents.RaiseInventoryChanged(OwnerId);
+            GameEvents.RaiseEquipmentChanged(OwnerId, item, false);
+            detached = worn;
+            reason = null;
+            return true;
+        }
+
+        /// <summary>U5A: puts a detached item back in its slot (the ground could not take it). Same stats / hand / revision path as an equip.</summary>
+        internal void ReattachSlot(EquipmentSlot slot, ItemInstance instance)
+        {
+            using (GameEventTransaction.Defer())
+            {
+                int index = SlotIndex(slot);
+                if (index < 1 || instance == null || _gear[index] != null) return;
+                ApplyToSlot(index, instance);
+                RefreshStats();
+                Inventory revisionOwner = BagPartner();
+                if (revisionOwner != null && revisionOwner.CanCommitRevision(out _)) revisionOwner.CommitRevision();
+                GameEvents.RaiseInventoryChanged(OwnerId);
+                GameEvents.RaiseEquipmentChanged(OwnerId, instance.Definition, true);
             }
         }
 

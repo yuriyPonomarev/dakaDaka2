@@ -42,6 +42,7 @@ MonoBehaviour:
   riposteSwingPatterns: 
   riposteStrikeGap: 0.1
   twoHanded: 1
+  isUnarmed: 0
   ammoDisplayName: Bolts
   rangedRange: 34
   projectileSpeed: 54

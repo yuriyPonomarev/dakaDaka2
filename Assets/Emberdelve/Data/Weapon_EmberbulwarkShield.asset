@@ -42,6 +42,7 @@ MonoBehaviour:
   riposteSwingPatterns: 
   riposteStrikeGap: 0.1
   twoHanded: 0
+  isUnarmed: 0
   ammoDisplayName: Ammo
   rangedRange: 42
   projectileSpeed: 36

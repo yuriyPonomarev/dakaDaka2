@@ -26,6 +26,11 @@ namespace Emberdelve.EditorTools
         public static WeaponData Shield;
         public static WeaponData Crossbow;
         public static WeaponData Rapier;
+        /// <summary>U5A: the bare fists, used while the main hand is empty. Never an item.</summary>
+        public static WeaponData Fists;
+        public static ItemData SwordItem;
+        public static ItemData BowItem;
+        public static ItemData CrossbowItem;
         public static ItemData Coin;
         public static ItemData Draught;
         public static ItemData SmolderingTonic;
@@ -281,6 +286,27 @@ namespace Emberdelve.EditorTools
                 w.edgeMaterial = EmberdelveMaterials.Blade;
                 w.gripMaterial = EmberdelveMaterials.Grip;
             });
+
+            // U5A: the bare fists. Not an item (no ItemData grants it, it is never dropped or equipped); the main hand falls back to it.
+            Fists = LoadOrCreate<WeaponData>(EmberdelvePaths.Data + "/Weapon_UnarmedFists.asset", w =>
+            {
+                w.weaponId = "unarmed_fists";
+                w.displayName = "Fists";
+                w.kind = WeaponKind.Melee;
+                w.baseDamage = 6f;
+                w.damageType = DamageType.Physical;
+                w.windupTime = 0.14f;
+                w.activeWindow = 0.10f;
+                w.recoveryTime = 0.20f;
+                w.cooldown = 0.45f;
+                w.reach = 1.4f;
+                w.arcAngle = 70f;
+                w.hitSphereRadius = 0.35f;
+                w.isUnarmed = true;
+                w.shaftMaterial = EmberdelveMaterials.Grip;
+                w.edgeMaterial = EmberdelveMaterials.Grip;
+                w.gripMaterial = EmberdelveMaterials.Grip;
+            });
         }
 
         /// <summary>
@@ -299,6 +325,7 @@ namespace Emberdelve.EditorTools
             SetDefense(Claw, DefenseRole.Weapon, DefenseCapability.None, -1f, -1f, false);
             SetDefense(ClawElite, DefenseRole.Weapon, DefenseCapability.None, -1f, -1f, false);
             SetDefense(Crossbow, DefenseRole.Weapon, DefenseCapability.None, -1f, -1f, true);
+            SetDefense(Fists, DefenseRole.Weapon, DefenseCapability.None, -1f, -1f, false); // U5A: fists never block or parry
 
             // The rapier is the first asset to actually claim Parry. It is still only a capability flag:
             // there is no parry timing window, animation or parry damage anywhere in the runtime yet.
@@ -852,6 +879,55 @@ namespace Emberdelve.EditorTools
                 i.gridFootprint = new Vector2Int(2, 2);
                 i.equipSlot = EquipmentSlot.OffHand;
                 i.grantedWeapon = Shield;
+            });
+
+            // U5A: the rest of the class kit as real items (hands are items like clothing): the ashen sword, the bow and the crossbow.
+            SwordItem = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_AshenShortSwordItem.asset", i =>
+            {
+                i.itemId = "ashen_short_sword";
+                i.displayName = "Ashen Short Sword";
+                i.description = "A plain one-handed sword with a blocking edge. Right click to hold it in the main hand.";
+                i.kind = ItemKind.Weapon;
+                i.value = 30;
+                i.maxStack = 1;
+                i.iconColor = new Color(0.62f, 0.64f, 0.68f);
+                i.worldMaterial = EmberdelveMaterials.Blade;
+                i.worldSize = new Vector3(0.24f, 0.9f, 0.24f);
+                i.gridFootprint = new Vector2Int(1, 3);
+                i.equipSlot = EquipmentSlot.Weapon;
+                i.grantedWeapon = Sword;
+            });
+
+            BowItem = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_HollowBowItem.asset", i =>
+            {
+                i.itemId = "hollow_bow";
+                i.displayName = "Hollow Bow";
+                i.description = "A two-handed bow. Right click to hold it; it fills both hands.";
+                i.kind = ItemKind.Weapon;
+                i.value = 40;
+                i.maxStack = 1;
+                i.iconColor = new Color(0.55f, 0.4f, 0.25f);
+                i.worldMaterial = EmberdelveMaterials.BowWood;
+                i.worldSize = new Vector3(0.2f, 0.9f, 0.2f);
+                i.gridFootprint = new Vector2Int(2, 3);
+                i.equipSlot = EquipmentSlot.Weapon;
+                i.grantedWeapon = Bow;
+            });
+
+            CrossbowItem = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_EmberCrossbowItem.asset", i =>
+            {
+                i.itemId = "ember_crossbow";
+                i.displayName = "Ember Crossbow";
+                i.description = "A two-handed crossbow. Right click to hold it; it fills both hands.";
+                i.kind = ItemKind.Weapon;
+                i.value = 45;
+                i.maxStack = 1;
+                i.iconColor = new Color(0.5f, 0.35f, 0.22f);
+                i.worldMaterial = EmberdelveMaterials.BowWood;
+                i.worldSize = new Vector3(0.3f, 0.5f, 0.2f);
+                i.gridFootprint = new Vector2Int(2, 2);
+                i.equipSlot = EquipmentSlot.Weapon;
+                i.grantedWeapon = Crossbow;
             });
 
             // D3b: minimal content so the new slots are testable. Gloves are armour (small fixed armour rating, Armor
@@ -1731,6 +1807,7 @@ namespace Emberdelve.EditorTools
         public static SwingPatternData SwordSlashRightToLeft;
         public static SwingPatternData SwordOverhead;
         public static SwingPatternData RapierThrust;
+        public static SwingPatternData FistPunch;
         public static HitLocationTable HitLocations;
 
         // ---------------------------------------------------------------- D1c4 enemy swing patterns
@@ -1787,6 +1864,18 @@ namespace Emberdelve.EditorTools
 
             AssignPatterns(Sword, SwordSlashLeftToRight, SwordSlashRightToLeft, SwordOverhead);
             AssignPatterns(Rapier, RapierThrust);
+
+            // U5A: the fist punch, a short straight thrust (our own tunables), and the hand rule of the ranged weapons: they fill both hands.
+            FistPunch = AuthorPattern("Pattern_FistPunch", "fist_punch", SwingKind.Thrust, Fists,
+                0.74f, 0.80f, 0.10f, 0.020f, 1, 1f,
+                new SwingKey(0f, new Vector3(0.20f, -0.22f, 0.25f), -6f, -5f),
+                new SwingKey(1f, new Vector3(0.20f, -0.22f, 0.80f), -6f, -5f));
+            AssignPatterns(Fists, FistPunch);
+            if (Fists != null && !Fists.isUnarmed) { Fists.isUnarmed = true; EditorUtility.SetDirty(Fists); }
+            foreach (WeaponData ranged in new[] { Bow, Crossbow })
+            {
+                if (ranged != null && !ranged.twoHanded) { ranged.twoHanded = true; EditorUtility.SetDirty(ranged); }
+            }
 
             HitLocations = LoadOrCreate<HitLocationTable>(EmberdelvePaths.Data + "/HitLocationTable.asset", t => { });
             if (HitLocations != null
@@ -2123,6 +2212,7 @@ namespace Emberdelve.EditorTools
             Config.mouseSensitivity = 1.2f;
             Config.fieldOfView = 68f;
             Config.itemCatalog = ItemCatalogAsset;
+            Config.unarmedWeapon = Fists;
             Config.hitLocations = HitLocations;
             // D1c2: an asset saved before the turn ceiling existed holds 0 there. Author the default once (0 means "unset");
             // a value the owner tuned (positive) or set to unlimited (negative) is left alone.

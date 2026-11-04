@@ -93,7 +93,7 @@ namespace Emberdelve.EditorTools
                 "bag uses the valid production catalog: " + catalogReason);
             if (catalog == null) return;
 
-            equipment.Clear();
+            equipment.ClearToBare();
             bag.Clear();
             bag.ConfigureGrid(10, 6);
             GameEvents.InventoryChanged += OnInventoryChanged;
@@ -102,7 +102,7 @@ namespace Emberdelve.EditorTools
             ulong emptyRevision = bag.Revision;
             ResetEvents();
             bag.Clear();
-            equipment.Clear();
+            equipment.ClearToBare();
             Check(bag.Revision == emptyRevision && inventoryEvents == 1 && equipmentEvents == 0,
                 "empty bag/equipment clears are revision no-ops while bag Clear retains its event contract");
 
@@ -139,7 +139,7 @@ namespace Emberdelve.EditorTools
             int oldWidth = bag.GridWidth;
             int oldHeight = bag.GridHeight;
             bag.ConfigureGrid(oldWidth, oldHeight);
-            equipment.Clear();
+            equipment.ClearToBare();
             Check(bag.Revision == before, "same-grid reseat and clearing empty equipment do not advance revision");
 
             ContainerSnapshot bagSnapshot = bag.ToContainerSnapshot();
@@ -185,7 +185,7 @@ namespace Emberdelve.EditorTools
             string gearJson = gearSnapshot.ToJson();
             before = bag.Revision;
             ResetEvents();
-            equipment.Clear();
+            equipment.ClearToBare();
             Check(bag.Revision == before + 1 && inventoryEvents == 0 && equipmentEvents == 0,
                 "nonempty equipment Clear commits once and retains its silent notification behavior");
             before = bag.Revision;

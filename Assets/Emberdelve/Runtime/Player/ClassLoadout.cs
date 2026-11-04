@@ -43,6 +43,18 @@ namespace Emberdelve.Player
         public Vector3 MuzzlePosition => _visual != null && _visual.Muzzle != null ? _visual.Muzzle.position : Vector3.zero;
         public CharacterClassData AppliedClass => _appliedClass;
 
+        private WeaponData _unarmed;
+
+        /// <summary>U5A: the bare-fist weapon the main hand falls back to (GameConfig.unarmedWeapon); null for a config that has none.</summary>
+        public WeaponData Unarmed => _unarmed;
+
+        /// <summary>U5A: the hands changed without the main hand changing (an off hand taken off or put on): dress the arms again from the settled state.</summary>
+        public void RefreshHands()
+        {
+            if (_rig == null || _activeSlot < 0) return;
+            SyncArms(ActiveWeapon);
+        }
+
         public WeaponData Primary => _slots[0];
         public WeaponData Secondary => _slots[1];
         /// <summary>Goes up on every Equip (every change of the weapon in hand, also one undone within the same frame).</summary>
@@ -106,6 +118,9 @@ namespace Emberdelve.Player
 
             _slots[0] = data.primaryWeapon;
             _slots[1] = data.secondaryWeapon;
+            _unarmed = config != null ? config.unarmedWeapon : null;
+            SeedKitItems(data, config, rig);
+            if (rig.Equipment != null && rig.Equipment.KitIsItems && _slots[0] == null) _slots[0] = _unarmed;
 
             _ammo.Clear();
             SeedAmmo(0, data.startingReserveAmmo, data.maxReserveAmmo);
@@ -115,6 +130,65 @@ namespace Emberdelve.Player
             Equip(0);
 
             if (targetCamera != null) targetCamera.fieldOfView = config.fieldOfView;
+        }
+
+        /// <summary>
+        /// U5A: the class kit becomes real items in the hand slots (the primary weapon in the main hand, the off-hand shield in the off hand
+        /// unless the primary is two-handed, the secondary weapon in the second set's main hand), minted through the bag's own issuer so each
+        /// has a uid like any other gear. Done only when every piece can be minted (a catalog entry exists for it) and the config names the bare
+        /// fists; otherwise the rig keeps the old class-fallback hands and says why.
+        /// </summary>
+        private void SeedKitItems(CharacterClassData data, GameConfig config, PlayerRig rig)
+        {
+            Equipment gear = rig.Equipment;
+            Inventory bag = rig.Inventory;
+            if (gear == null || bag == null || bag.Catalog == null || _unarmed == null) return;
+
+            bool offAllowed = data.primaryWeapon == null || data.primaryWeapon.Hands != HandUse.TwoHanded;
+            ItemInstance main = null, off = null, alt = null;
+            if (!MintKit(bag, data.primaryWeapon, out main)) return;
+            if (offAllowed && !MintKit(bag, data.offhandShield, out off)) return;
+            if (!MintKit(bag, data.secondaryWeapon, out alt)) return;
+
+            gear.BeginKit();
+            gear.SeedKitHand(EquipmentSlot.Weapon, main);
+            gear.SeedKitHand(EquipmentSlot.OffHand, off);
+            gear.SeedKitHand(EquipmentSlot.AltWeapon, alt);
+            gear.EndKit();
+        }
+
+        /// <summary>
+        /// U5A: a full clear of the worn gear puts the class kit back (fresh items, fresh uids): an Equipment.Clear is a reset to the starting
+        /// loadout, never to bare hands. Taking a hand item off, or dropping it, is what empties a hand.
+        /// </summary>
+        internal void ReseedKit()
+        {
+            if (_rig == null || _appliedClass == null || _rig.Equipment == null || !_rig.Equipment.KitIsItems) return;
+            _slots[0] = _appliedClass.primaryWeapon;
+            _slots[1] = _appliedClass.secondaryWeapon;
+            SeedKitItems(_appliedClass, null, _rig);
+            if (_slots[0] == null) _slots[0] = _unarmed;
+            int active = _activeSlot >= 0 && _slots[_activeSlot] != null ? _activeSlot : 0;
+            Equip(active);
+        }
+
+        private static bool MintKit(Inventory bag, WeaponData weapon, out ItemInstance instance)
+        {
+            instance = null;
+            if (weapon == null) return true;
+
+            IReadOnlyList<ItemData> items = bag.Catalog.Items;
+            for (int i = 0; i < items.Count; i++)
+            {
+                ItemData candidate = items[i];
+                if (candidate == null || candidate.grantedWeapon != weapon || !candidate.IsEquippable) continue;
+                if (bag.TryMintKitInstance(candidate, out instance, out string reason)) return true;
+                Debug.LogWarning($"[Emberdelve][ClassLoadout] kit item for {weapon.weaponId} could not be minted: {reason}");
+                return false;
+            }
+
+            Debug.LogWarning($"[Emberdelve][ClassLoadout] no catalog item grants {weapon.weaponId}: the kit stays on the class fallback hands.");
+            return false;
         }
 
         private void Update()
@@ -480,6 +554,7 @@ namespace Emberdelve.Player
             if (weapon == null) { SyncArms(null); return; }
             Transform aimFrame = _rig != null && _rig.Look != null ? _rig.Look.AimTransform : weaponAnchor;
             _visual = WeaponVisualBuilder.Build(weapon, weaponAnchor, aimFrame);
+            if (_visual != null && weapon.isUnarmed) _visual.HideBlockoutRenderers(); // U5A: the bare fists have no blockout model, only the swing
             SyncArms(weapon);
         }
 
@@ -502,7 +577,7 @@ namespace Emberdelve.Player
 
             if (_arms == null) return;
             _armsPending = false;
-            bool dressed = weapon != null && _arms.SetWeapons(weapon, _rig != null ? _rig.OffhandWeapon : null);
+            bool dressed = weapon != null && (_arms.SetWeapons(weapon, _rig != null ? _rig.OffhandWeapon : null) || weapon.isUnarmed);
             _arms.SetVisual(_visual);
             _arms.gameObject.SetActive(dressed);
             if (dressed)

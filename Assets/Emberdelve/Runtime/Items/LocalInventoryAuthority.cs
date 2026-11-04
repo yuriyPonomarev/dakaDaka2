@@ -213,10 +213,65 @@ namespace Emberdelve.Items
                     return _equipment.TrySwapWeaponSet(out reason);
                 }
 
+                case InventoryCommandKind.Drop:
+                    return ExecuteDrop(command, out reason);
+
                 default:
                     reason = "unknown inventory command";
                     return false;
             }
+        }
+
+        /// <summary>U5A test seam: the ground that receives dropped items when no RunDirector is in the scene.</summary>
+        internal static IGroundItemSink GroundSinkOverride;
+
+        private bool ExecuteDrop(InventoryCommand command, out string reason)
+        {
+            IGroundItemSink sink = GroundSinkOverride;
+            if (sink == null && GameServices.TryGet<RunDirector>(out RunDirector director)) sink = director;
+            if (sink == null)
+            {
+                reason = "there is no ground to drop onto";
+                return false;
+            }
+
+            ItemInstance instance;
+            EquipmentSlot fromSlot = EquipmentSlot.None;
+            if (command.SourceStackId != 0)
+            {
+                if (!ResolveBagStack(command.SourceStackId, command.ExpectedSourceGearUid, out InventorySlot stack, out int index, out reason)) return false;
+                instance = stack.Instance;
+                if (instance == null)
+                {
+                    reason = "only gear can be dropped";
+                    return false;
+                }
+
+                if (!_inventory.CanCommitRevision(out reason)) return false;
+                if (_inventory.TryRemoveAt(index, 1) != 1)
+                {
+                    reason = "the item could not leave the bag";
+                    return false;
+                }
+            }
+            else
+            {
+                fromSlot = command.DestinationSlot;
+                if (!_equipment.TryDetachSlot(fromSlot, command.ExpectedSourceGearUid, out instance, out reason)) return false;
+            }
+
+            Vector3 at = _rig.transform.position + _rig.transform.forward * 1.1f + Vector3.up * 0.5f;
+            if (!sink.TrySpawnDropped(instance, at, out reason))
+            {
+                // The ground refused: the item goes back exactly where it came from, so the uid is never in zero places.
+                if (fromSlot == EquipmentSlot.None) _inventory.TryAddInstance(instance, out _);
+                else _equipment.ReattachSlot(fromSlot, instance);
+                return false;
+            }
+
+            AttemptNotification(() => GameEvents.RaiseToast(_rig.PlayerId, $"Dropped {instance.Definition.displayName}"));
+            reason = null;
+            return true;
         }
 
         private bool ResolveBagStack(ulong stackId, Guid expectedUid, out InventorySlot slot,

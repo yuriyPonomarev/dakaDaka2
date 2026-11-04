@@ -1557,7 +1557,7 @@ namespace Emberdelve.EditorTools
             Check(heavyVsBuckler.HasValue && heavyVsBuckler.Value.GuardBroken, "heavy (30) vs buckler: broken");
             Cooldown(3f);
             _clock += 2f;
-            _rig.SetOffhandWeapon(null);
+            _rig.SetOffhandWeapon(_rig.Class.offhandShield); // U5A: an empty off hand stays empty, so the class shield is put back explicitly
             Near(20f, _rig.Defense.ImpactResist, 1e-4f, "the heater shield is back in hand");
 
             // 6. a hit from behind is never blocked, whatever its impact power, and breaks nothing
@@ -1584,7 +1584,7 @@ namespace Emberdelve.EditorTools
             Check(!parryShield.CanParry && (parryShield.EffectiveCapabilities & DefenseCapability.Parry) == 0, "a shield ticked with Parry still cannot parry (sanitised)");
             _rig.SetOffhandWeapon(parryShield);
             Check(!_rig.CanParry && !_rig.Defense.CanParry, "a rig carrying that shield cannot parry");
-            _rig.SetOffhandWeapon(null);
+            _rig.SetOffhandWeapon(_rig.Class.offhandShield); // U5A: the off hand stays empty on null, so the class shield is put back explicitly
             Check(!_rig.CanParry, "the default kit cannot parry");
             string[] damageFields = Array.ConvertAll(typeof(DamageInfo).GetFields(BindingFlags.Instance | BindingFlags.Public), x => x.Name.ToLowerInvariant());
             Check(Array.TrueForAll(damageFields, x => !x.Contains("parry")), "DamageInfo has no parry state: guard break did not introduce one");
@@ -2170,6 +2170,7 @@ namespace Emberdelve.EditorTools
             Check(_rig.Inventory.TryAdd(blade, 1), "follow-ups: the blade is in the bag");
             WeaponData other = UnityEngine.Object.Instantiate(_sword);
             _cleanup.Add(other);
+            int filledBefore = _rig.Equipment.FilledCount; // U5A: the kit items are worn already
 
             _rig.TryGetAimPose(out _, out float yaw, out float pitch);
             float t0 = _clock;
@@ -2180,7 +2181,7 @@ namespace Emberdelve.EditorTools
                 _clock = t0 + at;
                 Check(loadout.TryReplaceWeaponSlot(0, other) == null && _rig.ActiveWeapon == _sword, $"follow-ups ({at:F1} s into the swing): replacing the weapon in hand is refused, the sword stays");
                 bool equipped = _rig.Equipment.TryEquipItem(blade, out string equipWhy);
-                Check(!equipped && equipWhy.Contains("during an attack") && _rig.Equipment.FilledCount == 0 && _rig.ActiveWeapon == _sword,
+                Check(!equipped && equipWhy.Contains("during an attack") && _rig.Equipment.FilledCount == filledBefore && _rig.ActiveWeapon == _sword,
                     $"follow-ups ({at:F1} s): equipping a weapon item is refused with nothing changed ({equipWhy})");
             }
             Check(_rig.Inventory.TotalUnits >= 1, "follow-ups: the blade is still in the bag");
@@ -2189,7 +2190,9 @@ namespace Emberdelve.EditorTools
             _authority.StepSwings();
             bool equippedAfter = _rig.Equipment.TryEquipItem(blade, out string afterWhy);
             Check(equippedAfter && _rig.ActiveWeapon == blade.grantedWeapon, $"follow-ups: after the swing the weapon item equips ({afterWhy})");
-            Check(_rig.Equipment.TryUnequip(blade.equipSlot, out string unWhy) && _rig.ActiveWeapon == _sword, $"follow-ups: and comes off again, the class sword returns ({unWhy})");
+            Check(_rig.Equipment.TryUnequip(blade.equipSlot, out string unWhy) && _rig.ActiveWeapon == _rig.Loadout.Unarmed, $"follow-ups: and comes off again, the hand is empty: the bare fists (U5A) ({unWhy})");
+            _rig.Equipment.Clear(); // a clear puts the starting kit back
+            Check(_rig.ActiveWeapon == _sword, "follow-ups: a clear puts the starting kit back, the class sword in hand");
             _rig.Inventory.Clear();
             _clock += 3f;
             _authority.StepSwings();

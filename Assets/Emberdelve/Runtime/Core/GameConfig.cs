@@ -46,6 +46,9 @@ namespace Emberdelve.Core
         [Tooltip("The one runtime item catalog (R3): every ItemData and the affix catalog. Built by the asset library.")]
         public ItemCatalog itemCatalog;
 
+        [Tooltip("U5A: the bare-fist weapon the main hand falls back to when nothing is held. Not an item.")]
+        public Emberdelve.Data.WeaponData unarmedWeapon;
+
         [Header("Look")]
         [Range(0.1f, 10f)] public float mouseSensitivity = 1.2f;
         [Range(20f, 120f)] public float fieldOfView = 68f;

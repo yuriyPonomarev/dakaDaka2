@@ -360,6 +360,51 @@ namespace Emberdelve.UI
             else if (mouse.rightButton.wasPressedThisFrame) HandleClick(screen, true);
 
             HandleHotbarKeys(screen);
+            HandleDropKey(screen);
+        }
+
+        /// <summary>U5A: while the satchel is open, Q lays the item under the pointer (a worn slot or a bag cell) on the ground. It is the same sequenced Drop command a client would send; the authority decides.</summary>
+        private void HandleDropKey(Vector2 screen)
+        {
+            if (!IsOpen || _showCharacter) return;
+            Keyboard keyboard = Keyboard.current;
+            if (keyboard != null && keyboard.qKey.wasPressedThisFrame) TryDropAt(screen);
+        }
+
+        /// <summary>
+        /// U5A: drops the gear under <paramref name="screenPosition"/> - a worn equipment slot (the main hand, the off-hand shield, clothing) or a bag
+        /// cell - through the Drop inventory command. A refusal (the authority's reason) is shown as a toast and changes nothing.
+        /// </summary>
+        public bool TryDropAt(Vector2 screenPosition)
+        {
+            if (!IsOpen || _inventory == null || !_model.CommandsAllowed) return false;
+            ValidateSelection();
+
+            string reason = null;
+            bool accepted = false;
+            if (TryEquipSlotAt(screenPosition, out EquipmentSlot slot))
+            {
+                ItemInstance worn = _equipment != null ? _equipment.EquippedInstance(slot) : null;
+                if (worn == null) return false;
+                accepted = SubmitInventoryCommand(InventoryCommandKind.Drop, default, default, Vector2Int.zero, slot, worn.Uid, Guid.Empty, out reason);
+            }
+            else if (TryCellAt(screenPosition, out Vector2Int cell))
+            {
+                int index = _inventory.IndexAtCell(cell);
+                if (index < 0) return false;
+                InventorySlot source = _inventory.Slots[index];
+                if (source.Instance == null)
+                {
+                    GameEvents.RaiseToast(ToastOwner, "Only gear can be dropped");
+                    return false;
+                }
+                accepted = SubmitInventoryCommand(InventoryCommandKind.Drop, source, default, Vector2Int.zero, EquipmentSlot.None, Guid.Empty, Guid.Empty, out reason);
+            }
+            else return false;
+
+            if (!accepted) GameEvents.RaiseToast(ToastOwner, reason);
+            RefreshAfterRefusal();
+            return accepted;
         }
 
         /// <summary>

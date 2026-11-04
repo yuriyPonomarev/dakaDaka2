@@ -1,0 +1,34 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a69090fdcbb9784688d25194e1e5755, type: 3}
+  m_Name: Item_AshenShortSwordItem
+  m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.ItemData
+  itemId: ashen_short_sword
+  displayName: Ashen Short Sword
+  description: A plain one-handed sword with a blocking edge. Right click to hold
+    it in the main hand.
+  gridFootprint: {x: 1, y: 3}
+  maxStack: 1
+  equipSlot: 1
+  grantedWeapon: {fileID: 11400000, guid: 61fcdd9150fffb04da2f52cf24d63e2a, type: 2}
+  statModifiers: []
+  attributeBonuses: []
+  kind: 4
+  value: 30
+  healAmount: 0
+  ammoGrant: 0
+  moveSpeedPenalty: 0
+  useChannelSeconds: 0
+  healOverTimeSeconds: 0
+  iconColor: {r: 0.62, g: 0.64, b: 0.68, a: 1}
+  worldMaterial: {fileID: 2100000, guid: f4115d57bd8d322489a672ab46a79b43, type: 2}
+  worldSize: {x: 0.24, y: 0.9, z: 0.24}

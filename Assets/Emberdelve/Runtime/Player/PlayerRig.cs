@@ -317,7 +317,10 @@ namespace Emberdelve.Player
         public ClassLoadout Loadout => loadout;
         public CharacterClassData Class => _class;
         public WeaponData MainHandWeapon => _mainHand;
-        public WeaponData OffhandWeapon => _offhand != null ? _offhand : (_class != null ? _class.offhandShield : null);
+        public WeaponData OffhandWeapon => _offhand != null ? _offhand : (_class != null && !KitIsItems ? _class.offhandShield : null);
+
+        /// <summary>U5A: the class kit lives in the hand slots as items, so an empty hand stays empty (no class shield or weapon comes back).</summary>
+        private bool KitIsItems => equipment != null && equipment.KitIsItems;
 
         /// <summary>Passive modifiers resolved from the class kit. Null until the class has been applied.</summary>
         public CharacterStatStack Stats => skills != null ? skills.Stats : null;
@@ -670,10 +673,11 @@ namespace Emberdelve.Player
         /// </summary>
         public void SetOffhandWeapon(WeaponData weapon)
         {
-            _offhand = weapon != null ? weapon : (_class != null ? _class.offhandShield : null);
+            _offhand = weapon != null ? weapon : (_class != null && !KitIsItems ? _class.offhandShield : null);
             _defense = ResolveDefense(_mainHand);
             InvalidateEffectiveStats();
             SyncGuardVisual();
+            if (loadout != null) loadout.RefreshHands(); // U5A: the arms and the third-person hands follow a change of the off hand too
         }
 
         private DefenseProfile ResolveDefense(WeaponData weapon)
@@ -685,7 +689,7 @@ namespace Emberdelve.Player
                 ? stats.Bonus(SkillStat.BlockReduction, _class.blockReduction)
                 : 0f;
 
-            return DefenseProfile.Resolve(_class, weapon, _offhand != null ? _offhand : _class.offhandShield, passiveBlockBonus);
+            return DefenseProfile.Resolve(_class, weapon, _offhand != null ? _offhand : (KitIsItems ? null : _class.offhandShield), passiveBlockBonus);
         }
 
         /// <summary>

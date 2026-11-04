@@ -294,7 +294,7 @@ namespace Emberdelve.EditorTools
             if (cat == null) return;
             ProductionStateChecks();
 
-            gear.Clear();
+            gear.ClearToBare();
             bag.Clear();
             bag.ConfigureGrid(10, 6);
             pristineStats = StatsNoPools();
@@ -470,7 +470,7 @@ namespace Emberdelve.EditorTools
                     Check(ContainerSnapshot.TryFromJson(gearJson0, out ContainerSnapshot gearParsed, out reason) && gearParsed.ToJson() == gearJson0, c + ": equipment json round trips string-equal");
 
                     int life = bag.LifetimeCollected, rec = bag.RecoveredValue;
-                    gear.Clear();
+                    gear.ClearToBare();
                     bag.Clear();
                     Check(Describe() != describe0, c + ": wiped target differs from the fixture");
 
@@ -1063,7 +1063,7 @@ namespace Emberdelve.EditorTools
             string reason;
 
             // no free healing, no accumulation
-            gear.Clear();
+            gear.ClearToBare();
             bag.Clear();
             string pristineNow = StatsNoPools();
             Check(pristineNow == pristineStats, "wiped gear returns the pristine stats and hands");
@@ -1131,7 +1131,7 @@ namespace Emberdelve.EditorTools
             string midState = Describe();
             LoadoutSnapshot now = LoadoutSnapshot.Capture(bag, gear);
             Check(LoadoutSnapshot.TryFromJson(now.ToJson(), out LoadoutSnapshot parsedNow, out reason) && parsedNow.ToJson() == now.ToJson(), "capture, json, parse is string-equal: " + reason);
-            gear.Clear();
+            gear.ClearToBare();
             bag.Clear();
             Check(LoadoutSnapshot.TryRestore(parsedNow, bag, gear, null, out reason) && Describe() == midState, "and restores to the same state: " + reason);
         }
@@ -1151,7 +1151,7 @@ namespace Emberdelve.EditorTools
             Check(bag.UsedSlots + gear.FilledCount > 0, label + ": the starting kit is present");
 
             Check(LoadoutSnapshot.TryFromJson(json, out LoadoutSnapshot parsed, out string reason) && parsed.ToJson() == json, label + ": json round trip is string-equal: " + reason);
-            gear.Clear();
+            gear.ClearToBare();
             bag.Clear();
             Check(LoadoutSnapshot.TryRestore(parsed, bag, gear, null, out reason), label + ": restore: " + reason);
             Check(Describe() == described, label + ": restored state is instance-equal to the original");

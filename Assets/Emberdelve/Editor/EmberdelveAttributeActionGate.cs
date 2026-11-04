@@ -469,7 +469,9 @@ namespace Emberdelve.EditorTools
                     _rapier.reach + _rapier.hitSphereRadius, true, 25.536f, "no stacking from the removed charm");
 
                 Unequip(rig, EquipmentSlot.Weapon);
-                Check(rig.MainHandWeapon == _sword, "unequipping the blade puts the class sword back in the hand");
+                Check(rig.MainHandWeapon == rig.Loadout.Unarmed, "unequipping the blade leaves the bare fists in the hand (U5A: hands are items, the class sword is in the bag)");
+                rig.Equipment.Clear(); // a clear mints the starting kit back
+                Check(rig.MainHandWeapon == _sword, "a clear puts the class sword back in the hand");
 
                 // 10. The legacy temporary buff factor still multiplies on top of the attribute factor.
                 rig.ApplyStatus(new StatusSpec(StatusKind.Empowered, 6f, 1.25f), 0);

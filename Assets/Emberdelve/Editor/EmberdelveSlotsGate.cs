@@ -262,7 +262,7 @@ namespace Emberdelve.EditorTools
             Check(GearScoreRules.TryTotal(rares, weights, out score, out reason) && score == 60, "eleven Rare pieces score 60 (2*5 + 10*5): " + reason);
 
             // ---- the command: an unknown slot is not even a legal intent
-            Check(Enum.GetNames(typeof(InventoryCommandKind)).Length == 8 && (int)InventoryCommandKind.SwapWeaponSet == 7 && (int)InventoryCommandKind.SwapEquipment == 6 && (int)InventoryCommandKind.Use == 5, "SwapEquipment is appended as 6 after Use 5");
+            Check(Enum.GetNames(typeof(InventoryCommandKind)).Length == 9 && (int)InventoryCommandKind.Drop == 8 && (int)InventoryCommandKind.SwapWeaponSet == 7 && (int)InventoryCommandKind.SwapEquipment == 6 && (int)InventoryCommandKind.Use == 5, "SwapEquipment is appended as 6 after Use 5");
         }
 
         // The harness reads the phase-1 totals and finishes the single final line.
@@ -370,7 +370,7 @@ namespace Emberdelve.EditorTools
             Check(_authority != null, "the bag exposes its bound authority");
             if (_authority == null) return;
 
-            _gear.Clear();
+            _gear.ClearToBare();
             _bag.Clear();
             _bag.ConfigureGrid(10, 6);
 
@@ -391,7 +391,7 @@ namespace Emberdelve.EditorTools
             FullKitGearScoreAndSnapshot(boots, gloves, necklace, ring, baseHp);
             CharacterPane(ring, baseStr);
 
-            _gear.Clear();
+            _gear.ClearToBare();
             _bag.Clear();
             Check(_gear.FilledCount == 0 && Mathf.Approximately(_rig.MaxHealth, baseHp) && Mathf.Approximately(_rig.Mana.MaxMana, baseMana) && GearScore.ForEquipment(_gear) == 0,
                 "after clearing, health, mana and gear score are exactly the baseline");
@@ -426,7 +426,7 @@ namespace Emberdelve.EditorTools
                     Check(Mathf.Approximately(_rig.MaxHealth, baseHp) && GearScore.ForEquipment(_gear) == 0 && _bag.TotalUnits == unitsInBag, label + " cycle " + cycle + " exact baseline again, uid conserved");
                 }
                 _bag.Clear();
-                _gear.Clear();
+                _gear.ClearToBare();
             }
         }
 
@@ -467,7 +467,7 @@ namespace Emberdelve.EditorTools
             Check(!created && unknownReason != null, "an Equip command naming slot 14 is not a legal intent: " + unknownReason);
 
             _bag.Clear();
-            _gear.Clear();
+            _gear.ClearToBare();
         }
 
         private InventorySlot FindStack(Guid uid)
@@ -507,7 +507,7 @@ namespace Emberdelve.EditorTools
             before = State();
             Check(_gear.TryEquipFromInventory(_bag.IndexOfInstance(r1.Uid), EquipmentSlot.RingRight, out why), "r1 can replace r2 on the right");
             _bag.Clear();
-            _gear.Clear();
+            _gear.ClearToBare();
         }
 
         // ------------------------------------------------------------------ the atomic swap through the authority
@@ -515,7 +515,7 @@ namespace Emberdelve.EditorTools
         private void RingSwapThroughAuthority(ItemData ring, float baseHp)
         {
             _bag.Clear();
-            _gear.Clear();
+            _gear.ClearToBare();
             ItemInstance a = Mint(ring, AffixStatKey.MaxHealth, "affix_max_health", 5f);
             ItemInstance b = Mint(ring, AffixStatKey.MaxHealth, "affix_max_health", 9f);
             if (a == null || b == null) return;
@@ -602,7 +602,7 @@ namespace Emberdelve.EditorTools
                   !_gear.TrySwapRingSlots(EquipmentSlot.RingLeft, EquipmentSlot.Hands, out why) && State() == direct, "TrySwapRingSlots refuses same-slot and non-ring requests without touching anything");
 
             _bag.Clear();
-            _gear.Clear();
+            _gear.ClearToBare();
         }
 
         // ------------------------------------------------------------------ five new slots worn together, gear score, snapshots
@@ -610,7 +610,7 @@ namespace Emberdelve.EditorTools
         private void FullKitGearScoreAndSnapshot(ItemData boots, ItemData gloves, ItemData necklace, ItemData ring, float baseHp)
         {
             _bag.Clear();
-            _gear.Clear();
+            _gear.ClearToBare();
             ItemInstance g = Mint(gloves, AffixStatKey.MaxHealth, "affix_max_health", 5f);
             ItemInstance f = Mint(boots, AffixStatKey.MaxHealth, "affix_max_health", 6f);
             ItemInstance n = Mint(necklace, AffixStatKey.MaxHealth, "affix_max_health", 7f);
@@ -634,7 +634,7 @@ namespace Emberdelve.EditorTools
             string json = saved.ToJson();
             Check(saved.schemaVersion == 4 && saved.equipment.schemaVersion == 4 && json.Contains("\"slot\":\"RingLeft\"") && json.Contains("\"slot\":\"RingRight\"") && json.Contains("\"slot\":\"Feet\"") &&
                   json.Contains("\"slot\":\"Hands\"") && json.Contains("\"slot\":\"Necklace\"") && !json.Contains("\"Legs\""), "the snapshot is version 4 and names the new slots; nothing is in Legs");
-            _gear.Clear();
+            _gear.ClearToBare();
             _bag.Clear();
             Check(LoadoutSnapshot.TryRestoreJson(json, _bag, _gear, null, out why), "the loadout restores from its JSON: " + why);
             string afterRestore = State();
@@ -658,7 +658,7 @@ namespace Emberdelve.EditorTools
                 Check(!_gear.TryRestore(gearOnly, out why) && State() == stateNow, "gloves in Feet and boots in Legs are refused and nothing changes: " + why);
             }
 
-            _gear.Clear();
+            _gear.ClearToBare();
             _bag.Clear();
         }
 
@@ -666,7 +666,7 @@ namespace Emberdelve.EditorTools
 
         private void CharacterPane(ItemData ring, int baseStr)
         {
-            _gear.Clear();
+            _gear.ClearToBare();
             _bag.Clear();
             ItemInstance strRing = Mint(ring, AffixStatKey.Strength, "affix_strength", 2f);
             if (strRing == null) return;
@@ -691,7 +691,7 @@ namespace Emberdelve.EditorTools
             }
             finally { Destroy(host); }
 
-            _gear.Clear();
+            _gear.ClearToBare();
             _bag.Clear();
         }
     }

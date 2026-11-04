@@ -570,7 +570,12 @@ namespace Emberdelve.EditorTools
                 yield return LootFlow();
                 // Test-environment control: only the enemy DefenseFlow uses stays live; every other enemy is parked
                 // for the flow and restored afterwards, so nothing else can hit the player mid-measurement.
-                EnemyAgent defenseEnemy = PickAliveEnemy();
+                // Deterministic by data, not by who happens to be nearest: the nearest living enemy can be the Ashen Warden, whose maul (impact
+                // above the guard's ImpactResist) breaks the guard by design, which made the held-block and riposte checks depend on chase timing.
+                // The probe is the nearest living enemy whose weapon the player's guard holds against; the check names the precondition.
+                EnemyAgent defenseEnemy = PickAliveEnemyWhereGuardHolds();
+                Check(defenseEnemy != null, "a living enemy whose weapon the guard holds against exists for the defense tests");
+                if (defenseEnemy == null) defenseEnemy = PickAliveEnemy();
                 List<EnemyAgent> parked = new List<EnemyAgent>();
                 foreach (EnemyAgent other in FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None))
                 {

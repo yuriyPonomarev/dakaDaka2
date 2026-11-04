@@ -47,7 +47,7 @@ namespace Emberdelve.Flow
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class RunDirector : MonoBehaviour, IExtractionSink, ILootHost, ICountedLootHost, IInstanceLootHost,
-        IEnemyDropHost, IRaidSessionHost, ILocalPlayerSource, IInteractionRulesSource, IInteractionAdmissionSource
+        IEnemyDropHost, IRaidSessionHost, ILocalPlayerSource, IInteractionRulesSource, IInteractionAdmissionSource, IGroundItemSink
     {
         [Header("Configuration")]
         [SerializeField] private GameConfig config;
@@ -994,7 +994,31 @@ namespace Emberdelve.Flow
 
             // The bag's own rule, read unchanged: one identity is one item, so a UID this player already
             // carries or already wears is refused rather than granted a second time.
-            return session.Inventory.TryAddInstance(instance, out reason);
+            if (!session.Inventory.TryAddInstance(instance, out reason)) return false;
+
+            // U5A: a weapon or shield picked up goes into the empty matching hand of the live set (the bag keeps it when the hand is taken).
+            Equipment gear = session.Rig != null ? session.Rig.Equipment : null;
+            if (gear != null) gear.TryAutoSeatHand(instance);
+            return true;
+        }
+
+        /// <summary>U5A: the ground half of a drop. The server lays the dropped instance in the world as a pickup holding that very instance.</summary>
+        public bool TrySpawnDropped(ItemInstance instance, Vector3 position, out string reason)
+        {
+            if (instance == null || instance.Definition == null)
+            {
+                reason = "no item to lay on the ground";
+                return false;
+            }
+
+            if (_state != RunState.Running)
+            {
+                reason = "the run is not running: nothing can be dropped";
+                return false;
+            }
+
+            reason = SpawnLootInstance(instance, position) != null ? null : "the ground refused the item";
+            return reason == null;
         }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD

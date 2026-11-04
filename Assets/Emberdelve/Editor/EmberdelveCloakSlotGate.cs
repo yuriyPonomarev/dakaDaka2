@@ -285,7 +285,7 @@ namespace Emberdelve.EditorTools
 
             Inventory bag = rig.Inventory;
             Equipment gear = rig.Equipment;
-            gear.Clear();
+            gear.ClearToBare();
             bag.Clear();
             bag.ConfigureGrid(10, 4);
 
@@ -413,7 +413,7 @@ namespace Emberdelve.EditorTools
             }
             finally { GameEvents.ItemCollected -= onCollected; }
             bag.Clear();
-            gear.Clear();
+            gear.ClearToBare();
 
             // ---- fixed pools plus a rolled pool: the rolled half adds exactly its own amount
             Check(bag.TryAddInstance(commonMantle, out reason) && gear.TryEquipFromInventory(bag.IndexOfInstance(commonMantle.Uid), out reason), "common mantle equips: " + reason);
@@ -426,7 +426,7 @@ namespace Emberdelve.EditorTools
             Check(rig.Mana.MaxMana == mantleFixedMana + 10, $"rolled +10 max mana on top of the fixed amount ({mantleFixedMana} -> {rig.Mana.MaxMana})");
             Check(gear.TryUnequip(EquipmentSlot.Back, out reason) && rig.Mana.MaxMana == baseMaxMana, "unequip returns to the pristine ceiling");
             bag.Clear();
-            gear.Clear();
+            gear.ClearToBare();
 
             // ---- chest + legs + back together: each slot contributes once
             ItemInstance legs = Mint(auth, boots, AffixRarity.Common);
@@ -435,7 +435,7 @@ namespace Emberdelve.EditorTools
             Check(gear.FilledCount == 2 && gear.EquippedInstance(EquipmentSlot.Feet) == legs && gear.EquippedInstance(EquipmentSlot.Back) == commonAshen, "two different slots, two instances");
             Check(gear.Describe().Contains("Back=Ashen Cloak") && gear.Describe().Contains("Feet=Footpad Boots"), "Describe names both slots: " + gear.Describe());
             Check(gear.TryUnequip(EquipmentSlot.Feet, out reason) && gear.EquippedInstance(EquipmentSlot.Back) == commonAshen, "removing boots leaves the cloak");
-            gear.Clear();
+            gear.ClearToBare();
             bag.Clear();
             Check(gear.FilledCount == 0 && rig.GetArmorRating() == baseArmor && SameScores(Scores(rig), baseScores), "Clear removes the cloak contribution too");
 
@@ -465,7 +465,7 @@ namespace Emberdelve.EditorTools
             Hit(rig, weapon, 15f, "back to bare after unequip");
             CombatRegistry.Unregister(actor.CombatId, actor);
             bag.Clear();
-            gear.Clear();
+            gear.ClearToBare();
 
             // ---- atomic swap: a full bag rejects a worn-cloak replacement that cannot fit, and loses or duplicates nothing
             bag.ConfigureGrid(10, 4);
@@ -496,7 +496,7 @@ namespace Emberdelve.EditorTools
             }
             finally { GameEvents.InventoryChanged -= onChanged; }
             bag.Clear();
-            gear.Clear();
+            gear.ClearToBare();
 
             // ---- a successful same-footprint swap: replacement, not accumulation
             bag.ConfigureGrid(10, 4);
@@ -509,7 +509,7 @@ namespace Emberdelve.EditorTools
             Check(rig.MaxHealth == baseMaxHealth + 9, "the second cloak's rolled max_health +9 applies exactly (" + baseMaxHealth + " -> " + rig.MaxHealth + ")");
             Check(gear.TryUnequip(EquipmentSlot.Back, out reason) && rig.GetArmorRating() == baseArmor && rig.MaxHealth == baseMaxHealth, "unequip restores the pristine numbers");
             bag.Clear();
-            gear.Clear();
+            gear.ClearToBare();
 
             // ---- loot tables drop cloaks with correct rarity and affix counts
             LootChecks(ashen, mantle, affixes);
@@ -521,7 +521,7 @@ namespace Emberdelve.EditorTools
             CharacterPanelChecks(rig, rareAshen, ashen, FindAffix(affixes, AffixStatKey.Charisma), auth, bag, gear, baseScores);
 
             bag.Clear();
-            gear.Clear();
+            gear.ClearToBare();
         }
 
         private void LootChecks(ItemData ashen, ItemData mantle, List<AffixDefinition> affixes)

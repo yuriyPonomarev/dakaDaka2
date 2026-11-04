@@ -116,7 +116,7 @@ namespace Emberdelve.EditorTools
                   !EquipmentSlots.Accepts(EquipmentSlot.Head, EquipmentSlot.AltWeapon) && !EquipmentSlots.Accepts(EquipmentSlot.AltWeapon, EquipmentSlot.Weapon) &&
                   !EquipmentSlots.Accepts(EquipmentSlot.AltOffHand, EquipmentSlot.AltOffHand),
                 "a weapon is not an off-hand item, armor is not a weapon, and an item can never AUTHOR an Alt slot");
-            Check(Enum.GetNames(typeof(InventoryCommandKind)).Length == 8 && (int)InventoryCommandKind.SwapWeaponSet == 7, "SwapWeaponSet is appended as command kind 7");
+            Check(Enum.GetNames(typeof(InventoryCommandKind)).Length == 9 && (int)InventoryCommandKind.Drop == 8 && (int)InventoryCommandKind.SwapWeaponSet == 7, "SwapWeaponSet is appended as command kind 7");
 
             // ---- the schema: version 4, version 1 to 3 still readable
             Check(ContainerSnapshot.CurrentSchemaVersion == 4 && ContainerSnapshot.MinSupportedSchemaVersion == 1, "schema version 4, version 1 still readable");
@@ -570,10 +570,10 @@ namespace Emberdelve.EditorTools
             Check(_gear.ActiveWeaponSet == 1 && _loadout.ActiveSlot == 1 && _rig.ActiveWeapon == blade.grantedWeapon && WornUid(EquipmentSlot.AltWeapon) == bladeInstance.Uid && Near(_rig.MaxHealth, baseHp + 10f, 0.0001f),
                 "a restore brings back set 2 live, the blade in its hand, and its stats exactly once");
 
-            // unwearing the second weapon falls back to the class weapon, never to an empty hand
+            // U5A: hands are items. Unwearing the second weapon leaves that hand empty (the kit item it replaced is in the bag), and with set 2 live the player falls back to set 1, never to nothing
             Check(_gear.TryUnequip(EquipmentSlot.AltWeapon, out equipWhy), "the blade comes off: " + equipWhy);
-            Check(_loadout.WeaponInSlot(1) == setTwo && _rig.ActiveWeapon == setTwo && Near(_rig.MaxHealth, baseHp, 0.0001f), "set 2 is the class weapon again and the hand is never empty");
-            Check(_authority.Submit(_rig, SwapCommand()).Accepted && _gear.ActiveWeaponSet == 0 && _rig.ActiveWeapon == setOne, "back to set 1");
+            Check(_loadout.WeaponInSlot(1) == null && _gear.ActiveWeaponSet == 0 && _rig.ActiveWeapon == setOne && Near(_rig.MaxHealth, baseHp, 0.0001f), "set 2 is empty again and the player is back on set 1 (the hand is never empty)");
+            Check(!_authority.Submit(_rig, SwapCommand()).Accepted && _gear.ActiveWeaponSet == 0 && _rig.ActiveWeapon == setOne, "there is no second weapon to swap to");
 
             _gear.Clear();
             _bag.Clear();
@@ -687,8 +687,9 @@ namespace Emberdelve.EditorTools
             instance = Mint(blade, AffixStatKey.MaxHealth, "affix_max_health", 10f);
             if (instance != null)
             {
+                int scoreBefore = GearScore.ForEquipment(_gear); // U5A: the live set's kit items already score; the inactive set must add nothing on top
                 Check(_gear.TryEquipFromInventory(_bag.IndexOfInstance(instance.Uid), EquipmentSlot.AltWeapon, out why), "score fixture equips alternate blade: " + why);
-                Check(GearScore.ForEquipment(_gear) == 0, "inactive weapon set does not add to the active kit's gear score");
+                Check(GearScore.ForEquipment(_gear) == scoreBefore, "inactive weapon set does not add to the active kit's gear score");
                 Check(_authority.Submit(_rig, SwapCommand()).Accepted && GearScore.ForEquipment(_gear) > 0, "alternate weapon contributes gear score while held");
                 _loadout.ForceSwitchToSlot(0);
             }

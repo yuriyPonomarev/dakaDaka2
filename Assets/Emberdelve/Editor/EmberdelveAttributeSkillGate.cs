@@ -1299,9 +1299,16 @@ namespace Emberdelve.EditorTools
                     ItemData worn = rig.Equipment.Equipped(slot);
                     if (worn == null) continue;
 
+                    // U5A: the class kit (sword, shield, secondary) is worn as items and stays; anything else leaves the hands
+                    if (EquipmentSlots.SetOf(slot) >= 0 && rig.Class != null && worn.grantedWeapon != null &&
+                        (worn.grantedWeapon == rig.Class.primaryWeapon || worn.grantedWeapon == rig.Class.offhandShield || worn.grantedWeapon == rig.Class.secondaryWeapon)) continue;
+
                     bool ok = rig.Equipment.TryUnequip(slot, out string reason);
                     Check(ok, $"unequip {worn.itemId} from {slot}{(ok ? string.Empty : " refused: " + reason)}");
                 }
+
+                // U5A: a test weapon that replaced the class sword left it in the bag; a clear mints the starting kit back
+                if (rig.Equipment.KitIsItems && rig.Class != null && rig.MainHandWeapon != rig.Class.primaryWeapon) rig.Equipment.Clear();
             }
 
             // ---------------------------------------------------------------- shared definitions

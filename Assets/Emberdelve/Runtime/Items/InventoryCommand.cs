@@ -26,7 +26,14 @@ namespace Emberdelve.Items
         /// ExpectedTargetGearUid = the uid worn in the main hand of the set it will switch to (Guid.Empty = the class asset's
         /// weapon is in that hand). Appended after SwapEquipment: the integers are stable.
         /// </summary>
-        SwapWeaponSet = 7
+        SwapWeaponSet = 7,
+        /// <summary>
+        /// U5A: lay an item on the ground. Either a bag item (SourceStackId = its stack, DestinationSlot None) or a worn item (SourceStackId 0,
+        /// DestinationSlot = the slot it is worn in); ExpectedSourceGearUid is the uid that must be there (never empty: only gear instances can be
+        /// dropped). The server checks the identity, removes the item from the model and spawns the ground item; one uid is in exactly one place.
+        /// Appended after SwapWeaponSet: the integers are stable.
+        /// </summary>
+        Drop = 8
     }
 
     /// <summary>A client intent containing identities and preconditions, never item data or effect amounts.</summary>
@@ -114,6 +121,14 @@ namespace Emberdelve.Items
                     break;
                 case InventoryCommandKind.SwapWeaponSet:
                     if (SourceStackId == 0 && TargetStackId == 0 && cellIsZero && slotIsNone)
+                    {
+                        reason = null;
+                        return true;
+                    }
+                    break;
+                case InventoryCommandKind.Drop:
+                    if (TargetStackId == 0 && cellIsZero && ExpectedSourceGearUid != Guid.Empty && ExpectedTargetGearUid == Guid.Empty &&
+                        ((SourceStackId != 0 && slotIsNone) || (SourceStackId == 0 && IsEquipmentSlot(DestinationSlot))))
                     {
                         reason = null;
                         return true;

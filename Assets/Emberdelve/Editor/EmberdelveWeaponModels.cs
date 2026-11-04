@@ -65,6 +65,7 @@ namespace Emberdelve.EditorTools
         {
             new[] { "ember_crossbow", "ranged: needs draw / reload arm animation (not in the Quaternius libraries); keeps the blockout crossbow and shows no arms" },
             new[] { "hollow_bow", "ranged: needs draw arm animation (not in the Quaternius libraries); keeps the blockout bow and shows no arms" },
+            new[] { "unarmed_fists", "bare hands: no model; the first-person arms show empty hands and the swing is the fist punch" },
             new[] { "hollow_claw", "enemy-only weapon, there is no claw model; keeps its current visual" },
         };
 

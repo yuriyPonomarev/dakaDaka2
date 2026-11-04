@@ -15,6 +15,8 @@ Upgrade the current overlap/angle melee and ground wedge to a visible committed 
 ## Inventory, gear and loot
 DiabloII-style10x4 inventory, differing item sizes, validated move/drag/swap/equip/unequip without loss on rejection. Character panel shows6attributes and derived stats. Tooltips separate fixed properties from rolled affixes and show rarity. Immutable definitions plus stable item instances with UID, quantity, rarity, fixed definition reference and preserved rolled values; no reroll on transfer/equip/save/restore. Full rules in ITEM_AFFIXES.md. Add back/cloak slot and boots; common0/uncommon1/rare2distinct valid affixes. Gear recomputation never stacks bonuses or awards free current-pool refill.
 
+Hands are equipment: weapons and shields are item instances in per-weapon-set hand slots, moved, swapped and dropped by the same server-validated commands as clothing. Handedness is data (one-handed to the main hand only, shield to the off hand only, two-handed blocks the off hand and moves a worn off-hand item to the bag or refuses when it is full). An empty main hand is the unarmed fists (not an item, cannot block). Dropping spawns a server-owned ground item; picking it up fills the bag or an empty matching hand. Combat, guard, riposte, first-person arms and HUD read the current hands.
+
 At least18data-defined items including5weapons, shield,6clothing/armour pieces, potions and valuables. Three saved chest variants/resources with distinct loot pools, lid animation and usable shared container UI. Server generates one contents list, validates distance<=3m/LOS and performs atomic single-ownership transfer: two players cannot duplicate the same UID. Death corpse loot obeys the same ownership rules.
 
 ## Raid results and persistence

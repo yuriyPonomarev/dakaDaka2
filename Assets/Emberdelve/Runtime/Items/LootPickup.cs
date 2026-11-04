@@ -55,6 +55,12 @@ namespace Emberdelve.Items
         bool TryCollectLootInstance(IInteractionActor actor, ItemInstance instance, out string reason);
     }
 
+    /// <summary>U5A: where a dropped item goes. The server lays the exact instance on the ground; false changes nothing (the caller puts the item back).</summary>
+    public interface IGroundItemSink
+    {
+        bool TrySpawnDropped(ItemInstance instance, Vector3 position, out string reason);
+    }
+
     /// <summary>
     /// R4: a host that owns enemy drops. The enemy reports where and what died (data + stable key); the host rolls the
     /// drop table with the raid's seed and issuer and spawns the result, gear as concrete instances. The enemy never
@@ -185,6 +191,7 @@ namespace Emberdelve.Items
         [SerializeField] private float spinSpeed = 42f;
 
         private ILootHost _host;
+        private bool _taken; // U5A: once an instance has been handed to a bag the pickup is spent, even within the frame Unity still lists it
         private Vector3 _home;
         private float _phase;
 
@@ -269,10 +276,17 @@ namespace Emberdelve.Items
 
             if (_instance != null)
             {
+                if (_taken)
+                {
+                    GameEvents.RaiseToast(actor.PlayerId, "Already taken");
+                    return;
+                }
+
                 // One concrete item, offered as itself through the instance path. A refusal (full bag, duplicate
                 // identity, run not running) leaves this pickup and its instance exactly as they were.
                 if (LootCollection.TryCollectInstance(_host, actor, _instance, out string refusal))
                 {
+                    _taken = true;
                     Destroy(gameObject);
                     return;
                 }

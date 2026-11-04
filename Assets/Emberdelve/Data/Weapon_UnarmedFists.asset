@@ -1,0 +1,69 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 773782a5953fad9409cd7c7ec700834c, type: 3}
+  m_Name: Weapon_UnarmedFists
+  m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.WeaponData
+  weaponId: unarmed_fists
+  displayName: Fists
+  kind: 0
+  baseDamage: 6
+  damageType: 0
+  finesse: 0
+  windupTime: 0.14
+  activeWindow: 0.1
+  recoveryTime: 0.2
+  cooldown: 0.45
+  reach: 1.4
+  arcAngle: 70
+  hitSphereRadius: 0.35
+  swingPatterns:
+  - {fileID: 11400000, guid: f41fea715b2b40849b14e632e84d6556, type: 2}
+  comboSteps: []
+  comboWindow: 0.7
+  comboFinisherRecovery: 0.35
+  impactZones: []
+  hitSlowMultiplier: 1
+  hitSlowDuration: 0
+  heldMoveSpeedPenalty: 0
+  impactPower: 10
+  impactResist: 15
+  canRiposte: 0
+  riposteWithOffhandShield: 0
+  riposteWindow: 1
+  riposteDamageMultiplier: 1.5
+  riposteSwingPatterns: 
+  riposteStrikeGap: 0.1
+  twoHanded: 0
+  isUnarmed: 1
+  ammoDisplayName: Ammo
+  rangedRange: 42
+  projectileSpeed: 36
+  projectileRadius: 0.07
+  projectileLength: 0.9
+  drawTime: 0.8
+  minChargeToFire: 0.18
+  minChargeDamageScale: 0.45
+  magazineSize: 7
+  reloadTime: 1.7
+  falloffStartRange: 16
+  falloffEndRange: 42
+  falloffMinScale: 0.45
+  projectileGravity: 0
+  projectileMaxFlightTime: 0
+  projectileFalloff: []
+  defenseRole: 1
+  capabilities: 0
+  blockReductionOverride: -1
+  blockArcOverride: -1
+  shaftMaterial: {fileID: 2100000, guid: dbbcb94c1c991e3418d36e4675a2dfda, type: 2}
+  edgeMaterial: {fileID: 2100000, guid: dbbcb94c1c991e3418d36e4675a2dfda, type: 2}
+  gripMaterial: {fileID: 2100000, guid: dbbcb94c1c991e3418d36e4675a2dfda, type: 2}
