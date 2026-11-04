@@ -86,13 +86,16 @@ namespace Emberdelve.BladeDefense
     ///   3. attack height not covered by guard height -> WrongHeight (full damage, costs nothing)
     ///   4. endurance enabled and the pool cannot pay -> Exhausted   (full damage, costs nothing)
     ///   5. impact power reaches impact resist        -> Broken      (reduction x break scale, pays the cost)
-    ///   6. otherwise                                 -> Blocked     (full reduction, pays the cost)
+    ///   6. otherwise                                 -> Blocked     (HeldGuardReduction: the whole hit, 0 HP; pays the cost)
     /// Shields and blades share the rule; a shield only differs by the height tolerance the caller passes. Nothing here parries.
     /// </summary>
     public static class BladeGuardRules
     {
         public const float DefaultHighPitchDegrees = 25f;
         public const float DefaultLowPitchDegrees = 25f;
+
+        /// <summary>FIX2: the share of a hit a guard that HOLDS (inside the arc, right height, impact power below the resist) takes off: all of it. A broken guard keeps only the authored reduction x the break scale.</summary>
+        public const float HeldGuardReduction = 1f;
 
         /// <summary>True when the attacker is inside the guard's front arc. NaN is outside.</summary>
         public static bool InsideArc(float bearingDegrees, float arcDegrees)
@@ -172,7 +175,7 @@ namespace Emberdelve.BladeDefense
                 return new GuardVerdict(GuardOutcome.Broken, reduction * Clamp01(g.BreakReductionScale), cost);
             }
 
-            return new GuardVerdict(GuardOutcome.Blocked, reduction, cost);
+            return new GuardVerdict(GuardOutcome.Blocked, HeldGuardReduction, cost);
         }
 
         /// <summary>

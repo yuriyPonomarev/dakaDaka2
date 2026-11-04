@@ -13,6 +13,7 @@ namespace Emberdelve.NetRules.Tests
         }
 
         [TestCase("melee-duel", NetScriptKind.MeleeDuel)]
+        [TestCase("melee-parry", NetScriptKind.MeleeParry)]
         [TestCase("ranged-shot", NetScriptKind.RangedShot)]
         [TestCase("combat-abuse", NetScriptKind.CombatAbuse)]
         public void CombatScripts_AreIsolatedProbesWithTheirOwnName(string text, NetScriptKind kind)

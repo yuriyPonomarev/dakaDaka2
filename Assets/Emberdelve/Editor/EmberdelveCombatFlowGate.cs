@@ -1473,8 +1473,8 @@ namespace Emberdelve.EditorTools
             Check(light.HasValue && light.Value.Blocked && !light.Value.GuardBroken, "sword vs heater shield: blocked, not broken");
             if (light.HasValue)
             {
-                Near(reduction, light.Value.BlockReduction, 1e-4f, "sword vs heater: the normal block reduction applies");
-                Near(unguarded * (1f - reduction), light.Value.Amount, 0.01f, "sword vs heater: damage = unguarded x (1 - reduction)");
+                Near(BladeGuardRules.HeldGuardReduction, light.Value.BlockReduction, 1e-4f, "sword vs heater: a holding guard takes the whole hit");
+                Near(unguarded * (1f - BladeGuardRules.HeldGuardReduction), light.Value.Amount, 0.01f, "sword vs heater: damage = unguarded x (1 - held reduction) = 0 HP");
                 Near(10f, light.Value.ImpactPower, 1e-4f, "the hit carries the sword's impact power");
             }
             Check(!_authority.IsGuardStaggered(_rig.CombatId) && _rig.IsGuarding, "sword vs heater: no stagger, the guard stays up");
@@ -1570,7 +1570,7 @@ namespace Emberdelve.EditorTools
 
             // 7. skills carry no impact power and never break a guard; the guard answers per hit
             DamageInfo skillLike = new DamageInfo(20f, _rig.CombatCenter, Vector3.back, _rig.transform.position + Vector3.forward * 2f, 999, EntityKind.Enemy, DamageType.Holy, false, false, 0f, HitLocation.Unspecified, 0f);
-            Check(_rig.TryResolveGuard(skillLike, CombatFlowTuning.Default, out GuardResult gr) && !gr.Broken && Mathf.Abs(gr.Reduction - reduction) < 1e-4f,
+            Check(_rig.TryResolveGuard(skillLike, CombatFlowTuning.Default, out GuardResult gr) && !gr.Broken && Mathf.Abs(gr.Reduction - BladeGuardRules.HeldGuardReduction) < 1e-4f,
                 "a hit with no impact power (a skill's flat damage) is blocked normally and never breaks the guard");
             DamageInfo heavyLike = skillLike.WithImpactPower(99f);
             Check(_rig.TryResolveGuard(heavyLike, CombatFlowTuning.Default, out gr) && gr.Broken && Mathf.Abs(gr.Reduction - reduction * 0.3f) < 1e-4f, "an impact power of 99 breaks it");
@@ -1693,7 +1693,7 @@ namespace Emberdelve.EditorTools
             // front, same band: held with the kit's own reduction
             bool front = _rig.TryResolveGuard(U3cHit(ahead, -_rig.transform.forward, impact, band), free, out GuardResult held);
             Check(front && !held.Broken, "U3C rig: a frontal hit in the guard's own band is blocked");
-            Near(kit.BlockReduction, held.Reduction, 1e-4f, "U3C rig: ... with the kit's reduction");
+            Near(BladeGuardRules.HeldGuardReduction, held.Reduction, 1e-4f, "U3C rig: ... taking the whole hit");
             Check(_rig.LastGuardOutcome == GuardOutcome.Blocked, "U3C rig: outcome Blocked (" + _rig.LastGuardOutcome + ")");
 
             // back: the guard is ignored, in every band

@@ -36,6 +36,7 @@ MonoBehaviour:
   impactPower: 0
   impactResist: 15
   canRiposte: 0
+  riposteWithOffhandShield: 0
   riposteWindow: 1
   riposteDamageMultiplier: 1.5
   riposteSwingPatterns: 

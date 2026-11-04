@@ -32,7 +32,7 @@ namespace Emberdelve.Rules.Tests
         }
 
         [Test]
-        public void FrontHit_InsideTheArcIsBlockedWithTheKitReduction()
+        public void FrontHit_InsideTheArcIsBlockedWithTheWholeHit()
         {
             GuardInput g = Baseline();
             foreach (float bearing in new[] { 0f, g.ArcDegrees * 0.25f, g.ArcDegrees * 0.5f })
@@ -40,7 +40,7 @@ namespace Emberdelve.Rules.Tests
                 g.BearingDegrees = bearing;
                 GuardVerdict v = BladeGuardRules.Resolve(in g);
                 Assert.That(v.Outcome, Is.EqualTo(GuardOutcome.Blocked), "bearing " + bearing);
-                Assert.That(v.Reduction, Is.EqualTo(g.BlockReduction).Within(1e-6f));
+                Assert.That(v.Reduction, Is.EqualTo(BladeGuardRules.HeldGuardReduction), "a holding guard takes the whole hit, whatever the authored reduction");
                 Assert.That(v.Mitigated, Is.True);
                 Assert.That(v.Broken, Is.False);
             }
@@ -186,7 +186,7 @@ namespace Emberdelve.Rules.Tests
             GuardVerdict v = BladeGuardRules.Resolve(in g);
             Assert.That(v.Outcome, Is.EqualTo(GuardOutcome.Blocked));
             Assert.That(v.EnduranceSpent, Is.EqualTo(g.EnduranceCost));
-            Assert.That(v.Reduction, Is.EqualTo(g.BlockReduction).Within(1e-6f));
+            Assert.That(v.Reduction, Is.EqualTo(BladeGuardRules.HeldGuardReduction), "a holding guard takes the whole hit, whatever the authored reduction");
         }
 
         [Test]
@@ -362,6 +362,21 @@ namespace Emberdelve.Rules.Tests
             float after = pool.Current;
             pool.Refresh(90f, 50f, 10f, 0f);
             Assert.That(pool.Current, Is.EqualTo(after));
+        }
+
+        [Test]
+        public void HeldGuardReduction_IsAllOfTheHit_AndBrokenGuardKeepsTheAuthoredPartial()
+        {
+            Assert.That(BladeGuardRules.HeldGuardReduction, Is.EqualTo(1f));
+            GuardInput g = Baseline();
+            foreach (float authored in new[] { 0.05f, g.BlockReduction, 0.95f })
+            {
+                g.BlockReduction = authored;
+                g.ImpactPower = g.ImpactResist - 0.01f;
+                Assert.That(BladeGuardRules.Resolve(in g).Reduction, Is.EqualTo(BladeGuardRules.HeldGuardReduction), "held, authored " + authored);
+                g.ImpactPower = g.ImpactResist;
+                Assert.That(BladeGuardRules.Resolve(in g).Reduction, Is.EqualTo(authored * g.BreakReductionScale).Within(1e-6f), "broken, authored " + authored);
+            }
         }
     }
 }

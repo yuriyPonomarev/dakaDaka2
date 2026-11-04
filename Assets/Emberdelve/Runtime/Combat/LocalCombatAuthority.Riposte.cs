@@ -60,7 +60,7 @@ namespace Emberdelve.Combat
         private static bool RiposteKitOf(ICombatEntity entity, IRiposteKit kit, out WeaponData weapon)
         {
             weapon = entity is IActiveWeaponProvider holder ? holder.ActiveWeapon : null;
-            return weapon != null && RiposteRules.KitCanRiposte(weapon.canRiposte, weapon.IsShield, kit.GuardHasShield, weapon.IsRanged, weapon.RiposteStrikeCount);
+            return weapon != null && RiposteRules.KitCanRiposte(weapon.canRiposte, weapon.IsShield, kit.GuardHasShield, weapon.IsRanged, weapon.RiposteStrikeCount, weapon.riposteWithOffhandShield);
         }
 
         private bool BuildRiposteRequest(int id, out ICombatEntity entity, out WeaponData weapon, out RiposteRequest request)
@@ -215,6 +215,8 @@ namespace Emberdelve.Combat
             reason = "riposte refused: " + verdict;
             LastRiposteVerdict = verdict;
             LastRiposteReason = reason;
+            // A block press with no parry on record is simply a guard being raised (every guard raise is that press): not a rejection worth counting or logging.
+            if (verdict == RiposteVerdict.NoParry) return false;
             if (countReject) RejectedCount++;
             if (logRejections)
             {

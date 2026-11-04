@@ -67,6 +67,7 @@ namespace Emberdelve.Combat
         public static DamageInfo ApplyProjectileFalloff(in DamageInfo info, float scale)
         {
             if (float.IsNaN(info.Amount) || float.IsInfinity(info.Amount)) return info;
+            if (info.Amount <= 0f) return info;   // FIX2: a held block stays at 0
             float s = float.IsNaN(scale) || scale < 0f ? 0f : scale;
             return new DamageInfo(Mathf.Max(1f, info.Amount * s), info.Point, info.Direction, info.SourcePosition,
                 info.SourceCombatId, info.SourceKind, info.Type, info.Blocked, info.Headshot, info.BlockReduction,
@@ -262,6 +263,7 @@ namespace Emberdelve.Combat
 
             float amount = info.Amount;
             if (float.IsNaN(amount) || float.IsInfinity(amount)) return info;
+            if (amount <= 0f) return info;   // FIX2: nothing left to mitigate; the 1.0 floor must not lift a held block
 
             double mitigated = (double)amount * (100.0 / (100.0 + (double)rating));
             float final = mitigated >= 1.0 ? (float)mitigated : 1f;

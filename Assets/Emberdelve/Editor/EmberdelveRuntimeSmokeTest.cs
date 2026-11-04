@@ -792,7 +792,95 @@ namespace Emberdelve.EditorTools
 
                 _rig.Health.Damaged -= CaptureDamage;
 
+                yield return RiposteRealPathFlow(enemy);
+
                 yield return OffAxisWindupFlow(enemy);
+            }
+
+            /// <summary>
+            /// FIX2: parry -> riposte on the REAL path (the one the host and a dedicated server run for a remote player): the rig is driven like a
+            /// server rig of a remote player (MeleeCombat.RemoteDriven + SetRemoteGuard, exactly what NetCombatServer does for a guard intent), a
+            /// real EnemyAgent swings its real swept attack at the real PlayerRig, the sword guard holds (0 HP), the server records the parry, and
+            /// the next block press yields the weapon's riposte strikes through the authority. Nothing here is a fake fighter.
+            /// </summary>
+            private IEnumerator RiposteRealPathFlow(EnemyAgent enemy)
+            {
+                if (enemy == null || enemy.IsDead || _localAuthority == null || _rig == null) yield break;
+                MeleeCombat melee = _rig.GetComponent<MeleeCombat>();
+                WeaponData mainHand = _rig.Class != null ? _rig.Class.primaryWeapon : null;
+                if (melee == null || mainHand == null || !mainHand.CanRiposteWeapon) yield break;
+
+                PlayerMovement movement = _rig.GetComponent<PlayerMovement>();
+                bool movementWas = movement != null && movement.enabled;
+                if (movement != null) movement.enabled = false;
+                bool remoteWas = melee.RemoteDriven;
+                melee.RemoteDriven = true;
+                melee.enabled = true;
+                melee.SetRemoteGuard(false);
+                System.Collections.Generic.List<int> strikes = new System.Collections.Generic.List<int>();
+                System.Action<int> onStrike = n => strikes.Add(n);
+                melee.RiposteStrikeStarted += onStrike;
+
+                Vector3 toEnemy = enemy.CombatCenter - _rig.transform.position;
+                toEnemy.y = 0f;
+                if (toEnemy.sqrMagnitude > 1e-4f) _rig.transform.rotation = Quaternion.LookRotation(toEnemy.normalized);
+                Physics.SyncTransforms();
+                yield return WaitFrames(2);
+
+                melee.SetRemoteGuard(true);
+                yield return WaitFrames(3);
+                Check(_rig.IsGuarding, "riposte real path: the server-side guard intent raised the rig's guard");
+
+                // the two strikes would kill a minion: give the enemy a deep health pool for the proof, put it back after
+                int enemyMaxOriginal = Mathf.RoundToInt(enemy.MaxHealth);
+                if (enemy.Health != null) { enemy.Health.SetMax(enemyMaxOriginal * 50); enemy.Health.SetHealth(enemyMaxOriginal * 50); }
+                Emberdelve.BladeDefense.RiposteTracker tracker = _localAuthority.Riposte;
+                int blocksBefore = tracker.BlocksRecorded;
+                int ripostesBefore = tracker.RipostesStarted;
+                int continuedBefore = tracker.StrikesContinued;
+                int meleeRipostesBefore = melee.RipostesStarted;
+                float hpBefore = _rig.CurrentHealth;
+                float enemyHpBefore = enemy.CurrentHealth;
+
+                enemy.enabled = true;
+                float deadline = Time.unscaledTime + 14f;
+                while (!tracker.HasLiveParry(_rig.CombatId) && Time.unscaledTime < deadline) yield return null;
+                bool parried = tracker.HasLiveParry(_rig.CombatId);
+                enemy.enabled = false;
+                Check(parried, "riposte real path: a real enemy swing blocked by the player's sword guard is recorded as a parry by the server");
+                Check(tracker.BlocksRecorded > blocksBefore, "riposte real path: the tracker counted the block");
+
+                if (parried)
+                {
+                    Check(tracker.ParriedAttacker(_rig.CombatId) == enemy.CombatId, "riposte real path: the parry is against the enemy that swung");
+                    Check(_rig.CurrentHealth >= hpBefore - 1e-3f, $"riposte real path: the held block took zero HP ({hpBefore:F1} -> {_rig.CurrentHealth:F1})");
+
+                    // release and press again: the second press is the riposte
+                    melee.SetRemoteGuard(false);
+                    yield return WaitFrames(2);
+                    melee.SetRemoteGuard(true);
+                    float until = Time.unscaledTime + 4f;
+                    while (melee.RipostesStarted == meleeRipostesBefore && Time.unscaledTime < until) yield return null;
+                    until = Time.unscaledTime + 6f;
+                    while ((melee.RiposteActive || melee.IsSwinging) && Time.unscaledTime < until) yield return null;
+
+                    Check(melee.RipostesStarted == meleeRipostesBefore + 1, "riposte real path: the block press started exactly one riposte");
+                    Check(tracker.RipostesStarted == ripostesBefore + 1, "riposte real path: the authority accepted it");
+                    Check(tracker.StrikesContinued == continuedBefore + (mainHand.RiposteStrikeCount - 1), "riposte real path: the follow-up strikes were accepted (data count)");
+                    Check(strikes.Count == mainHand.RiposteStrikeCount, $"riposte real path: {strikes.Count} strikes started, data says {mainHand.RiposteStrikeCount}");
+                    for (int i = 0; i < strikes.Count; i++) Check(strikes[i] == i + 1, "riposte real path: strike numbers run 1, 2, ...");
+                    Check(enemy.IsDead || enemy.CurrentHealth < enemyHpBefore, $"riposte real path: the riposte hurt the enemy ({enemyHpBefore:F1} -> {enemy.CurrentHealth:F1})");
+                }
+
+                melee.RiposteStrikeStarted -= onStrike;
+                melee.SetRemoteGuard(false);
+                yield return WaitFrames(2);
+                melee.RemoteDriven = remoteWas;
+                _rig.SetGuardHeld(false);
+                if (movement != null) movement.enabled = movementWas;
+                if (enemy.Health != null && !enemy.IsDead) { enemy.Health.SetMax(enemyMaxOriginal); enemy.Health.SetHealth(enemyMaxOriginal); }
+                Physics.SyncTransforms();
+                yield return WaitFrames(2);
             }
 
             /// <summary>
@@ -1089,10 +1177,15 @@ namespace Emberdelve.EditorTools
                 Check(frontAccepted, "authority accepted the front-facing attack");
                 Check(_capturedValid, "player damage was recorded on the rig");
                 Check(_capturedValid && _capturedDamage.Blocked, "front-facing guard reports the hit as blocked");
+                // FIX2: a guard that HOLDS takes the whole hit (0 HP, reduction = the rule's held value); a guard this weapon breaks keeps only the
+                // authored partial (> 0 and below 60% of the weapon damage). Which one applies is read from the hit itself, not assumed.
+                bool heldBlock = _capturedValid && _capturedDamage.Blocked && !_capturedDamage.GuardBroken;
                 Check(_capturedValid && _capturedDamage.BlockReduction > 0.2f,
                     $"guard reports a reduction ({(_capturedValid ? _capturedDamage.BlockReduction : 0f):F2})");
-                Check(blockedDamage > 0f && blockedDamage < claw.baseDamage * 0.6f,
-                    $"front-facing block reduced the damage ({blockedDamage:F1} from a {claw.baseDamage:F1} weapon)");
+                Check(!heldBlock || Mathf.Approximately(_capturedDamage.BlockReduction, Emberdelve.BladeDefense.BladeGuardRules.HeldGuardReduction),
+                    "a holding guard reports the whole hit as taken off");
+                Check(heldBlock ? blockedDamage == 0f : (blockedDamage > 0f && blockedDamage < claw.baseDamage * 0.6f),
+                    $"front-facing block reduced the damage ({blockedDamage:F1} from a {claw.baseDamage:F1} weapon; held guard takes 0, a broken one keeps the partial)");
                 Check(frontAccepted && frontSequence > enemyConsumedBefore,
                     $"enemy intent claimed a fresh sequence from the same allocator (consumed {enemyConsumedBefore} -> used {frontSequence})");
                 if (!frontAccepted) SequenceDiag("guardFront", enemy.CombatId, frontSequence);

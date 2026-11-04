@@ -81,6 +81,9 @@ namespace Emberdelve.Rules.Tests
             Assert.That(RiposteRules.KitCanRiposte(false, false, false, false, 2), Is.False, "not flagged in data");
             Assert.That(RiposteRules.KitCanRiposte(true, true, false, false, 2), Is.False, "the weapon is a shield");
             Assert.That(RiposteRules.KitCanRiposte(true, false, true, false, 2), Is.False, "a shield contributes to the guard");
+            Assert.That(RiposteRules.KitCanRiposte(true, false, true, false, 2, offhandShieldAllowed: true), Is.True, "a shield in the off hand, when the sword's data allows it");
+            Assert.That(RiposteRules.KitCanRiposte(true, true, true, false, 2, offhandShieldAllowed: true), Is.False, "a shield itself never parries, whatever the flag");
+            Assert.That(RiposteRules.KitCanRiposte(false, false, true, false, 2, offhandShieldAllowed: true), Is.False, "an unflagged weapon with a shield stays out");
             Assert.That(RiposteRules.KitCanRiposte(true, false, false, true, 2), Is.False, "ranged");
             Assert.That(RiposteRules.KitCanRiposte(true, false, false, false, 0), Is.False, "no strikes authored");
         }

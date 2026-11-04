@@ -341,7 +341,8 @@ namespace Emberdelve.Combat
             MeleeSwingIntent intent = new MeleeSwingIntent(rig.CombatId, _weapon.weaponId, 0, 0, yaw, pitch, sequence);
             if (!riposter.TryBeginRiposte(rig.CombatSender, intent, out int swingId, out int strikes, out string reason))
             {
-                CombatDiagnostics.Log("riposte-refused", $"[MeleeCombat] riposte refused by the authority: {reason}", this);
+                // a block press with no parry on record is just a guard being raised: nothing to report
+                if (reason == null || !reason.EndsWith(Emberdelve.BladeDefense.RiposteVerdict.NoParry.ToString())) CombatDiagnostics.Log("riposte-refused", $"[MeleeCombat] riposte refused by the authority: {reason}", this);
                 return false;
             }
 

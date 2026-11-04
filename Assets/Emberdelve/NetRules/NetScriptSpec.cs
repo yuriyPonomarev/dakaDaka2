@@ -38,7 +38,9 @@ namespace Emberdelve.Net.Rules
         /// <summary>U3B3: the lower server id shoots the higher one with a bow: a full draw, then a release before the minimum charge. Never chained.</summary>
         RangedShot = 17,
         /// <summary>U3B3 development probe: forged, replayed, malformed and flooded combat intents until the server disconnects the client. Never chained.</summary>
-        CombatAbuse = 18
+        CombatAbuse = 18,
+        /// <summary>FIX2: two players duel with swords: the lower server id swings once, the higher one holds the guard, then releases and presses it again within the window (the riposte). Never chained.</summary>
+        MeleeParry = 19
     }
 
     /// <summary>One step of a client test script: <c>name[:seconds][@yawDegrees]</c>.</summary>
@@ -86,6 +88,7 @@ namespace Emberdelve.Net.Rules
         public bool IsMeleeDuelOnly => _steps.Count == 1 && _steps[0].Kind == NetScriptKind.MeleeDuel;
         public bool IsRangedShotOnly => _steps.Count == 1 && _steps[0].Kind == NetScriptKind.RangedShot;
         public bool IsCombatAbuseOnly => _steps.Count == 1 && _steps[0].Kind == NetScriptKind.CombatAbuse;
+        public bool IsMeleeParryOnly => _steps.Count == 1 && _steps[0].Kind == NetScriptKind.MeleeParry;
 
         /// <summary>True for the scripts that drive an RPC probe or the skill channel instead of the movement stream (always a single step).</summary>
         public bool IsProbeOnly => _steps.Count == 1 && IsProbeKind(_steps[0].Kind);
@@ -94,14 +97,14 @@ namespace Emberdelve.Net.Rules
         public bool IsSkillScript => IsSkillProofOnly || IsSkillCastOnly || IsSkillAbuseOnly;
 
         /// <summary>True for the scripts that run on the combat sender (U3B3; they also steer the movement stream's aim and walking).</summary>
-        public bool IsCombatScript => IsMeleeDuelOnly || IsRangedShotOnly || IsCombatAbuseOnly;
+        public bool IsCombatScript => IsMeleeDuelOnly || IsMeleeParryOnly || IsRangedShotOnly || IsCombatAbuseOnly;
 
         /// <summary>The kinds that stand alone: no duration, no yaw semantics, never part of a chain.</summary>
         public static bool IsProbeKind(NetScriptKind kind)
         {
             return kind == NetScriptKind.ForgeOwner || kind == NetScriptKind.SkillProof ||
                    kind == NetScriptKind.SkillCast || kind == NetScriptKind.SkillAbuse ||
-                   kind == NetScriptKind.MeleeDuel || kind == NetScriptKind.RangedShot || kind == NetScriptKind.CombatAbuse;
+                   kind == NetScriptKind.MeleeDuel || kind == NetScriptKind.MeleeParry || kind == NetScriptKind.RangedShot || kind == NetScriptKind.CombatAbuse;
         }
 
         /// <summary>
@@ -134,6 +137,7 @@ namespace Emberdelve.Net.Rules
                 case NetScriptKind.SkillCast: return "skill-cast";
                 case NetScriptKind.SkillAbuse: return "skill-abuse";
                 case NetScriptKind.MeleeDuel: return "melee-duel";
+                case NetScriptKind.MeleeParry: return "melee-parry";
                 case NetScriptKind.RangedShot: return "ranged-shot";
                 case NetScriptKind.CombatAbuse: return "combat-abuse";
                 case NetScriptKind.WalkForward: return "walk-forward";
@@ -161,6 +165,7 @@ namespace Emberdelve.Net.Rules
                 case "skill-cast": kind = NetScriptKind.SkillCast; defaultSeconds = 0f; return true;
                 case "skill-abuse": kind = NetScriptKind.SkillAbuse; defaultSeconds = 0f; return true;
                 case "melee-duel": kind = NetScriptKind.MeleeDuel; defaultSeconds = 0f; return true;
+                case "melee-parry": kind = NetScriptKind.MeleeParry; defaultSeconds = 0f; return true;
                 case "ranged-shot": kind = NetScriptKind.RangedShot; defaultSeconds = 0f; return true;
                 case "combat-abuse": kind = NetScriptKind.CombatAbuse; defaultSeconds = 0f; return true;
                 case "walk-forward": kind = NetScriptKind.WalkForward; defaultSeconds = 3f; return true;

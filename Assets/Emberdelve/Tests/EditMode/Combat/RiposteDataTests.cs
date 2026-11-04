@@ -254,7 +254,7 @@ namespace Emberdelve.Combat.Tests
         }
 
         [Test]
-        public void ABlockedRiposteStrike_StillReducesByTheGuard_ThenTheMultiplier()
+        public void ABlockedRiposteStrike_IntoAHoldingGuard_TakesZero_AndABrokenOneKeepsThePartial()
         {
             WeaponData sword = All.Find(w => w.weaponId == "ashen_short_sword");
             float mult = RiposteRules.StrikeMultiplier(sword.riposteDamageMultiplier);
@@ -264,7 +264,60 @@ namespace Emberdelve.Combat.Tests
             DamageInfo unguarded = Swing(sword, pattern, mult, open);
             DamageInfo guarded = Swing(sword, pattern, mult, guard);
             Assert.That(guarded.Blocked, Is.True);
-            Assert.That(guarded.Amount, Is.EqualTo(unguarded.Amount * (1f - guard.Reduction)).Within(unguarded.Amount * 1e-4f), "resolved like any blocked hit");
+            Assert.That(guarded.GuardBroken, Is.False);
+            Assert.That(guarded.BlockReduction, Is.EqualTo(BladeGuardRules.HeldGuardReduction), "a holding guard reports the whole hit");
+            Assert.That(guarded.Amount, Is.EqualTo(0f), "FIX2: a held block, a riposte strike included, costs 0 HP");
+            Assert.That(guarded.IsValid, Is.True, "a held block is still a valid, resolved hit");
+
+            // a guard the strike breaks keeps only the authored reduction x the break scale (the 1.0 floor applies again)
+            CombatFlowTuning tuning = new CombatFlowTuning();
+            Dummy broken = new Dummy { Guarding = true, Resist = 0.01f, Reduction = 0.5f };
+            DamageInfo breaking = Swing(sword, pattern, mult, broken);
+            Assert.That(breaking.GuardBroken, Is.True);
+            float expected = Mathf.Max(1f, unguarded.Amount * (1f - broken.Reduction * Mathf.Clamp01(tuning.guardBreakReductionScale)));
+            Assert.That(breaking.Amount, Is.EqualTo(expected).Within(expected * 1e-4f), "a broken guard keeps the partial reduction");
+        }
+
+        [Test]
+        public void OnlyTheAshenSword_RipostesWithAnOffhandShield()
+        {
+            foreach (WeaponData w in All)
+            {
+                bool expected = w.weaponId == "ashen_short_sword";
+                Assert.That(w.riposteWithOffhandShield, Is.EqualTo(expected), w.weaponId);
+                if (w.riposteWithOffhandShield) Assert.That(w.canRiposte, Is.True, "the shield allowance only means something on a riposting weapon");
+            }
+
+            WeaponData sword = All.Find(w => w.weaponId == "ashen_short_sword");
+            Assert.That(RiposteRules.KitCanRiposte(sword.canRiposte, sword.IsShield, true, sword.IsRanged, sword.RiposteStrikeCount, sword.riposteWithOffhandShield), Is.True, "the warrior's sword and shield");
+        }
+
+        [Test]
+        public void AHeldBlock_TakesZero_ForEveryAuthoredFloorBeforeIt_AndStaysValid()
+        {
+            DamageInfo hit = new DamageInfo(1f, Vector3.zero, Vector3.forward, Vector3.zero, 1, EntityKind.Enemy, DamageType.Physical, false, false, 0f);
+            foreach (float amount in new[] { 1f, 3f, 26f, 500f })
+            {
+                DamageInfo h = new DamageInfo(amount, Vector3.zero, Vector3.forward, Vector3.zero, 1, EntityKind.Enemy, DamageType.Physical, false, false, 0f);
+                DamageInfo held = h.WithReduction(BladeGuardRules.HeldGuardReduction, out bool blocked);
+                Assert.That(blocked, Is.True);
+                Assert.That(held.Amount, Is.EqualTo(0f), "held, amount " + amount);
+                Assert.That(held.IsValid, Is.True);
+
+                DamageInfo partial = h.WithReduction(0.8f, out _);
+                Assert.That(partial.Amount, Is.EqualTo(Mathf.Max(1f, amount * 0.2f)).Within(1e-4f), "a partial reduction keeps the 1.0 floor");
+
+                DamageInfo brokenInfo = h.WithReduction(1f, out _, guardBroken: true);
+                Assert.That(brokenInfo.Amount, Is.GreaterThanOrEqualTo(1f), "a broken guard never takes a hit to zero");
+
+                Assert.That(DamageResolver.ApplyArmorRating(in held, 50f).Amount, Is.EqualTo(0f), "armor does not lift a held block to the floor");
+                Assert.That(DamageResolver.ApplyProjectileFalloff(in held, 0.5f).Amount, Is.EqualTo(0f), "nor does projectile falloff");
+            }
+
+            Assert.That(hit.IsValid, Is.True);
+            Assert.That(DamageInfo.Invalid.IsValid, Is.False);
+            DamageInfo zeroUnblocked = new DamageInfo(0f, Vector3.zero, Vector3.forward, Vector3.zero, 1, EntityKind.Enemy, DamageType.Physical, false, false, 0f);
+            Assert.That(zeroUnblocked.IsValid, Is.False, "zero damage is only valid as a held block");
         }
     }
 }

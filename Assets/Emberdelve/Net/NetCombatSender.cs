@@ -293,6 +293,7 @@ namespace Emberdelve.Net
             }
 
             if (_spec.IsMeleeDuelOnly) { if (_lower) MeleeAttacker(other); else MeleeDefender(other); }
+            else if (_spec.IsMeleeParryOnly) { if (_lower) MeleeAttacker(other); else ParryDefender(other); }
             else if (_spec.IsRangedShotOnly) { if (_lower) RangedShooter(other); else Stand(other); }
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
             else if (_spec.IsCombatAbuseOnly) { if (_lower) Stand(other); else Abuse(other); }
@@ -301,7 +302,7 @@ namespace Emberdelve.Net
 
         private string Role()
         {
-            if (_spec.IsMeleeDuelOnly) return _lower ? "attacker" : "defender";
+            if (_spec.IsMeleeDuelOnly || _spec.IsMeleeParryOnly) return _lower ? "attacker" : "defender";
             if (_spec.IsRangedShotOnly) return _lower ? "shooter" : "target";
             return _lower ? "victim" : "abuser";
         }
@@ -411,6 +412,41 @@ namespace Emberdelve.Net
                         if (_counter >= attempts.Length + 2) Finish("post-mortem-done");
                     }
 
+                    break;
+            }
+        }
+
+        // melee-parry, defender (FIX2): guards at once; after the first blocked hit was reported it releases the guard and presses it again
+        // (the riposte press, well inside the window), then waits for the two strikes to play out.
+        private void ParryDefender(NetPlayerRig other)
+        {
+            Drive(0f, YawTo(_owner.transform.position, other.transform.position), 0f);
+            int myId = _owner.ServerPlayerId.Value;
+            switch (_phase)
+            {
+                case 1:
+                    Enqueue(CombatIntentKind.GuardDown);
+                    NextPhase(2);
+                    break;
+                case 2:
+                    if (NetCombatFx.BlockedOn(myId) >= 1 || Time.unscaledTime - _phaseStartedAt >= _params.Hold)
+                    {
+                        Enqueue(CombatIntentKind.GuardUp);
+                        NextPhase(3);
+                        _nextAt = Time.unscaledTime + 0.15f;
+                    }
+
+                    break;
+                case 3:
+                    if (Time.unscaledTime >= _nextAt)
+                    {
+                        Enqueue(CombatIntentKind.GuardDown);
+                        NextPhase(4);
+                    }
+
+                    break;
+                case 4:
+                    if (Time.unscaledTime - _phaseStartedAt >= 3f) Finish("parry-done");
                     break;
             }
         }

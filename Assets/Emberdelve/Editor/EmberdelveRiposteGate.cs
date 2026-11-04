@@ -61,6 +61,7 @@ namespace Emberdelve.EditorTools
         private WeaponData _rapier;
         private WeaponData _maul;
         private WeaponData _shieldData;
+        private WeaponData _swordNoShield;   // the sword with the off-hand shield allowance off: a shield in hand then refuses the riposte
 
         // ------------------------------------------------------------------------------------------------
         // fakes
@@ -355,6 +356,10 @@ namespace Emberdelve.EditorTools
 
             Check(_sword.CanRiposteWeapon && _rapier.CanRiposteWeapon, "the sword and the rapier are flagged in data");
             Check(!_maul.CanRiposteWeapon && !_shieldData.CanRiposteWeapon, "the maul and the shield are not");
+            Check(_sword.riposteWithOffhandShield && !_rapier.riposteWithOffhandShield, "the sword (the warrior's, with a shield) is allowed a shield in the off hand in data");
+            _swordNoShield = UnityEngine.Object.Instantiate(_sword);
+            _swordNoShield.riposteWithOffhandShield = false;
+            _cleanup.Add(_swordNoShield);
             Check(_sword.RiposteStrikeCount == 2, "the sword's riposte is two strikes (data)");
             Check(_sword.riposteWindow > 0f && _sword.riposteDamageMultiplier > 1f && _sword.riposteStrikeGap >= 0f, "window, multiplier and gap are authored");
             Check(_sword.impactResist > _sword.impactPower * Mathf.Max(_sword.swingPatterns[0].impactPowerScale, _sword.swingPatterns[1].impactPowerScale),
@@ -375,6 +380,7 @@ namespace Emberdelve.EditorTools
             MeleeSwingStatus blocked = BlockedHit(d);
             MeleeSwingHit onB = HitOn(blocked, d.B);
             Check(CountOn(blocked, d.B) == 1 && onB.Blocked && !onB.GuardBroken, "the sword block held (blocked, guard not broken)");
+            Check(onB.Amount == 0f && d.B.Taken == 0f, "a successful block took ZERO HP (reported amount and health lost)");
             Check(_authority.Riposte.HasLiveParry(d.B.CombatId), "the server recorded a parry for the defender");
             Check(_authority.Riposte.ParriedAttacker(d.B.CombatId) == d.A.CombatId, "... against the attacker");
             Check(!_authority.Riposte.HasLiveParry(d.A.CombatId), "the attacker has no parry");
@@ -499,7 +505,7 @@ namespace Emberdelve.EditorTools
         private void NoParryKits()
         {
             Advance(5f);
-            Duel shield = NewDuel(_sword, _sword, true);
+            Duel shield = NewDuel(_sword, _swordNoShield, true);
             shield.B.Shield = true;
             int blocksBefore = _authority.Riposte.BlocksRecorded;
             MeleeSwingStatus status = BlockedHit(shield);
@@ -514,10 +520,20 @@ namespace Emberdelve.EditorTools
 
             // a shield picked up AFTER a sword block: refused by the kit rule
             Advance(5f);
-            Duel swapped = NewDuel(_sword, _sword, true);
+            Duel swapped = NewDuel(_sword, _swordNoShield, true);
             BlockedHit(swapped);
             swapped.B.Shield = true;
             Check(!BeginRiposte(swapped, out _, out _) && _authority.LastRiposteVerdict == RiposteVerdict.KitCannotRiposte, "a shield contributing to the guard at the press refuses the riposte");
+
+            // the warrior's sword and shield: the sword's data allows the shield, the block parries, the block took 0 HP
+            Advance(5f);
+            Duel both = NewDuel(_sword, _sword, true);
+            both.B.Shield = true;
+            int blocks = _authority.Riposte.BlocksRecorded;
+            MeleeSwingStatus bothStatus = BlockedHit(both);
+            Check(CountOn(bothStatus, both.B) == 1 && HitOn(bothStatus, both.B).Blocked && both.B.Taken == 0f, "sword and shield: the block held and took 0 HP");
+            Check(_authority.Riposte.BlocksRecorded == blocks + 1 && _authority.Riposte.HasLiveParry(both.B.CombatId), "sword and shield: the sword's block is a parry (data allows the shield)");
+            Check(BeginRiposte(both, out _, out int bothStrikes) && bothStrikes == _sword.RiposteStrikeCount, "sword and shield: the riposte is accepted");
         }
 
         private void HoldingGuard()
@@ -537,7 +553,7 @@ namespace Emberdelve.EditorTools
             MeleeSwingStatus s1 = RunToEnd(id1);
             MeleeSwingHit h1 = HitOn(s1, d.A);
             Check(CountOn(s1, d.A) == 1 && h1.Blocked && !h1.GuardBroken, "strike 1 is resolved like a blocked hit: the guard holds");
-            NearRel(base0 * mult * (1f - 0.5f), h1.Amount, "... with the guard's reduction on top of the multiplier");
+            NearRel(base0 * mult * (1f - BladeGuardRules.HeldGuardReduction), h1.Amount, "... the held guard takes all of it (0 HP), whatever the multiplier");
 
             RiposteResult r = RiposteResult.NotYet;
             int id2 = 0;
@@ -551,7 +567,7 @@ namespace Emberdelve.EditorTools
             MeleeSwingStatus s2 = RunToEnd(id2);
             MeleeSwingHit h2 = HitOn(s2, d.A);
             Check(CountOn(s2, d.A) == 1 && h2.Blocked && !h2.GuardBroken, "strike 2: the guard holds");
-            NearRel(base1 * mult * (1f - 0.5f), h2.Amount, "strike 2 damage = plain x multiplier x guard reduction");
+            NearRel(base1 * mult * (1f - BladeGuardRules.HeldGuardReduction), h2.Amount, "strike 2 into the holding guard: 0 HP");
             Check(_authority.GuardBreaksApplied == breaksBefore, "no guard break was applied");
             Check(!_authority.IsGuardStaggered(d.A.CombatId), "the attacker's guard is not staggered");
             Check(_authority.Riposte.BlocksRecorded > blocksOnA && _authority.Riposte.HasLiveParry(d.A.CombatId), "the attacker's own block of a riposte strike is a parry of its own");

@@ -1964,6 +1964,8 @@ namespace Emberdelve.EditorTools
                 Sword.riposteDamageMultiplier = 1.5f;
                 Sword.riposteSwingPatterns = new[] { 0, 1 };
                 Sword.riposteStrikeGap = 0.10f;
+                // FIX2: the warrior carries a shield in the off hand; the parry is the sword's, so the shield must not refuse it.
+                Sword.riposteWithOffhandShield = true;
                 EditorUtility.SetDirty(Sword);
             }
 

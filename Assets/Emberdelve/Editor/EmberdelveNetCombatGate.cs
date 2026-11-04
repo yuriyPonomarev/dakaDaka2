@@ -166,6 +166,8 @@ namespace Emberdelve.EditorTools
 
             int rc = MeleeSession(exe, runDir, logs, sword, tables, warriorHealth, interval, stop);
             if (rc != 0) return rc;
+            rc = ParrySession(exe, runDir, logs, sword, tables, interval, stop);
+            if (rc != 0) return rc;
             rc = RangedSession(exe, runDir, logs, bow, tables);
             if (rc != 0) return rc;
             rc = AbuseSession(exe, runDir, logs);
@@ -293,6 +295,84 @@ namespace Emberdelve.EditorTools
             return EndServer(s);
         }
 
+
+        // ============================================================================================
+        // 1b. parry -> riposte over the network (FIX2): the REAL host/server path, two player processes
+        // ============================================================================================
+
+        private static int ParrySession(string exe, string runDir, string logs, WeaponData sword, List<HitLocationTable> tables, double interval, double stop)
+        {
+            Debug.Log(Tag + " ---- session 1b: melee-parry");
+            sword = LiveWeapon(sword);
+            Session s = StartServer(exe, runDir, logs, "parry", "-ember-net-no-enemies -ember-net-party-size 1");
+            if (s == null) return 1;
+
+            string goA = Path.Combine(runDir, "parry_a.go"), goB = Path.Combine(runDir, "parry_b.go");
+            string quitA = Path.Combine(runDir, "parry_a.quit"), quitB = Path.Combine(runDir, "parry_b.quit");
+            foreach (string f in new[] { goA, goB, quitA, quitB }) if (File.Exists(f)) File.Delete(f);
+
+            string logA = Path.Combine(logs, "parry_a.log"), logB = Path.Combine(logs, "parry_b.log");
+            Process a = Launch(exe, logA, ClientArgs(s.Port, "par-a", "warrior", Q(quitA), "-ember-net-script melee-parry -ember-net-script-start-file " + Q(goA)) + " -ember-net-autoquit 500");
+            Match admA = WaitForRegex(s.ServerLog, AdmittedRegex("par-a", "warrior"), 90, s.Server);
+            Check(a != null && admA != null, "parry: server admitted A");
+            if (admA == null) return 1;
+            Process b = Launch(exe, logB, ClientArgs(s.Port, "par-b", "warrior", Q(quitB), "-ember-net-script melee-parry -ember-net-script-start-file " + Q(goB)) + " -ember-net-autoquit 500");
+            Match admB = WaitForRegex(s.ServerLog, AdmittedRegex("par-b", "warrior"), 90, s.Server);
+            Check(b != null && admB != null, "parry: server admitted B");
+            if (admB == null) return 1;
+            int idA = GI(admA, "id"), idB = GI(admB, "id");
+            string clientA = admA.Groups["client"].Value, clientB = admB.Groups["client"].Value;
+            Check(idA < idB, "parry: A (the attacker role) has the lower id");
+
+            Check(WaitForRegex(logA, @"\[client\] owner id=" + idA + @" views=2 owned=1", 60, a) != null, "parry: A settles with views=2");
+            Check(WaitForRegex(logB, @"\[client\] owner id=" + idB + @" views=2 owned=1", 60, b) != null, "parry: B settles with views=2");
+            Check(LogContains(logB, C + "combat sender started script=melee-parry realInput=False"), "parry: B's combat sender runs the melee-parry script");
+
+            File.WriteAllText(goA, "go stop=" + F(stop) + " interval=" + F(interval) + " presses=1");
+            File.WriteAllText(goB, "go hold=8");
+
+            int strikes = sword.RiposteStrikeCount;
+            Match last = WaitForRegex(s.ServerLog, @"combat-swing id=" + idB + @" .*riposte=" + strikes, 90, s.Server);
+            Check(last != null, "parry: the server started riposte strike " + strikes + " of B (the data's strike count)");
+            if (last == null) { DumpTail(s.ServerLog); }
+            Thread.Sleep(4000);
+
+            List<HitLine> hits = ParseHits(s.ServerLog);
+            List<HitLine> onB = hits.FindAll(h => h.Attacker == idA && h.Target == idB && h.Source == "Melee");
+            List<HitLine> onA = hits.FindAll(h => h.Attacker == idB && h.Target == idA && h.Source == "Melee");
+            Check(onB.Count == 1, "parry: A's single swing hit B once (got " + onB.Count + ")");
+            if (onB.Count == 1)
+            {
+                HitLine h = onB[0];
+                Check(h.Blocked == "True" && h.GuardBroken == "False", "parry: B's sword-and-shield block held (not broken)");
+                Check(h.Amount == 0.0, "parry: the held block took ZERO HP (reported amount " + F(h.Amount) + ")");
+                Check(Near(h.BlockReduction, Emberdelve.BladeDefense.BladeGuardRules.HeldGuardReduction), "parry: the reported reduction is the held-guard value");
+            }
+
+            double mult = Emberdelve.BladeDefense.RiposteRules.StrikeMultiplier(sword.riposteDamageMultiplier);
+            Check(onA.Count == strikes, "parry: B's riposte landed exactly the data's " + strikes + " strikes on A (got " + onA.Count + ")");
+            for (int i = 0; i < onA.Count; i++)
+            {
+                HitLine h = onA[i];
+                string why = MeleeMismatch(h, sword, tables, true);
+                Check(why == null && h.Blocked == "False", "parry: riposte hit " + (i + 1) + " (" + F(h.Amount) + ") matches the data-derived value" + (why != null ? " (" + why + ")" : ""));
+                Check(Near(h.Step, mult), "parry: riposte hit " + (i + 1) + " carries the data multiplier x" + F(mult) + " (step " + F(h.Step) + ")");
+            }
+
+            for (int k = 1; k <= strikes; k++)
+                Check(CountMatches(s.ServerLog, @"combat-swing id=" + idB + @" .*riposte=" + k + @"\b") == 1, "parry: exactly one server swing line with riposte=" + k);
+            Check(CountMatches(s.ServerLog, @"combat-swing id=" + idA + " ") == 1, "parry: A swung exactly once");
+            Check(CountMatches(s.ServerLog, @"combat-intent client=" + clientB + @" id=" + idB + @" kind=GuardDown seq=\d+ outcome=Accepted reason=None") >= 2, "parry: B's two guard presses were accepted");
+            Check(CountMatches(s.ServerLog, @"combat-intent client=" + clientB + @" id=" + idB + @" kind=GuardUp seq=\d+ outcome=Accepted reason=None") >= 1, "parry: B's release was accepted");
+            Check(CountMatches(s.ServerLog, @"combat reject=") == 0, "parry: honest traffic produced no combat reject");
+            Check(WaitForCount(logA, @"\[client\] server-swing id=" + idB + @" .*riposte=1", 1, 20, a), "parry: A (the target) was told riposte strike 1");
+
+            QuitClient(a, quitA, logA, "A");
+            QuitClient(b, quitB, logB, "B");
+            Check(LogContains(logA, "clientBlockedDamage=0") && LogContains(logB, "clientBlockedDamage=0"), "parry: the clients applied no damage themselves");
+            return EndServer(s);
+        }
+
         /// <summary>
         /// The WeaponData the gate resolved before the player build can be unloaded by the build (Unity fake-null on the weapon or on its
         /// SwingPatternData sub-assets), after which its pattern list enumerates as zero live patterns. The expected value is derived from the
@@ -315,7 +395,16 @@ namespace Emberdelve.EditorTools
             return best ?? held;
         }
 
-        private static string MeleeMismatch(HitLine h, WeaponData sword, List<HitLocationTable> tables)
+        /// <summary>The damage left after the defender's guard: a guard that HELD took the whole hit (0 HP, FIX2); everything else keeps the 1.0 floor.</summary>
+        private static double GuardedAmount(HitLine h, double pre)
+        {
+            if (h.Blocked != "True") return pre;
+            double reduction = Math.Min(1.0, Math.Max(0.0, h.BlockReduction));
+            if (h.GuardBroken != "True" && reduction >= 1.0) return 0.0;
+            return Math.Max(1.0, pre * (1.0 - reduction));
+        }
+
+        private static string MeleeMismatch(HitLine h, WeaponData sword, List<HitLocationTable> tables, bool riposteStrike = false)
         {
             sword = LiveWeapon(sword);
             if (h.Weapon != sword.weaponId) return "weapon " + h.Weapon + " != " + sword.weaponId;
@@ -328,6 +417,7 @@ namespace Emberdelve.EditorTools
 
             bool stepOk = !sword.HasComboChain && Math.Abs(h.Step - 1.0) < 0.0015;
             if (sword.HasComboChain) foreach (ComboStep cs in sword.comboSteps) if (Math.Abs(cs.damageMultiplier - h.Step) <= 0.0015) stepOk = true;
+            if (riposteStrike && Math.Abs(Emberdelve.BladeDefense.RiposteRules.StrikeMultiplier(sword.riposteDamageMultiplier) - h.Step) <= 0.0015) stepOk = true;
             if (!stepOk) return "combo step multiplier " + F(h.Step) + " is not in the weapon's chain";
 
             double baseDamage = sword.BoostedBaseDamage((float)h.Flat);
@@ -339,8 +429,8 @@ namespace Emberdelve.EditorTools
                 considered++;
                 // the resolver's own order: base x pattern x step x outgoing x location x zone (floor 1), then the guard (floor 1), then armor (floor 1)
                 double pre = Math.Max(1.0, baseDamage * p.damageMultiplier * h.Step * h.OutMult * h.LocMult * h.Zone);
-                double after = h.Blocked == "True" ? Math.Max(1.0, pre * (1.0 - Math.Min(1.0, Math.Max(0.0, h.BlockReduction)))) : pre;
-                double final = h.Armor > 0.0 ? Math.Max(1.0, after * (100.0 / (100.0 + h.Armor))) : after;
+                double after = GuardedAmount(h, pre);
+                double final = h.Armor > 0.0 && after > 0.0 ? Math.Max(1.0, after * (100.0 / (100.0 + h.Armor))) : after;
                 double tolerance = Math.Max(0.1, 0.01 * h.Amount);
                 if (Math.Abs(final - h.Amount) <= tolerance) return null;
                 tried.Append(" [pattern ").Append(p.patternId).Append(" dmgMult ").Append(F(p.damageMultiplier)).Append(" -> pre ").Append(F(pre))
@@ -489,7 +579,7 @@ namespace Emberdelve.EditorTools
 
             double charged = bow.BoostedBaseDamage((float)h.Flat) * Mathf.Lerp(bow.minChargeDamageScale, 1f, (float)h.Charge);
             double pre = Math.Max(1.0, charged * h.OutMult * h.LocMult);
-            double after = h.Blocked == "True" ? Math.Max(1.0, pre * (1.0 - Math.Min(1.0, Math.Max(0.0, h.BlockReduction)))) : pre;
+            double after = GuardedAmount(h, pre);
             double armored = h.Armor > 0.0 ? Math.Max(1.0, after * (100.0 / (100.0 + h.Armor))) : after;
             double scale = h.AirScale;
             double final;

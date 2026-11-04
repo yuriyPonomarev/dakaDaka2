@@ -368,7 +368,7 @@ namespace Emberdelve.EditorTools
                     "blade: the sword's " + p.patternId + " (impact " + swordImpact.ToString("F2", CultureInfo.InvariantCulture) + ") does not break the sword's own guard (resist " + blade.ImpactResist.ToString("F2", CultureInfo.InvariantCulture) + ")");
                 GuardVerdict swordHit = BladeGuardRules.Resolve(InputFor(blade, _sword, p, 0f, BladeHeight.Mid, BladeTrajectories.HeightOf(p.kind, _flow)));
                 Check(swordHit.Mitigated && !swordHit.Broken, "blade: a sword hit by " + p.patternId + " is held, not broken (" + swordHit.Outcome + ")");
-                Near(blade.BlockReduction, swordHit.Reduction, 1e-5f, "blade: " + p.patternId + " is held with the full kit reduction");
+                Near(BladeGuardRules.HeldGuardReduction, swordHit.Reduction, 1e-5f, "blade: " + p.patternId + " is held: the whole hit is taken off");
             }
 
             bool anyHeavy = false;
@@ -394,7 +394,7 @@ namespace Emberdelve.EditorTools
                 // front: inside the arc the guard holds, with the kit's own reduction
                 GuardVerdict ahead = BladeGuardRules.Resolve(InputFor(kit, _sword, slash, 0f, BladeHeight.Mid, slashBand));
                 Check(ahead.Mitigated, who + ": a frontal slash against a mid guard is held (" + ahead.Outcome + ")");
-                Near(kit.BlockReduction, ahead.Reduction, 1e-5f, who + ": held with the kit's reduction");
+                Near(BladeGuardRules.HeldGuardReduction, ahead.Reduction, 1e-5f, who + ": held, the whole hit is taken off");
 
                 GuardVerdict edge = BladeGuardRules.Resolve(InputFor(kit, _sword, slash, half, BladeHeight.Mid, slashBand));
                 Check(edge.Mitigated, who + ": a hit exactly at the arc edge (" + half.ToString("F1", CultureInfo.InvariantCulture) + " deg) is held");
@@ -633,7 +633,7 @@ namespace Emberdelve.EditorTools
             shieldDummy.GuardHeight = BladeHeight.Mid;
             DamageInfo blocked = Swing(_sword, over, front, shieldDummy);
             Check(blocked.Blocked && !blocked.GuardBroken, "front, mid guard: the overhead is blocked (" + shieldDummy.Last + ")");
-            Near(Mathf.Max(1f, unguarded * (1f - shieldKit.BlockReduction)), blocked.Amount, 0.01f, "blocked damage = unguarded x (1 - kit reduction)");
+            Near(unguarded * (1f - BladeGuardRules.HeldGuardReduction), blocked.Amount, 0.01f, "a held block takes 0 HP: unguarded x (1 - held reduction)");
 
             // back: full damage
             DamageInfo behind = Swing(_sword, over, back, shieldDummy);
@@ -660,8 +660,10 @@ namespace Emberdelve.EditorTools
             DamageInfo maulGuarded = Swing(_maul, maulPattern, front, shieldDummy);
             bool expectBreak = BladeGuardRules.IsGuardBroken(_maul.impactPower * maulPattern.impactPowerScale, shieldKit.ImpactResist);
             Check(maulGuarded.GuardBroken == expectBreak, "the maul breaks the guard exactly when its impact power reaches the resist (" + expectBreak + ")");
-            float expectedReduction = expectBreak ? shieldKit.BlockReduction * Mathf.Clamp01(_flow.guardBreakReductionScale) : shieldKit.BlockReduction;
-            Near(Mathf.Max(1f, maulBare.Amount * (1f - expectedReduction)), maulGuarded.Amount, 0.01f, "maul damage = unguarded x (1 - reduction x break scale)");
+            float expectedAmount = expectBreak
+                ? Mathf.Max(1f, maulBare.Amount * (1f - shieldKit.BlockReduction * Mathf.Clamp01(_flow.guardBreakReductionScale)))
+                : maulBare.Amount * (1f - BladeGuardRules.HeldGuardReduction);
+            Near(expectedAmount, maulGuarded.Amount, 0.01f, "maul damage: a broken guard keeps the authored reduction x break scale, a held one takes 0");
         }
 
         // ---------------------------------------------------------------------------------------------

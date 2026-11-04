@@ -115,6 +115,8 @@ namespace Emberdelve.Data
         [Header("Riposte (U3C3)")]
         [Tooltip("Sword-class marker: a successful block with this weapon (never with a shield) opens a riposte window. Authored data on the definition; the runtime never looks at a weapon id or name to decide it.")]
         public bool canRiposte = false;
+        [Tooltip("FIX2: the riposte still works while a shield is carried in the off hand (the warrior's sword and shield). The parry is this weapon's; a shield alone never parries.")]
+        public bool riposteWithOffhandShield = false;
         [Tooltip("Seconds after a successful block within which pressing block again starts the riposte (server clock, inclusive).")]
         [Range(0.1f, 3f)] public float riposteWindow = 1.0f;
         [Tooltip("Damage multiplier of every riposte strike. Impact power is NOT multiplied, so a riposte never breaks a holding guard that the normal swing would not.")]

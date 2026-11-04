@@ -90,12 +90,15 @@ namespace Emberdelve.Core
         public static DamageInfo Invalid => new DamageInfo(0f, Vector3.zero, Vector3.zero, Vector3.zero,
             -1, EntityKind.Neutral, DamageType.Physical, false, false, 0f);
 
-        public bool IsValid => Amount > 0f && SourceCombatId >= 0;
+        /// <summary>A hit is valid with a positive amount, or with exactly zero when a guard that HELD took all of it (FIX2: a held block costs 0 HP).</summary>
+        public bool IsValid => SourceCombatId >= 0 && (Amount > 0f || (Blocked && !GuardBroken && Amount == 0f));
 
         public DamageInfo WithReduction(float reduction, out bool blocked, bool guardBroken = false)
         {
             blocked = reduction > 0f;
-            return new DamageInfo(Mathf.Max(1f, Amount * (1f - Mathf.Clamp01(reduction))), Point, Direction,
+            // FIX2: a guard that holds (not broken) with a full reduction takes the whole hit: 0 HP, not the 1.0 floor every other hit keeps.
+            bool held = blocked && !guardBroken && Mathf.Clamp01(reduction) >= 1f;
+            return new DamageInfo(held ? 0f : Mathf.Max(1f, Amount * (1f - Mathf.Clamp01(reduction))), Point, Direction,
                 SourcePosition, SourceCombatId, SourceKind, Type, blocked, Headshot, Mathf.Clamp01(reduction), Location,
                 ImpactPower, guardBroken && blocked, RangedProjectile, GuardBladeContact, AttackHeight);
         }

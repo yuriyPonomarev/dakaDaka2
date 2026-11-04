@@ -273,9 +273,9 @@ namespace Emberdelve.BladeDefense
             return authored;
         }
 
-        /// <summary>A kit may riposte when its weapon is flagged (data), it is not a shield and no shield contributes to the guard.</summary>
-        public static bool KitCanRiposte(bool weaponFlagged, bool weaponIsShield, bool guardHasShield, bool weaponIsRanged, int strikeCount) =>
-            weaponFlagged && !weaponIsShield && !guardHasShield && !weaponIsRanged && strikeCount > 0;
+        /// <summary>A kit may riposte when its weapon is flagged (data), is not a shield or ranged, and no shield contributes to the guard unless the weapon's data allows an off-hand shield (FIX2: the warrior's sword and shield; the parry is the sword's, a shield alone never parries).</summary>
+        public static bool KitCanRiposte(bool weaponFlagged, bool weaponIsShield, bool guardHasShield, bool weaponIsRanged, int strikeCount, bool offhandShieldAllowed = false) =>
+            weaponFlagged && !weaponIsShield && (!guardHasShield || offhandShieldAllowed) && !weaponIsRanged && strikeCount > 0;
 
         /// <summary>
         /// A block counts as a parry when the guard HELD (blocked, not broken) against a melee hit and the kit can riposte. A broken
