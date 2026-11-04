@@ -85,13 +85,16 @@ namespace Emberdelve.EditorTools
         {
             EmberdelveMaterials.BuildAll();
             BuildWeapons();
+            BuildSwordFamilyWeapons();
             BuildItems();
+            BuildSwordFamilyItems();
             ApplyFeetSlot();
             BuildSkills();
             BuildClasses();
             ApplyDefenseKit();
             ApplySwingPatterns();
             ApplyCombatFlow();
+            ApplySwordFamily();
             ApplyProjectileBallistics();
             ApplySkillKit();
             ApplyAttributeDefinitions();
@@ -101,6 +104,7 @@ namespace Emberdelve.EditorTools
             BuildAffixCatalog();
             BuildItemCatalog();
             BuildLootTables();
+            ApplySwordFamilyLoot();
             ApplyLootRarityProfiles();
             BuildJewelerLoot();
             BuildEnemies();
@@ -1348,9 +1352,11 @@ namespace Emberdelve.EditorTools
             ApplyTableProfile(EmberLoot, Affixes,
                 (Cuirass, AffixRarity.Uncommon),
                 (FangBlade, AffixRarity.Uncommon),
+                (ArmingSwordItem, AffixRarity.Uncommon),
                 (EmberMantle, AffixRarity.Uncommon));
             ApplyTableProfile(SealedLoot, Affixes,
                 (ShieldItem, AffixRarity.Rare),
+                (TwoHandedSwordItem, AffixRarity.Rare),
                 (EmberMantle, AffixRarity.Rare));
 
             AssetDatabase.SaveAssets();
@@ -2190,6 +2196,210 @@ namespace Emberdelve.EditorTools
 
             weapon.swingPatterns = patterns;
             EditorUtility.SetDirty(weapon);
+        }
+
+        // ---------------------------------------------------------------------------------------------------
+        // U5B - the arming sword (one-handed) and the two-handed sword. All numbers are data; Docs/Tasks/U5B.md explains them.
+        // ---------------------------------------------------------------------------------------------------
+
+        public static WeaponData ArmingSword;
+        public static WeaponData TwoHandedSword;
+        public static ItemData ArmingSwordItem;
+        public static ItemData TwoHandedSwordItem;
+        public static SwingPatternData ArmingThrust;
+        public static SwingPatternData GreatSlashLeftToRight;
+        public static SwingPatternData GreatSlashRightToLeft;
+        public static SwingPatternData GreatOverhead;
+        public static SwingPatternData GreatThrust;
+
+        private static void BuildSwordFamilyWeapons()
+        {
+            ArmingSword = LoadOrCreate<WeaponData>(EmberdelvePaths.Data + "/Weapon_ArmingSword.asset", w =>
+            {
+                w.weaponId = "arming_sword";
+                w.displayName = "Arming Sword";
+                w.kind = WeaponKind.Melee;
+                w.damageType = DamageType.Physical;
+                w.arcAngle = 120f;
+                w.hitSphereRadius = 0.6f;
+                w.shaftMaterial = EmberdelveMaterials.Blade;
+                w.edgeMaterial = EmberdelveMaterials.Blade;
+                w.gripMaterial = EmberdelveMaterials.Grip;
+            });
+
+            TwoHandedSword = LoadOrCreate<WeaponData>(EmberdelvePaths.Data + "/Weapon_TwoHandedSword.asset", w =>
+            {
+                w.weaponId = "two_handed_sword";
+                w.displayName = "Two-Handed Sword";
+                w.kind = WeaponKind.Melee;
+                w.damageType = DamageType.Physical;
+                w.arcAngle = 150f;
+                w.hitSphereRadius = 0.65f;
+                w.shaftMaterial = EmberdelveMaterials.Blade;
+                w.edgeMaterial = EmberdelveMaterials.Blade;
+                w.gripMaterial = EmberdelveMaterials.Grip;
+            });
+        }
+
+        private static void BuildSwordFamilyItems()
+        {
+            ArmingSwordItem = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_ArmingSwordItem.asset", i =>
+            {
+                i.itemId = "arming_sword";
+                i.displayName = "Arming Sword";
+                i.description = "A plain one-handed sword, a little longer than the ashen short sword. Fits a shield in the off hand and parries. Right click to hold it in the main hand.";
+                i.kind = ItemKind.Weapon;
+                i.value = 50;
+                i.maxStack = 1;
+                i.iconColor = new Color(0.7f, 0.72f, 0.76f);
+                i.worldMaterial = EmberdelveMaterials.Blade;
+                i.worldSize = new Vector3(0.24f, 1.0f, 0.24f);
+                i.gridFootprint = new Vector2Int(1, 3);
+                i.equipSlot = EquipmentSlot.Weapon;
+                i.grantedWeapon = ArmingSword;
+            });
+
+            TwoHandedSwordItem = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_TwoHandedSwordItem.asset", i =>
+            {
+                i.itemId = "two_handed_sword";
+                i.displayName = "Two-Handed Sword";
+                i.description = "A long, heavy sword held in both hands (nothing in the off hand). Slow, wide and hard hitting; a held guard holds against sword blows. Right click to hold it.";
+                i.kind = ItemKind.Weapon;
+                i.value = 95;
+                i.maxStack = 1;
+                i.iconColor = new Color(0.66f, 0.68f, 0.74f);
+                i.worldMaterial = EmberdelveMaterials.Blade;
+                i.worldSize = new Vector3(0.28f, 1.3f, 0.28f);
+                i.gridFootprint = new Vector2Int(1, 4);
+                i.equipSlot = EquipmentSlot.Weapon;
+                i.grantedWeapon = TwoHandedSword;
+            });
+        }
+
+        /// <summary>Wide arc of the two-handed slash: radius 0.95 m around the shoulder from -70 to +70 degrees (the short sword's is 0.85 m, -55 to +55).</summary>
+        private static SwingKey[] WideArcKeys(bool leftToRight)
+        {
+            SwingKey[] keys = new SwingKey[5];
+            for (int i = 0; i < 5; i++)
+            {
+                float yaw = leftToRight ? -70f + 35f * i : 70f - 35f * i;
+                float r = yaw * Mathf.Deg2Rad;
+                keys[i] = new SwingKey(i / 4f, new Vector3(0.2f + 0.95f * Mathf.Sin(r), -0.3f, 0.1f + 0.95f * Mathf.Cos(r)), yaw, -4f);
+            }
+            return keys;
+        }
+
+        private static void ApplySwordFamily()
+        {
+            if (Sword == null) return;
+
+            if (ArmingSword != null)
+            {
+                // Standard speed (the short sword's timing, and its three slash patterns are shared), 0.15 m more reach, +2 damage.
+                ArmingSword.baseDamage = 28f;
+                ArmingSword.windupTime = 0.26f;
+                ArmingSword.activeWindow = 0.30f;
+                ArmingSword.recoveryTime = 0.32f;
+                ArmingSword.cooldown = 0.98f;
+                ArmingSword.reach = 2.45f;
+                ArmingSword.twoHanded = false;
+
+                ArmingThrust = AuthorPattern("Pattern_ArmingThrust", "arming_thrust", SwingKind.Thrust, ArmingSword,
+                    0.75f, 1.08f, 0.10f, 0.020f, 2, 1f,
+                    new SwingKey(0f, new Vector3(0.20f, -0.22f, 0.30f), -6f, -5f),
+                    new SwingKey(1f, new Vector3(0.20f, -0.22f, 1.10f), -6f, -5f));
+                SetPatternTiming(ArmingThrust, 0.22f, 0.14f, 0.30f);
+                AssignPatterns(ArmingSword, SwordSlashLeftToRight, SwordSlashRightToLeft, SwordOverhead, ArmingThrust);
+
+                // slash / slash / thrust / overhead finisher
+                ArmingSword.comboSteps = new[]
+                {
+                    new ComboStep(0, 1.00f, 1f, 1f),
+                    new ComboStep(1, 1.05f, 0.85f, 1f),
+                    new ComboStep(3, 1.10f, 0.90f, 0.9f),
+                    new ComboStep(2, 1.15f, 1f, 1f)
+                };
+                ArmingSword.comboWindow = 0.70f;
+                ArmingSword.comboFinisherRecovery = 0.38f;
+                ArmingSword.impactZones = new[] { new ImpactZone(0f, 0.7f), new ImpactZone(0.35f, 0.9f), new ImpactZone(0.70f, 1f) };
+                ArmingSword.hitSlowMultiplier = 0.9f;
+                ArmingSword.hitSlowDuration = 0.6f;
+                ArmingSword.heldMoveSpeedPenalty = 11f;
+                ArmingSword.impactPower = 11f;      // overhead 11 x 1.2 = 13.2, below the sword guard's resist (15)
+                ArmingSword.impactResist = 16f;
+                ArmingSword.canRiposte = true;
+                ArmingSword.riposteWindow = 1.0f;
+                ArmingSword.riposteDamageMultiplier = 1.5f;
+                ArmingSword.riposteSwingPatterns = new[] { 3, 1 };   // thrust, then the right-to-left slash
+                ArmingSword.riposteStrikeGap = 0.10f;
+                ArmingSword.riposteWithOffhandShield = true;
+                SetDefense(ArmingSword, DefenseRole.Weapon, DefenseCapability.Block, -1f, -1f, false);
+                SetFinesse(ArmingSword, false);
+                EditorUtility.SetDirty(ArmingSword);
+            }
+
+            if (TwoHandedSword != null)
+            {
+                TwoHandedSword.baseDamage = 40f;
+                TwoHandedSword.windupTime = 0.42f;
+                TwoHandedSword.activeWindow = 0.34f;
+                TwoHandedSword.recoveryTime = 0.50f;
+                TwoHandedSword.cooldown = 1.45f;
+                TwoHandedSword.reach = 2.9f;
+
+                GreatSlashLeftToRight = AuthorPattern("Pattern_GreatSlashLR", "great_slash_lr", SwingKind.HorizontalLeftToRight, TwoHandedSword,
+                    0.79f, 0.94f, 0.15f, 0.020f, 3, 1f, WideArcKeys(true));
+                GreatSlashRightToLeft = AuthorPattern("Pattern_GreatSlashRL", "great_slash_rl", SwingKind.HorizontalRightToLeft, TwoHandedSword,
+                    0.79f, 0.94f, 0.15f, 0.020f, 3, 1f, WideArcKeys(false));
+                GreatOverhead = AuthorPattern("Pattern_GreatOverhead", "great_overhead", SwingKind.Overhead, TwoHandedSword,
+                    0.79f, 0.94f, 0.15f, 0.016f, 2, 1f,
+                    new SwingKey(0f, new Vector3(0.15f, 0.60f, 0.35f), 2f, -85f),
+                    new SwingKey(0.5f, new Vector3(0.15f, 0.15f, 0.90f), 2f, -25f),
+                    new SwingKey(1f, new Vector3(0.15f, -0.30f, 1.00f), 2f, 40f));
+                GreatThrust = AuthorPattern("Pattern_GreatThrust", "great_thrust", SwingKind.Thrust, TwoHandedSword,
+                    0.74f, 1.08f, 0.10f, 0.020f, 2, 1f,
+                    new SwingKey(0f, new Vector3(0.20f, -0.22f, 0.30f), -6f, -5f),
+                    new SwingKey(1f, new Vector3(0.20f, -0.22f, 1.20f), -6f, -5f));
+                SetPatternTiming(GreatSlashLeftToRight, 0.42f, 0.34f, 0.50f);
+                SetPatternTiming(GreatSlashRightToLeft, 0.42f, 0.34f, 0.50f);
+                SetPatternTiming(GreatOverhead, 0.55f, 0.36f, 0.60f);
+                SetPatternTiming(GreatThrust, 0.34f, 0.20f, 0.45f);
+                AssignPatterns(TwoHandedSword, GreatSlashLeftToRight, GreatSlashRightToLeft, GreatOverhead, GreatThrust);
+
+                // slash / slash / overhead finisher; the follow-up slash winds up a little quicker
+                TwoHandedSword.comboSteps = new[]
+                {
+                    new ComboStep(0, 1.00f, 1f, 1f),
+                    new ComboStep(1, 1.05f, 0.85f, 1f),
+                    new ComboStep(2, 1.15f, 1f, 1f)
+                };
+                TwoHandedSword.comboWindow = 0.80f;
+                TwoHandedSword.comboFinisherRecovery = 0.50f;
+                TwoHandedSword.impactZones = new[] { new ImpactZone(0f, 0.75f), new ImpactZone(0.35f, 0.95f), new ImpactZone(0.70f, 1.05f) };
+                TwoHandedSword.hitSlowMultiplier = 0.85f;
+                TwoHandedSword.hitSlowDuration = 0.9f;
+                TwoHandedSword.heldMoveSpeedPenalty = 20f;
+                TwoHandedSword.impactPower = 12f;     // overhead 12 x 1.2 = 14.4: still below the sword guard (15) and the shield (20), above the short sword's 10
+                TwoHandedSword.impactResist = 22f;    // its own guard holds against everything except the maul (30)
+                TwoHandedSword.canRiposte = true;
+                TwoHandedSword.riposteWindow = 1.0f;
+                TwoHandedSword.riposteDamageMultiplier = 1.5f;
+                TwoHandedSword.riposteSwingPatterns = new[] { 3, 0 };   // thrust, then the left-to-right slash
+                TwoHandedSword.riposteStrikeGap = 0.12f;
+                TwoHandedSword.riposteWithOffhandShield = false;
+                SetDefense(TwoHandedSword, DefenseRole.Weapon, DefenseCapability.Block, -1f, -1f, true);
+                SetFinesse(TwoHandedSword, false);
+                EditorUtility.SetDirty(TwoHandedSword);
+            }
+
+            AssetDatabase.SaveAssets();
+        }
+
+        private static void ApplySwordFamilyLoot()
+        {
+            EnsureEntry(EmberLoot, ArmingSwordItem, 2);
+            EnsureEntry(SealedLoot, TwoHandedSwordItem, 2);
+            AssetDatabase.SaveAssets();
         }
 
         private static void BuildConfig()

@@ -29,6 +29,14 @@ MonoBehaviour:
     prefab: {fileID: 7798084207747093549, guid: cee3474336fd8da4a8365cfccada88f5, type: 3}
     length: 0.8
     sourceId: kite_shield
+  - weaponId: arming_sword
+    prefab: {fileID: 2829247557748352499, guid: 4f4318ad25df4054f8df0ca09024e55e, type: 3}
+    length: 0.95
+    sourceId: knights_sword
+  - weaponId: two_handed_sword
+    prefab: {fileID: 3105251061381523984, guid: 05d40d018dab5da419fb761d5fa85b41, type: 3}
+    length: 1.25
+    sourceId: long_sword
   unmapped:
   - weaponId: ember_crossbow
     reason: 'ranged: needs draw / reload arm animation (not in the Quaternius libraries);
@@ -36,11 +44,11 @@ MonoBehaviour:
   - weaponId: hollow_bow
     reason: 'ranged: needs draw arm animation (not in the Quaternius libraries);
       keeps the blockout bow and shows no arms'
-  - weaponId: hollow_claw
-    reason: enemy-only weapon, there is no claw model; keeps its current visual
   - weaponId: unarmed_fists
     reason: 'bare hands: no model; the first-person arms show empty hands and the
       swing is the fist punch'
+  - weaponId: hollow_claw
+    reason: enemy-only weapon, there is no claw model; keeps its current visual
   spareModels:
   - ornate_medieval_mace
   - ornate_war_hammer

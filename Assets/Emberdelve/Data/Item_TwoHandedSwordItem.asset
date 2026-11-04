@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a69090fdcbb9784688d25194e1e5755, type: 3}
+  m_Name: Item_TwoHandedSwordItem
+  m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.ItemData
+  itemId: two_handed_sword
+  displayName: Two-Handed Sword
+  description: A long, heavy sword held in both hands (nothing in the off hand).
+    Slow, wide and hard hitting; a held guard holds against sword blows. Right click
+    to hold it.
+  gridFootprint: {x: 1, y: 4}
+  maxStack: 1
+  equipSlot: 1
+  grantedWeapon: {fileID: 11400000, guid: 79b5be3d38541d94db32c28d1a44d49d, type: 2}
+  statModifiers: []
+  attributeBonuses: []
+  kind: 4
+  value: 95
+  healAmount: 0
+  ammoGrant: 0
+  moveSpeedPenalty: 0
+  useChannelSeconds: 0
+  healOverTimeSeconds: 0
+  iconColor: {r: 0.66, g: 0.68, b: 0.74, a: 1}
+  worldMaterial: {fileID: 2100000, guid: f4115d57bd8d322489a672ab46a79b43, type: 2}
+  worldSize: {x: 0.28, y: 1.3, z: 0.28}

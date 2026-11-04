@@ -135,6 +135,9 @@ namespace Emberdelve.Player
         /// <summary>Scale applied to the main hand model so that its blade matches the damage segment (clamped).</summary>
         public float WeaponScale { get; private set; } = 1f;
 
+        /// <summary>U5B: the second hand of a two-handed weapon sits this far (metres at model scale 1) behind the right grip, along the weapon's own long axis.</summary>
+        public const float SecondGripOffset = 0.1f;
+
         /// <summary>
         /// Creates the arms for the local player under <paramref name="anchor"/> (the weapon anchor of the look pivot), or returns null
         /// when this rig is not the local, camera-carrying player (clones for other players, servers and tools get none) or the
@@ -410,7 +413,8 @@ namespace Emberdelve.Player
             }
             else if (_mainData != null && _mainData.twoHanded && gripRight != null)
             {
-                Vector3 second = gripRight.position - gripRight.up * (0.3f * WeaponScale);
+                Vector3 axis = _mainHand != null ? _mainHand.transform.up : gripRight.up;
+                Vector3 second = gripRight.position - axis * (SecondGripOffset * WeaponScale);
                 SolveArm(_upperL, _lowerL, _handL, _handL, second, _handL.rotation, frame.rotation * LeftPole);
             }
         }

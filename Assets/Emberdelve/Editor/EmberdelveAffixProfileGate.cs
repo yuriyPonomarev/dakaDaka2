@@ -94,7 +94,9 @@ namespace Emberdelve.EditorTools
             // U2B11 rewrite: the original 4/4/3 entries are preserved IN ORDER (asserted entry by entry below, by index) and
             // each table gained exactly one appended cloak entry, so the counts are now 5/5/4. The previous expectation
             // 4/4/3 pre-dated the cloak slot and only counted the pre-cloak tables; coverage is kept and extended.
-            Check(supply.entries.Length == 5 && ember.entries.Length == 5 && seal.entries.Length == 4, "entry counts: original 4/4/3 plus one appended cloak each");
+            // U5B: the ember and sealed tables each gained one more appended entry after the cloak (arming sword / two-handed sword), so 5/6/5.
+            Check(supply.entries.Length == 5 && ember.entries.Length == 6 && seal.entries.Length == 5, "entry counts: original 4/4/3 plus one appended cloak each, plus the U5B sword on ember and sealed");
+            Check(ember.entries[5].item == EmberdelveAssetLibrary.ArmingSwordItem && seal.entries[4].item == EmberdelveAssetLibrary.TwoHandedSwordItem, "U5B sword entries appended after the cloak entries");
             Check(supply.entries[4].item == EmberdelveAssetLibrary.AshenCloak && supply.entries[4].affixRarity == AffixRarity.Common, "supply cloak entry appended Common");
             Check(ember.entries[4].item == EmberdelveAssetLibrary.EmberMantle && ember.entries[4].affixRarity == AffixRarity.Uncommon, "ember cloak entry appended Uncommon");
             Check(seal.entries[3].item == EmberdelveAssetLibrary.EmberMantle && seal.entries[3].affixRarity == AffixRarity.Rare, "sealed cloak entry appended Rare");

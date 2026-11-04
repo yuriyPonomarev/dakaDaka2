@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a69090fdcbb9784688d25194e1e5755, type: 3}
+  m_Name: Item_ArmingSwordItem
+  m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.ItemData
+  itemId: arming_sword
+  displayName: Arming Sword
+  description: A plain one-handed sword, a little longer than the ashen short sword.
+    Fits a shield in the off hand and parries. Right click to hold it in the main
+    hand.
+  gridFootprint: {x: 1, y: 3}
+  maxStack: 1
+  equipSlot: 1
+  grantedWeapon: {fileID: 11400000, guid: 9c3ea2ad6732ad54591c6403afacf894, type: 2}
+  statModifiers: []
+  attributeBonuses: []
+  kind: 4
+  value: 50
+  healAmount: 0
+  ammoGrant: 0
+  moveSpeedPenalty: 0
+  useChannelSeconds: 0
+  healOverTimeSeconds: 0
+  iconColor: {r: 0.7, g: 0.72, b: 0.76, a: 1}
+  worldMaterial: {fileID: 2100000, guid: f4115d57bd8d322489a672ab46a79b43, type: 2}
+  worldSize: {x: 0.24, y: 1, z: 0.24}

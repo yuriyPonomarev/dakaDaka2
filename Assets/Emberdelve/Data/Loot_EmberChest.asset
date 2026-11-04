@@ -44,6 +44,12 @@ MonoBehaviour:
     weight: 2
     maxCopies: 1
     affixRarity: 1
+  - item: {fileID: 11400000, guid: e16de89f38fbe8546a1d39593d2ffc65, type: 2}
+    minAmount: 1
+    maxAmount: 1
+    weight: 2
+    maxCopies: 1
+    affixRarity: 1
   affixCatalog:
   - {fileID: 11400000, guid: bde103bf544903d44ba67efe9563e3b1, type: 2}
   - {fileID: 11400000, guid: 20de4a56a742eff4d8d71828dbf14903, type: 2}
@@ -58,5 +64,7 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 31aa064f69c86f341980114c8c9cb52c, type: 2}
   - {fileID: 11400000, guid: 3579720142dff794ea198e20f860c7af, type: 2}
   - {fileID: 11400000, guid: 3351b2f852c7b3f44bc5be8c30396cd9, type: 2}
+  rarityLadder: []
   maxRolls: 4
   guaranteeFirstEntry: 1
+  nothingWeight: 0

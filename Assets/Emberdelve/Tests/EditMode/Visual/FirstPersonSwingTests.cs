@@ -310,6 +310,34 @@ namespace Emberdelve.Tests.Visual
         }
 
         [Test]
+        public void TwoHandedWeapon_IsHeldWithBothHands_LeftHandOnTheSecondGrip_EverywhereInTheSwing()
+        {
+            int checkedWeapons = 0;
+            foreach (string guid in AssetDatabase.FindAssets("t:WeaponData"))
+            {
+                WeaponData weapon = AssetDatabase.LoadAssetAtPath<WeaponData>(AssetDatabase.GUIDToAssetPath(guid));
+                if (weapon == null || weapon.Hands != HandUse.TwoHanded || weapon.IsRanged || !weapon.UsesSweptMelee) continue;
+                checkedWeapons++;
+                using (Scene scene = Scene.Create(weapon.weaponId, ShieldId))
+                {
+                    Assert.That(scene.Driver.WeaponScale, Is.GreaterThan(0f));
+                    float reach = FirstPersonArmsDriver.SecondGripOffset * scene.Driver.WeaponScale + 0.05f;
+                    foreach (SwingPatternData pattern in weapon.swingPatterns)
+                    {
+                        for (int i = 0; i <= 4; i++)
+                        {
+                            scene.Pose(pattern, pattern.Timing.Windup + pattern.Timing.Active * (i / 4f), 0f);
+                            float apart = Vector3.Distance(scene.Driver.GripLeft.position, scene.Driver.GripRight.position);
+                            Assert.That(apart, Is.LessThan(reach + 0.35f), weapon.weaponId + " " + pattern.name + " step " + i + ": the left hand is on the weapon, not at the side");
+                        }
+                    }
+                }
+            }
+
+            Assert.That(checkedWeapons, Is.GreaterThanOrEqualTo(1), "a two-handed melee weapon ships");
+        }
+
+        [Test]
         public void ModelScale_MatchesTheDamageSegmentWithinTheClamp()
         {
             WeaponViewModelSet set = WeaponViewModelSet.Load();

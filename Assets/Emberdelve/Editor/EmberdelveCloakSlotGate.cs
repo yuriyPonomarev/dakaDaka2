@@ -147,7 +147,7 @@ namespace Emberdelve.EditorTools
             LootTable sealedTable = AssetDatabase.LoadAssetAtPath<LootTable>(EmberdelvePaths.Data + "/Loot_SealedChest.asset");
             Check(CountEntries(supply, ashen) == 1 && CountEntries(ember, mantle) == 1 && CountEntries(sealedTable, mantle) == 1,
                 "each chest table holds its cloak entry exactly once after two builds");
-            Check(supply.entries.Length == 5 && ember.entries.Length == 5 && sealedTable.entries.Length == 4, "entry counts 5/5/4");
+            Check(supply.entries.Length == 5 && ember.entries.Length == 6 && sealedTable.entries.Length == 5, "entry counts 5/6/5 (cloak entries plus the U5B swords on ember and sealed)");
             Check(supply.Validate().Count == 0 && ember.Validate().Count == 0 && sealedTable.Validate().Count == 0, "tables still validate clean");
         }
 

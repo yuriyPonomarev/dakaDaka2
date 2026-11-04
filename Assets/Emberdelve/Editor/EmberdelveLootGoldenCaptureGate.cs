@@ -30,14 +30,16 @@ namespace Emberdelve.EditorTools
         private static int _checks;
         private static int _failures;
 
+        // U5B: the ember and sealed chest tables each gained one appended sword entry (arming sword / two-handed sword), which changes the total
+        // weight and so every seeded roll on those tables; the rows below were re-recorded from the saved tables for exactly that data change.
         private static readonly Dictionary<string, string> ExpectedTableLines = new Dictionary<string, string>
         {
-            { "ember-a", "[R8b1][GOLDEN][TABLE] case=ember-a tableId=ember_chest seed=0x0123456789ABCDEF success=True reason=<none> mintedBefore=0 mintedAfter=2 dropCount=5" },
-            { "ember-b", "[R8b1][GOLDEN][TABLE] case=ember-b tableId=ember_chest seed=0x0BADF00D12345678 success=True reason=<none> mintedBefore=2 mintedAfter=4 dropCount=5" },
-            { "sealed-a", "[R8b1][GOLDEN][TABLE] case=sealed-a tableId=sealed_chest seed=0xCAFEBABE87654321 success=True reason=<none> mintedBefore=4 mintedAfter=6 dropCount=4" },
-            { "sealed-b", "[R8b1][GOLDEN][TABLE] case=sealed-b tableId=sealed_chest seed=0x1020304050607080 success=True reason=<none> mintedBefore=6 mintedAfter=8 dropCount=4" },
-            { "supply-a", "[R8b1][GOLDEN][TABLE] case=supply-a tableId=supply_chest seed=0x3141592653589793 success=True reason=<none> mintedBefore=8 mintedAfter=9 dropCount=4" },
-            { "hollow-a", "[R8b1][GOLDEN][TABLE] case=hollow-a tableId=enemy_hollow_servitor seed=0x2718281828459045 success=True reason=<none> mintedBefore=9 mintedAfter=9 dropCount=2" }
+            { "ember-a", "[R8b1][GOLDEN][TABLE] case=ember-a tableId=ember_chest seed=0x0123456789ABCDEF success=True reason=<none> mintedBefore=0 mintedAfter=4 dropCount=5" },
+            { "ember-b", "[R8b1][GOLDEN][TABLE] case=ember-b tableId=ember_chest seed=0x0BADF00D12345678 success=True reason=<none> mintedBefore=4 mintedAfter=7 dropCount=5" },
+            { "sealed-a", "[R8b1][GOLDEN][TABLE] case=sealed-a tableId=sealed_chest seed=0xCAFEBABE87654321 success=True reason=<none> mintedBefore=7 mintedAfter=9 dropCount=4" },
+            { "sealed-b", "[R8b1][GOLDEN][TABLE] case=sealed-b tableId=sealed_chest seed=0x1020304050607080 success=True reason=<none> mintedBefore=9 mintedAfter=11 dropCount=4" },
+            { "supply-a", "[R8b1][GOLDEN][TABLE] case=supply-a tableId=supply_chest seed=0x3141592653589793 success=True reason=<none> mintedBefore=11 mintedAfter=12 dropCount=4" },
+            { "hollow-a", "[R8b1][GOLDEN][TABLE] case=hollow-a tableId=enemy_hollow_servitor seed=0x2718281828459045 success=True reason=<none> mintedBefore=12 mintedAfter=12 dropCount=2" }
         };
         private static readonly Dictionary<string, string> ExpectedNegativeLines = new Dictionary<string, string>
         {
@@ -49,39 +51,39 @@ namespace Emberdelve.EditorTools
         private static readonly string[] ExpectedDrops_ember_a =
         {
             "[R8b1][GOLDEN][DROP] case=ember-a index=0 itemId=boiled_cuirass amount=1 rarity=Uncommon uid=07387a158fa44daa9573529b34a1d093 affixes=[affix_dexterity,dexterity,1]",
-            "[R8b1][GOLDEN][DROP] case=ember-a index=1 itemId=blood_draught amount=1 rarity=Common uid=<none> affixes=[]",
-            "[R8b1][GOLDEN][DROP] case=ember-a index=2 itemId=ember_coin amount=8 rarity=Common uid=<none> affixes=[]",
-            "[R8b1][GOLDEN][DROP] case=ember-a index=3 itemId=ember_coin amount=4 rarity=Common uid=<none> affixes=[]",
-            "[R8b1][GOLDEN][DROP] case=ember-a index=4 itemId=emberthread_mantle amount=1 rarity=Uncommon uid=2eb7902f6d994ecca2d419334c4667ec affixes=[affix_dexterity,dexterity,1]"
+            "[R8b1][GOLDEN][DROP] case=ember-a index=1 itemId=emberthread_mantle amount=1 rarity=Uncommon uid=2eb7902f6d994ecca2d419334c4667ec affixes=[affix_dexterity,dexterity,1]",
+            "[R8b1][GOLDEN][DROP] case=ember-a index=2 itemId=blood_draught amount=1 rarity=Common uid=<none> affixes=[]",
+            "[R8b1][GOLDEN][DROP] case=ember-a index=3 itemId=arming_sword amount=1 rarity=Uncommon uid=e94c40019314488094bc574c2a2b4c72 affixes=[affix_mana_regen,mana_regen,0.2]",
+            "[R8b1][GOLDEN][DROP] case=ember-a index=4 itemId=ember_fang_blade amount=1 rarity=Uncommon uid=105bfcb87060458c8931545f4f9ea651 affixes=[affix_melee_damage,melee_damage,4]"
         };
         private static readonly string[] ExpectedDrops_ember_b =
         {
-            "[R8b1][GOLDEN][DROP] case=ember-b index=0 itemId=boiled_cuirass amount=1 rarity=Uncommon uid=e94c40019314488094bc574c2a2b4c72 affixes=[affix_constitution,constitution,1]",
+            "[R8b1][GOLDEN][DROP] case=ember-b index=0 itemId=boiled_cuirass amount=1 rarity=Uncommon uid=4edb84f94ff14bdea680d065cb73ece7 affixes=[affix_constitution,constitution,1]",
             "[R8b1][GOLDEN][DROP] case=ember-b index=1 itemId=ember_coin amount=7 rarity=Common uid=<none> affixes=[]",
-            "[R8b1][GOLDEN][DROP] case=ember-b index=2 itemId=emberthread_mantle amount=1 rarity=Uncommon uid=105bfcb87060458c8931545f4f9ea651 affixes=[affix_move_speed,move_speed,0.0899999961]",
-            "[R8b1][GOLDEN][DROP] case=ember-b index=3 itemId=ember_coin amount=8 rarity=Common uid=<none> affixes=[]",
-            "[R8b1][GOLDEN][DROP] case=ember-b index=4 itemId=blood_draught amount=2 rarity=Common uid=<none> affixes=[]"
+            "[R8b1][GOLDEN][DROP] case=ember-b index=2 itemId=emberthread_mantle amount=1 rarity=Uncommon uid=cdc9b8cd629a4fdaaa6e60fd5089adec affixes=[affix_move_speed,move_speed,0.0899999961]",
+            "[R8b1][GOLDEN][DROP] case=ember-b index=3 itemId=blood_draught amount=1 rarity=Common uid=<none> affixes=[]",
+            "[R8b1][GOLDEN][DROP] case=ember-b index=4 itemId=arming_sword amount=1 rarity=Uncommon uid=b285ba8ef78d477797f6c69811cfb13b affixes=[affix_wisdom,wisdom,2]"
         };
         private static readonly string[] ExpectedDrops_sealed_a =
         {
             "[R8b1][GOLDEN][DROP] case=sealed-a index=0 itemId=ashen_relic amount=1 rarity=Common uid=<none> affixes=[]",
             "[R8b1][GOLDEN][DROP] case=sealed-a index=1 itemId=ember_coin amount=10 rarity=Common uid=<none> affixes=[]",
-            "[R8b1][GOLDEN][DROP] case=sealed-a index=2 itemId=emberthread_mantle amount=1 rarity=Rare uid=4edb84f94ff14bdea680d065cb73ece7 affixes=[affix_strength,strength,2;affix_dexterity,dexterity,3]",
-            "[R8b1][GOLDEN][DROP] case=sealed-a index=3 itemId=emberbulwark_shield amount=1 rarity=Rare uid=cdc9b8cd629a4fdaaa6e60fd5089adec affixes=[affix_charisma,charisma,3;affix_dexterity,dexterity,2]"
+            "[R8b1][GOLDEN][DROP] case=sealed-a index=2 itemId=emberthread_mantle amount=1 rarity=Rare uid=5c8b0e3850684f3997ebcca19d49c3f5 affixes=[affix_strength,strength,2;affix_dexterity,dexterity,3]",
+            "[R8b1][GOLDEN][DROP] case=sealed-a index=3 itemId=emberbulwark_shield amount=1 rarity=Rare uid=e3c4b82acb9548598028babe93685d04 affixes=[affix_charisma,charisma,3;affix_dexterity,dexterity,2]"
         };
         private static readonly string[] ExpectedDrops_sealed_b =
         {
             "[R8b1][GOLDEN][DROP] case=sealed-b index=0 itemId=ashen_relic amount=1 rarity=Common uid=<none> affixes=[]",
-            "[R8b1][GOLDEN][DROP] case=sealed-b index=1 itemId=ember_coin amount=10 rarity=Common uid=<none> affixes=[]",
-            "[R8b1][GOLDEN][DROP] case=sealed-b index=2 itemId=emberbulwark_shield amount=1 rarity=Rare uid=b285ba8ef78d477797f6c69811cfb13b affixes=[affix_dexterity,dexterity,1;affix_wisdom,wisdom,2]",
-            "[R8b1][GOLDEN][DROP] case=sealed-b index=3 itemId=emberthread_mantle amount=1 rarity=Rare uid=5c8b0e3850684f3997ebcca19d49c3f5 affixes=[affix_armor,armor,3;affix_mana_regen,mana_regen,0.3]"
+            "[R8b1][GOLDEN][DROP] case=sealed-b index=1 itemId=emberthread_mantle amount=1 rarity=Rare uid=f8317f99cda4409c921d99f3172d8bac affixes=[affix_intelligence,intelligence,1;affix_wisdom,wisdom,2]",
+            "[R8b1][GOLDEN][DROP] case=sealed-b index=2 itemId=ember_coin amount=12 rarity=Common uid=<none> affixes=[]",
+            "[R8b1][GOLDEN][DROP] case=sealed-b index=3 itemId=emberbulwark_shield amount=1 rarity=Rare uid=9f342b5a1ebc4e0fb97f89de6e3f1828 affixes=[affix_armor,armor,3;affix_intelligence,intelligence,1]"
         };
         private static readonly string[] ExpectedDrops_supply_a =
         {
             "[R8b1][GOLDEN][DROP] case=supply-a index=0 itemId=blood_draught amount=1 rarity=Common uid=<none> affixes=[]",
             "[R8b1][GOLDEN][DROP] case=supply-a index=1 itemId=ember_coin amount=2 rarity=Common uid=<none> affixes=[]",
             "[R8b1][GOLDEN][DROP] case=supply-a index=2 itemId=ember_coin amount=5 rarity=Common uid=<none> affixes=[]",
-            "[R8b1][GOLDEN][DROP] case=supply-a index=3 itemId=footpad_boots amount=1 rarity=Common uid=e3c4b82acb9548598028babe93685d04 affixes=[]"
+            "[R8b1][GOLDEN][DROP] case=supply-a index=3 itemId=footpad_boots amount=1 rarity=Common uid=235a17e7adbf427bb7e9ff7484731d95 affixes=[]"
         };
         private static readonly string[] ExpectedDrops_hollow_a =
         {

@@ -1,0 +1,6 @@
+OpenGameArt weapon models used for the arming sword and the two-handed sword.
+Knight's Sword by Teh_Bucket: https://opengameart.org/content/knights-sword
+One Handed Sword by LordNeo: https://opengameart.org/content/one-handed-sword
+
+License of both (as stated on their OpenGameArt pages): CC0 1.0 Universal (public domain dedication), https://creativecommons.org/publicdomain/zero/1.0/
+The works may be copied, modified, distributed and used, even commercially, without asking permission. Credit is appreciated, not required.

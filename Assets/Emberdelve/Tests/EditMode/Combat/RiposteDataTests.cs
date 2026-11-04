@@ -17,6 +17,8 @@ namespace Emberdelve.Combat.Tests
     public sealed class RiposteDataTests
     {
         private static readonly List<WeaponData> All = new List<WeaponData>();
+        // U5B: the plain arming sword and the two-handed sword riposte too (their flags are asserted in SwordFamilyTests)
+        private static readonly HashSet<string> SwordFamily = new HashSet<string> { "arming_sword", "two_handed_sword" };
 
         [OneTimeSetUp]
         public void LoadWeapons()
@@ -113,7 +115,7 @@ namespace Emberdelve.Combat.Tests
 
             foreach (WeaponData w in All)
             {
-                if (w == sword || w == rapier) continue;
+                if (w == sword || w == rapier || SwordFamily.Contains(w.weaponId)) continue;
                 Assert.That(w.canRiposte, Is.False, w.weaponId + " is not a sword");
                 Assert.That(w.CanRiposteWeapon, Is.False, w.weaponId);
             }
@@ -279,11 +281,11 @@ namespace Emberdelve.Combat.Tests
         }
 
         [Test]
-        public void OnlyTheAshenSword_RipostesWithAnOffhandShield()
+        public void OnlyTheOneHandedSwords_RipostesWithAnOffhandShield()
         {
             foreach (WeaponData w in All)
             {
-                bool expected = w.weaponId == "ashen_short_sword";
+                bool expected = w.weaponId == "ashen_short_sword" || w.weaponId == "arming_sword";
                 Assert.That(w.riposteWithOffhandShield, Is.EqualTo(expected), w.weaponId);
                 if (w.riposteWithOffhandShield) Assert.That(w.canRiposte, Is.True, "the shield allowance only means something on a riposting weapon");
             }

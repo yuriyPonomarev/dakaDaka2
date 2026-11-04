@@ -39,6 +39,7 @@ namespace Emberdelve.EditorTools
             public string Role;
             public Color BaseColor = Color.white;   // multiplied into the photo albedo (the 1.8 prop lift is far too bright for polished steel next to the torch)
             public Color? BodyColor;                // materials whose name contains "body" (painted wood of the shield)
+            public string ModelPath;                // U5B: a model outside Poly Haven (OpenGameArt): the asset path; its materials are the project ones of EmberdelveOpenGameArtImport
         }
 
         public static readonly Spec[] Specs =
@@ -49,6 +50,8 @@ namespace Emberdelve.EditorTools
             new Spec { Id = "ornate_war_hammer", Shape = Shape.Head, Length = 0.7f, GripFraction = 0.15f, Role = "war hammer", BaseColor = new Color(0.95f, 0.95f, 0.95f) },
             new Spec { Id = "ornate_medieval_dagger", Shape = Shape.Blade, Length = 0.35f, Exclude = new[] { "scabbard" }, Role = "dagger", BaseColor = new Color(0.9f, 0.9f, 0.9f) },
             new Spec { Id = "hatchet", Shape = Shape.Head, Length = 0.3f, GripFraction = 0.18f, Role = "axe", BaseColor = new Color(1.1f, 1.0f, 0.95f) },
+            new Spec { Id = "knights_sword", Shape = Shape.Blade, Length = 0.95f, Role = "arming sword", ModelPath = EmberdelveOpenGameArtImport.KnightsSwordModel },
+            new Spec { Id = "long_sword", Shape = Shape.Blade, Length = 1.25f, Role = "two-handed sword", ModelPath = EmberdelveOpenGameArtImport.LongswordModel },
             new Spec { Id = "kite_shield", Shape = Shape.Shield, Length = 0.8f, Role = "shield", BaseColor = new Color(1f, 1f, 1f), BodyColor = new Color(0.62f, 0.52f, 0.48f) },
         };
 
@@ -59,6 +62,8 @@ namespace Emberdelve.EditorTools
             new[] { "ember_rapier", "antique_estoc" },
             new[] { "warden_maul", "sledgehammer_01" },
             new[] { "emberbulwark_shield", "kite_shield" },
+            new[] { "arming_sword", "knights_sword" },
+            new[] { "two_handed_sword", "long_sword" },
         };
 
         public static readonly string[][] Unmapped =
@@ -90,6 +95,7 @@ namespace Emberdelve.EditorTools
         public static string EnsureAll(bool force)
         {
             StringBuilder report = new StringBuilder();
+            EmberdelveOpenGameArtImport.EnsureConfigured();
             EmberdelveVisualSetup.EnsureFolder(PrefabFolder);
             for (int i = 0; i < Specs.Length; i++)
             {
@@ -105,12 +111,13 @@ namespace Emberdelve.EditorTools
 
         private static string BuildOne(Spec spec)
         {
-            GameObject fbx = EmberdelvePolyHavenImport.LoadModel(spec.Id);
+            GameObject fbx = spec.ModelPath != null ? AssetDatabase.LoadAssetAtPath<GameObject>(spec.ModelPath) : EmberdelvePolyHavenImport.LoadModel(spec.Id);
             if (fbx == null) return spec.Id + ": FBX missing";
 
             GameObject source = (GameObject)PrefabUtility.InstantiatePrefab(fbx);
             PrefabUtility.UnpackPrefabInstance(source, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
             source.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            if (spec.ModelPath != null) ApplyProjectMaterials(spec, source);
 
             try
             {
@@ -155,6 +162,18 @@ namespace Emberdelve.EditorTools
             finally
             {
                 if (source != null) Object.DestroyImmediate(source);
+            }
+        }
+
+        /// <summary>U5B: replaces every renderer's materials by the project URP/Lit ones of the model (looked up by the source material's name).</summary>
+        private static void ApplyProjectMaterials(Spec spec, GameObject source)
+        {
+            Renderer[] renderers = source.GetComponentsInChildren<Renderer>(true);
+            for (int r = 0; r < renderers.Length; r++)
+            {
+                Material[] materials = renderers[r].sharedMaterials;
+                for (int m = 0; m < materials.Length; m++) materials[m] = EmberdelveOpenGameArtImport.MaterialFor(spec.ModelPath, materials[m] != null ? materials[m].name : null);
+                renderers[r].sharedMaterials = materials;
             }
         }
 
@@ -278,7 +297,7 @@ namespace Emberdelve.EditorTools
         public static void ApplyLook(string id)
         {
             Spec spec = Find(id);
-            if (spec == null) return;
+            if (spec == null || spec.ModelPath != null) return;
             string[] guids = AssetDatabase.FindAssets("t:Material", new[] { EmberdelvePolyHavenImport.MaterialsFolder(id) });
             for (int i = 0; i < guids.Length; i++)
             {

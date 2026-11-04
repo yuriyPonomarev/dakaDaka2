@@ -1,0 +1,52 @@
+{
+    "schema": "emberdelve-opengameart-manifest/1",
+    "license": "CC0-1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "note": "Files are byte for byte what the sources serve (renamed where the original name had an apostrophe or spaces). Import settings come from EmberdelveOpenGameArtImport; the prefabs use project URP/Lit materials built by it (solid-colour textures are generated, not third party).",
+    "files": [
+        {
+            "path": "Assets/Emberdelve/Art/ThirdParty/OpenGameArt/knights_sword/knights_sword.obj",
+            "title": "Knight's Sword",
+            "author": "Teh_Bucket",
+            "page": "https://opengameart.org/content/knights-sword",
+            "source": "https://opengameart.org/sites/default/files/Knight%27s%20Sword.obj",
+            "license": "CC0-1.0",
+            "sha256": "b0f8016725ea598fc3e94f542f3f44e148d2756d99edb8d989bb938b81b65fa3",
+            "bytes": 33331,
+            "note": "original name \"Knight's Sword.obj\"; arming sword"
+        },
+        {
+            "path": "Assets/Emberdelve/Art/ThirdParty/OpenGameArt/knights_sword/knightSword.png",
+            "title": "Knight's Sword texture",
+            "author": "Teh_Bucket",
+            "page": "https://opengameart.org/content/knights-sword",
+            "source": "https://opengameart.org/sites/default/files/knightSword.png",
+            "license": "CC0-1.0",
+            "sha256": "ac8f696de904b8716e357ad21e06548a41304025318438ebdd6b0e7afd94f656",
+            "bytes": 117039,
+            "note": ""
+        },
+        {
+            "path": "Assets/Emberdelve/Art/ThirdParty/OpenGameArt/one_handed_sword/onehandedsword.fbx",
+            "title": "One Handed Sword",
+            "author": "LordNeo",
+            "page": "https://opengameart.org/content/one-handed-sword",
+            "source": "https://opengameart.org/sites/default/files/onehandedsword.zip (onehandedsword.fbx)",
+            "license": "CC0-1.0",
+            "sha256": "f5a55440ac8536ba40b586c4ecf74e2935692866d4dfc89cceb622e11c1a293b",
+            "bytes": 133068,
+            "note": "long slender blade; used as the two-handed sword"
+        },
+        {
+            "path": "Assets/Emberdelve/Art/ThirdParty/OpenGameArt/one_handed_sword/Metal_Corrogated_Shiny.jpg",
+            "title": "One Handed Sword texture",
+            "author": "LordNeo",
+            "page": "https://opengameart.org/content/one-handed-sword",
+            "source": "https://opengameart.org/sites/default/files/onehandedsword.zip (onehandedsword/Metal_Corrogated_Shiny.jpg)",
+            "license": "CC0-1.0",
+            "sha256": "e9334d76e18c0fdd62e492693b69ff127cddfb0291038717f88700338e14cdbe",
+            "bytes": 1806,
+            "note": ""
+        }
+    ]
+}
