@@ -35,6 +35,11 @@ MonoBehaviour:
   heldMoveSpeedPenalty: 8
   impactPower: 8
   impactResist: 20
+  canRiposte: 0
+  riposteWindow: 1
+  riposteDamageMultiplier: 1.5
+  riposteSwingPatterns: 
+  riposteStrikeGap: 0.1
   twoHanded: 0
   ammoDisplayName: Ammo
   rangedRange: 42

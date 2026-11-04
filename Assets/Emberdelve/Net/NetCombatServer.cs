@@ -347,18 +347,20 @@ namespace Emberdelve.Net
             // U3C: the committed trajectory is the authority's own record of this swing (the same data its sweep uses), never the intent's.
             BladeWarning warning = default(BladeWarning);
             bool aimCommitted = false;
+            int riposteStrike = 0;
             if (melee != null && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority swingAuthority)
                 && swingAuthority.TryGetMeleeSwingStatus(melee.LastSwingId, out MeleeSwingStatus swingStatus))
             {
                 warning = swingStatus.Warning;
                 aimCommitted = swingStatus.AimCommitted;
+                riposteStrike = swingStatus.RiposteStrike;
             }
 
             _log("combat-swing id=" + conn.PlayerId + " weapon=" + Dash(intent.WeaponId) + " pattern=" + Dash(patternId) + " step=" + intent.ComboStep +
                  " windup=" + F(timing.Windup) + " active=" + F(timing.Active) + " recovery=" + F(timing.Recovery) +
                  " trajectory=" + warning.Trajectory + " height=" + warning.Height + " yaw=" + F(warning.AimYaw) + " pitch=" + F(warning.AimPitch) +
                  " minyaw=" + F(warning.MinBladeYaw) + " maxyaw=" + F(warning.MaxBladeYaw) + " reach=" + F(warning.Reach) +
-                 " committed=" + (aimCommitted ? 1 : 0));
+                 " committed=" + (aimCommitted ? 1 : 0) + " riposte=" + riposteStrike);
 
             if (conn.NetRig == null || !conn.NetRig.IsSpawned) return;
             try
@@ -373,6 +375,7 @@ namespace Emberdelve.Net
                     Recovery = timing.Recovery
                 };
                 wire.SetWarning(in warning, aimCommitted);
+                wire.Riposte = (byte)Mathf.Clamp(riposteStrike, 0, 255);
                 conn.NetRig.CombatSwingRpc(wire);
             }
             catch (Exception e) { _logError("combat swing event threw: " + e.Message); }

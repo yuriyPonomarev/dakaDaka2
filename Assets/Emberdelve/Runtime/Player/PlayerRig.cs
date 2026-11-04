@@ -21,7 +21,7 @@ namespace Emberdelve.Player
     [RequireComponent(typeof(PlayerMovement))]
     [RequireComponent(typeof(PlayerLook))]
     [RequireComponent(typeof(HealthComponent))]
-    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, IWeaponChangeSource, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IGuardStateSource, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback, IKitSeedSource, IKitView, IMovementRollback, IActionSpeedSource, IInteractionSpeedSource, ISkillCooldownSource
+    public sealed class PlayerRig : MonoBehaviour, ICombatEntity, IDefenseProvider, IStatusTarget, IDamageOutgoingProvider, IDamageFlatWeaponBonusProvider, IArmorRatingProvider, IActiveWeaponProvider, IWeaponChangeSource, ISkillCasterState, IAmmoSource, IAimPoseProvider, IHitShapeProvider, IGuardBreakDefender, IGuardStateSource, IMoveFlowSource, IPlayerOwned, IInteractionActor, IRunParticipant, IPlayerCombatFeedback, IKitSeedSource, IKitView, IMovementRollback, IActionSpeedSource, IInteractionSpeedSource, ISkillCooldownSource, IRiposteKit
     {
         /// <summary>Effective capture read by the offline authority; U3B must provide the server-owned equivalent.</summary>
         public float ActionSpeedFactor => EffectiveStats.IsReady ? EffectiveStats.ActionSpeedFactor : 1f;
@@ -291,6 +291,9 @@ namespace Emberdelve.Player
         public bool IsGuardStaggered =>
             GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) && authority is ICombatFlowState flow && flow.IsGuardStaggered(_combatId);
         public bool CanGuard => Defense.CanBlock;
+
+        /// <summary>U3C3: a shield contributes to the guard (a shield never parries, so the authority never records a riposte for it).</summary>
+        public bool GuardHasShield => Defense.HasShield;
         public bool CanParry => Defense.CanParry;
         public DefenseProfile Defense
         {

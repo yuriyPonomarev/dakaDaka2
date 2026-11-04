@@ -274,6 +274,8 @@ namespace Emberdelve.Combat
 
             target.ApplyDamage(damage);
 
+            NoteDamageTaken(target, damage);
+
             AcceptedCount++;
             ApplyHitEffects(target, damage, weapon);
 
@@ -600,6 +602,8 @@ namespace Emberdelve.Combat
             activation.Targets.Add(target.CombatId);
 
             target.ApplyDamage(damage);
+
+            NoteDamageTaken(target, damage);
 
             StatusSpec targetStatus = ScaleStatus(skill.TargetStatusSpec, activation.Scale);
             if (!targetStatus.IsNone && target is IStatusTarget statusTarget)

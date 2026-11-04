@@ -53,7 +53,7 @@ namespace Emberdelve.Net
                       " step=" + swing.ComboStep + " windup=" + F(swing.Windup) + " active=" + F(swing.Active) + " recovery=" + F(swing.Recovery) +
                       " trajectory=" + swing.TrajectoryKind + " height=" + swing.HeightBand + " yaw=" + F(swing.AimYaw) + " pitch=" + F(swing.AimPitch) +
                       " minyaw=" + F(swing.MinBladeYaw) + " maxyaw=" + F(swing.MaxBladeYaw) + " reach=" + F(swing.Reach) +
-                      " committed=" + swing.Committed);
+                      " committed=" + swing.Committed + " riposte=" + swing.Riposte);
         }
 
         public static void OnShot(NetPlayerRig carrier, in CombatShotWire shot)

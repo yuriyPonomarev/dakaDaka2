@@ -70,11 +70,27 @@ namespace Emberdelve.Combat
         public bool RemoteGuardWanted => _remoteGuard;
 
         private bool _remoteGuard;
+        private bool _remotePressPending;
+        private bool _prevSecondaryHeld;
+        private int _riposteStrikesLeft;
+        private int _riposteSequence;
+
+        /// <summary>U3C3: true while this component has riposte strikes left to start (the guard stays down until they are done).</summary>
+        public bool RiposteActive => _riposteStrikesLeft > 0;
+
+        /// <summary>U3C3: ripostes the authority accepted for this component (observability for gates).</summary>
+        public int RipostesStarted { get; private set; }
+
+        /// <summary>U3C3: raised when a riposte strike was accepted and is playing; the argument is the 1-based strike number. Presentation hook.</summary>
+        public event Action<int> RiposteStrikeStarted;
 
         /// <summary>U3B3: guard button level of a remote player. Takes effect on the next Update; ignored unless <see cref="RemoteDriven"/>.</summary>
         public void SetRemoteGuard(bool wanted)
         {
+            bool wasWanted = _remoteGuard;
             _remoteGuard = RemoteDriven && wanted;
+            // U3C3: a guard level that goes up is a block PRESS (the riposte request). A repeated GuardDown while it is already up is not one.
+            if (_remoteGuard && !wasWanted) _remotePressPending = true;
         }
 
         /// <summary>The pattern of the swing in progress (or the last one).</summary>
@@ -126,6 +142,10 @@ namespace Emberdelve.Combat
             _readyTime = 0f;
             _swingId = 0;
             _recoilStarted = false;
+            _riposteStrikesLeft = 0;
+            _riposteSequence = 0;
+            _remotePressPending = false;
+            _prevSecondaryHeld = false;
 
             if (weapon == null || weapon.IsRanged) enabled = false;
         }
@@ -140,6 +160,8 @@ namespace Emberdelve.Combat
             if (rig.IsDead)
             {
                 _remoteGuard = false;
+                _remotePressPending = false;
+                _riposteStrikesLeft = 0;
                 rig.SetGuardHeld(false);
                 _phase = Phase.Idle;
                 return;
@@ -149,7 +171,15 @@ namespace Emberdelve.Combat
             bool primaryPressed = !RemoteDriven && input.PrimaryPressed;
             bool secondaryHeld = RemoteDriven ? _remoteGuard : input.SecondaryHeld;
 
-            rig.SetGuardHeld(secondaryHeld && !IsSwinging);
+            // U3C3: a block press (guard going down-to-up edge) is a riposte request. The server decides from the parry it recorded; a refusal
+            // leaves it an ordinary guard press. While a riposte has strikes left the guard stays down so the swings are not refused.
+            bool pressed = RemoteDriven ? _remotePressPending : secondaryHeld && !_prevSecondaryHeld;
+            _remotePressPending = false;
+            _prevSecondaryHeld = secondaryHeld;
+            if (pressed && secondaryHeld && _riposteStrikesLeft == 0 && !IsSwinging) TryBeginRiposte();
+            if (_riposteStrikesLeft > 0 && _phase == Phase.Idle) ContinueRiposte();
+
+            rig.SetGuardHeld(secondaryHeld && !IsSwinging && _riposteStrikesLeft == 0);
 
             float dt = Time.deltaTime;
 
@@ -296,6 +326,84 @@ namespace Emberdelve.Combat
             return true;
         }
 
+        /// <summary>
+        /// U3C3: the block press asks the authority for a riposte. Nothing about the parry is known here: the server recorded it when the
+        /// guard held, and it answers from that record (window, no damage since, sword kit, not staggered, not swinging, one riposte per parry).
+        /// </summary>
+        private bool TryBeginRiposte()
+        {
+            if (_weapon == null || rig == null || !_weapon.CanRiposteWeapon) return false;
+            if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) || !(authority is IRiposteAuthority riposter)) return false;
+            if (!rig.TryGetAimPose(out _, out float yaw, out float pitch)) return false;
+
+            if (rig.IsGuarding) rig.SetGuardHeld(false);
+            int sequence = CombatRegistry.NextSequence(rig.CombatId);
+            MeleeSwingIntent intent = new MeleeSwingIntent(rig.CombatId, _weapon.weaponId, 0, 0, yaw, pitch, sequence);
+            if (!riposter.TryBeginRiposte(rig.CombatSender, intent, out int swingId, out int strikes, out string reason))
+            {
+                CombatDiagnostics.Log("riposte-refused", $"[MeleeCombat] riposte refused by the authority: {reason}", this);
+                return false;
+            }
+
+            if (!AdoptRiposteSwing(authority, swingId, intent)) return false;
+            _riposteStrikesLeft = Mathf.Max(0, strikes - 1);
+            _riposteSequence = 0;
+            RipostesStarted++;
+            return true;
+        }
+
+        /// <summary>Asks for the next strike of the riposte the authority opened; NotYet keeps asking (same request) until its gap has passed.</summary>
+        private void ContinueRiposte()
+        {
+            if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) || !(authority is IRiposteAuthority riposter))
+            {
+                _riposteStrikesLeft = 0;
+                return;
+            }
+
+            if (!rig.TryGetAimPose(out _, out float yaw, out float pitch)) return;
+            if (_riposteSequence == 0) _riposteSequence = CombatRegistry.NextSequence(rig.CombatId);
+            MeleeSwingIntent intent = new MeleeSwingIntent(rig.CombatId, _weapon.weaponId, 0, 0, yaw, pitch, _riposteSequence);
+            RiposteResult result = riposter.TryContinueRiposte(rig.CombatSender, intent, out int swingId, out string reason);
+            if (result == RiposteResult.NotYet) return;
+
+            _riposteSequence = 0;
+            if (result == RiposteResult.Started && AdoptRiposteSwing(authority, swingId, intent))
+            {
+                _riposteStrikesLeft--;
+                return;
+            }
+
+            CombatDiagnostics.Log("riposte-ended", $"[MeleeCombat] riposte follow-up ended: {reason}", this);
+            _riposteStrikesLeft = 0;
+        }
+
+        /// <summary>Plays the riposte strike the authority accepted (same visual and timer path as an ordinary swing).</summary>
+        private bool AdoptRiposteSwing(ICombatAuthority authority, int swingId, MeleeSwingIntent intent)
+        {
+            if (!authority.TryGetMeleeSwingStatus(swingId, out MeleeSwingStatus accepted)) return false;
+            int strike = Mathf.Max(1, accepted.RiposteStrike);
+            if (!_weapon.TryResolveRiposteStrike(strike - 1, out _, out SwingPatternData pattern)) return false;
+
+            _pattern = pattern;
+            _comboStep = 0;
+            _timing = accepted.Timing;
+            _swingId = swingId;
+            _swingStartedAt = Time.time;
+            _recoilStarted = false;
+            _phase = _timing.Windup > 0f ? Phase.Windup : Phase.Active;
+            _phaseTimer = _timing.Windup;
+            if (_phase == Phase.Active) _phaseTimer = _timing.Active;
+            _readyTime = Time.time + Mathf.Max(0f, accepted.RepeatInterval - accepted.Elapsed);
+            _bufferedUntil = -1f;
+
+            rig.PlaySwingVisual(_weapon, pattern, _timing);
+            AttackStarted?.Invoke(intent);
+            RiposteStrikeStarted?.Invoke(strike);
+            CombatDiagnostics.Log("melee-riposte", $"[MeleeCombat] riposte strike {strike} ({_weapon.weaponId}, {pattern.patternId}) accepted by the authority as swing {swingId}", this);
+            return true;
+        }
+
         private void EnterActive()
         {
             _phase = Phase.Active;
@@ -325,6 +433,8 @@ namespace Emberdelve.Combat
         private void OnDisable()
         {
             _remoteGuard = false;
+            _remotePressPending = false;
+            _riposteStrikesLeft = 0;
             if (rig != null) rig.SetGuardHeld(false);
             _phase = Phase.Idle;
             // B1: a press buffered during a recovery must not outlive the weapon in hand (it would fire on the next melee swap-in).

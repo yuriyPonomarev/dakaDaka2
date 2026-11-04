@@ -1958,6 +1958,12 @@ namespace Emberdelve.EditorTools
                 // U3C: a sword guard holds against sword hits (Dark and Darker): resist above the strongest sword pattern (overhead 10 x 1.2 = 12),
                 // below the heavy weapons (maul 30). Plain assignment, so existing assets are updated on every build.
                 Sword.impactResist = 15f;
+                // U3C3: a sword block opens a riposte window; two horizontal slashes (patterns 0 and 1) at x1.5, impact power unchanged.
+                Sword.canRiposte = true;
+                Sword.riposteWindow = 1.0f;
+                Sword.riposteDamageMultiplier = 1.5f;
+                Sword.riposteSwingPatterns = new[] { 0, 1 };
+                Sword.riposteStrikeGap = 0.10f;
                 EditorUtility.SetDirty(Sword);
             }
 
@@ -1978,6 +1984,12 @@ namespace Emberdelve.EditorTools
                 Rapier.heldMoveSpeedPenalty = 5f;
                 Rapier.impactPower = 6f;
                 Rapier.impactResist = 5f;
+                // U3C3: the rapier ripostes with two thrusts (its only pattern, index 0) at x1.5.
+                Rapier.canRiposte = true;
+                Rapier.riposteWindow = 1.0f;
+                Rapier.riposteDamageMultiplier = 1.5f;
+                Rapier.riposteSwingPatterns = new[] { 0, 0 };
+                Rapier.riposteStrikeGap = 0.10f;
                 EditorUtility.SetDirty(Rapier);
             }
 

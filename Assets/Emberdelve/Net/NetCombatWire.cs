@@ -61,6 +61,9 @@ namespace Emberdelve.Net
         public float MaxBladePitch;
         public float Reach;
 
+        /// <summary>U3C3: 0 for an ordinary swing, else the 1-based number of the riposte strike (presentation: the owner's cue and the observers' swing).</summary>
+        public byte Riposte;
+
         /// <summary>Copies the authority's committed-trajectory warning into the wire fields (server side).</summary>
         public void SetWarning(in BladeWarning warning, bool aimCommitted)
         {
@@ -104,6 +107,7 @@ namespace Emberdelve.Net
             serializer.SerializeValue(ref MinBladePitch);
             serializer.SerializeValue(ref MaxBladePitch);
             serializer.SerializeValue(ref Reach);
+            serializer.SerializeValue(ref Riposte);
         }
     }
 

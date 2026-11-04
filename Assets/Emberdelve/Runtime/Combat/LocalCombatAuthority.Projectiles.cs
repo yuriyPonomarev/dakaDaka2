@@ -874,6 +874,7 @@ namespace Emberdelve.Combat
                     FlowTuning, true, bladeContact, location, locationMultiplier, airTimeFalloff);
                 if (!damage.IsValid) return;
                 target.ApplyDamage(damage);
+                NoteDamageTaken(target, damage);
                 ApplyHitEffects(target, damage, flight.Weapon);
                 PublishProjectileFeedback(instigator, target, point, damage);
                 ReportHit(CombatHitSource.Projectile, instigator, target, flight.Weapon, damage, location, locationMultiplier, 1f, 1f, 0f,
@@ -893,6 +894,7 @@ namespace Emberdelve.Combat
                 true, bladeContact, location, locationMultiplier, airTimeFalloff);
             if (!skillDamage.IsValid) return;
             target.ApplyDamage(skillDamage);
+            NoteDamageTaken(target, skillDamage);
             StatusSpec status = ScaleStatus(activation.Skill.TargetStatusSpec, activation.Scale);
             if (!status.IsNone && target is IStatusTarget statusTarget) statusTarget.ApplyStatus(status, instigator.CombatId);
             group.Targets.Add(target.CombatId);

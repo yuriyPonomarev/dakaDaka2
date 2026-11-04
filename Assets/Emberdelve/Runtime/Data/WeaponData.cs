@@ -112,6 +112,18 @@ namespace Emberdelve.Data
         [Tooltip("Impact resist of this item when it blocks: a hit with power >= this breaks the block (reduced mitigation and a guard stagger).")]
         [Range(0f, 100f)] public float impactResist = 15f;
 
+        [Header("Riposte (U3C3)")]
+        [Tooltip("Sword-class marker: a successful block with this weapon (never with a shield) opens a riposte window. Authored data on the definition; the runtime never looks at a weapon id or name to decide it.")]
+        public bool canRiposte = false;
+        [Tooltip("Seconds after a successful block within which pressing block again starts the riposte (server clock, inclusive).")]
+        [Range(0.1f, 3f)] public float riposteWindow = 1.0f;
+        [Tooltip("Damage multiplier of every riposte strike. Impact power is NOT multiplied, so a riposte never breaks a holding guard that the normal swing would not.")]
+        [Range(0.1f, 3f)] public float riposteDamageMultiplier = 1.5f;
+        [Tooltip("Indices into Swing Patterns, one per riposte strike in order (the strike count is this array's length).")]
+        public int[] riposteSwingPatterns = new int[0];
+        [Tooltip("Seconds between the end of one riposte strike and the start of the next.")]
+        [Range(0f, 1f)] public float riposteStrikeGap = 0.10f;
+
         [Header("Hands")]
         [Tooltip("A two-handed weapon occupies both hands, so an off-hand shield cannot contribute its block while it is held.")]
         public bool twoHanded = false;
@@ -311,6 +323,24 @@ namespace Emberdelve.Data
         public WeaponDamageScale DamageScale => finesse
             ? WeaponDamageScale.Finesse
             : (IsRanged ? WeaponDamageScale.Ranged : WeaponDamageScale.Melee);
+
+        /// <summary>Number of strikes a riposte with this weapon has (0 = none authored).</summary>
+        public int RiposteStrikeCount => canRiposte && UsesSweptMelee && riposteSwingPatterns != null ? riposteSwingPatterns.Length : 0;
+
+        /// <summary>True when a block with this weapon can open a riposte: flagged in data, melee, swept, strikes authored and not a shield.</summary>
+        public bool CanRiposteWeapon => RiposteStrikeCount > 0 && !IsShield && !IsRanged;
+
+        /// <summary>The swing pattern of riposte strike <paramref name="strike"/> (0-based) and its index into Swing Patterns. False when the weapon has no such strike.</summary>
+        public bool TryResolveRiposteStrike(int strike, out int patternIndex, out SwingPatternData pattern)
+        {
+            patternIndex = -1;
+            pattern = null;
+            if (strike < 0 || strike >= RiposteStrikeCount) return false;
+            patternIndex = riposteSwingPatterns[strike];
+            if (swingPatterns == null || patternIndex < 0 || patternIndex >= swingPatterns.Length) return false;
+            pattern = swingPatterns[patternIndex];
+            return pattern != null;
+        }
 
         public bool IsShield => defenseRole == DefenseRole.Shield;
 

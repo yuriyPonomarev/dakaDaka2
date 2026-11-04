@@ -241,12 +241,16 @@ namespace Emberdelve.Combat
         /// <summary>U3C: true when the sweep keeps the aim the swing began with (CombatFlowTuning.commitSwingAim); false = it follows the live aim at the turn ceiling.</summary>
         public readonly bool AimCommitted;
 
+        /// <summary>U3C3: 0 for an ordinary swing, otherwise the 1-based number of the riposte strike this swing is (the damage multiplier is then the weapon's riposte multiplier).</summary>
+        public readonly int RiposteStrike;
+
         public MeleeSwingStatus(int swingId, int instigatorCombatId, SwingPhase phase, SwingEndReason endReason,
             float elapsed, int samplesProcessed, int sampleCount, int wallContactSample, IReadOnlyList<MeleeSwingHit> hits,
             int comboStep = 0, float stepMultiplier = 1f, Emberdelve.Data.SwingTiming timing = default,
             float turnClampedDegrees = 0f, Vector3 wallPoint = default, Vector3 wallNormal = default, bool hasWallPoint = false,
-            float repeatInterval = 0f, float actionSpeedFactor = 1f, BladeWarning warning = default, bool aimCommitted = false)
+            float repeatInterval = 0f, float actionSpeedFactor = 1f, BladeWarning warning = default, bool aimCommitted = false, int riposteStrike = 0)
         {
+            RiposteStrike = riposteStrike;
             Warning = warning;
             AimCommitted = aimCommitted;
             WallPoint = wallPoint;

@@ -78,6 +78,7 @@ namespace Emberdelve.Combat
             public int ComboStep;
             public float StepMultiplier = 1f;
             public int Sequence;
+            public int RiposteStrike;
             public float StartTime;
             public int SampleCount;
             public int NextSample;
@@ -241,9 +242,20 @@ namespace Emberdelve.Combat
             ComboStep stepData;
             string stepReason;
             bool resolved;
-            bool legacyPick = AllowLegacyPatternSelection && weapon.HasComboChain && intent.ComboStep == 0
-                              && intent.PatternIndex != weapon.comboSteps[0].patternIndex;
-            if (legacyPick)
+            // U3C3: a riposte strike is begun by TryBeginRiposte / TryContinueRiposte only (they set the override after checking the
+            // server's parry record). Its pattern and damage multiplier come from the weapon data, never from the intent.
+            bool riposte = _riposteOverride.Active;
+            bool legacyPick = riposte || (AllowLegacyPatternSelection && weapon.HasComboChain && intent.ComboStep == 0
+                              && intent.PatternIndex != weapon.comboSteps[0].patternIndex);
+            if (riposte)
+            {
+                int riposteIndex = _riposteOverride.PatternIndex;
+                pattern = weapon.swingPatterns != null && riposteIndex >= 0 && riposteIndex < weapon.swingPatterns.Length ? weapon.swingPatterns[riposteIndex] : null;
+                resolved = pattern != null;
+                stepData = new ComboStep(riposteIndex, _riposteOverride.Multiplier);
+                stepReason = $"riposte pattern {riposteIndex} is not a pattern of the equipped weapon";
+            }
+            else if (legacyPick)
             {
                 resolved = weapon.TryResolveSwingPattern(0, intent.PatternIndex, out pattern);
                 stepData = new ComboStep(intent.PatternIndex, 1f);
@@ -288,7 +300,7 @@ namespace Emberdelve.Combat
                 ? FrozenRepeatInterval(intent.InstigatorCombatId, previousAttack, cooldown * cooldownGrace)
                 : cooldown * cooldownGrace;
 
-            if (_lastAttackTime.TryGetValue(intent.InstigatorCombatId, out float lastAttack) && now - lastAttack < minimumInterval)
+            if (!_riposteOverride.SkipCooldown && _lastAttackTime.TryGetValue(intent.InstigatorCombatId, out float lastAttack) && now - lastAttack < minimumInterval)
             {
                 return RejectSwing(intent, "attack faster than weapon cooldown", out reason);
             }
@@ -352,6 +364,7 @@ namespace Emberdelve.Combat
                 ComboStep = intent.ComboStep,
                 StepMultiplier = Mathf.Max(0.05f, stepData.damageMultiplier),
                 Sequence = intent.Sequence,
+                RiposteStrike = riposte ? _riposteOverride.Strike : 0,
                 StartTime = now,
                 SampleCount = SwingGeometry.SampleCount(pattern, weapon, FlowTuning.GridSwingTurnCeiling, timing.Active),
                 TurnCeiling = FlowTuning.ResolvedSwingTurnCeiling,
@@ -396,7 +409,7 @@ namespace Emberdelve.Combat
             status = new MeleeSwingStatus(r.Id, r.InstigatorId, r.Phase, r.EndReason, elapsed,
                 Mathf.Min(r.NextSample, r.SampleCount + 1), r.SampleCount, r.WallSample, r.HitsView,
                 r.ComboStep, r.StepMultiplier, r.Timing, r.TurnClamped, r.WallPoint, r.WallNormal, r.HasWallPoint, r.RepeatInterval, r.ActionSpeedFactor,
-                r.Warning, r.CommitAim);
+                r.Warning, r.CommitAim, r.RiposteStrike);
             return true;
         }
 
@@ -598,6 +611,7 @@ namespace Emberdelve.Combat
         {
             PruneUnregistered(_lastSwingFloor);
             PruneUnregistered(_chains);
+            _riposte.Prune(RegisteredId);
 
             if (_guardBrokenUntil.Count == 0) return;
             float now = Now;
@@ -968,6 +982,7 @@ namespace Emberdelve.Combat
 
             rec.Hit.Add(target.CombatId);
             target.ApplyDamage(damage);
+            NoteMeleeResult(rec.InstigatorId, target, damage);
             AcceptedCount++;
             rec.Hits.Add(new MeleeSwingHit(target.CombatId, contact.Location, damage.Amount, damage.Blocked, sample, contact.FirstSample,
                 contact.Point, contact.T, zone, damage.GuardBroken));
