@@ -172,6 +172,90 @@ namespace Emberdelve.EditorTools
             }, 0.05f);
         }
 
+        /// <summary>
+        /// V3d: a first-person frame of the arms driven the way the game drives them: the idle base pose of the controller, then the solver puts the
+        /// right hand on the weapon pose of <paramref name="pattern"/> at <paramref name="time"/> (seconds into the swing; negative = the guard / rest
+        /// pose) and the left hand on the shield. <paramref name="guard"/> raises the shield.
+        /// </summary>
+        public static string FirstPersonPattern(string pngPath, string weaponId, string shieldId, Emberdelve.Data.SwingPatternData pattern, float time, float guard, float fov = 70f, int width = 960, int height = 540, bool wall = true, Emberdelve.Data.SwingTiming? timing = null, bool swapFirst = false)
+        {
+            return Capture(pngPath, width, height, fov, true, (root, camera) =>
+            {
+                camera.transform.SetPositionAndRotation(Origin + new Vector3(0f, 1.66f, 0f), Quaternion.identity);
+                if (wall)
+                {
+                    GameObject back = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    back.transform.SetParent(root, false);
+                    back.transform.localPosition = new Vector3(0f, 1.5f, 3.5f);
+                    back.transform.localScale = new Vector3(8f, 3f, 0.3f);
+                    Collider collider = back.GetComponent<Collider>();
+                    if (collider != null) UnityEngine.Object.DestroyImmediate(collider);
+                    Material wallMaterial = AssetDatabase.LoadAssetAtPath<Material>("Assets/Emberdelve/Art/Materials/Stone_Wall.mat");
+                    if (wallMaterial != null) back.GetComponent<Renderer>().sharedMaterial = wallMaterial;
+                }
+
+                Emberdelve.Player.WeaponViewModelSet set = Emberdelve.Player.WeaponViewModelSet.Load();
+                GameObject arms = (GameObject)PrefabUtility.InstantiatePrefab(set.armsPrefab);
+                arms.transform.SetParent(camera.transform, false);
+                Emberdelve.Player.FirstPersonArmsDriver driver = arms.GetComponent<Emberdelve.Player.FirstPersonArmsDriver>();
+                driver.Bind(null, camera, set);
+                if (swapFirst) driver.SetWeapons(FindWeapon("ember_crossbow"), string.IsNullOrEmpty(shieldId) ? null : FindWeapon(shieldId));
+                driver.SetWeapons(FindWeapon(weaponId), string.IsNullOrEmpty(shieldId) ? null : FindWeapon(shieldId));
+                PoseArms(arms, driver, camera, pattern, time, guard, timing);
+            }, 0.05f);
+        }
+
+        /// <summary>Poses an arms instance (edit mode): idle base pose, then the solver on the pattern pose at <paramref name="time"/> (negative: the rest pose).</summary>
+        public static void PoseArms(GameObject arms, Emberdelve.Player.FirstPersonArmsDriver driver, Camera camera, Emberdelve.Data.SwingPatternData pattern, float time, float guard, Emberdelve.Data.SwingTiming? timing = null)
+        {
+            AnimationClip idle = AssetDatabase.LoadAssetAtPath<AnimationClip>(EmberdelveFirstPersonArms.ClipPath(Emberdelve.Player.FirstPersonArmsDriver.IdleState));
+            EmberdelveFirstPersonArms.PoseInstance(arms, idle, 0.3f);
+            if (guard > 0.5f && time < 0f)
+            {
+                Emberdelve.Player.GuardBladePose.ResolveRoot(camera.transform.position, Quaternion.LookRotation(camera.transform.forward, Vector3.up), true, out Vector3 gp, out Quaternion gr);
+                Vector3 lp = camera.transform.InverseTransformPoint(gp);
+                driver.Pose(camera.transform, camera, lp, Quaternion.Inverse(camera.transform.rotation) * gr, guard, Vector3.zero, Vector3.zero);
+                return;
+            }
+
+            Emberdelve.Data.SwingPose pose = pattern == null ? new Emberdelve.Data.SwingPose(Emberdelve.Player.FirstPersonArmsDriver.PatternRest, 12f, -8f, 14f)
+                : (time < 0f ? pattern.RestPose : pattern.Evaluate(time, timing ?? pattern.Timing));
+            driver.Pose(camera.transform, camera, pose.Base, pose.LocalRotation, guard, Vector3.zero, Vector3.zero);
+        }
+
+        /// <summary>Stitches PNG files into one contact sheet (columns x rows of equally sized frames).</summary>
+        public static string Sheet(string sheetPath, List<string> files, int columns, int cellWidth, int cellHeight)
+        {
+            int rows = (files.Count + columns - 1) / columns;
+            Texture2D sheet = new Texture2D(columns * cellWidth, rows * cellHeight, TextureFormat.RGB24, false);
+            Color32[] clear = new Color32[sheet.width * sheet.height];
+            sheet.SetPixels32(clear);
+            for (int i = 0; i < files.Count; i++)
+            {
+                Texture2D t = new Texture2D(2, 2, TextureFormat.RGB24, false);
+                t.LoadImage(File.ReadAllBytes(files[i]));
+                RenderTexture rt = RenderTexture.GetTemporary(cellWidth, cellHeight, 0);
+                Graphics.Blit(t, rt);
+                RenderTexture.active = rt;
+                Texture2D small = new Texture2D(cellWidth, cellHeight, TextureFormat.RGB24, false);
+                small.ReadPixels(new Rect(0, 0, cellWidth, cellHeight), 0, 0);
+                small.Apply();
+                RenderTexture.active = null;
+                RenderTexture.ReleaseTemporary(rt);
+                int cx = (i % columns) * cellWidth;
+                int cy = (rows - 1 - i / columns) * cellHeight;
+                sheet.SetPixels(cx, cy, cellWidth, cellHeight, small.GetPixels());
+                UnityEngine.Object.DestroyImmediate(t);
+                UnityEngine.Object.DestroyImmediate(small);
+            }
+
+            sheet.Apply();
+            Directory.CreateDirectory(Path.GetDirectoryName(sheetPath));
+            File.WriteAllBytes(sheetPath, sheet.EncodeToPNG());
+            UnityEngine.Object.DestroyImmediate(sheet);
+            return sheetPath;
+        }
+
         private static void SwitchOffRetro(List<ScriptableRendererFeature> switched)
         {
             UniversalRenderPipelineAsset asset = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;

@@ -330,6 +330,9 @@ namespace Emberdelve.Player
             // All hand, pool and ammo callbacks remain deferred until the new stats and shared revision are final.
             if (setOwner != null) setOwner.CompleteWeaponSet(setChanged, isSwap);
 
+            // V3d: the off hand is final only now (the set's off hand is restored by BeginWeaponSet / ApplyMainHandWeapon above), so the first-person hands are dressed again from the settled state.
+            if (_arms != null) SyncArms(weapon);
+
             GameEvents.RaiseActiveWeapon(OwnerId, weapon);
             if (weapon != null) GameEvents.RaiseToast(OwnerId, $"Equipped {weapon.displayName}");
         }
@@ -500,6 +503,7 @@ namespace Emberdelve.Player
             if (_arms == null) return;
             _armsPending = false;
             bool dressed = weapon != null && _arms.SetWeapons(weapon, _rig != null ? _rig.OffhandWeapon : null);
+            _arms.SetVisual(_visual);
             _arms.gameObject.SetActive(dressed);
             if (dressed)
             {

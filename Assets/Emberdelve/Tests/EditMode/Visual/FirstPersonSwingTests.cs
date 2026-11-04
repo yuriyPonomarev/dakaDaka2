@@ -1,0 +1,330 @@
+using System.Collections.Generic;
+using NUnit.Framework;
+using UnityEditor;
+using UnityEngine;
+using Emberdelve.Combat;
+using Emberdelve.Core;
+using Emberdelve.Data;
+using Emberdelve.EditorTools;
+using Emberdelve.Player;
+
+namespace Emberdelve.Tests.Visual
+{
+    /// <summary>
+    /// V3d: the first-person hands follow the real swing trajectory. Each test poses the arms exactly the way the game does (idle base pose,
+    /// then <see cref="FirstPersonArmsDriver.Pose"/> on the pose of the pattern) and compares with the SwingPatternData itself: the blade
+    /// direction is the pattern's, the sweep goes the pattern's way, the hand stays inside the camera frustum. Expectations are read from the
+    /// data assets and the camera, never from source text.
+    /// </summary>
+    public sealed class FirstPersonSwingTests
+    {
+        private const string SwordId = "ashen_short_sword";
+        private const string ShieldId = "emberbulwark_shield";
+
+        private sealed class Scene : System.IDisposable
+        {
+            public GameObject Root;
+            public Camera Camera;
+            public GameObject Arms;
+            public FirstPersonArmsDriver Driver;
+
+            public static Scene Create(string weaponId, string shieldId)
+            {
+                Scene s = new Scene();
+                s.Root = new GameObject("V3dTestCamera");
+                s.Root.transform.position = new Vector3(4000f, 1.66f, 4000f);
+                s.Camera = s.Root.AddComponent<Camera>();
+                s.Camera.fieldOfView = 70f;
+                s.Camera.aspect = 16f / 9f;
+                s.Camera.nearClipPlane = 0.05f;
+                WeaponViewModelSet set = WeaponViewModelSet.Load();
+                Assert.IsNotNull(set);
+                s.Arms = (GameObject)PrefabUtility.InstantiatePrefab(set.armsPrefab);
+                s.Arms.transform.SetParent(s.Root.transform, false);
+                s.Driver = s.Arms.GetComponent<FirstPersonArmsDriver>();
+                s.Driver.Bind(null, s.Camera, set);
+                s.Driver.SetWeapons(EmberdelveViewmodelPreview.FindWeapon(weaponId), string.IsNullOrEmpty(shieldId) ? null : EmberdelveViewmodelPreview.FindWeapon(shieldId));
+                return s;
+            }
+
+            public void Dispose()
+            {
+                if (Root != null) Object.DestroyImmediate(Root);
+            }
+
+            public void Pose(SwingPatternData pattern, float time, float guard = 0f)
+            {
+                EmberdelveViewmodelPreview.PoseArms(Arms, Driver, Camera, pattern, time, guard);
+            }
+
+            /// <summary>Blade direction of the held model in the camera frame (the grip's +Y is the tip).</summary>
+            public Vector3 TipDirection() => Camera.transform.InverseTransformDirection(Driver.GripRight.up);
+
+            public Vector3 GripLocal() => Camera.transform.InverseTransformPoint(Driver.GripRight.position);
+
+            public bool InFrustum(Vector3 world)
+            {
+                Plane[] planes = GeometryUtility.CalculateFrustumPlanes(Camera);
+                for (int i = 0; i < planes.Length; i++) if (planes[i].GetDistanceToPoint(world) < 0f) return false;
+                return true;
+            }
+        }
+
+        private static IEnumerable<SwingPatternData> MeleePatterns()
+        {
+            string[] guids = AssetDatabase.FindAssets("t:SwingPatternData");
+            for (int i = 0; i < guids.Length; i++)
+            {
+                SwingPatternData pattern = AssetDatabase.LoadAssetAtPath<SwingPatternData>(AssetDatabase.GUIDToAssetPath(guids[i]));
+                if (pattern != null && pattern.keys != null && pattern.keys.Length >= 2) yield return pattern;
+            }
+        }
+
+        private static IEnumerable<string> PatternNames()
+        {
+            foreach (SwingPatternData pattern in MeleePatterns()) yield return pattern.name;
+        }
+
+        private static SwingPatternData Pattern(string name)
+        {
+            foreach (SwingPatternData pattern in MeleePatterns()) if (pattern.name == name) return pattern;
+            Assert.Fail("pattern " + name + " exists");
+            return null;
+        }
+
+        private static float YawOf(Vector3 direction) => Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
+        private static float PitchDownOf(Vector3 direction) => -Mathf.Asin(Mathf.Clamp(direction.normalized.y, -1f, 1f)) * Mathf.Rad2Deg;
+
+        [TestCaseSource(nameof(PatternNames))]
+        public void Blade_FollowsThePatternDirection_AtEveryPhase(string patternName)
+        {
+            SwingPatternData pattern = Pattern(patternName);
+            SwingTiming timing = pattern.Timing;
+            using (Scene scene = Scene.Create(SwordId, ShieldId))
+            {
+                float[] times = { 0f, timing.Windup * 0.5f, timing.Windup, timing.Windup + timing.Active * 0.5f, timing.ActiveEnd, timing.ActiveEnd + timing.Recovery * 0.5f, timing.Total };
+                for (int i = 0; i < times.Length; i++)
+                {
+                    scene.Pose(pattern, times[i]);
+                    Vector3 expected = pattern.Evaluate(times[i], timing).LocalDirection;
+                    float angle = Vector3.Angle(expected, scene.TipDirection());
+                    Assert.Less(angle, 3f, patternName + " t=" + times[i] + ": the model's blade points along the pattern's blade direction");
+                }
+            }
+        }
+
+        [TestCaseSource(nameof(PatternNames))]
+        public void Sweep_GoesTheWayOfThePattern(string patternName)
+        {
+            SwingPatternData pattern = Pattern(patternName);
+            SwingTiming timing = pattern.Timing;
+            SwingPose start = pattern.Evaluate(timing.Windup, timing);
+            SwingPose end = pattern.Evaluate(timing.ActiveEnd, timing);
+            using (Scene scene = Scene.Create(SwordId, ShieldId))
+            {
+                scene.Pose(pattern, timing.Windup);
+                Vector3 tipStart = scene.TipDirection();
+                Vector3 handStart = scene.GripLocal();
+                scene.Pose(pattern, timing.Windup + timing.Active * 0.5f);
+                Vector3 tipMid = scene.TipDirection();
+                scene.Pose(pattern, timing.ActiveEnd);
+                Vector3 tipEnd = scene.TipDirection();
+                Vector3 handEnd = scene.GripLocal();
+
+                float yawData = end.Yaw - start.Yaw;
+                float pitchData = end.Pitch - start.Pitch;
+                float forwardData = end.Base.z - start.Base.z;
+
+                if (Mathf.Abs(yawData) > 5f)
+                {
+                    Assert.AreEqual(Mathf.Sign(yawData), Mathf.Sign(YawOf(tipEnd) - YawOf(tipStart)), patternName + ": the blade sweeps to the side the pattern's yaw does");
+                    Assert.AreEqual(Mathf.Sign(yawData), Mathf.Sign(YawOf(tipMid) - YawOf(tipStart)), patternName + ": and already at the middle of the active phase");
+                }
+
+                if (Mathf.Abs(pitchData) > 5f)
+                {
+                    Assert.AreEqual(Mathf.Sign(pitchData), Mathf.Sign(PitchDownOf(tipEnd) - PitchDownOf(tipStart)), patternName + ": the blade moves up or down as the pattern's pitch does (overhead = top-down)");
+                }
+
+                if (forwardData > 0.3f)
+                {
+                    Assert.Greater(handEnd.z - handStart.z, 0.03f, patternName + ": a thrust brings the hand forward");
+                }
+
+                if (pattern.kind == SwingKind.HorizontalLeftToRight) Assert.Greater(handEnd.x, handStart.x, patternName + ": left-to-right moves the hand to the right");
+                if (pattern.kind == SwingKind.HorizontalRightToLeft) Assert.Less(handEnd.x, handStart.x, patternName + ": right-to-left moves the hand to the left");
+                if (pattern.kind == SwingKind.Overhead) Assert.Greater(PitchDownOf(tipEnd), PitchDownOf(tipStart) + 20f, patternName + ": the overhead comes down");
+            }
+        }
+
+        [Test]
+        public void LeftToRight_And_RightToLeft_AreDistinctMotions()
+        {
+            SwingPatternData lr = Pattern("Pattern_SwordSlashLR");
+            SwingPatternData rl = Pattern("Pattern_SwordSlashRL");
+            using (Scene scene = Scene.Create(SwordId, ShieldId))
+            {
+                float Sweep(SwingPatternData p)
+                {
+                    SwingTiming t = p.Timing;
+                    scene.Pose(p, t.Windup);
+                    float a = YawOf(scene.TipDirection());
+                    scene.Pose(p, t.ActiveEnd);
+                    return YawOf(scene.TipDirection()) - a;
+                }
+
+                float lrSweep = Sweep(lr);
+                float rlSweep = Sweep(rl);
+                Assert.Greater(lrSweep, 20f, "LR sweeps right");
+                Assert.Less(rlSweep, -20f, "RL sweeps left");
+            }
+        }
+
+        [TestCaseSource(nameof(PatternNames))]
+        public void Hand_StaysInsideTheCameraFrustum_ThroughTheWholeSwing(string patternName)
+        {
+            SwingPatternData pattern = Pattern(patternName);
+            SwingTiming timing = pattern.Timing;
+            using (Scene scene = Scene.Create(SwordId, ShieldId))
+            {
+                int steps = 16;
+                for (int i = 0; i <= steps; i++)
+                {
+                    float time = timing.Total * i / steps;
+                    scene.Pose(pattern, time);
+                    Assert.IsTrue(scene.InFrustum(scene.Driver.GripRight.position), patternName + " t=" + time.ToString("0.000") + ": the grip is inside the frustum (fov " + scene.Camera.fieldOfView + ", near " + scene.Camera.nearClipPlane + ")");
+
+                    SwingPose pose = pattern.Evaluate(time, timing);
+                    Vector3 expected = scene.Camera.transform.TransformPoint(FirstPersonArmsDriver.ClampToView(scene.Camera, FirstPersonArmsDriver.ViewHand(pose.Base)));
+                    Assert.Less(Vector3.Distance(expected, scene.Driver.GripRight.position), 0.06f, patternName + " t=" + time.ToString("0.000") + ": the arm reaches the hand target");
+                }
+            }
+        }
+
+        [Test]
+        public void ViewHand_NeverMovesTheHandOutsideTheFrustumForAnyAuthoredBase()
+        {
+            using (Scene scene = Scene.Create(SwordId, ShieldId))
+            {
+                foreach (SwingPatternData pattern in MeleePatterns())
+                {
+                    for (int k = 0; k < pattern.keys.Length; k++)
+                    {
+                        Vector3 local = FirstPersonArmsDriver.ClampToView(scene.Camera, FirstPersonArmsDriver.ViewHand(pattern.keys[k].basePos));
+                        Assert.IsTrue(scene.InFrustum(scene.Camera.transform.TransformPoint(local)), pattern.name + " key " + k);
+                    }
+                }
+            }
+        }
+
+        [Test]
+        public void Block_RaisesTheShield_AndBringsTheBladeToTheGuardPose()
+        {
+            using (Scene scene = Scene.Create(SwordId, ShieldId))
+            {
+                scene.Pose(null, -1f, 0f);
+                Vector3 restShield = scene.Camera.transform.InverseTransformPoint(scene.Driver.GripLeft.position);
+                scene.Pose(null, -1f, 1f);
+                Vector3 raisedShield = scene.Camera.transform.InverseTransformPoint(scene.Driver.GripLeft.position);
+                Assert.Greater(raisedShield.y, restShield.y + 0.05f, "the shield rises when the block is held");
+                Assert.Greater(raisedShield.x, restShield.x + 0.05f, "and comes towards the middle");
+
+                GuardBladePose.ResolveRoot(scene.Camera.transform.position, Quaternion.LookRotation(scene.Camera.transform.forward, Vector3.up), true, out Vector3 guardPosition, out Quaternion guardRotation);
+                Vector3 expectedDirection = scene.Camera.transform.InverseTransformDirection(guardRotation * Vector3.forward);
+                Assert.Less(Vector3.Angle(expectedDirection, scene.TipDirection()), 3f, "the held blade is the guard blade the projectile defence uses");
+                Assert.IsTrue(scene.InFrustum(scene.Driver.GripRight.position));
+                Assert.IsTrue(scene.InFrustum(scene.Driver.GripLeft.position));
+            }
+        }
+
+        [Test]
+        public void ShieldVisual_SurvivesAWeaponSwapSequence()
+        {
+            WeaponData sword = EmberdelveViewmodelPreview.FindWeapon(SwordId);
+            WeaponData shield = EmberdelveViewmodelPreview.FindWeapon(ShieldId);
+            WeaponData crossbow = EmberdelveViewmodelPreview.FindWeapon("ember_crossbow");
+            Assert.IsNotNull(crossbow);
+            using (Scene scene = Scene.Create(SwordId, ShieldId))
+            {
+                Assert.IsTrue(scene.Driver.ShieldShown, "spawn: sword and shield");
+
+                // The loadout calls SetWeapons for every equip: the crossbow (arms are hidden for it), then the sword set again, repeatedly.
+                for (int round = 0; round < 3; round++)
+                {
+                    scene.Driver.SetWeapons(crossbow, shield);
+                    scene.Arms.SetActive(false);
+                    scene.Driver.SetWeapons(sword, shield);
+                    scene.Arms.SetActive(true);
+
+                    Assert.IsTrue(scene.Driver.ShieldShown, "round " + round + ": the shield model is back in the left hand");
+                    Assert.IsTrue(scene.Driver.HasWeaponModel, "and the sword");
+                    scene.Pose(Pattern("Pattern_SwordSlashLR"), -1f, 0f);
+                    Vector3 shieldLocal = scene.Camera.transform.InverseTransformPoint(scene.Driver.OffHandModel.transform.position);
+                    Assert.IsTrue(scene.InFrustum(scene.Driver.OffHandModel.transform.position), "the shield is on screen: " + shieldLocal);
+                    Assert.Less(Vector3.Distance(scene.Camera.transform.InverseTransformPoint(scene.Driver.GripLeft.position), FirstPersonArmsDriver.ShieldRest), 0.08f, "the left hand holds it at its rest position");
+                    Assert.AreEqual(0, CountEnabledShields(scene.Driver, shield) - 1, "exactly one shield is shown");
+                }
+            }
+        }
+
+        private static int CountEnabledShields(FirstPersonArmsDriver driver, WeaponData shield)
+        {
+            int count = 0;
+            Transform[] all = driver.GripLeft.GetComponentsInChildren<Transform>(false);
+            for (int i = 0; i < all.Length; i++) if (all[i].name == "Held_" + shield.weaponId) count++;
+            return count;
+        }
+
+        [Test]
+        public void Defense_KeepsTheShield_WhenTheRangedSetIsHeldAndTheMeleeSetReturns()
+        {
+            CharacterClassData warrior = null;
+            string[] guids = AssetDatabase.FindAssets("t:CharacterClassData");
+            for (int i = 0; i < guids.Length && warrior == null; i++)
+            {
+                CharacterClassData data = AssetDatabase.LoadAssetAtPath<CharacterClassData>(AssetDatabase.GUIDToAssetPath(guids[i]));
+                if (data != null && data.offhandShield != null && data.primaryWeapon != null && !data.primaryWeapon.IsRanged
+                    && data.secondaryWeapon != null && data.secondaryWeapon.IsRanged) warrior = data;
+            }
+
+            Assert.IsNotNull(warrior, "a class with sword + shield and a ranged second set exists");
+            DefenseProfile before = DefenseProfile.Resolve(warrior, warrior.primaryWeapon, warrior.offhandShield, 0f);
+            DefenseProfile ranged = DefenseProfile.Resolve(warrior, warrior.secondaryWeapon, warrior.offhandShield, 0f);
+            DefenseProfile after = DefenseProfile.Resolve(warrior, warrior.primaryWeapon, warrior.offhandShield, 0f);
+            Assert.IsTrue(before.HasShield, "spawn: the shield defends");
+            Assert.IsFalse(ranged.CanBlock, "a crossbow does not block");
+            Assert.IsTrue(after.HasShield, "after the swap back the shield defends again (gameplay is not what disappeared)");
+            Assert.AreEqual(before.BlockReduction, after.BlockReduction, 1e-5f);
+        }
+
+        [Test]
+        public void ShieldHeld_ShowsTheLeftHandOnTheShieldGrip_NotAnIdleFist()
+        {
+            using (Scene scene = Scene.Create(SwordId, ShieldId))
+            {
+                scene.Pose(Pattern("Pattern_SwordSlashLR"), 0.1f, 0f);
+                Vector3 expected = FirstPersonArmsDriver.ShieldRest;
+                Vector3 actual = scene.Camera.transform.InverseTransformPoint(scene.Driver.GripLeft.position);
+                Assert.Less(Vector3.Distance(expected, actual), 0.08f, "the shield stays at its rest place while the right hand swings");
+            }
+        }
+
+        [Test]
+        public void ModelScale_MatchesTheDamageSegmentWithinTheClamp()
+        {
+            WeaponViewModelSet set = WeaponViewModelSet.Load();
+            foreach (string id in new[] { SwordId, "ember_rapier", "warden_maul" })
+            {
+                WeaponData weapon = EmberdelveViewmodelPreview.FindWeapon(id);
+                WeaponViewModelSet.Entry entry = set.Find(id);
+                if (weapon == null || entry == null) continue;
+                float damage = FirstPersonArmsDriver.DamageBladeLength(weapon);
+                float scale = FirstPersonArmsDriver.ModelScaleFor(damage, entry.length);
+                Assert.GreaterOrEqual(scale, FirstPersonArmsDriver.MinModelScale);
+                Assert.LessOrEqual(scale, FirstPersonArmsDriver.MaxModelScale);
+                if (damage / entry.length >= FirstPersonArmsDriver.MinModelScale && damage / entry.length <= FirstPersonArmsDriver.MaxModelScale)
+                    Assert.AreEqual(damage, entry.length * scale, 1e-3f, id + ": the shown blade is the damage segment");
+            }
+        }
+    }
+}

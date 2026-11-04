@@ -112,7 +112,7 @@ namespace Emberdelve.Player
             Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
             for (int i = 0; i < renderers.Length; i++)
             {
-                if (renderers[i].gameObject.name == "Sweep_Edge" || renderers[i].GetComponent<SwingTrail>() != null) continue;
+                if (renderers[i].GetComponent<SwingTrail>() != null) continue;
                 renderers[i].enabled = false;
             }
         }
