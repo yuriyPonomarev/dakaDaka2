@@ -29,3 +29,6 @@ Thumbs.db
 .DS_Store
 # Local QA Python bytecode
 /Tools/LocalTesting/__pycache__/
+
+# Local harness Python cache
+/Tools/**/__pycache__/

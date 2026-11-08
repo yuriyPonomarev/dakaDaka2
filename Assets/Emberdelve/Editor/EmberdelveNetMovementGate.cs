@@ -397,6 +397,7 @@ namespace Emberdelve.EditorTools
             if (string.IsNullOrEmpty(exe))
             {
                 exe = Path.Combine(runDir, "player", "EmberdelveNet.exe");
+                exe = EmberdelvePlayerBuildCache.TestPlayerPath(exe, "net-proof");
                 bool built = EmberdelveWindowsBuild.BuildNetProofPlayer(exe, out string buildError);
                 Check(built, "player build" + (built ? "" : " failed: " + buildError));
                 if (!built) return 1;

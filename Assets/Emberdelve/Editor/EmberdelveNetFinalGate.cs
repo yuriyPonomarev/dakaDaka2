@@ -277,6 +277,7 @@ namespace Emberdelve.EditorTools
             if (string.IsNullOrEmpty(exe))
             {
                 exe = Path.Combine(runDir, "player", "EmberdelveNet.exe");
+                exe = EmberdelvePlayerBuildCache.TestPlayerPath(exe, "net-final");
                 bool built = EmberdelveWindowsBuild.BuildNetFinalPlayer(exe, out string buildError);
                 Check(built, "final player build (Lobby + Level01)" + (built ? "" : " failed: " + buildError));
                 if (!built) return 1;

@@ -18,7 +18,7 @@ if(Test-Path -LiteralPath $runRoot){
                 $result=if($run.passed){'PASS'}else{'FAIL'}
                 Write-Output ("{0}: {1} set={2} seconds={3}" -f $runDir.Name,$result,$run.set,$run.elapsedSeconds)
                 $gateSummary=[string]$run.gates
-                if(Test-Path -LiteralPath $gateSummary){
+                if($gateSummary -and (Test-Path -LiteralPath $gateSummary)){
                     $gates=Get-Content -LiteralPath $gateSummary -Raw | ConvertFrom-Json
                     foreach($gate in @($gates.results | Where-Object { !$_.passed })){
                         Write-Output ("  {0}: {1}" -f $gate.name,((@($gate.problems | Select-Object -First 3)) -join ' | '))

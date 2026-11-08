@@ -161,18 +161,7 @@ namespace Emberdelve.EditorTools
                 };
 
                 Debug.Log(Tag + " net-proof start scenes=[" + EmberdelveNetBuilder.NetBootScenePath + ", " + EmberdelvePaths.DungeonScenePath + "] output=" + exePath);
-                BuildReport report = BuildPipeline.BuildPlayer(options);
-                BuildSummary summary = report.summary;
-                Debug.Log(Tag + " net-proof report result=" + summary.result + " totalSize=" + summary.totalSize +
-                          " totalTime=" + summary.totalTime);
-
-                if (summary.result != BuildResult.Succeeded || !File.Exists(exePath))
-                {
-                    error = "build result=" + summary.result + " exeExists=" + File.Exists(exePath);
-                    return false;
-                }
-
-                return true;
+                return EmberdelvePlayerBuildCache.Build(options, "net-proof", out error);
             }
             catch (Exception exception)
             {
@@ -251,18 +240,7 @@ namespace Emberdelve.EditorTools
                 };
 
                 Debug.Log(Tag + " net-final start scenes=[" + lobby + ", " + dungeon + "] output=" + exePath);
-                BuildReport report = BuildPipeline.BuildPlayer(options);
-                BuildSummary summary = report.summary;
-                Debug.Log(Tag + " net-final report result=" + summary.result + " totalSize=" + summary.totalSize +
-                          " totalTime=" + summary.totalTime);
-
-                if (summary.result != BuildResult.Succeeded || !File.Exists(exePath))
-                {
-                    error = "build result=" + summary.result + " exeExists=" + File.Exists(exePath);
-                    return false;
-                }
-
-                return true;
+                return EmberdelvePlayerBuildCache.Build(options, "net-final", out error);
             }
             catch (Exception exception)
             {
