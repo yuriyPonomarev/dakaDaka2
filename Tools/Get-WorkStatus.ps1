@@ -6,6 +6,11 @@ Write-Output 'DakaDaka: read Docs/CURRENT_WORK.md for the active slice; Docs/ROA
 $runRoot=Join-Path $projectRoot 'Logs/runs'
 if(Test-Path -LiteralPath $runRoot){
     foreach($runDir in @(Get-ChildItem -LiteralPath $runRoot -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First $Recent)){
+        $cancel=Join-Path $runDir.FullName 'cancellation.json'
+        if(Test-Path -LiteralPath $cancel){
+            Write-Output ($runDir.Name+': CANCELLED (see cancellation.json; not a regression verdict)')
+            continue
+        }
         $summary=Join-Path $runDir.FullName 'run.json'
         if(Test-Path -LiteralPath $summary){
             try {
@@ -29,4 +34,3 @@ Write-Output ('Mirror lock present: '+(Test-Path -LiteralPath (Join-Path $mirror
 $changes=@(& git -C $projectRoot -c core.quotepath=false status --porcelain --untracked-files=all)
 if($LASTEXITCODE -ne 0){throw 'Cannot read working tree'}
 Write-Output ('Changed/untracked paths: '+$changes.Count+' (working-tree cleanliness alone does not establish acceptance)')
-

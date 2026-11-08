@@ -1,4 +1,4 @@
-# DakaDaka — development contract
+# DakaDaka вЂ” development contract
 
 Unity 6000.2.5f1 / URP 17.2 / NGO 2.7 / C# / new Input System.
 Root: Assets/Emberdelve. Design: Docs/Design/UNITY_DESIGN.md.
@@ -32,7 +32,7 @@ One executor by default. Delegate only independent, bounded work when useful; se
 | Arms/animation | Visual EditMode tests; Hands, Visual; NetCombat if network enemy presentation changed; actual motion review |
 | Process/docs only | Review paths/commands for accuracy; no gameplay test rerun solely for prose |
 
-Compile + focused proof per slice. One full `Run-All.ps1 -Set all -EditMode` after integration or before accepting a baseline/build. Repeat passing checks only after relevant changes or new evidence. Never reduce expectations to obtain green.
+Compile + focused proof per slice. One full `Run-All.ps1 -Set all -EditMode` after integration or before accepting a baseline/build. Repeat passing checks only after relevant changes or new evidence. After a full run and a test-fixture-only correction, rerun the affected scenario (and failing seed); do not restart the entire suite solely to obtain one green aggregate. Record combined evidence honestly; reserve the next full run for substantive integration/release. Never reduce expectations to obtain green.
 Readiness is separate: implemented -> automated proof -> visual proof -> accepted. Report seed/version/run path; old passes do not validate later changes. Generated maps need more than one layout for targeted acceptance.
 
 ## Unity pipeline

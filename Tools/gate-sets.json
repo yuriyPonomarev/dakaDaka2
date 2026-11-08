@@ -65,10 +65,17 @@
     "net": [
       "NetAdmission",
       "NetCombat",
+      "NetDoor",
       "NetFinal",
+      "NetExtraction",
+      "NetInventory",
+      "Emberdelve.EditorTools.EmberdelveNetInventoryGate.RunInventoryDropProofOnly",
       "NetMovement",
       "NetProof",
       "NetSkill"
+    ],
+    "net-floor-loot": [
+      "Emberdelve.EditorTools.EmberdelveNetInventoryGate.RunFloorLootProofOnly"
     ],
     "visual": [
       "RetroVisual",
@@ -134,13 +141,20 @@
       "TurnCeiling",
       "NetAdmission",
       "NetCombat",
+      "NetDoor",
       "NetFinal",
+      "NetExtraction",
+      "NetInventory",
+      "Emberdelve.EditorTools.EmberdelveNetInventoryGate.RunInventoryDropProofOnly",
       "NetMovement",
       "NetProof",
       "NetSkill",
       "RetroVisual",
       "Visual",
       "RuntimeSmokeTest.RunCombatFlow"
+    ],
+    "net-inventory-drop": [
+      "Emberdelve.EditorTools.EmberdelveNetInventoryGate.RunInventoryDropProofOnly"
     ]
   }
 }

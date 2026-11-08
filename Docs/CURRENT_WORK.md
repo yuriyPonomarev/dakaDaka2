@@ -1,17 +1,28 @@
-# CURRENT WORK - 4 Nov 2026
+# DakaDaka - current work
 
-Rewrite this file each slice; history is in `Docs/Archive/`.
+Updated 8 November 2026. Process commit: 3616c4fc.
+Roadmap: ROADMAP.md. Open risks: CRITICAL_DEBT.md. Rules: ../AGENTS.md.
+Compact readout: powershell -NoProfile -ExecutionPolicy Bypass -File Tools/Get-WorkStatus.ps1
 
-## State
-- U5B (arming sword + two-handed sword: data, catalog, loot, CC0 OpenGameArt models, two-handed first-person grip) is done, uncommitted: see `Docs/Tasks/U5B.md`. Loot only, no kit choice exists. The two-hander does not break a sword guard (impactPower 12, documented deviation from the brief).
-- U5A (weapons and shields as equipment: hand slots, drop, pickup, fists) is done, uncommitted: see `Docs/Tasks/U5A.md`. V3d is also uncommitted; V3c bc7a6c28, U3C3 de67cce2 and FIX2 a03c1885 are committed.
-- Weapons and shields are ItemInstances in hand slots (per weapon set), moved by the same server-authoritative commands as clothing, droppable (Q in the satchel) as server-spawned ground items. Handedness is data: one-handed main hand only, shield off hand only, two-handed blocks the off hand. Empty main hand = unarmed fists.
-- Evidence: gate `Hands`, `HandsRulesTests`, Run-All all + EditMode (see the U5A task file).
-- RuntimeSmokeTest flake fixed by data-derived probe enemy selection (task file).
+## Current evidence
 
-## Next
-- Play-test the new swords (two-hander timing, FP pommel size); a better longsword model if Quaternius Modular Weapons becomes downloadable.
-- Networked drop/pickup needs a network inventory (U4A).
+- Full mirror run 20261108-190643: EditMode 887/887; 68 of 69 gates passed. Sole failure: smoke loot fixture placed player on a modular plinth. This full run is FAIL, not green.
+- Fresh passes in that full run: NetMovement 189/0, NetFinal 172/0, NetInventory 146/0, NetDoor 37/0, NetCombat 312/0, NetExtraction 136/0, NetSkill 127/0, Hands 92/0, Visual 207/0, DrawSpeed 203/0.
+- Fixed smoke fixture to choose supported capsule clearance, probe reach and production LOS; original target/collection assertions retained. Focused 20261108-193032: smoke 249/0 and equipment-drop 17/0 PASS. Original failing seed rerun 20261108-193253 passed 249/0 (same map hash; selected pickup differs).
+- NetMovement telemetry race fixed by bounded fresh-counter AND owner/observer convergence wait; original tolerances retained.
+- Audit found equipment-drop missing from net/all. Added it (now all=70); full 190643 predates this membership change, so drop was verified separately. No single 70-gate green run yet.
 
-## Known compromises
-- No network proof of a client drop seen by another client. FP arms and HUD not played, only gate-verified. Block pose follows the true guard blade; unused controller states kept.
+## Next three actions
+
+1. Keep the full + targeted evidence; do not repeat successful suites merely for a green aggregate. Full run next at release or substantive integration.
+2. Add failure-after-offhand-stow test before fixing two-handed equip atomicity (ITEMS-01).
+3. Real two-client inventory/reconnect/raid acceptance, then hands/block and authoritative attack phase timing in motion.
+
+## Limits and ownership
+
+- Test audit: Tasks/TEST_AUDIT_20261108.md (67 test files, measured runtime, overlap, omissions and missing critical scenarios). No tests deleted or tolerances weakened.
+- Hands grip/guard and enemy trigger fixes have automated coverage; appearance unaccepted, enemy swing duration still approximate. Production timer remains disabled pending HUD review. Stash not implemented.
+- Default session size is 9; parser allows up to 64, not measured capacity. Network movement proof uses four clients; nine-client load acceptance missing.
+- Preserve inherited mixed changes (map/content, inventory/extraction, combat/visuals, gates). Only process changes committed so far; no blanket commit/reset. Exclude material drift and local Pipeline settings.
+
+Run 193510 was a redundant full rerun, explicitly cancelled after user feedback; raw runner exit is not a newly discovered regression. Main Editor preserved. No tests remain running from this work.

@@ -1,11 +1,11 @@
-# Critical debt register — 8 November 2026
+# Critical debt register вЂ” 8 November 2026
 
 Only coordinator updates closure. Priority is risk, not amount of code written. No new feature work until P0 is closed.
 
 | ID | Priority | Problem / status | Closure evidence |
 |---|---|---|---|
-| NET-01 | P0 | Old map assumptions in movement/final fixtures; 5s telemetry raced by 3.5s wait. Fixes implemented, rerun pending. | Current NetMovement + NetFinal pass; unchanged movement thresholds, original spawns still tested |
-| BASE-01 | P0 | No passing full regression for accumulated current changes | Current all + EditMode pass; exact run path, no concurrent source changes |
+| NET-01 | P0 | Old map assumptions in movement/final fixtures; 5s telemetry raced by 3.5s wait. Automated closure: full 190643 NetMovement 189/0, NetFinal 172/0. | Current NetMovement + NetFinal pass; unchanged movement thresholds, original spawns still tested |
+| BASE-01 | P0 | 190643 had 68/69 passing; sole smoke fixture failure fixed (193032 249/0). New drop inclusion passed separately 17/0; Original seed passed 193253 249/0. Combined evidence closes observed failures; unified 70-gate release run deferred, redundant 193510 cancelled. | Current all + EditMode pass; exact run path, no concurrent source changes |
 | ITEMS-01 | P1 | Two-handed equip may commit displaced offhand before main equip; atomicity not covered by drop fix | Inspect LocalInventoryAuthority transfer path; failure after displacement must restore all UIDs/slots/revision; regression test, NetInventory/Hands |
 | UI-01 | P1 | Inventory/reconnect and full raid not accepted through actual client UI | Two clients: equip/drop/contention, disconnect/rejoin, corpse, extraction and result; no item duplication |
 | ANIM-01 | P1 | Grip/guard/trigger changes not visually accepted; attack duration still guessed | Hands/Visual/NetCombat pass plus in-motion owner/peer review; phase timing agrees with server damage |
