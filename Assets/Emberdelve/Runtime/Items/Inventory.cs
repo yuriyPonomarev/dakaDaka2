@@ -1342,6 +1342,41 @@ namespace Emberdelve.Items
         /// and raises the single InventoryChanged notification once both halves exist. A refusal touches
         /// nothing and notifies nothing.
         /// </summary>
+        internal bool TryEquipTransferWithOffhand(int bagIndex, ItemInstance incoming, ItemInstance outgoing,
+            ItemInstance offhand, out string reason)
+        {
+            if (offhand == null) return TryEquipTransfer(bagIndex, incoming, outgoing, out reason);
+            EnsureGrid();
+            var saved = new List<Stack>(_stacks.Count);
+            foreach (Stack stack in _stacks)
+                saved.Add(new Stack { StackId = stack.StackId, Item = stack.Item, Instance = stack.Instance,
+                    Count = stack.Count, Origin = stack.Origin });
+            ulong next = _nextStackId;
+            bool exhausted = _stackIdsExhausted;
+            int units = TotalUnits, value = CarriedValue;
+            bool committed = false;
+            try
+            {
+                // Both helpers are silent and do not advance revision. Equipment publishes once.
+                if (!TryUnequipTransfer(offhand, out reason)) return false;
+                committed = TryEquipTransfer(bagIndex, incoming, outgoing, out reason);
+                return committed;
+            }
+            finally
+            {
+                if (!committed)
+                {
+                    _stacks.Clear();
+                    _stacks.AddRange(saved);
+                    _nextStackId = next;
+                    _stackIdsExhausted = exhausted;
+                    TotalUnits = units;
+                    CarriedValue = value;
+                    Recompute();
+                }
+            }
+        }
+
         internal bool TryEquipTransfer(int bagIndex, ItemInstance expectedIncoming, ItemInstance outgoing,
             out string reason)
         {

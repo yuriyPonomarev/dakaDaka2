@@ -374,34 +374,15 @@ namespace Emberdelve.Items
 
             if (!_inventory.CanCommitRevision(out reason)) return false;
 
-            // The bag half first. Inventory plans the hole for the outgoing item using the space the incoming
-            // unit is about to vacate, and commits both moves together. A refusal here has changed nothing, and
-            // a success has told nobody yet: the transfer is silent so this component can finish its own half.
-            // U5A: a two-handed weapon needs the off hand of its set free: the worn off-hand item goes to the bag first (the same unequip
-            // every off-hand takes off uses). When the equip itself then fails the off-hand item is put back, so a refusal changes nothing.
-            ItemInstance displacedOff = null;
-            EquipmentSlot displacedSlot = EquipmentSlot.None;
-            if (displaceOffIndex >= 0)
-            {
-                displacedOff = _gear[displaceOffIndex];
-                displacedSlot = (EquipmentSlot)displaceOffIndex;
-                if (!TryUnequipSlotState(displaceOffIndex, out string stowReason))
-                {
-                    reason = $"the off hand cannot be freed for {item.displayName}: {stowReason}";
-                    return false;
-                }
-            }
-
-            if (!_inventory.TryEquipTransfer(bagIndex, incoming, previous, out reason))
-            {
-                if (displacedOff != null)
-                {
-                    int back = _inventory.IndexOfInstance(displacedOff.Uid);
-                    if (back >= 0) TryEquipSelectedState(back, displacedOff, displacedSlot, out _);
-                }
+            ItemInstance displacedOff = displaceOffIndex >= 0 ? _gear[displaceOffIndex] : null;
+            if (!_inventory.TryEquipTransferWithOffhand(bagIndex, incoming, previous, displacedOff, out reason))
                 return false;
-            }
 
+            if (displacedOff != null)
+            {
+                _gear[displaceOffIndex] = null;
+                RestoreClassHand((EquipmentSlot)displaceOffIndex);
+            }
             ApplyToSlot(index, incoming);
             RefreshStats();
             _inventory.CommitRevision();
@@ -410,6 +391,7 @@ namespace Emberdelve.Items
             // inventory notification an equipment transfer owes its observers is raised here, never from
             // inside the bag helper, so a subscriber can never read a half-committed transfer.
             GameEvents.RaiseInventoryChanged(OwnerId);
+            if (displacedOff != null) GameEvents.RaiseEquipmentChanged(OwnerId, displacedOff.Definition, false);
             GameEvents.RaiseEquipmentChanged(OwnerId, item, true);
             GameEvents.RaiseToast(OwnerId, $"Equipped {item.displayName}");
             return true;

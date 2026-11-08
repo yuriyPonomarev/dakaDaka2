@@ -6,6 +6,8 @@ Compact readout: powershell -NoProfile -ExecutionPolicy Bypass -File Tools/Get-W
 
 ## Current evidence
 
+- ITEMS-01 completed: atomic offhand/main-hand bag transfer; refused exchange restores exact bag state without changing hands/revision. Run 20261108-202148-890: EditMode 902/0, NetInventory 146/0, Hands 92/0. See Tasks/ITEMS01_ATOMIC_EQUIP.md.
+
 - Development harness milestone completed: change-based selection, verified build cache and stable localhost test paths. Final 201255-412: NetAdmission 107/0, NetProof 35/0; fresh/store 36.32s, HIT 8.18s. Planner 13/13 and final cache fixture 13/13 pass. Details: Tasks/HARNESS_20261108.md; commands: HARNESS.md.
 - Uncommitted-work inventory: Tasks/WORKTREE_AUDIT_20261108.md. Commit only completed tasks by milestone; no WIP snapshots. Map/inventory/animation changes remain pending their acceptance criteria.
 - Full mirror run 20261108-190643: EditMode 887/887; 68 of 69 gates passed. Sole failure: smoke loot fixture placed player on a modular plinth. This full run is FAIL, not green.
@@ -16,8 +18,8 @@ Compact readout: powershell -NoProfile -ExecutionPolicy Bypass -File Tools/Get-W
 
 ## Next three actions
 
-1. Add failure-after-offhand-stow test before fixing two-handed equip atomicity (ITEMS-01); use the harness checkpoint/selection loop.
-2. Real two-client inventory/reconnect/raid acceptance; commit completed milestone tasks only.
+1. Perform real two-client equip/drop/contention and reconnect acceptance; use the harness checkpoint/selection loop.
+2. Complete death/corpse/extraction/result/retry UI acceptance; commit completed milestone tasks only.
 3. Hands/block and authoritative attack phase timing in motion. Retain full + targeted evidence; next full run only at substantive integration/release.
 
 ## Limits and ownership
