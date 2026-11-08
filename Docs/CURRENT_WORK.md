@@ -18,6 +18,8 @@ Compact readout: powershell -NoProfile -ExecutionPolicy Bypass -File Tools/Get-W
 
 ## Next three actions
 
+User priority: finish existing features first; no stash/new systems or harness expansion. One acceptance scenario per slice, focused checks only, no repeated broad runs without a concrete reason.
+
 1. Perform real two-client equip/drop/contention and reconnect acceptance; use the harness checkpoint/selection loop.
 2. Complete death/corpse/extraction/result/retry UI acceptance; commit completed milestone tasks only.
 3. Hands/block and authoritative attack phase timing in motion. Retain full + targeted evidence; next full run only at substantive integration/release.
