@@ -11,8 +11,7 @@ using Emberdelve.Level;
 namespace Emberdelve.EditorTools
 {
     /// <summary>
-    /// One-click generation of the vertical slice. Everything it creates lives under Assets/Emberdelve
-    /// and can be re-run safely: existing data assets are reused, scenes are regenerated.
+    /// One-click setup of the modular crypt game. Existing authored scenes are kept; a missing modular catalog or scene may be created.
     /// </summary>
     public static class EmberdelveBootstrapMenu
     {
@@ -32,9 +31,14 @@ namespace Emberdelve.EditorTools
             EmberdelveVendorImport.EnsureImported(false);
 
             EmberdelveAssetLibrary.BuildAll();
+            EmberdelveNetBloodBuilder.Build();
 
             EmberdelveLobbyBuilder.Build();
-            EmberdelveLevelBuilder.Build();
+            string moduleCatalogPath = EmberdelvePaths.Root + "/Resources/Emberdelve/DungeonModuleCatalog.asset";
+            if (AssetDatabase.LoadAssetAtPath<DungeonModuleCatalog>(moduleCatalogPath) == null)
+                DungeonModuleContentBuilder.BuildCatalog();
+            if (!System.IO.File.Exists(EmberdelvePaths.ModularDungeonScenePath))
+                EmberdelveLevelBuilder.BuildModularScene();
 
             EmberdelveProjectSetup.EnsureBuildScenes();
 
@@ -44,7 +48,7 @@ namespace Emberdelve.EditorTools
             EditorSceneManager.OpenScene(EmberdelvePaths.LobbyScenePath, OpenSceneMode.Single);
 
             Debug.Log("[Emberdelve] Vertical slice built. Open " +
-                      EmberdelvePaths.LobbyScenePath + " and press Play, then DESCEND.");
+                      EmberdelvePaths.LobbyScenePath + " and press Play, then DESCEND into the modular crypts.");
         }
 
         [MenuItem(Menu + "Build Data Assets Only")]
@@ -103,10 +107,15 @@ namespace Emberdelve.EditorTools
         public static void BuildDungeonOnly()
         {
             EmberdelveAssetLibrary.BuildAll();
-            EmberdelveLevelBuilder.Build();
+            string moduleCatalogPath = EmberdelvePaths.Root + "/Resources/Emberdelve/DungeonModuleCatalog.asset";
+            if (AssetDatabase.LoadAssetAtPath<DungeonModuleCatalog>(moduleCatalogPath) == null)
+                DungeonModuleContentBuilder.BuildCatalog();
+            if (!System.IO.File.Exists(EmberdelvePaths.ModularDungeonScenePath))
+                EmberdelveLevelBuilder.BuildModularScene();
             EmberdelveProjectSetup.EnsureBuildScenes();
             AssetDatabase.SaveAssets();
-            EditorSceneManager.OpenScene(EmberdelvePaths.DungeonScenePath, OpenSceneMode.Single);
+            if (System.IO.File.Exists(EmberdelvePaths.ModularDungeonScenePath))
+                EditorSceneManager.OpenScene(EmberdelvePaths.ModularDungeonScenePath, OpenSceneMode.Single);
         }
 
         [MenuItem(Menu + "Build Lobby Scene Only")]
@@ -134,13 +143,13 @@ namespace Emberdelve.EditorTools
         [MenuItem(Menu + "Open Dungeon Scene")]
         public static void OpenDungeon()
         {
-            if (!System.IO.File.Exists(EmberdelvePaths.DungeonScenePath))
+            if (!System.IO.File.Exists(EmberdelvePaths.ModularDungeonScenePath))
             {
-                Debug.LogWarning("[Emberdelve] Dungeon scene not found - run 'Build Vertical Slice (all)' first.");
+                Debug.LogWarning("[Emberdelve] Modular Crypts scene not found - run 'Build Vertical Slice (all)' first.");
                 return;
             }
 
-            EditorSceneManager.OpenScene(EmberdelvePaths.DungeonScenePath, OpenSceneMode.Single);
+            EditorSceneManager.OpenScene(EmberdelvePaths.ModularDungeonScenePath, OpenSceneMode.Single);
         }
 
         /// <summary>
@@ -151,6 +160,11 @@ namespace Emberdelve.EditorTools
         public static void ValidateSlice()
         {
             EmberdelveAssetLibrary.BuildAll();
+            if (!System.IO.File.Exists(EmberdelvePaths.ModularDungeonScenePath))
+            {
+                Debug.LogError("[Emberdelve][Validate] Required Modular Crypts scene is missing; refusing to validate the legacy dungeon as gameplay.");
+                return;
+            }
 
             Emberdelve.Level.DungeonLayoutData layout = EmberdelveAssetLibrary.Layout;
             Emberdelve.Core.NavGridData grid = EmberdelveAssetLibrary.NavGrid;
@@ -228,7 +242,7 @@ namespace Emberdelve.EditorTools
             if (!routed || route.Count < 2) failures.Add("runtime pathfinder could not route start -> extraction");
 
             // ---- 3. Scene wiring ----
-            EditorSceneManager.OpenScene(EmberdelvePaths.DungeonScenePath, OpenSceneMode.Single);
+            EditorSceneManager.OpenScene(EmberdelvePaths.ModularDungeonScenePath, OpenSceneMode.Single);
 
             Emberdelve.Player.PlayerRig rig = Object.FindFirstObjectByType<Emberdelve.Player.PlayerRig>();
             if (rig == null) failures.Add("no PlayerRig in the dungeon scene");

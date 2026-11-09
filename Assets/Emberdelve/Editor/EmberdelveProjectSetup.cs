@@ -15,7 +15,8 @@ namespace Emberdelve.EditorTools
         public const string Scenes = Root + "/Scenes";
         public const string InputAssetPath = Data + "/EmberdelveInputActions.inputactions";
 
-        public const string DungeonScenePath = Scenes + "/" + GameConfig.DefaultDungeonSceneName + ".unity";
+        public const string DungeonScenePath = Scenes + "/" + GameConfig.LegacyDungeonSceneName + ".unity";
+        public const string ModularDungeonScenePath = Scenes + "/" + GameConfig.DefaultDungeonSceneName + ".unity";
         public const string LobbyScenePath = Scenes + "/" + GameConfig.DefaultLobbySceneName + ".unity";
 
         public static void EnsureFolders()
@@ -140,20 +141,26 @@ namespace Emberdelve.EditorTools
         {
             List<EditorBuildSettingsScene> scenes = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
 
-            AddScene(scenes, EmberdelvePaths.DungeonScenePath);
-            AddScene(scenes, EmberdelvePaths.LobbyScenePath);
+            // Keep the legacy scene asset and any unrelated scenes, but never package Level01 as a game mode.
+            scenes.RemoveAll(scene => scene.path == EmberdelvePaths.DungeonScenePath);
+            if (!System.IO.File.Exists(EmberdelvePaths.ModularDungeonScenePath))
+                Debug.LogError("[Emberdelve] Required Modular Crypts scene is missing; player builds must fail until it is authored.");
+            else AddScene(scenes, EmberdelvePaths.ModularDungeonScenePath);
+            if (System.IO.File.Exists(EmberdelvePaths.LobbyScenePath)) AddScene(scenes, EmberdelvePaths.LobbyScenePath);
 
-            // Lobby has to be scene 0: it is where the class is chosen and it loads the dungeon itself.
-            int lobbyIndex = IndexOf(scenes, EmberdelvePaths.LobbyScenePath);
-            int dungeonIndex = IndexOf(scenes, EmberdelvePaths.DungeonScenePath);
-            if (lobbyIndex > dungeonIndex)
-            {
-                EditorBuildSettingsScene lobby = scenes[lobbyIndex];
-                scenes.RemoveAt(lobbyIndex);
-                scenes.Insert(dungeonIndex, lobby);
-            }
+            MoveSceneToIndex(scenes, EmberdelvePaths.LobbyScenePath, 0);
+            MoveSceneToIndex(scenes, EmberdelvePaths.ModularDungeonScenePath, 1);
 
             EditorBuildSettings.scenes = scenes.ToArray();
+        }
+
+        private static void MoveSceneToIndex(List<EditorBuildSettingsScene> scenes, string path, int targetIndex)
+        {
+            int index = IndexOf(scenes, path);
+            if (index < 0) return;
+            EditorBuildSettingsScene scene = scenes[index];
+            scenes.RemoveAt(index);
+            scenes.Insert(Mathf.Clamp(targetIndex, 0, scenes.Count), scene);
         }
 
         private static int IndexOf(List<EditorBuildSettingsScene> scenes, string path)

@@ -51,6 +51,8 @@ namespace Emberdelve.AI
         private bool _windingUp;
         private bool _attackConsumed;
         private Vector3 _telegraphDirection;
+        private int _lastHeardTargetId;
+        private float _lastHeardAt = float.NegativeInfinity;
 
         public EnemyBrain(EnemyData data, INavigationProvider nav, Vector3 home, LayerMask levelMask)
         {
@@ -115,14 +117,28 @@ namespace Emberdelve.AI
 
             bool visible = targetAlive && CanSee(self, facing, targetCenter);
             bool heard = targetAlive && DistanceXZ(self, targetCenter) <= _data.hearingRange;
+            if (!heard && target != null && _lastHeardTargetId == target.CombatId) _lastHeardTargetId = 0;
+            bool newSound = heard && _lastHeardTargetId != target.CombatId;
+            if (newSound)
+            {
+                _lastHeardTargetId = target.CombatId;
+                _lastHeardAt = now;
+            }
+            bool heardWithinMemory = heard && now - _lastHeardAt <= _data.memoryDuration;
 
             if (visible)
             {
                 _lastKnownPosition = targetCenter;
                 _lastSeenAt = now;
             }
+            else if (newSound)
+            {
+                // Hearing supplies one last-known search point even when a closed door blocks sight. Do not
+                // refresh it every frame: that would reveal and track an occluded player's exact position indefinitely.
+                _lastKnownPosition = targetCenter;
+            }
 
-            if (targetAlive && (visible || heard) && _state != EnemyState.Chase && _state != EnemyState.Attack)
+            if (targetAlive && (visible || heardWithinMemory) && _state != EnemyState.Chase && _state != EnemyState.Attack)
             {
                 _state = EnemyState.Chase;
             }
@@ -177,7 +193,7 @@ namespace Emberdelve.AI
                 _windupLeft = 0f;
             }
 
-            if (!visible && now - _lastSeenAt > _data.memoryDuration)
+            if (!visible && now - Mathf.Max(_lastSeenAt, _lastHeardAt) > _data.memoryDuration)
             {
                 _state = EnemyState.Investigate;
                 _investigateUntil = now + Mathf.Max(0.5f, _data.investigateTime);

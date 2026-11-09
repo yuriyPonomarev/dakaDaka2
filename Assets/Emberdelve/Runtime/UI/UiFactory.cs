@@ -33,7 +33,10 @@ namespace Emberdelve.UI
 
         public static Canvas EnsureCanvas(string name, int sortingOrder)
         {
-            Canvas canvas = Object.FindFirstObjectByType<Canvas>();
+            Canvas canvas = null;
+            foreach (Canvas candidate in Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None))
+                if (candidate.name == name && candidate.renderMode == RenderMode.ScreenSpaceOverlay)
+                { canvas = candidate; break; }
 
             if (canvas == null)
             {

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using Emberdelve.Core;
+using Emberdelve.Level;
 using Emberdelve.Net.Rules;
 using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
@@ -63,12 +64,14 @@ namespace Emberdelve.Net
         private string _endText = "";
         private bool _cursorLocked;
         private static NetBootstrap _lobbySession;
+        private static NetBootstrap _activeSession;
+        private bool _retryAfterShutdown;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Entry()
         {
             // Inert until the lobby's Online panel calls it: only stores two delegates (no object, no log, no NetworkManager).
-            NetLobbyBridge.Register(StartFromLobby, CancelFromLobby);
+            NetLobbyBridge.Register(StartFromLobby, CancelFromLobby, NavigateResult);
 
             NetLaunchArgs args = NetLaunchArgs.Parse(Environment.GetCommandLineArgs());
 
@@ -115,7 +118,6 @@ namespace Emberdelve.Net
                 argv.Add("-ember-listen");
                 argv.Add("any");
             }
-
             argv.AddRange(Environment.GetCommandLineArgs());
             NetLaunchArgs args = NetLaunchArgs.Parse(argv.ToArray());
             if (!args.IsValid) return "invalid arguments: " + string.Join("; ", args.Errors);
@@ -135,11 +137,23 @@ namespace Emberdelve.Net
             if (_lobbySession != null) _lobbySession.EndSession(NetLobbyPhase.Idle, "cancelled", "cancel");
         }
 
+        private static bool NavigateResult(bool retry)
+        {
+            NetBootstrap session = _activeSession;
+            if (session == null || session._args.Mode == NetLaunchMode.Server || session._shuttingDown || session._quitIssued)
+                return false;
+            session._interactive = true;
+            session._retryAfterShutdown = retry;
+            session.EndSession(NetLobbyPhase.Idle, retry ? "starting another run..." : "returned from the delve", "run-result");
+            return true;
+        }
+
         /// <summary>The parsed command line of this process (null offline). Read by the client-side movement stream.</summary>
         internal static NetLaunchArgs LaunchArgs { get; private set; }
 
         private void Configure(NetLaunchArgs args)
         {
+            _activeSession = this;
             _args = args;
             LaunchArgs = args;
             switch (args.Mode)
@@ -182,6 +196,15 @@ namespace Emberdelve.Net
 
         private bool BuildAndStart()
         {
+            string modularScenePath = "Assets/Emberdelve/Scenes/" + NetTuning.ModularDungeonSceneName + ".unity";
+            DungeonModuleCatalog moduleCatalog = Resources.Load<DungeonModuleCatalog>("Emberdelve/DungeonModuleCatalog");
+            if (SceneUtility.GetBuildIndexByScenePath(modularScenePath) < 0 || moduleCatalog == null ||
+                moduleCatalog.Modules == null || moduleCatalog.Modules.Length == 0)
+            {
+                LogErr("required Modular Crypts scene/catalog is missing from this build; network role will not start");
+                return false;
+            }
+
             GameObject go = gameObject;
             _nm = go.AddComponent<NetworkManager>();
             UnityTransport transport = go.AddComponent<UnityTransport>();
@@ -221,6 +244,11 @@ namespace Emberdelve.Net
                 transport.SetConnectionData(_args.ListenAddress, (ushort)_args.Port, _args.ListenAddress);
                 _server = new NetServer(_nm, _args, playerPrefab, Log, LogErr);
                 _server.Install();
+                if (!_server.CanStart)
+                {
+                    LogErr("required modular map setup failed; server will not listen or load a fallback scene");
+                    return false;
+                }
                 bool ok = _args.Mode == NetLaunchMode.Host ? _nm.StartHost() : _nm.StartServer();
                 return ok;
             }
@@ -228,6 +256,7 @@ namespace Emberdelve.Net
             transport.SetConnectionData(_args.Address, (ushort)_args.Port);
             Log("connecting address=" + _args.Address + " port=" + _args.Port + " timeout=" + _args.ConnectTimeoutSeconds + "s");
             gameObject.AddComponent<NetClientProbe>().Configure(_args);
+            gameObject.AddComponent<NetDungeonModulePlanClient>().Configure(_nm);
             bool started = _nm.StartClient();
             if (started) StartUdpResetFix(false);
             return started;
@@ -507,6 +536,7 @@ namespace Emberdelve.Net
             if (_lobbySession == this) _lobbySession = null;
             LaunchArgs = null;
             NetRole.ResetToOffline();
+            DungeonModulePlanSession.Reset();
             NetLobbyBridge.Report(_endPhase, _endText);
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
@@ -556,6 +586,11 @@ namespace Emberdelve.Net
 
         private void OnDestroy()
         {
+            if (_activeSession == this) _activeSession = null;
+            if (_retryAfterShutdown && _returnToLobby && _quitIssued)
+                NetLobbyBridge.QueueRetry(_args.Mode == NetLaunchMode.Host,
+                    _args.Mode == NetLaunchMode.Host ? _args.ListenAddress : _args.Address,
+                    _args.Port, RequestedClass());
             if (_nm == null) return;
             _nm.OnClientConnectedCallback -= OnClientConnected;
             _nm.OnClientDisconnectCallback -= OnClientDisconnected;

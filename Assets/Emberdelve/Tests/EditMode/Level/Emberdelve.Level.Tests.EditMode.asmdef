@@ -1,0 +1,7 @@
+{
+  "name": "Emberdelve.Level.Tests.EditMode",
+  "references": ["UnityEngine.TestRunner", "UnityEditor.TestRunner", "Emberdelve.Runtime"],
+  "includePlatforms": ["Editor"], "excludePlatforms": [], "allowUnsafeCode": false,
+  "overrideReferences": true, "precompiledReferences": ["nunit.framework.dll"],
+  "autoReferenced": true, "defineConstraints": ["UNITY_INCLUDE_TESTS"], "versionDefines": [], "noEngineReferences": false
+}

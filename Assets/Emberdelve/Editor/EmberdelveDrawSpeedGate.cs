@@ -188,17 +188,19 @@ namespace Emberdelve.EditorTools
             float expected = rig.Movement.ResolveWalkSpeed() * rig.GetMoveFlowFactor();
             Close(rig.Movement.ResolveGroundSpeed(false, false), expected, label + " aiming penalty reset", .0001f);
         }
-        private void Visual(PlayerRig rig)
+        private void Visual(PlayerRig rig, bool crossbow)
         {
-            WeaponVisualRig visual = rig.Loadout.Visual; Check(visual != null, "actual bow visual exists"); if (visual == null) return;
-            Transform line = visual.transform.Find("Bow_String"), arrow = visual.transform.Find("Bow_Arrow");
+            WeaponVisualRig visual = rig.Loadout.Visual; Check(visual != null, "actual ranged visual exists"); if (visual == null) return;
+            Transform line = visual.transform.Find(crossbow ? "Crossbow_String" : "Bow_String");
+            Transform arrow = visual.transform.Find(crossbow ? "Crossbow_Bolt" : "Bow_Arrow");
             Check(line != null && arrow != null, "actual string and arrow exist"); if (line == null || arrow == null) return;
             float charge = rig.GetComponent<RangedCombat>().Charge;
             Close(line.localPosition.z, -.02f - .2f * charge, "string consumes same captured progress");
-            Close(line.localScale.y, .42f + .06f * charge, "string stretch consumes same captured progress");
+            Close(crossbow ? line.localScale.x : line.localScale.y,
+                (crossbow ? .43f : .52f) + .06f * charge, "string stretch consumes same captured progress");
             Close(arrow.localPosition.z, .12f - .22f * charge, "arrow consumes same captured progress");
         }
-        private IEnumerator HoldFractions(PlayerRig rig, float duration)
+        private IEnumerator HoldFractions(PlayerRig rig, float duration, bool crossbow)
         {
             RangedCombat ranged = rig.GetComponent<RangedCombat>(); float started = Time.time;
             foreach (float fraction in new[] { .25f, .5f, 1f, 1.2f })
@@ -206,7 +208,7 @@ namespace Emberdelve.EditorTools
                 while (Time.time - started < duration * fraction) yield return null;
                 // Frame-quantized checks use the independent literal duration and observed elapsed engine time.
                 Close(ranged.Charge, Mathf.Clamp01((Time.time - started) / duration), "quarter/half/full/saturated local charge", .0002f);
-                Visual(rig);
+                Visual(rig, crossbow);
             }
         }
         private IEnumerator ClassDraw(CharacterClassData source, WeaponData weapon, bool archer)
@@ -216,7 +218,7 @@ namespace Emberdelve.EditorTools
             Close(ranged.ActiveDrawDuration, archer ? .7589285714f : .3f, "saved class local draw duration");
             Close(ranged.ActiveAuthoredDrawTime, archer ? .85f : .3f, "saved authored draw time captured");
             float hp = rig.CurrentHealth, mana = rig.Mana.CurrentMana; int magazine = ranged.Magazine, reserve = ranged.Reserve, shots = _shots, acceptedBefore = _authority.AcceptedCount;
-            IEnumerator hold = HoldFractions(rig, archer ? .7589285714f : .3f); while (hold.MoveNext()) yield return hold.Current;
+            IEnumerator hold = HoldFractions(rig, archer ? .7589285714f : .3f, !archer); while (hold.MoveNext()) yield return hold.Current;
             IEnumerator release = Release(); while (release.MoveNext()) yield return release.Current;
             Check(_shots == shots + 1 && _authority.AcceptedCount == acceptedBefore + 1 && ranged.Magazine == magazine - 1 && ranged.Reserve == reserve, "valid saturated release is accepted and launches/spends exactly once");
             Close(_lastShot.Charge, 1, "ordinary intent carries old saturated charge only"); Cleared(rig, "valid release");

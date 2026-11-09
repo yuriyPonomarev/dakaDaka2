@@ -56,6 +56,89 @@ namespace Emberdelve.NetRules.Tests
         }
 
         [Test]
+        public void InventoryContestHarnessArguments_AreExplicitAndValidated()
+        {
+            NetLaunchArgs server = NetLaunchArgs.Parse(new[] { "-ember-net", "server", "-ember-net-inventory-contest-server" });
+            Assert.That(server.IsValid, Is.True, string.Join(";", server.Errors));
+            Assert.That(server.InventoryContestServer, Is.True);
+
+            NetLaunchArgs client = NetLaunchArgs.Parse(new[] { "-ember-net", "client", "-ember-net-inventory-contest-role", "a" });
+            Assert.That(client.IsValid, Is.True, string.Join(";", client.Errors));
+            Assert.That(client.InventoryContestRole, Is.EqualTo("a"));
+
+            NetLaunchArgs invalid = NetLaunchArgs.Parse(new[] { "-ember-net", "client", "-ember-net-inventory-contest-role", "owner" });
+            Assert.That(invalid.IsValid, Is.False);
+        }
+
+        [Test]
+        public void InventoryDropProofArguments_AreKnownAndPreserveFixturePaths()
+        {
+            NetLaunchArgs server = NetLaunchArgs.Parse(new[]
+            {
+                "-ember-net", "server", "-ember-net-inventory-drop-proof-server",
+                "-ember-net-inventory-drop-proof-action-file", "client action.txt",
+                "-ember-net-inventory-drop-proof-expected-file", "expected item.json"
+            });
+            Assert.That(server.IsValid, Is.True, string.Join(";", server.Errors));
+            Assert.That(server.InventoryDropProofServer, Is.True, "bare fixture switch must be recognized as a flag");
+            Assert.That(server.InventoryDropProofActionFile, Is.EqualTo("client action.txt"));
+            Assert.That(server.InventoryDropProofExpectedFile, Is.EqualTo("expected item.json"));
+            Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "server" }).InventoryDropProofServer, Is.False);
+
+            foreach (string role in new[] { "owner", "peer", "late" })
+            {
+                NetLaunchArgs client = NetLaunchArgs.Parse(new[]
+                {
+                    "-ember-net", "client", "-ember-net-inventory-drop-proof-role", role,
+                    "-ember-net-inventory-drop-proof-action-file", "client action.txt",
+                    "-ember-net-inventory-drop-proof-expected-file", "expected item.json"
+                });
+                Assert.That(client.IsValid, Is.True, string.Join(";", client.Errors));
+                Assert.That(client.InventoryDropProofRole, Is.EqualTo(role));
+                Assert.That(client.InventoryDropProofActionFile, Is.EqualTo("client action.txt"));
+                Assert.That(client.InventoryDropProofExpectedFile, Is.EqualTo("expected item.json"));
+            }
+
+            NetLaunchArgs invalid = NetLaunchArgs.Parse(new[]
+                { "-ember-net", "client", "-ember-net-inventory-drop-proof-role", "unknown" });
+            Assert.That(invalid.IsValid, Is.False);
+        }
+
+        [Test]
+        public void CombatEnemyProofFixture_IsOptInAndServerScoped()
+        {
+            Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "server" }).CombatEnemyProofServer, Is.False);
+            NetLaunchArgs args = NetLaunchArgs.Parse(new[] { "-ember-net", "server", "-ember-net-combat-enemy-proof-server" });
+            Assert.That(args.IsValid, Is.True, string.Join(";", args.Errors));
+            Assert.That(args.CombatEnemyProofServer, Is.True);
+        }
+
+        [Test]
+        public void ExtractionProofHarnessFlag_IsExplicitAndClientScriptsParse()
+        {
+            NetLaunchArgs server = NetLaunchArgs.Parse(new[] { "-ember-net", "server", "-ember-net-extraction-proof-server" });
+            Assert.That(server.IsValid, Is.True, string.Join(";", server.Errors));
+            Assert.That(server.ExtractionProofServer, Is.True);
+            NetLaunchArgs ownerFlag = NetLaunchArgs.Parse(new[] { "-ember-net", "client", "-ember-net-extraction-proof-owner" });
+            Assert.That(ownerFlag.IsValid, Is.True, string.Join(";", ownerFlag.Errors));
+            Assert.That(ownerFlag.ExtractionProofOwner, Is.True);
+
+            NetLaunchArgs action = NetLaunchArgs.Parse(new[] { "-ember-net", "server", "-ember-net-extraction-proof-action-file", "C:\\proof\\action.txt" });
+            Assert.That(action.IsValid, Is.True, string.Join(";", action.Errors));
+            Assert.That(action.ExtractionProofActionFile, Is.EqualTo("C:\\proof\\action.txt"));
+
+            NetLaunchArgs owner = NetLaunchArgs.Parse(new[] { "-ember-net", "client", "-ember-net-script", "extraction-owner" });
+            Assert.That(owner.IsValid, Is.True, string.Join(";", owner.Errors));
+            Assert.That(owner.ScriptSpec.IsExtractionOwnerOnly, Is.True);
+            NetLaunchArgs forge = NetLaunchArgs.Parse(new[] { "-ember-net", "client", "-ember-net-script", "extraction-forge" });
+            Assert.That(forge.IsValid, Is.True, string.Join(";", forge.Errors));
+            Assert.That(forge.ScriptSpec.IsExtractionForgeOnly, Is.True);
+            NetLaunchArgs interrupt = NetLaunchArgs.Parse(new[] { "-ember-net", "client", "-ember-net-script", "extraction-interrupt" });
+            Assert.That(interrupt.IsValid, Is.True, string.Join(";", interrupt.Errors));
+            Assert.That(interrupt.ScriptSpec.IsExtractionInterruptOnly, Is.True);
+        }
+
+        [Test]
         public void PartySizeOverride_DefaultsToTheAuthoredValueAndParsesBothForms()
         {
             Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "server" }).PartySizeOverride, Is.EqualTo(0));

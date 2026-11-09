@@ -197,6 +197,16 @@ namespace Emberdelve.EditorTools
                 BeginGate(s);
                 return;
             }
+            // Start each gate on a later editor update. Unity can finish startup/import work at
+            // the end of the update that invokes RunFromCommandLine; BuildPipeline.BuildPlayer
+            // must not run in that same turn while a domain reload is queued. Keeping this phase
+            // in SessionState also lets the suite resume correctly if that reload happens here.
+            if (s.phase == "invoke")
+            {
+                if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+                InvokeGate(s);
+                return;
+            }
             if (!s.exitReceived && !s.batch)
             {
                 // Several gates only call Exit when Application.isBatchMode. In the open editor treat a final
@@ -238,8 +248,28 @@ namespace Emberdelve.EditorTools
                 WriteOutputs(s, false); Save();
                 return;
             }
-            s.phase = "waiting";
+            s.phase = "invoke";
             s.capturing = true;
+            Save();
+        }
+
+        static void InvokeGate(State s)
+        {
+            if (s == null || !s.active || s.index >= s.gates.Count) return;
+            string name = s.gates[s.index];
+            MethodInfo m = Resolve(name);
+            if (m == null)
+            {
+                lock (s)
+                {
+                    s.lines.Add("gate method not found after editor reload: " + name);
+                    s.exitReceived = true; s.exitCode = 1; s.exitTicks = DateTime.UtcNow.Ticks;
+                }
+                s.phase = "waiting";
+                Save();
+                return;
+            }
+            s.phase = "waiting";
             Save();
             try { m.Invoke(null, null); }
             catch (Exception e)

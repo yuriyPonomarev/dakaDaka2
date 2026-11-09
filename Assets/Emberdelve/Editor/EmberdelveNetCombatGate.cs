@@ -195,7 +195,7 @@ namespace Emberdelve.EditorTools
         private static int MeleeSession(string exe, string runDir, string logs, WeaponData sword, List<HitLocationTable> tables, int warriorHealth, double interval, double stop)
         {
             Debug.Log(Tag + " ---- session 1: melee-duel");
-            Session s = StartServer(exe, runDir, logs, "melee", "-ember-net-no-enemies -ember-net-party-size 1");
+            Session s = StartServer(exe, runDir, logs, "melee", "-ember-net-combat-test-fixture-server -ember-net-no-enemies -ember-net-party-size 1");
             if (s == null) return 1;
             Check(LogContains(s.ServerLog, "party size override=1"), "server applied the party size override");
             Check(LogContains(s.ServerLog, S + "combat-server ready kinds=" + CombatNetLimits.KindMax), "server logged 'combat-server ready' with the intent kind count from the shared constant");
@@ -221,6 +221,7 @@ namespace Emberdelve.EditorTools
             Match spA = WaitForRegex(s.ServerLog, SpawnRegex(clientA), 10, s.Server);
             Match spB = WaitForRegex(s.ServerLog, SpawnRegex(clientB), 10, s.Server);
             Check(spA != null && spB != null, "server logged both spawn poses");
+            CheckCombatFixture(s.ServerLog, idA, idB, "melee");
             double d0 = spA != null && spB != null ? Flat(GD(spA, "x"), GD(spA, "z"), GD(spB, "x"), GD(spB, "z")) : double.NaN;
             Debug.Log(Tag + " spawn distance " + F(d0));
             Check(!double.IsNaN(d0) && d0 > 0.5, "the spawns are apart (" + F(d0) + " m)");
@@ -305,7 +306,7 @@ namespace Emberdelve.EditorTools
         {
             Debug.Log(Tag + " ---- session 1b: melee-parry");
             sword = LiveWeapon(sword);
-            Session s = StartServer(exe, runDir, logs, "parry", "-ember-net-no-enemies -ember-net-party-size 1");
+            Session s = StartServer(exe, runDir, logs, "parry", "-ember-net-combat-test-fixture-server -ember-net-no-enemies -ember-net-party-size 1");
             if (s == null) return 1;
 
             string goA = Path.Combine(runDir, "parry_a.go"), goB = Path.Combine(runDir, "parry_b.go");
@@ -323,6 +324,7 @@ namespace Emberdelve.EditorTools
             if (admB == null) return 1;
             int idA = GI(admA, "id"), idB = GI(admB, "id");
             string clientA = admA.Groups["client"].Value, clientB = admB.Groups["client"].Value;
+            CheckCombatFixture(s.ServerLog, idA, idB, "parry");
             Check(idA < idB, "parry: A (the attacker role) has the lower id");
 
             Check(WaitForRegex(logA, @"\[client\] owner id=" + idA + @" views=2 owned=1", 60, a) != null, "parry: A settles with views=2");
@@ -449,7 +451,7 @@ namespace Emberdelve.EditorTools
         private static int RangedSession(string exe, string runDir, string logs, WeaponData bow, List<HitLocationTable> tables)
         {
             Debug.Log(Tag + " ---- session 2: ranged-shot");
-            Session s = StartServer(exe, runDir, logs, "ranged", "-ember-net-no-enemies -ember-net-party-size 1");
+            Session s = StartServer(exe, runDir, logs, "ranged", "-ember-net-combat-test-fixture-server -ember-net-no-enemies -ember-net-party-size 1");
             if (s == null) return 1;
 
             string goA = Path.Combine(runDir, "ranged_a.go"), goB = Path.Combine(runDir, "ranged_b.go");
@@ -468,17 +470,12 @@ namespace Emberdelve.EditorTools
             int idA = GI(admA, "id"), idB = GI(admB, "id");
             string clientA = admA.Groups["client"].Value, clientB = admB.Groups["client"].Value;
             Check(idA < idB, "A (the shooter role) has the lower id");
+            CheckCombatFixture(s.ServerLog, idA, idB, "ranged");
 
             Match spA = WaitForRegex(s.ServerLog, SpawnRegex(clientA), 10, s.Server);
             Match spB = WaitForRegex(s.ServerLog, SpawnRegex(clientB), 10, s.Server);
             Check(spA != null && spB != null, "server logged both spawn poses");
             if (spA == null || spB == null) return 1;
-            // The player standing in dungeon row 3 (open ground to the east: hall, corridor, library) walks east to make the distance.
-            int cellA = (int)Math.Floor(GD(spA, "z") / 2.0), cellB = (int)Math.Floor(GD(spB, "z") / 2.0);
-            bool aWalks = cellA == 3 || cellB != 3;
-            Debug.Log(Tag + " spawn rows A=" + cellA + " B=" + cellB + " walker=" + (aWalks ? "A (shooter)" : "B (target)"));
-            Check(cellA == 3 || cellB == 3, "one spawn is in the open row 3 (rows " + cellA + ", " + cellB + ")");
-
             // The shooting distance from the data: the middle of the weapon's air-time falloff window when it has one.
             double speed = bow.projectileSpeed;
             double targetAir = 0.5;
@@ -489,17 +486,19 @@ namespace Emberdelve.EditorTools
             }
 
             double away = Math.Min(18.0, Math.Max(8.0, speed * targetAir));
+            double stagedDistance = Flat(GD(spA, "x"), GD(spA, "z"), GD(spB, "x"), GD(spB, "z"));
+            Check(Math.Abs(stagedDistance - away) <= 0.1,
+                "the clear modular-room fixture stages the archer at the data-derived shooting distance " + F(away) + " m (actual " + F(stagedDistance) + ")");
             double drawSeconds = bow.drawTime;
             double hold = drawSeconds * 1.6 + 0.8;
             double early = 0.04;
             string common = "away=" + F(away) + " pspeed=" + F(speed) + " pgrav=" + F(bow.projectileGravity);
-            string walk = " awayyaw=90"; // east: the open row (hall, corridor, library)
             Debug.Log(Tag + " derived bow=" + bow.weaponId + " speed=" + F(speed) + " gravity=" + F(bow.projectileGravity) + " airTarget=" + F(targetAir) + " -> away=" + F(away) + " hold=" + F(hold));
 
             Check(WaitForRegex(logA, @"\[client\] owner id=" + idA + @" views=2 owned=1", 60, a) != null, "A settles with views=2");
             Check(WaitForRegex(logB, @"\[client\] owner id=" + idB + @" views=2 owned=1", 60, b) != null, "B settles with views=2");
-            string fileA = "go shots=2 hold=" + F(hold) + " early=" + F(early) + " " + common + (aWalks ? walk : "");
-            string fileB = "go " + common + (aWalks ? "" : walk);
+            string fileA = "go shots=2 hold=" + F(hold) + " early=" + F(early) + " " + common;
+            string fileB = "go " + common;
             File.WriteAllText(goA, fileA);
             File.WriteAllText(goB, fileB);
 
@@ -621,7 +620,7 @@ namespace Emberdelve.EditorTools
         private static int AbuseSession(string exe, string runDir, string logs)
         {
             Debug.Log(Tag + " ---- session 3: combat-abuse");
-            Session s = StartServer(exe, runDir, logs, "abuse", "-ember-net-no-enemies -ember-net-party-size 1" +
+            Session s = StartServer(exe, runDir, logs, "abuse", "-ember-net-combat-test-fixture-server -ember-net-no-enemies -ember-net-party-size 1" +
                 " -ember-net-skill-reject-burst " + RejectBurst + " -ember-net-skill-reject-rate " + RejectRate +
                 " -ember-net-skill-disconnect-after " + DisconnectAfter + " -ember-net-skill-memory-seconds " + MemorySeconds);
             if (s == null) return 1;
@@ -647,6 +646,7 @@ namespace Emberdelve.EditorTools
             string clientA = admA.Groups["client"].Value, clientB = admB.Groups["client"].Value;
             int idA = GI(admA, "id"), idB = GI(admB, "id");
             string netIdA = admA.Groups["net"].Value;
+            CheckCombatFixture(s.ServerLog, idA, idB, "abuse");
             Check(WaitForRegex(logA, @"\[client\] owner id=" + idA + @" views=2 owned=1", 60, a) != null, "A settles with views=2");
             Check(WaitForRegex(logB, @"\[client\] owner id=" + idB + @" views=2 owned=1", 60, b) != null, "B settles with views=2");
             Thread.Sleep(1500);
@@ -700,19 +700,42 @@ namespace Emberdelve.EditorTools
         private static int EnemySession(string exe, string runDir, string logs)
         {
             Debug.Log(Tag + " ---- session 4: enemy visibility");
-            Session s = StartServer(exe, runDir, logs, "enemy", "");
+            Session s = StartServer(exe, runDir, logs, "enemy", "-ember-net-combat-enemy-proof-server");
             if (s == null) return 1;
             Match ready = Regex.Match(ReadShared(s.ServerLog), @"\[server\] ready scene=\S+ players=(\d+) senders=(\d+) registry=(?<reg>\d+)");
             int enemies = GI(ready, "reg");
             Check(enemies > 0 && LogContains(s.ServerLog, "enemies=on"), "the server runs with enemies (registry=" + enemies + ")");
 
             string quitA = Path.Combine(runDir, "enemy_a.quit");
+            string quitB = Path.Combine(runDir, "enemy_b.quit");
+            string goA = Path.Combine(runDir, "enemy_a.go");
             if (File.Exists(quitA)) File.Delete(quitA);
+            if (File.Exists(quitB)) File.Delete(quitB);
+            if (File.Exists(goA)) File.Delete(goA);
             string logA = Path.Combine(logs, "enemy_a.log");
-            Process a = Launch(exe, logA, ClientArgs(s.Port, "ene-a", "warrior", Q(quitA), "") + " -ember-net-autoquit 500");
+            string logB = Path.Combine(logs, "enemy_b.log");
+            Process a = Launch(exe, logA, ClientArgs(s.Port, "ene-a", "warrior", Q(quitA),
+                "-ember-net-script enemy-hit -ember-net-script-start-file " + Q(goA)) + " -ember-net-autoquit 500");
             Match adm = WaitForRegex(s.ServerLog, AdmittedRegex("ene-a", "warrior"), 90, s.Server);
-            Check(a != null && adm != null, "server admitted the client");
+            Check(a != null && adm != null, "server admitted the scripted enemy attacker");
             if (adm == null) return 1;
+            int attackerId = GI(adm, "id");
+
+            // Establish that A has the complete server-authored kind set before B arrives; B must then receive the same full snapshot as a late join.
+            HashSet<string> serverKinds = WaitForPresentationKinds(s.ServerLog, s.Server, 2, 35);
+            HashSet<string> kindsA = WaitForPresentationKinds(logA, a, serverKinds.Count, 35);
+            Check(serverKinds.Count >= 2, "the live server map contains at least two distinct authored enemy visual kinds (" + JoinKinds(serverKinds) + ")");
+            Check(kindsA.Count == serverKinds.Count && ContainsAllKinds(kindsA, serverKinds),
+                "client A received the complete server-authored visual-kind set before the late join (" + JoinKinds(kindsA) + ")");
+
+            Process b = Launch(exe, logB, ClientArgs(s.Port, "ene-b", "warrior", Q(quitB), "") + " -ember-net-autoquit 500");
+            Match admB = WaitForRegex(s.ServerLog, AdmittedRegex("ene-b", "warrior"), 90, s.Server);
+            Check(b != null && admB != null, "server admitted the observing client");
+            if (admB == null) return 1;
+
+            Match fixture = WaitForRegex(s.ServerLog,
+                @"combat-enemy-proof fixture player=" + attackerId + @" enemy=(?<enemy>\d+) distance=(?<distance>\d+(?:\.\d+)?) lineOfSight=True enemyStunned=True placement=server-dev", 20, s.Server);
+            Check(fixture != null, "server staged the proof attacker beside a live, held enemy with clear line of sight");
 
             Match view = WaitForRegex(logA, @"\[client\] enemy-view summary total=(?<total>\d+) alive=(?<alive>\d+) dead=(?<dead>\d+) poses=(?<poses>\d+)", 40, a);
             Check(view != null, "the client logged an enemy-view summary");
@@ -723,7 +746,83 @@ namespace Emberdelve.EditorTools
             }
 
             Check(CountMatches(logA, @"\[client\] enemy-view id=\d+ health=\S+ max=\S+ dead=False") >= 1, "enemy health is reported to the client");
+            Match viewB = WaitForRegex(logB, @"\[client\] enemy-view summary total=(?<total>\d+) alive=(?<alive>\d+) dead=(?<dead>\d+) poses=(?<poses>\d+)", 40, b);
+            Check(viewB != null && GI(viewB, "total") == enemies && GI(viewB, "alive") >= 1,
+                "the second client also has live enemy proxies before the scripted hit");
+            HashSet<string> kindsB = WaitForPresentationKinds(logB, b, serverKinds.Count, 35);
+            Check(kindsB.Count == serverKinds.Count && ContainsAllKinds(kindsB, serverKinds),
+                "late-joining client B received the same complete visual-kind set as A (" + JoinKinds(kindsB) + ")");
+
+            // The server-only dev fixture stages the actor in the current scene's reachable combat space.
+            // AttackPress, movement replication, swing geometry and hit/LOS resolution remain the production paths.
+            File.WriteAllText(goA, "go stop=1.2 interval=0.8 presses=80");
+            Match serverHit = WaitForRegex(s.ServerLog,
+                @"combat-hit src=Melee attacker=" + attackerId + @" attackerCombat=\d+ target=0 targetCombat=(?<enemy>\d+) targetKind=Enemy .* px=(?<px>-?\d+(?:\.\d+)?) py=(?<py>-?\d+(?:\.\d+)?) pz=(?<pz>-?\d+(?:\.\d+)?)", 100, s.Server);
+            Check(serverHit != null, "the server resolved a real enemy melee hit from the client's AttackPress intent");
+            Match hitA = serverHit != null ? WaitForRegex(logA,
+                @"\[client\] server-hit src=Melee attacker=" + attackerId + @" target=(?<enemy>\d+) enemy=True ", 20, a) : null;
+            Match hitB = serverHit != null ? WaitForRegex(logB,
+                @"\[client\] server-hit src=Melee attacker=" + attackerId + @" target=(?<enemy>\d+) enemy=True ", 20, b) : null;
+            Check(hitA != null, "attacking owner received the server enemy-hit event");
+            Check(hitB != null, "the other connected client received the server enemy-hit event");
+            if (serverHit != null && hitA != null && hitB != null)
+                Check(hitA.Groups["enemy"].Value == serverHit.Groups["enemy"].Value &&
+                      hitB.Groups["enemy"].Value == serverHit.Groups["enemy"].Value,
+                    "both client reports name the exact enemy the server hit");
+            Match bloodA = hitA != null ? WaitForRegex(logA,
+                @"\[client\] blood-event accepted id=(?<event>\d+) target=" + hitA.Groups["enemy"].Value + @" point=(?<point>\S+)", 10, a) : null;
+            Match bloodB = hitB != null ? WaitForRegex(logB,
+                @"\[client\] blood-event accepted id=(?<event>\d+) target=" + hitB.Groups["enemy"].Value + @" point=(?<point>\S+)", 10, b) : null;
+            Check(bloodA != null, "the attacking owner accepted and emitted the blood particles");
+            Check(bloodB != null, "the second client accepted and emitted the blood particles");
+            if (bloodA != null && bloodB != null)
+            {
+                Check(bloodA.Groups["event"].Value == bloodB.Groups["event"].Value &&
+                      hitA.Groups["enemy"].Value == hitB.Groups["enemy"].Value &&
+                      bloodA.Groups["point"].Value == bloodB.Groups["point"].Value && serverHit != null &&
+                      bloodA.Groups["point"].Value == serverHit.Groups["px"].Value + "," + serverHit.Groups["py"].Value + "," + serverHit.Groups["pz"].Value,
+                    "both clients emitted for the same authoritative event id, enemy and server hit point");
+                string eventA = bloodA.Groups["event"].Value;
+                Check(CountMatches(logA, @"\[client\] blood-event accepted id=" + eventA + @" ") == 1 &&
+                      CountMatches(logB, @"\[client\] blood-event accepted id=" + eventA + @" ") == 1,
+                    "each client emitted that event exactly once despite the bounded duplicate filter");
+            }
+
+            int targetEnemyId = fixture != null ? GI(fixture, "enemy") : 0;
+            Match actionA = targetEnemyId > 0 ? WaitForRegex(logA, @"\[client\] enemy-animation id=" + targetEnemyId + @" action=Hit kind=", 12, a) : null;
+            Match actionB = targetEnemyId > 0 ? WaitForRegex(logB, @"\[client\] enemy-animation id=" + targetEnemyId + @" action=Hit kind=", 12, b) : null;
+            Check(actionA != null, "client A triggered the enemy Hit animator parameter for the exact enemy damaged by its real attack");
+            Check(actionB != null, "late-joining client B triggered the same enemy Hit animator parameter");
+
+            Match serverAttack = WaitForRegex(s.ServerLog, @"combat-enemy-proof action=real-swing-start enemy=" + targetEnemyId + @" swings=\d+", 20, s.Server);
+            Check(serverAttack != null, "the released live EnemyAgent began a real AI swing through combat authority");
+            Match attackA = WaitForRegex(logA, @"\[client\] enemy-animation id=" + targetEnemyId + @" action=Attack kind=", 20, a);
+            Match attackB = WaitForRegex(logB, @"\[client\] enemy-animation id=" + targetEnemyId + @" action=Attack kind=", 20, b);
+            Check(attackA != null, "client A triggered the remote enemy Attack animator parameter from the server windup/swing state");
+            Check(attackB != null, "late-joining client B triggered the same remote enemy Attack animator parameter");
+
+            Match serverDeath = WaitForRegex(s.ServerLog,
+                @"combat-enemy-proof action=server-death-stimulus enemy=" + targetEnemyId + @" dead=True afterRealSwing=True", 8, s.Server);
+            Check(serverDeath != null, "after that real swing, the dev fixture used the server HealthComponent death path");
+            Match deathA = WaitForRegex(logA, @"\[client\] enemy-animation id=" + targetEnemyId + @" action=Death kind=", 12, a);
+            Match deathB = WaitForRegex(logB, @"\[client\] enemy-animation id=" + targetEnemyId + @" action=Death kind=", 12, b);
+            Check(deathA != null, "client A triggered the remote enemy Death animator parameter");
+            Check(deathB != null, "late-joining client B triggered the same remote enemy Death animator parameter");
+
+            Match stateHitA = WaitForRegex(logA, @"\[client\] enemy-animation-state id=" + targetEnemyId + @" state=Hit kind=", 8, a);
+            Match stateHitB = WaitForRegex(logB, @"\[client\] enemy-animation-state id=" + targetEnemyId + @" state=Hit kind=", 8, b);
+            Check(stateHitA != null, "client A AnimatorStateInfo entered the actual Hit state");
+            Check(stateHitB != null, "late-joining client B AnimatorStateInfo entered the actual Hit state");
+            Match stateAttackA = WaitForRegex(logA, @"\[client\] enemy-animation-state id=" + targetEnemyId + @" state=Attack kind=", 8, a);
+            Match stateAttackB = WaitForRegex(logB, @"\[client\] enemy-animation-state id=" + targetEnemyId + @" state=Attack kind=", 8, b);
+            Check(stateAttackA != null, "client A AnimatorStateInfo entered the actual Attack state");
+            Check(stateAttackB != null, "late-joining client B AnimatorStateInfo entered the actual Attack state");
+            Match stateDeathA = WaitForRegex(logA, @"\[client\] enemy-animation-state id=" + targetEnemyId + @" state=Death kind=", 8, a);
+            Match stateDeathB = WaitForRegex(logB, @"\[client\] enemy-animation-state id=" + targetEnemyId + @" state=Death kind=", 8, b);
+            Check(stateDeathA != null, "client A AnimatorStateInfo entered the actual Death state");
+            Check(stateDeathB != null, "late-joining client B AnimatorStateInfo entered the actual Death state");
             QuitClient(a, quitA, logA, "client");
+            QuitClient(b, quitB, logB, "observer");
             Check(LogContains(logA, "clientBlockedDamage=0"), "the client applied no damage");
             return EndServer(s);
         }
@@ -747,6 +846,14 @@ namespace Emberdelve.EditorTools
         private static string SpawnRegex(string clientId)
         {
             return @"combat-spawn client=" + clientId + @" id=\d+ party=\d+ x=(?<x>" + NumBody + @") y=(?<y>" + NumBody + @") z=(?<z>" + NumBody + @") yaw=" + NumBody;
+        }
+
+        private static void CheckCombatFixture(string serverLog, int firstId, int secondId, string label)
+        {
+            string row = @"combat-fixture id={0} slot={1} room=entry pos=\(\S+,\S+,\S+\) target=\(\S+,\S+,\S+\) los=True";
+            Check(Regex.IsMatch(ReadShared(serverLog), string.Format(CultureInfo.InvariantCulture, row, firstId, 0)) &&
+                  Regex.IsMatch(ReadShared(serverLog), string.Format(CultureInfo.InvariantCulture, row, secondId, 1)),
+                label + ": server staged both real actors in clear positions in the modular entry room");
         }
 
         private static string DisconnectRegex(string clientId)
@@ -955,6 +1062,41 @@ namespace Emberdelve.EditorTools
         private static bool WaitForCount(string path, string pattern, int count, double seconds, Process owner)
         {
             return WaitForPredicate(() => CountMatches(path, pattern) >= count, seconds, owner);
+        }
+
+        private static HashSet<string> WaitForPresentationKinds(string path, Process owner, int minimumKinds, double seconds)
+        {
+            HashSet<string> found = new HashSet<string>();
+            WaitForPredicate(() =>
+            {
+                found = ParsePresentationKinds(ReadShared(path));
+                return found.Count >= minimumKinds;
+            }, seconds, owner);
+            return found;
+        }
+
+        private static HashSet<string> ParsePresentationKinds(string log)
+        {
+            var kinds = new HashSet<string>(StringComparer.Ordinal);
+            MatchCollection matches = Regex.Matches(log ?? string.Empty,
+                @"(?:combat-)?enemy-presentation id=\d+ kind=(?<kind>Minion|Rogue|Warrior|Mage)");
+            for (int i = 0; i < matches.Count; i++) kinds.Add(matches[i].Groups["kind"].Value);
+            return kinds;
+        }
+
+        private static bool ContainsAllKinds(HashSet<string> actual, HashSet<string> expected)
+        {
+            if (actual == null || expected == null) return false;
+            foreach (string kind in expected) if (!actual.Contains(kind)) return false;
+            return true;
+        }
+
+        private static string JoinKinds(HashSet<string> kinds)
+        {
+            var values = new List<string>();
+            if (kinds != null) foreach (string kind in kinds) values.Add(kind);
+            values.Sort(StringComparer.Ordinal);
+            return values.Count == 0 ? "none" : string.Join(",", values);
         }
 
         private static Match WaitForRegex(string path, string pattern, double seconds, Process owner)

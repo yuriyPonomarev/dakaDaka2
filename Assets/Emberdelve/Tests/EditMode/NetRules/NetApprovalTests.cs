@@ -99,7 +99,7 @@ namespace Emberdelve.NetRules.Tests
         {
             string slot = new string('s', NetConnectPayload.MaxField);
             string cls = "warrior";
-            byte[] ok = Encoding.UTF8.GetBytes("EMB|1|" + slot + "|" + cls);
+            byte[] ok = Encoding.UTF8.GetBytes("EMB|" + Proto + "|" + slot + "|" + cls);
             Assert.That(ok.Length, Is.LessThanOrEqualTo(NetConnectPayload.MaxBytes));
             Assert.That(Eval(ok, 0, 2).Approved, Is.True);
         }

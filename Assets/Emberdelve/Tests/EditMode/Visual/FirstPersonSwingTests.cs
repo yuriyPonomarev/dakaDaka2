@@ -21,6 +21,40 @@ namespace Emberdelve.Tests.Visual
         private const string SwordId = "ashen_short_sword";
         private const string ShieldId = "emberbulwark_shield";
 
+        [TestCase(1f)]
+        [TestCase(FirstPersonArmsDriver.ModelScale)]
+        [TestCase(0.75f)]
+        public void ArmSolver_PlacesScaledPalmGripOnTarget(float scale)
+        {
+            GameObject root = new GameObject("ScaledArmTest");
+            try
+            {
+                root.transform.localScale = Vector3.one * scale;
+                Transform upper = new GameObject("Upper").transform;
+                upper.SetParent(root.transform, false);
+                Transform lower = new GameObject("Lower").transform;
+                lower.SetParent(upper, false);
+                lower.localPosition = Vector3.right * 0.4f;
+                Transform hand = new GameObject("Hand").transform;
+                hand.SetParent(lower, false);
+                hand.localPosition = Vector3.right * 0.4f;
+                Transform grip = new GameObject("Grip").transform;
+                grip.SetParent(hand, false);
+                grip.localPosition = new Vector3(0.08f, -0.03f, 0.04f);
+                grip.localRotation = Quaternion.Euler(10f, 20f, 30f);
+                Vector3 target = new Vector3(0.2f, -0.3f, 0.3f) * scale;
+                Quaternion rotation = Quaternion.Euler(40f, -35f, 15f);
+
+                FirstPersonArmsDriver.SolveArm(upper, lower, hand, grip, target, rotation, Vector3.down);
+
+                Assert.That(Vector3.Distance(grip.position, target), Is.LessThan(0.0001f));
+                Assert.That(Quaternion.Angle(grip.rotation, rotation), Is.LessThan(0.05f));
+                Assert.That(Vector3.Distance(upper.position, lower.position), Is.EqualTo(0.4f * scale).Within(0.0001f));
+                Assert.That(Vector3.Distance(lower.position, hand.position), Is.EqualTo(0.4f * scale).Within(0.0001f));
+            }
+            finally { Object.DestroyImmediate(root); }
+        }
+
         private sealed class Scene : System.IDisposable
         {
             public GameObject Root;
@@ -259,8 +293,12 @@ namespace Emberdelve.Tests.Visual
                     Assert.IsTrue(scene.Driver.ShieldShown, "round " + round + ": the shield model is back in the left hand");
                     Assert.IsTrue(scene.Driver.HasWeaponModel, "and the sword");
                     scene.Pose(Pattern("Pattern_SwordSlashLR"), -1f, 0f);
-                    Vector3 shieldLocal = scene.Camera.transform.InverseTransformPoint(scene.Driver.OffHandModel.transform.position);
-                    Assert.IsTrue(scene.InFrustum(scene.Driver.OffHandModel.transform.position), "the shield is on screen: " + shieldLocal);
+                    // The strap-aligned pivot can sit below the frame while the shield surface remains visible.
+                    Plane[] planes = GeometryUtility.CalculateFrustumPlanes(scene.Camera);
+                    bool shieldVisible = false;
+                    foreach (Renderer renderer in scene.Driver.OffHandModel.GetComponentsInChildren<Renderer>(false))
+                        shieldVisible |= renderer.enabled && GeometryUtility.TestPlanesAABB(planes, renderer.bounds);
+                    Assert.IsTrue(shieldVisible, "the active shield model intersects the camera frustum");
                     Assert.Less(Vector3.Distance(scene.Camera.transform.InverseTransformPoint(scene.Driver.GripLeft.position), FirstPersonArmsDriver.ShieldRest), 0.08f, "the left hand holds it at its rest position");
                     Assert.AreEqual(0, CountEnabledShields(scene.Driver, shield) - 1, "exactly one shield is shown");
                 }

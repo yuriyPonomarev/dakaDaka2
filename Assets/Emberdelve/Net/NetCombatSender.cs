@@ -21,7 +21,7 @@ namespace Emberdelve.Net
     /// queue (CombatNetLimits.ClientQueueLimit) drained at most once per CombatNetLimits.ClientMinIntervalSeconds, in order; a press that
     /// does not fit is dropped on the client (counted). That keeps an honest player under the server's gate and out of its reject ledger.
     ///
-    /// Input sources, in this order: a scripted driver (-ember-net-script melee-duel | ranged-shot | combat-abuse; works headless, steers the
+    /// Input sources, in this order: a scripted driver (-ember-net-script melee-duel | ranged-shot | combat-abuse | enemy-hit; works headless, steers the
     /// movement stream through NetInputSender.DriveFromCombatScript, and reads its numbers from the start file, see CombatScriptParams), the
     /// real EmberdelveInput of a windowed owner. A scripted client takes no real input. combat-abuse is a hostile probe and exists in
     /// development builds and the Editor only.
@@ -67,10 +67,12 @@ namespace Emberdelve.Net
         private bool _lower;
         private int _counter;
         private float _nextAt;
+        private int _enemyHitBaseline;
 
         public uint LastSequence => _sequence;
         public int Sent => _sent;
         public int Dropped => _dropped;
+        public bool CanOpenInventory => !_drawHeld;
 
         public void Configure(NetPlayerRig owner, NetLaunchArgs args)
         {
@@ -155,7 +157,15 @@ namespace Emberdelve.Net
             if (_owner == null || !_owner.IsSpawned) return;
 
             if (_spec != null) RunScript();
-            else if (_useRealInput) RealInput();
+            else if (_useRealInput)
+            {
+                var inventory = GetComponent<NetInventoryClient>();
+                if (inventory != null && inventory.IsOpen)
+                {
+                    if (_guardHeld && Enqueue(CombatIntentKind.GuardUp)) _guardHeld = false;
+                }
+                else RealInput();
+            }
 
             Pump();
         }
@@ -246,11 +256,13 @@ namespace Emberdelve.Net
         private void RunScript()
         {
             if (_scriptDone) return;
-            NetPlayerRig other = OtherPlayer();
+            bool enemyHitScript = _spec.IsEnemyHitOnly;
+            NetPlayerRig other = enemyHitScript ? null : OtherPlayer();
 
             if (!_scriptStarted)
             {
-                if (other == null || !StartConditionMet()) return;
+                if ((!enemyHitScript && other == null) || !StartConditionMet()) return;
+                if (enemyHitScript && !NetEnemyViews.TryGetNearestAliveProxy(_owner.transform.position, out _, out _)) return;
                 string file = _args != null ? _args.ScriptStartFile : "";
                 if (!string.IsNullOrEmpty(file))
                 {
@@ -270,15 +282,22 @@ namespace Emberdelve.Net
                     }
                 }
 
-                _lower = _owner.ServerPlayerId.Value < other.ServerPlayerId.Value;
                 _scriptStarted = true;
                 _scriptStartedAt = Time.unscaledTime;
+                if (enemyHitScript)
+                {
+                    _enemyHitBaseline = NetCombatFx.EnemyHits;
+                    NextPhase(1);
+                    Debug.Log(NetTuning.LogPrefix + "[client] script enemy-hit start id=" + _owner.ServerPlayerId.Value);
+                    return;
+                }
+                _lower = _owner.ServerPlayerId.Value < other.ServerPlayerId.Value;
                 NextPhase(_params.HasWalk ? 0 : 1);
                 Debug.Log(NetTuning.LogPrefix + "[client] script " + _spec.Text + " start role=" + Role() + " id=" + _owner.ServerPlayerId.Value +
                           " other=" + other.ServerPlayerId.Value + " dist=" + F(Flat(_owner.transform.position, other.transform.position)));
             }
 
-            if (other == null || Time.unscaledTime - _scriptStartedAt > ScriptTimeoutSeconds)
+            if ((!enemyHitScript && other == null) || Time.unscaledTime - _scriptStartedAt > ScriptTimeoutSeconds)
             {
                 Finish("timeout");
                 return;
@@ -292,7 +311,8 @@ namespace Emberdelve.Net
                 return;
             }
 
-            if (_spec.IsMeleeDuelOnly) { if (_lower) MeleeAttacker(other); else MeleeDefender(other); }
+            if (enemyHitScript) EnemyAttacker();
+            else if (_spec.IsMeleeDuelOnly) { if (_lower) MeleeAttacker(other); else MeleeDefender(other); }
             else if (_spec.IsMeleeParryOnly) { if (_lower) MeleeAttacker(other); else ParryDefender(other); }
             else if (_spec.IsRangedShotOnly) { if (_lower) RangedShooter(other); else Stand(other); }
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -325,6 +345,42 @@ namespace Emberdelve.Net
             }
 
             Drive(0f, YawTo(me, them), 0f);
+        }
+
+        private void EnemyAttacker()
+        {
+            if (NetCombatFx.EnemyHits > _enemyHitBaseline)
+            {
+                Finish("enemy-hit-reported");
+                return;
+            }
+            if (!NetEnemyViews.TryGetNearestAliveProxy(_owner.transform.position, out _, out Vector3 target))
+            {
+                Drive(0f, _owner.transform.eulerAngles.y, CurrentPitch);
+                return;
+            }
+
+            Vector3 me = _owner.transform.position;
+            float yaw = YawTo(me, target);
+            float dist = Flat(me, target);
+            if (dist > _params.Stop)
+            {
+                Drive(1f, yaw, 0f);
+                return;
+            }
+
+            Drive(0f, yaw, 0f);
+            if (Time.unscaledTime - _phaseStartedAt < SettleSeconds) return;
+            if (_counter >= _params.Presses)
+            {
+                Finish("enemy-presses-spent");
+                return;
+            }
+            if (Time.unscaledTime >= _nextAt && Enqueue(CombatIntentKind.AttackPress))
+            {
+                _counter++;
+                _nextAt = Time.unscaledTime + _params.Interval;
+            }
         }
 
         // melee-duel, attacker: approach to the stop distance, then press every interval until the other is dead or the presses are spent.

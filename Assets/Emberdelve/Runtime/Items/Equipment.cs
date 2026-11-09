@@ -142,6 +142,7 @@ namespace Emberdelve.Items
 
         public void Initialize(PlayerRig rig)
         {
+            if (_inventory != null && !_inventory.CanCommitRevision(out _)) return;
             _rig = rig != null ? rig : GetComponent<PlayerRig>();
             _inventory = _rig != null && _rig.Inventory != null ? _rig.Inventory : GetComponent<Inventory>();
         }
@@ -550,6 +551,16 @@ namespace Emberdelve.Items
         // ------------------------------------------------------------ U5A: hands as items
 
         private bool _kitIsItems;
+        private bool _dropHandMutationPermit;
+        internal static Action DropFinalizeFaultForTest;
+        internal static Action DropRollbackFaultForTest;
+
+        internal sealed class DropStateSnapshot
+        {
+            internal int ActiveSet;
+            internal WeaponData Offhand;
+            internal ClassLoadout.DropHandSnapshot Hands;
+        }
 
         /// <summary>
         /// U5A: true once the class kit has been minted into the hand slots as real items (a rig with a class, a catalog and a configured
@@ -563,6 +574,7 @@ namespace Emberdelve.Items
         /// <summary>U5A: starts seeding the class kit: clears the four hand slots (no bag, no revision: a class apply is a run start).</summary>
         internal void BeginKit()
         {
+            if (_inventory != null && !_dropHandMutationPermit && !_inventory.CanCommitRevision(out _)) return;
             for (int i = 1; i < SlotCount; i++)
             {
                 if (EquipmentSlots.SetOf((EquipmentSlot)i) >= 0) _gear[i] = null;
@@ -573,6 +585,7 @@ namespace Emberdelve.Items
         /// <summary>U5A: puts one minted kit item straight into a hand slot (the loadout already holds the matching weapon).</summary>
         internal void SeedKitHand(EquipmentSlot slot, ItemInstance instance)
         {
+            if (_inventory != null && !_dropHandMutationPermit && !_inventory.CanCommitRevision(out _)) return;
             int index = SlotIndex(slot);
             if (index >= 0 && instance != null && EquipmentSlots.SetOf(slot) >= 0) _gear[index] = instance;
         }
@@ -580,6 +593,7 @@ namespace Emberdelve.Items
         /// <summary>U5A: finishes the kit seed: slot views, stats, and the rig's off hand for the live set.</summary>
         internal void EndKit()
         {
+            if (_inventory != null && !_dropHandMutationPermit && !_inventory.CanCommitRevision(out _)) return;
             RecomputeSlots();
             RefreshStats();
             if (_rig != null) _rig.SetOffhandWeapon(WornOffhandOfSet(_activeSet));
@@ -685,6 +699,7 @@ namespace Emberdelve.Items
         /// </summary>
         internal bool BeginWeaponSet(int set, bool isSwap)
         {
+            if (_inventory != null && !_dropHandMutationPermit && !_inventory.CanCommitRevision(out _)) return false;
             if (set < 0 || set >= EquipmentSlots.WeaponSetCount) return false;
 
             bool changed = _activeSet != set;
@@ -878,6 +893,8 @@ namespace Emberdelve.Items
 
         private void ClearState(bool reseedKit)
         {
+            Inventory reservationOwner = BagPartner();
+            if (reservationOwner != null && !reservationOwner.CanCommitRevision(out _)) return;
             bool changed = false;
             for (int i = 0; i < SlotCount; i++) changed |= _gear[i] != null;
             Inventory revisionOwner = BagPartner();
@@ -987,6 +1004,9 @@ namespace Emberdelve.Items
             if (_rig != null && _rig.Inventory != null) return _rig.Inventory;
             return GetComponent<Inventory>();
         }
+
+        /// <summary>Public pairing check for higher-level server services that must validate an atomic bag/equipment transaction.</summary>
+        public bool IsPairedWith(Inventory bag) => bag != null && ReferenceEquals(BagPartner(), bag);
 
         /// <summary>
         /// What is worn as a versioned, canonical, checksummed <see cref="ContainerSnapshot"/> (kind equipment, no
@@ -1182,18 +1202,18 @@ namespace Emberdelve.Items
 
         // ------------------------------------------------------------ internals
 
-        private void ApplyToSlot(int index, ItemInstance instance)
+        private void ApplyToSlot(int index, ItemInstance instance, bool publishHandEvents = true)
         {
             _gear[index] = instance;
             RecomputeSlots();
-            ApplyHand(instance.Definition, (EquipmentSlot)index);
+            ApplyHand(instance.Definition, (EquipmentSlot)index, publishHandEvents);
         }
 
         /// <summary>
         /// The hand half of wearing an item: a weapon or shield definition takes the hand of the slot it was put in (D3c: a
         /// set-2 slot fills set 2's hand, which is only the hand in use while set 2 is the active set), anything else does nothing.
         /// </summary>
-        private void ApplyHand(ItemData item, EquipmentSlot slot)
+        private void ApplyHand(ItemData item, EquipmentSlot slot, bool publishEvents = true)
         {
             if (!item.GrantsWeapon) return;
 
@@ -1207,7 +1227,11 @@ namespace Emberdelve.Items
             }
 
             ClassLoadout loadout = _rig != null ? _rig.Loadout : null;
-            if (loadout != null) loadout.TryReplaceWeaponSlot(set, item.grantedWeapon);
+            if (loadout != null)
+            {
+                if (publishEvents) loadout.TryReplaceWeaponSlot(set, item.grantedWeapon);
+                else loadout.TryReplaceWeaponSlotSilently(set, item.grantedWeapon);
+            }
         }
 
         /// <summary>
@@ -1291,11 +1315,11 @@ namespace Emberdelve.Items
             return true;
         }
 
-        private void RestoreClassHand(EquipmentSlot slot)
+        private void RestoreClassHand(EquipmentSlot slot, bool publishEvents = true)
         {
             if (_kitIsItems)
             {
-                RestoreEmptyHand(slot);
+                RestoreEmptyHand(slot, publishEvents);
                 return;
             }
 
@@ -1317,13 +1341,18 @@ namespace Emberdelve.Items
             WeaponData classWeapon = set == 0 ? data.primaryWeapon : data.secondaryWeapon;
             if (classWeapon != null)
             {
-                loadout.TryReplaceWeaponSlot(set, classWeapon);
+                if (publishEvents) loadout.TryReplaceWeaponSlot(set, classWeapon);
+                else loadout.TryReplaceWeaponSlotSilently(set, classWeapon);
             }
             else if (set == 1)
             {
                 // A class with no secondary weapon: set 2's hand is empty again. If it was the live set, the player falls back to set 1.
                 _quietSetChange++;
-                try { loadout.ClearSecondaryWeapon(); }
+                try
+                {
+                    if (publishEvents) loadout.ClearSecondaryWeapon();
+                    else loadout.ClearSecondaryWeaponSilently();
+                }
                 finally { _quietSetChange--; }
             }
         }
@@ -1351,7 +1380,7 @@ namespace Emberdelve.Items
         }
 
         /// <summary>U5A: an emptied hand in item mode: the main hand becomes the bare fists (set 1) or nothing (set 2), the off hand nothing.</summary>
-        private void RestoreEmptyHand(EquipmentSlot slot)
+        private void RestoreEmptyHand(EquipmentSlot slot, bool publishEvents = true)
         {
             int set = EquipmentSlots.SetOf(slot);
             if (set < 0 || _rig == null) return;
@@ -1368,12 +1397,20 @@ namespace Emberdelve.Items
             if (set == 0)
             {
                 WeaponData fists = Fists;
-                if (fists != null) loadout.TryReplaceWeaponSlot(0, fists);
+                if (fists != null)
+                {
+                    if (publishEvents) loadout.TryReplaceWeaponSlot(0, fists);
+                    else loadout.TryReplaceWeaponSlotSilently(0, fists);
+                }
             }
             else
             {
                 _quietSetChange++;
-                try { loadout.ClearSecondaryWeapon(); }
+                try
+                {
+                    if (publishEvents) loadout.ClearSecondaryWeapon();
+                    else loadout.ClearSecondaryWeaponSilently();
+                }
                 finally { _quietSetChange--; }
             }
         }
@@ -1415,34 +1452,20 @@ namespace Emberdelve.Items
             return true;
         }
 
-        /// <summary>
-        /// U5A: takes a worn item out of its slot and out of the player's model entirely (to be laid on the ground by the authority). The slot
-        /// releases the identity in the same commit the revision moves, the hand falls back to the fists / nothing, the stats are rebuilt.
-        /// The expected uid must be what is worn there. A refusal changes nothing. <see cref="ReattachSlot"/> undoes it when the ground refuses.
-        /// </summary>
-        internal bool TryDetachSlot(EquipmentSlot slot, Guid expectedUid, out ItemInstance detached, out string reason)
-        {
-            using (GameEventTransaction.Defer()) return TryDetachSlotState(slot, expectedUid, out detached, out reason);
-        }
-
-        private bool TryDetachSlotState(EquipmentSlot slot, Guid expectedUid, out ItemInstance detached, out string reason)
+        /// <summary>Provisional, event-silent equipment removal owned by one drop lease. Does not commit the shared revision.</summary>
+        internal bool TryDetachSlotForDrop(Inventory.DropMutationLease lease, EquipmentSlot slot, Guid expectedUid,
+            out ItemInstance detached, out DropStateSnapshot snapshot, out string reason)
         {
             detached = null;
+            snapshot = null;
+            if (_inventory == null || !_inventory.OwnsDropLease(lease))
+            {
+                reason = "drop reservation is no longer valid";
+                return false;
+            }
+
             int index = SlotIndex(slot);
-            if (index < 1)
-            {
-                reason = "no such equipment slot";
-                return false;
-            }
-
-            ItemInstance worn = _gear[index];
-            if (worn == null || worn.Definition == null)
-            {
-                reason = "nothing equipped there";
-                return false;
-            }
-
-            if (worn.Uid != expectedUid)
+            if (index < 1 || _gear[index] == null || _gear[index].Definition == null || _gear[index].Uid != expectedUid)
             {
                 reason = "the requested gear identity is no longer worn in that slot";
                 return false;
@@ -1454,50 +1477,107 @@ namespace Emberdelve.Items
                 return false;
             }
 
-            ItemData item = worn.Definition;
-            if (item.GrantsWeapon && !EquipmentSlots.IsOffHand(slot) && _rig.Loadout != null && _rig.Loadout.IsActionLocked)
+            ItemInstance worn = _gear[index];
+            if (worn.Definition.GrantsWeapon && !EquipmentSlots.IsOffHand(slot) && _rig.Loadout != null && _rig.Loadout.IsActionLocked)
             {
                 reason = "cannot change weapons during an attack";
-                GameEvents.RaiseToast(OwnerId, _rig.Loadout.ActionLockMessage);
                 return false;
             }
 
-            Inventory revisionOwner = BagPartner();
-            if (revisionOwner == null)
+            snapshot = new DropStateSnapshot
             {
-                reason = "equipment has no shared inventory revision owner";
-                return false;
-            }
-
-            if (!revisionOwner.CanCommitRevision(out reason)) return false;
+                ActiveSet = _activeSet,
+                Offhand = _rig.OffhandWeapon,
+                Hands = _rig.Loadout != null ? _rig.Loadout.CaptureDropHandSnapshot() : null
+            };
 
             _gear[index] = null;
             RecomputeSlots();
-            if (item.GrantsWeapon) RestoreClassHand(slot);
-            RefreshStats();
-            revisionOwner.CommitRevision();
-
-            GameEvents.RaiseInventoryChanged(OwnerId);
-            GameEvents.RaiseEquipmentChanged(OwnerId, item, false);
             detached = worn;
             reason = null;
             return true;
         }
 
-        /// <summary>U5A: puts a detached item back in its slot (the ground could not take it). Same stats / hand / revision path as an equip.</summary>
-        internal void ReattachSlot(EquipmentSlot slot, ItemInstance instance)
+        /// <summary>Applies the provisional equipment stat change after pickup publication can no longer refuse.</summary>
+        internal bool FinalizeDropDetach(Inventory.DropMutationLease lease, EquipmentSlot slot, ItemInstance instance)
         {
-            using (GameEventTransaction.Defer())
+            int index = SlotIndex(slot);
+            if (_inventory == null || !_inventory.OwnsDropLease(lease) || index < 1 || instance == null || _gear[index] != null) return false;
+            _dropHandMutationPermit = true;
+            try
             {
-                int index = SlotIndex(slot);
-                if (index < 1 || instance == null || _gear[index] != null) return;
-                ApplyToSlot(index, instance);
-                RefreshStats();
-                Inventory revisionOwner = BagPartner();
-                if (revisionOwner != null && revisionOwner.CanCommitRevision(out _)) revisionOwner.CommitRevision();
-                GameEvents.RaiseInventoryChanged(OwnerId);
-                GameEvents.RaiseEquipmentChanged(OwnerId, instance.Definition, true);
+                if (instance.Definition.GrantsWeapon) RestoreClassHand(slot, false);
             }
+            finally { _dropHandMutationPermit = false; }
+            DropFinalizeFaultForTest?.Invoke();
+            RefreshStats();
+            return true;
+        }
+
+        /// <summary>Restores a provisional drop before revision commit, without publishing events or changing the revision.</summary>
+        internal bool TryRestoreSlotAfterDropFailure(Inventory.DropMutationLease lease, EquipmentSlot slot,
+            ItemInstance instance, DropStateSnapshot snapshot, out string reason)
+        {
+            int index = SlotIndex(slot);
+            if (_inventory == null || !_inventory.OwnsDropLease(lease) || index < 1 || instance == null || _gear[index] != null)
+            {
+                reason = "the original equipment state cannot be restored";
+                return false;
+            }
+
+            // Put identity back first. Even if a visual/stat restoration faults, the UID remains owned by this slot
+            // and the prepared pickup is cancelled by the caller.
+            _gear[index] = instance;
+            RecomputeSlots();
+            _dropHandMutationPermit = true;
+            string restorationFault = null;
+            try
+            {
+                if (snapshot != null)
+                {
+                    _activeSet = snapshot.ActiveSet;
+                    if (_rig != null)
+                    {
+                        try { _rig.SetOffhandWeapon(snapshot.Offhand); }
+                        catch (Exception exception) { restorationFault = "offhand restore threw: " + exception.Message; }
+                        try { _rig.Loadout?.RestoreDropHandSnapshot(snapshot.Hands); }
+                        catch (Exception exception)
+                        {
+                            if (restorationFault == null) restorationFault = "hand restore threw: " + exception.Message;
+                            else restorationFault += "; hand restore threw: " + exception.Message;
+                        }
+                    }
+                }
+            }
+            finally { _dropHandMutationPermit = false; }
+
+            try { RefreshStats(); }
+            catch (Exception exception)
+            {
+                if (restorationFault == null) restorationFault = "stat restore threw: " + exception.Message;
+                else restorationFault += "; stat restore threw: " + exception.Message;
+            }
+
+            // Fault injection occurs after all rollback state has been restored, proving that a late exception is
+            // reported without exposing a half-restored source or losing its UID.
+            try { DropRollbackFaultForTest?.Invoke(); }
+            catch (Exception exception)
+            {
+                if (restorationFault == null) restorationFault = "late rollback fault: " + exception.Message;
+                else restorationFault += "; late rollback fault: " + exception.Message;
+            }
+
+            bool handMatches = snapshot == null || (_activeSet == snapshot.ActiveSet &&
+                (_rig == null || (ReferenceEquals(_rig.OffhandWeapon, snapshot.Offhand) &&
+                                  (_rig.Loadout == null || _rig.Loadout.MatchesDropHandSnapshot(snapshot.Hands)))));
+            if (!ReferenceEquals(_gear[index], instance) || !handMatches || restorationFault != null)
+            {
+                reason = restorationFault ?? "the equipment hand snapshot could not be fully restored";
+                return false;
+            }
+
+            reason = null;
+            return true;
         }
 
         private void RecomputeSlots()

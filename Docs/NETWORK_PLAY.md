@@ -1,6 +1,6 @@
 # Network play (U3A): how to start a server and clients
 
-What exists after U3A5: a dedicated server process (headless), clients that walk in the same dungeon (server-simulated movement, owner prediction, interpolated other players), late join, clean disconnect and rejoin, and a minimal Online panel in the lobby. There is no combat, inventory, chest or enemy replication online yet (U3B and later): enemies run only on the server and nobody sees them, so proofs usually run with `-ember-net-no-enemies`. The offline game is unchanged: start the exe without arguments, press DESCEND.
+The game always uses the authored Modular Crypts map for offline play, Host, and dedicated servers. Clients join the server-selected scene and plan. Server-simulated movement, owner prediction, interpolated other players, late join, clean disconnect and rejoin are supported. Combat, inventory, chest and enemy presentation remain incomplete online; proofs usually run with `-ember-net-no-enemies`.
 
 Everything below uses ONE executable. Networking is chosen by the command line (`-ember-net ...`) or by the lobby's Online panel; without either the process is the plain offline game.
 
@@ -13,7 +13,7 @@ Close the Unity Editor for this project, then run `Tools\net\Build-NetPlayable.b
   -executeMethod Emberdelve.EditorTools.EmberdelveWindowsBuild.BuildNetPlayable --ember-build-output C:\Games\EmberdelveNet\EmberdelveNet.exe
 ```
 
-It builds scenes Lobby + Level01 (Development build) and first generates the network player prefab and its catalog if they are missing. The output must be an absolute path outside `Assets`. Exit code 0 means built. From a running Editor use the same entry through `EmberdelveWindowsBuild.BuildNetFinalPlayer` (internal) or the gate below.
+It requires and builds scenes Lobby + Modular Crypts (Development build), and generates the network player prefab from the modular scene if it is missing. The output must be an absolute path outside `Assets`. Exit code 0 means built. From a running Editor use `EmberdelveWindowsBuild.BuildNetFinalPlayer` (internal) or the gate below.
 
 ## 2. Dedicated server
 

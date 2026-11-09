@@ -122,8 +122,11 @@ namespace Emberdelve.Items
         private readonly List<Stack> _stacks = new List<Stack>();
         private readonly List<InventorySlot> _views = new List<InventorySlot>();
         private int[] _cells = new int[40];
+        [NonSerialized] private bool _gridMapInitialized;
         [NonSerialized] private ulong _nextStackId = 1;
         [NonSerialized] private bool _stackIdsExhausted;
+        [NonSerialized] private bool _hasNetworkRevision;
+        [NonSerialized] private DropMutationLease _dropMutationLease;
 
         private PlayerRig _rig;
         private RangedCombat _rangedCombat;
@@ -132,6 +135,7 @@ namespace Emberdelve.Items
         private ItemIdentityIssuer _issuer;
         private Equipment _equipment;
         [NonSerialized] private LocalInventoryAuthority _localAuthority;
+        [NonSerialized] private IInventoryAuthority _networkAuthority;
         [NonSerialized] private HotbarBindings _hotbar;
 
         // R3: the run's one item catalog. Null until the loadout (or a test) supplies it; gear is only minted
@@ -151,6 +155,7 @@ namespace Emberdelve.Items
         /// <summary>Points the bag at the raid's issuer. Null is ignored (a bag never loses its issuer).</summary>
         public void SetIssuer(ItemIdentityIssuer issuer)
         {
+            if (_dropMutationLease != null) return;
             if (issuer != null) _issuer = issuer;
         }
 
@@ -161,6 +166,7 @@ namespace Emberdelve.Items
         /// </summary>
         public void SetCatalog(ItemCatalog catalog)
         {
+            if (_dropMutationLease != null) return;
             _catalog = catalog;
         }
 
@@ -174,7 +180,14 @@ namespace Emberdelve.Items
         public int FreeCells => Mathf.Max(0, Capacity - UsedCells);
         public IReadOnlyList<InventorySlot> Slots => _views;
         /// <summary>Local command authority bound to this rig's exact bag and equipment pair, when wired.</summary>
-        public IInventoryAuthority CommandAuthority => GetOrCreateLocalAuthority();
+        public IInventoryAuthority CommandAuthority => NetRole.IsClientOnly && _networkAuthority != null
+            ? _networkAuthority : GetOrCreateLocalAuthority();
+
+        /// <summary>Attaches or detaches the owner client's network sender; never replaces the server authority.</summary>
+        public void SetNetworkAuthority(IInventoryAuthority authority)
+        {
+            if (NetRole.IsClientOnly) _networkAuthority = authority;
+        }
         /// <summary>
         /// R6c2: the 1-4 hotbar assignments for this bag. Each slot names a runtime StackId, never a list index, so
         /// compaction cannot retarget a key. Cleared by <see cref="Clear"/>, re-seeded by a loadout restore and by
@@ -201,6 +214,12 @@ namespace Emberdelve.Items
         /// <summary>Checks the shared revision boundary before a caller starts a transaction that may mutate state.</summary>
         internal bool CanCommitRevision(out string reason)
         {
+            if (_dropMutationLease != null)
+            {
+                reason = "inventory is reserved for an item drop";
+                return false;
+            }
+
             if (Revision == ulong.MaxValue)
             {
                 reason = "this inventory/loadout revision is exhausted";
@@ -211,8 +230,100 @@ namespace Emberdelve.Items
             return true;
         }
 
+        /// <summary>Exclusive synchronous reservation used while a ground sink prepares an inactive pickup.</summary>
+        internal sealed class DropMutationLease : IDisposable
+        {
+            private Inventory _owner;
+            internal DropMutationLease(Inventory owner) { _owner = owner; }
+            public void Dispose()
+            {
+                Inventory owner = _owner;
+                _owner = null;
+                if (owner != null && ReferenceEquals(owner._dropMutationLease, this)) owner._dropMutationLease = null;
+            }
+        }
+
+        internal bool TryBeginDropMutation(out DropMutationLease lease, out string reason)
+        {
+            lease = null;
+            if (_dropMutationLease != null) { reason = "inventory is already reserved for a drop"; return false; }
+            if (Revision == ulong.MaxValue) { reason = "this inventory/loadout revision is exhausted"; return false; }
+            lease = new DropMutationLease(this);
+            _dropMutationLease = lease;
+            reason = null;
+            return true;
+        }
+
+        internal bool OwnsDropLease(DropMutationLease lease) => lease != null && ReferenceEquals(_dropMutationLease, lease);
+
+        /// <summary>Detaches one gear stack provisionally for a ground transfer; no revision or observers change yet.</summary>
+        internal bool TryDetachInstanceForDrop(DropMutationLease lease, ulong stackId, Guid expectedUid, out ItemInstance instance,
+            out Vector2Int origin, out ulong originalRevision, out string reason)
+        {
+            instance = null;
+            origin = Vector2Int.zero;
+            originalRevision = Revision;
+            EnsureGrid();
+            int index = IndexOfStack(stackId);
+            if (index < 0 || _stacks[index].Instance == null || _stacks[index].Instance.Uid != expectedUid)
+            {
+                reason = "source stack identity is unknown or no longer holds the expected gear";
+                return false;
+            }
+            if (!OwnsDropLease(lease) || Revision == ulong.MaxValue) { reason = "drop reservation is no longer valid"; return false; }
+
+            Stack stack = _stacks[index];
+            instance = stack.Instance;
+            origin = stack.Origin;
+            _stacks.RemoveAt(index);
+            Recompute();
+            TotalUnits = Mathf.Max(0, TotalUnits - 1);
+            CarriedValue = Mathf.Max(0, CarriedValue - instance.Definition.value);
+            reason = null;
+            return true;
+        }
+
+        /// <summary>Restores a refused provisional drop without changing revision, counters, stack identity, or observers.</summary>
+        internal bool TryRestoreInstanceAfterDropRefusal(DropMutationLease lease, ItemInstance instance, ulong stackId, Vector2Int origin,
+            ulong originalRevision, out string reason)
+        {
+            if (!OwnsDropLease(lease) || instance == null || stackId == 0 || Revision != originalRevision || HoldsInstanceUid(instance.Uid) ||
+                !CanPlace(origin, instance.Definition.EffectiveFootprint, -1))
+            {
+                reason = "the original bag state cannot be restored";
+                return false;
+            }
+            AddStack(instance.Definition, instance, 1, origin, stackId);
+            TotalUnits += 1;
+            CarriedValue += instance.Definition.value;
+            reason = null;
+            return true;
+        }
+
+        /// <summary>Publishes a previously preflighted drop only after its ground representation exists.</summary>
+        internal bool CommitDroppedInstance(DropMutationLease lease, ulong originalRevision, out string reason)
+        {
+            reason = null;
+            if (!OwnsDropLease(lease) || Revision != originalRevision || Revision == ulong.MaxValue)
+            {
+                reason = "inventory changed during the ground transfer";
+                return false;
+            }
+            AdvanceRevision();
+            GameEvents.RaiseInventoryChanged(OwnerId);
+            reason = null;
+            return true;
+        }
+
         /// <summary>Commits one logical mutation. Call once after every state half is final and before outward events.</summary>
         internal void CommitRevision()
+        {
+            if (_dropMutationLease != null)
+                throw new InvalidOperationException("A reserved drop transaction owns the shared revision.");
+            AdvanceRevision();
+        }
+
+        private void AdvanceRevision()
         {
             if (Revision == ulong.MaxValue)
                 throw new InvalidOperationException("This inventory/loadout exhausted its revision space.");
@@ -233,11 +344,15 @@ namespace Emberdelve.Items
         {
             _rig = GetComponent<PlayerRig>();
             _rangedCombat = GetComponent<RangedCombat>();
-            EnsureGrid();
+            // The cell array is zero-filled on allocation, where zero means occupied by stack 0.
+            // Build the empty occupancy map immediately; ConfigureGrid may legitimately no-op when
+            // the loadout requests the serialized defaults (10x4), and item placement must still work.
+            Recompute();
         }
 
         public void Initialize(PlayerRig rig)
         {
+            if (_dropMutationLease != null) return;
             if (!ReferenceEquals(_rig, rig)) _localAuthority = null;
             _rig = rig;
             _rangedCombat = GetComponent<RangedCombat>();
@@ -268,6 +383,7 @@ namespace Emberdelve.Items
 
         public void ConfigureGrid(int width, int height)
         {
+            if (_dropMutationLease != null) return;
             int newWidth = Mathf.Max(1, width);
             int newHeight = Mathf.Max(1, height);
 
@@ -340,7 +456,12 @@ namespace Emberdelve.Items
             {
                 for (int i = 0; i < items.Length; i++)
                 {
-                    if (items[i] != null) TryAdd(items[i], 1);
+                    if (items[i] == null) continue;
+                    if (!TryAdd(items[i], 1, out string reason))
+                    {
+                        string refusal = reason ?? "no reason provided";
+                        Debug.LogWarning($"Starting item '{items[i].displayName}' was not placed: {refusal}", this);
+                    }
                 }
             }
             finally
@@ -943,6 +1064,43 @@ namespace Emberdelve.Items
             return true;
         }
 
+        /// <summary>
+        /// Restores a validated bag snapshot as loot acquired from another authoritative container. The bag state,
+        /// profile UID ledger, run loot counters and outward events commit together; refusal leaves all four intact.
+        /// </summary>
+        internal bool TryRestoreLoot(ContainerSnapshot snapshot, ItemUidRegistry others, ItemData acquiredItem,
+            int acquiredQuantity, out string reason)
+        {
+            if (acquiredItem == null || acquiredQuantity <= 0)
+            {
+                reason = "loot restore needs an item and a positive quantity";
+                return false;
+            }
+            long addedValue = (long)acquiredItem.value * acquiredQuantity;
+            if (addedValue < 0 || addedValue > int.MaxValue - (long)RecoveredValue ||
+                acquiredQuantity > int.MaxValue - (long)LifetimeCollected)
+            {
+                reason = "loot counters would overflow";
+                return false;
+            }
+            if (!TryPrepareRestore(snapshot, others, true, out ValidatedContainer validated, out reason)) return false;
+            if (!CanCommitRevision(out reason)) return false;
+
+            if (others != null && !others.TryReplaceOwner(validated.ContainerId, validated.Uids, out reason)) return false;
+
+            using (GameEventTransaction.Defer())
+            {
+                ApplyRestore(validated);
+                CommitRevision();
+                LifetimeCollected += acquiredQuantity;
+                RecoveredValue += (int)addedValue;
+                GameEvents.RaiseItemCollected(OwnerId, acquiredItem, LifetimeCollected);
+                NotifyRestore();
+            }
+            reason = null;
+            return true;
+        }
+
         /// <summary>Validation half of a restore: touches nothing.</summary>
         internal bool TryPrepareRestore(ContainerSnapshot snapshot, ItemUidRegistry others, bool checkPartner,
             out ValidatedContainer validated, out string reason)
@@ -1041,6 +1199,32 @@ namespace Emberdelve.Items
             // A belt that held nothing before the restore (a fresh bag) gets the default assignment, as before. No event is
             // raised here (see the doc above); NotifyRestore's InventoryChanged refreshes the HUD.
             if (!Hotbar.RebindFromIdentities(belt)) Hotbar.SeedDefaults();
+        }
+
+        internal bool CanApplyNetworkRevision(ulong revision) => !_hasNetworkRevision || revision > Revision;
+
+        /// <summary>Starts a fresh client connection; its server revision is unrelated to the preceding session.</summary>
+        public void BeginNetworkSession()
+        {
+            if (NetRole.IsClientOnly) _hasNetworkRevision = false;
+        }
+
+        // Caller has validated an exact mapping for every restored stack before any mutation.
+        internal void ApplyNetworkIdentities(Dictionary<Vector2Int, ulong> ids, ulong revision)
+        {
+            BeltIdentity[] belt = Hotbar.CaptureIdentities();
+            ulong maximum = 0;
+            foreach (Stack stack in _stacks)
+            {
+                stack.StackId = ids[stack.Origin];
+                if (stack.StackId > maximum) maximum = stack.StackId;
+            }
+            if (maximum == ulong.MaxValue) { _stackIdsExhausted = true; _nextStackId = 0; }
+            else if (!_stackIdsExhausted && _nextStackId <= maximum) _nextStackId = maximum + 1;
+            Revision = revision;
+            _hasNetworkRevision = true;
+            Recompute();
+            Hotbar.RebindFromIdentities(belt, allowEmpty: true);
         }
 
         /// <summary>Notify half of a restore: a throwing subscriber is logged and cannot undo or abort an applied restore.</summary>
@@ -1671,7 +1855,7 @@ namespace Emberdelve.Items
         public bool TryUseSlot(int index)
         {
             if (index < 0 || index >= _stacks.Count) return false;
-            return SubmitUse(GetOrCreateLocalAuthority(), _views[index]);
+            return SubmitUse(CommandAuthority, _views[index]);
         }
 
         /// <summary>
@@ -1682,10 +1866,10 @@ namespace Emberdelve.Items
         public bool TryUseStack(ulong stackId)
         {
             if (stackId == 0 || !TryGetStack(stackId, out InventorySlot slot)) return false;
-            return SubmitUse(GetOrCreateLocalAuthority(), slot);
+            return SubmitUse(CommandAuthority, slot);
         }
 
-        private bool SubmitUse(LocalInventoryAuthority authority, InventorySlot slot)
+        private bool SubmitUse(IInventoryAuthority authority, InventorySlot slot)
         {
             if (authority == null || slot.StackId == 0 ||
                 !authority.TryCreateLocalCommand(InventoryCommandKind.Use, slot.StackId, 0,
@@ -1697,6 +1881,7 @@ namespace Emberdelve.Items
 
         public void Clear()
         {
+            if (_dropMutationLease != null) return;
             bool changed = _stacks.Count > 0 || TotalUnits != 0 || CarriedValue != 0;
             if (changed && !CanCommitRevision(out string revisionReason))
             {
@@ -1757,19 +1942,28 @@ namespace Emberdelve.Items
 
         private void EnsureGrid()
         {
+            EnsureGridStorage();
+            // EditMode, inactive objects and deserialized components can be queried before Awake.
+            // Rebuild from the live stacks rather than assuming the zero-filled cache is empty.
+            if (!_gridMapInitialized) Recompute();
+        }
+
+        private void EnsureGridStorage()
+        {
             gridWidth = Mathf.Max(1, gridWidth);
             gridHeight = Mathf.Max(1, gridHeight);
 
             if (_cells == null || _cells.Length != gridWidth * gridHeight)
             {
-                System.Array.Resize(ref _cells, gridWidth * gridHeight);
+                _cells = new int[gridWidth * gridHeight];
+                _gridMapInitialized = false;
             }
         }
 
         /// <summary>Rebuilds the cell occupancy map and the read-only slot view from the stacks.</summary>
         private void Recompute()
         {
-            EnsureGrid();
+            EnsureGridStorage();
 
             for (int i = 0; i < _cells.Length; i++) _cells[i] = -1;
 
@@ -1796,6 +1990,8 @@ namespace Emberdelve.Items
                     }
                 }
             }
+
+            _gridMapInitialized = true;
         }
     }
 }

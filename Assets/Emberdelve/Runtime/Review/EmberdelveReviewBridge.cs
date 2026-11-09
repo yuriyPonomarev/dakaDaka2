@@ -653,10 +653,9 @@ namespace Emberdelve.Review
                 FileInfo info = new FileInfo(_commandPath);
                 long stamp = info.LastWriteTimeUtc.Ticks ^ (info.Length * 31L);
                 if (stamp == _commandStamp) return true; // unchanged since the last read
-                _commandStamp = stamp;
 
                 string json;
-                using (FileStream stream = new FileStream(_commandPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (FileStream stream = new FileStream(_commandPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                 {
                     using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
                     {
@@ -664,6 +663,7 @@ namespace Emberdelve.Review
                     }
                 }
 
+                _commandStamp = stamp; // consume only after a successful read; a writer may be replacing the file
                 string trimmed = json == null ? string.Empty : json.Trim();
                 if (trimmed.Length == 0 || trimmed[0] != '{')
                 {
@@ -679,6 +679,11 @@ namespace Emberdelve.Review
                     return false;
                 }
 
+                return true;
+            }
+            catch (IOException)
+            {
+                // Transient replacement/sharing races are retried on the next poll, with no failed acknowledgement.
                 return true;
             }
             catch (Exception exception)
@@ -918,6 +923,14 @@ namespace Emberdelve.Review
                     : string.Empty;
             }
 
+            // A named mouse command captures the held pose before releasing the button.
+            // RunSnapshot finishes through Finish, which releases input even on capture failure.
+            if (!string.IsNullOrWhiteSpace(command.name))
+            {
+                yield return RunSnapshot(command, command.id);
+                yield break;
+            }
+
             bool released = QueueMouse(position, Vector2.zero, 0);
             yield return null;
 
@@ -1002,8 +1015,18 @@ namespace Emberdelve.Review
         {
             try
             {
-                if (_keyboard == null) _keyboard = InputSystem.AddDevice<Keyboard>("EmberdelveReviewKeyboard");
-                if (_mouse == null) _mouse = InputSystem.AddDevice<Mouse>("EmberdelveReviewMouse");
+                // Review commands target this player even while another client has focus.
+                // Only our synthetic devices opt in; native devices retain the game's focus policy.
+                if (_keyboard == null)
+                {
+                    InputSystem.RegisterLayout("{\"name\":\"EmberdelveReviewKeyboard\",\"extend\":\"Keyboard\",\"runInBackground\":\"enabled\"}");
+                    _keyboard = (Keyboard)InputSystem.AddDevice("EmberdelveReviewKeyboard");
+                }
+                if (_mouse == null)
+                {
+                    InputSystem.RegisterLayout("{\"name\":\"EmberdelveReviewMouse\",\"extend\":\"Mouse\",\"runInBackground\":\"enabled\"}");
+                    _mouse = (Mouse)InputSystem.AddDevice("EmberdelveReviewMouse");
+                }
 
                 // The review devices are the ones the reviewer drives, so they must be the .current
                 // devices that uGUI and the inventory pointer read. The OS devices stay untouched.
@@ -1519,6 +1542,8 @@ namespace Emberdelve.Review
             {
                 if (_keyboard != null) { InputSystem.RemoveDevice(_keyboard); _keyboard = null; }
                 if (_mouse != null) { InputSystem.RemoveDevice(_mouse); _mouse = null; }
+                InputSystem.RemoveLayout("EmberdelveReviewKeyboard");
+                InputSystem.RemoveLayout("EmberdelveReviewMouse");
             }
             catch (Exception exception)
             {

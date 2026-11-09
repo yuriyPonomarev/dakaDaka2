@@ -145,13 +145,27 @@ namespace Emberdelve.Core
     /// </summary>
     public static class PlayerView
     {
+        private static int _networkLocalPlayerId;
+
         /// <summary>Id of the player this process controls and presents, or <see cref="GameEvents.NoPlayer"/> when none is bound.</summary>
         public static int LocalPlayerId
         {
             get
             {
+                if (NetRole.IsClientOnly && _networkLocalPlayerId > 0) return _networkLocalPlayerId;
                 return GameServices.TryGet<ILocalPlayerSource>(out ILocalPlayerSource source) ? source.LocalPlayerId : GameEvents.NoPlayer;
             }
+        }
+
+        /// <summary>U4B: the owner identity from the server-spawned player object, for network client presentation.</summary>
+        public static void BindNetworkLocalPlayer(int playerId)
+        {
+            if (NetRole.IsClientOnly && playerId > 0) _networkLocalPlayerId = playerId;
+        }
+
+        public static void ClearNetworkLocalPlayer(int playerId)
+        {
+            if (_networkLocalPlayerId == playerId) _networkLocalPlayerId = GameEvents.NoPlayer;
         }
 
         /// <summary>True when an event owned by <paramref name="ownerId"/> belongs on the local viewer: its own player, or a global one.</summary>

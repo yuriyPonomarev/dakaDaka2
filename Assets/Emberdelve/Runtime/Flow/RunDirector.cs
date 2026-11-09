@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -10,6 +11,7 @@ using Emberdelve.Items;
 using Emberdelve.Level;
 using Emberdelve.AI;
 using Emberdelve.Player;
+using Emberdelve.Rules;
 
 namespace Emberdelve.Flow
 {
@@ -32,6 +34,8 @@ namespace Emberdelve.Flow
         public float EndedAt;
         public bool HasResult;
         public RunResult Result;
+        internal bool DeathCustodyPending;
+        internal float NextDeathCustodyAttemptAt;
         internal System.Action DiedHandler;
 
         public bool IsRunning => State == RunState.Running;
@@ -66,18 +70,33 @@ namespace Emberdelve.Flow
 
         private RunState _state = RunState.Briefing;
         private float _startedAt;
+        private float _offlinePausedDuration;
+        private float _offlinePauseStartedAt;
+        private bool _raidExpired;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        private bool _proofRaidCountdownEnabled;
+        private int _proofRaidDurationSeconds;
+#endif
         private bool _paused;
         private bool _started;
+        private bool _startInvoked;
+        private bool _runtimeLayoutRequiredBeforeStart;
+        private bool _runtimeLayoutInstalled;
+        private bool _runtimeLayoutInstallationComplete;
+        private bool _startDeferredForRuntimeLayout;
         private readonly List<PlayerSession> _sessions = new List<PlayerSession>();
         private readonly Dictionary<int, PlayerSession> _byPlayerId = new Dictionary<int, PlayerSession>();
         private PlayerSession _local;
         private int _spawnedCount;
         private int _networkSpawnCount;
+        private string _runtimeDungeonSceneName;
 
         /// <summary>The run-wide state: Briefing, Running, Paused, and the final outcome once no player is left in the run.</summary>
         public RunState State => _state;
+        public bool IsStarted => _started;
         public GameConfig Config => config;
         public DungeonLayoutData Layout => layout;
+        public bool RuntimeLayoutInstallationComplete => _runtimeLayoutInstallationComplete;
 
         /// <summary>Every admitted player, in join order.</summary>
         public IReadOnlyList<PlayerSession> Players => _sessions;
@@ -103,6 +122,63 @@ namespace Emberdelve.Flow
         /// <summary>Marks the run as server hosted. Only meaningful before Start (tools and gates).</summary>
         public void SetServerMode(bool enabled) => serverMode = enabled;
 
+        /// <summary>Installs a per-run generated layout before Start; used by the modular scene assembler only.</summary>
+        public bool SetRuntimeLayout(DungeonLayoutData runtimeLayout)
+        {
+            if (_started || runtimeLayout == null) return false;
+            layout = runtimeLayout;
+            _runtimeLayoutInstalled = true;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            Debug.Log("[modular-proof] runtime layout assigned before run start layout=" + runtimeLayout.name, this);
+#endif
+            return true;
+        }
+
+        /// <summary>Explicitly gates this scene's run until its modular assembler commits the authoritative layout.</summary>
+        public bool RequireRuntimeLayoutBeforeStart()
+        {
+            if (_startInvoked || _started) return false;
+            _runtimeLayoutRequiredBeforeStart = true;
+            return true;
+        }
+
+        /// <summary>Marks all scene geometry/gameplay placement checks complete, then releases a deferred Start.</summary>
+        public bool CompleteRuntimeLayoutInstallation()
+        {
+            if (!_runtimeLayoutRequiredBeforeStart || !_runtimeLayoutInstalled || layout == null || _started) return false;
+            _runtimeLayoutInstallationComplete = true;
+            if (_startDeferredForRuntimeLayout)
+            {
+                _startDeferredForRuntimeLayout = false;
+                BeginRun();
+            }
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            Debug.Log("[modular-proof] runtime layout installation complete runStarted=" + _started + " layout=" + layout.name, this);
+#endif
+            return true;
+        }
+
+        public bool SetRuntimeDungeonSceneName(string sceneName)
+        {
+            if (_started || string.IsNullOrWhiteSpace(sceneName)) return false;
+            _runtimeDungeonSceneName = sceneName;
+            return true;
+        }
+
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>Applies a process-local raid clock for a development proof without mutating the shared GameConfig asset.</summary>
+        public bool ConfigureRaidCountdownForProof(int durationSeconds)
+        {
+            if (!IsServerMode || !_started || durationSeconds <= 0 || _raidExpired) return false;
+            _proofRaidDurationSeconds = durationSeconds;
+            _proofRaidCountdownEnabled = true;
+            _startedAt = Time.unscaledTime;
+            _offlinePausedDuration = 0f;
+            _offlinePauseStartedAt = 0f;
+            return true;
+        }
+#endif
+
         /// <summary>
         /// Restart and return-to-lobby load a scene, which would unload a network-synchronised one. Only the offline game
         /// (NetRole Offline) may do it; online both calls are ignored until the network lifecycle (U3A5) owns them.
@@ -117,7 +193,30 @@ namespace Emberdelve.Flow
         public int Kills => _local != null ? _local.Kills : 0;
         public int ItemsCollected => _local != null && _local.Inventory != null ? _local.Inventory.LifetimeCollected : 0;
         public int LootValue => _local != null && _local.Inventory != null ? _local.Inventory.RecoveredValue : 0;
-        public float Elapsed => Mathf.Max(0f, Time.unscaledTime - _startedAt);
+        public float Elapsed => RaidCountdownRules.ElapsedSeconds(
+            _startedAt,
+            Time.unscaledTime,
+            _offlinePausedDuration,
+            _offlinePauseStartedAt,
+            _paused && NetRole.IsOffline);
+        public bool RaidCountdownEnabled =>
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            _proofRaidCountdownEnabled ||
+#endif
+            config != null && config.enableRaidCountdown;
+        public float RaidSecondsRemaining => RaidCountdownEnabled
+            ? RaidCountdownRules.RemainingSeconds(RaidDurationSeconds, Elapsed)
+            : RaidDurationSeconds;
+        public bool RaidExpired => _raidExpired;
+
+        private int RaidDurationSeconds => RaidCountdownRules.NormalizeDurationSeconds(
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            _proofRaidCountdownEnabled ? _proofRaidDurationSeconds :
+#endif
+            config != null ? config.raidDurationSeconds : RaidCountdownRules.DefaultDurationSeconds);
+
+        private bool RaidDeadlineReached => RaidCountdownEnabled &&
+            !RaidCountdownRules.IsExtractionWindowOpen(RaidDurationSeconds, Elapsed, !NetRole.IsClientOnly);
 
         public float InteractionReach => config != null ? Mathf.Max(0.5f, config.interactionAuthorityRange) : InteractionRules.DefaultReach;
 
@@ -284,6 +383,26 @@ namespace Emberdelve.Flow
 
         private void Start()
         {
+            _startInvoked = true;
+            if (SceneManager.GetActiveScene().name == GameConfig.DefaultDungeonSceneName && !_runtimeLayoutRequiredBeforeStart)
+            {
+                Debug.LogError("[RunDirector] Modular Crypts scene has no active module-plan assembler; gameplay remains fail-closed.", this);
+                return;
+            }
+            if (_runtimeLayoutRequiredBeforeStart && !_runtimeLayoutInstallationComplete)
+            {
+                _startDeferredForRuntimeLayout = true;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                Debug.Log("[modular-proof] RunDirector.Start deferred until modular plan commit", this);
+#endif
+                return;
+            }
+            BeginRun();
+        }
+
+        private void BeginRun()
+        {
+            if (_started) return;
             if (IsServerMode)
             {
                 StartServerRun();
@@ -319,7 +438,25 @@ namespace Emberdelve.Flow
 
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            RecordModularOfflineRunProof();
+#endif
         }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private void RecordModularOfflineRunProof()
+        {
+            if (IsServerMode || !_runtimeLayoutRequiredBeforeStart || !_started) return;
+            DungeonModulePlan plan = DungeonModulePlanSession.Current;
+            DungeonModuleSceneAssembler assembler = FindFirstObjectByType<DungeonModuleSceneAssembler>(FindObjectsInactive.Include);
+            bool layoutInstalled = _runtimeLayoutInstallationComplete && layout != null && plan != null;
+            bool assemblyValidated = assembler != null && assembler.RuntimeMapValidationComplete &&
+                                     assembler.AppliedLayoutHash == plan?.LayoutHash && assembler.RuntimeLayout == layout;
+            ModularOfflineRunProof.RecordStartedRun(Session != null ? Session.RaidSeed : 0UL,
+                plan != null ? plan.Seed : 0, plan != null ? plan.LayoutHash : string.Empty,
+                _started, layoutInstalled, assemblyValidated);
+        }
+#endif
 
         /// <summary>
         /// U3A2: the hosted run starts with nobody in it. No scene rig joins, the pointer and the pause clock are left
@@ -386,6 +523,11 @@ namespace Emberdelve.Flow
             CharacterClassData selectedClass, out string reason)
         {
             reason = null;
+            if (_raidExpired || (_started && RaidDeadlineReached))
+            {
+                reason = "the raid timer has expired";
+                return false;
+            }
             if (rig == null) { reason = "no rig"; return false; }
             if (selectedClass == null) { reason = "no class selected"; return false; }
             if (_state == RunState.Dead || _state == RunState.Extracted) { reason = "the run already ended"; return false; }
@@ -429,6 +571,9 @@ namespace Emberdelve.Flow
             {
                 _local = session;
                 playerRig = rig;
+                // A host joins after the server run has started. Its class/kit events fired
+                // before LocalPlayerId was bound, so presentation must now seed from the live rig.
+                if (_started) GameEvents.RaisePlayerRunState(session.PlayerId, session.State);
             }
 
             if (_started) GameEvents.RaiseStatusLine(session.PlayerId, selectedClass.displayName);
@@ -568,6 +713,11 @@ namespace Emberdelve.Flow
         {
             rig = null;
             reason = null;
+            if (_raidExpired || (_started && RaidDeadlineReached))
+            {
+                reason = "the raid timer has expired";
+                return false;
+            }
             if (prefab == null) { reason = "no player prefab"; return false; }
             if (selectedClass == null) { reason = "no class selected"; return false; }
             if (_state == RunState.Dead || _state == RunState.Extracted) { reason = "the run already ended"; return false; }
@@ -736,6 +886,11 @@ namespace Emberdelve.Flow
 
         private void Update()
         {
+            if (_started && !_raidExpired && _state == RunState.Running && RaidDeadlineReached)
+                ExpireRaid();
+
+            RetryPendingDeathCustody();
+
             PlayerRig rig = Player;
             if (rig == null) return;
 
@@ -771,10 +926,29 @@ namespace Emberdelve.Flow
         internal void TogglePause()
         {
             if (_state != RunState.Running && _state != RunState.Paused) return;
-            _paused = !_paused;
 
             // Online, pause is the local player's menu only: the clock and the run-wide state belong to everybody.
             bool offline = NetRole.IsOffline;
+            if (offline)
+            {
+                if (_paused)
+                {
+                    if (Time.unscaledTime >= _offlinePauseStartedAt)
+                        _offlinePausedDuration += Time.unscaledTime - _offlinePauseStartedAt;
+                    _offlinePauseStartedAt = 0f;
+                    _paused = false;
+                }
+                else
+                {
+                    _offlinePauseStartedAt = Time.unscaledTime;
+                    _paused = true;
+                }
+            }
+            else
+            {
+                _paused = !_paused;
+            }
+
             if (offline) Time.timeScale = _paused ? 0f : 1f;
             if (_local != null && _local.IsRunning) _local.Rig.SetInputEnabled(!_paused);
             if (offline) SetState(_paused ? RunState.Paused : RunState.Running);
@@ -794,7 +968,85 @@ namespace Emberdelve.Flow
 
         private void HandlePlayerDeath(PlayerSession session)
         {
+            if (session == null || !session.IsRunning) return;
+            if (NetRole.IsNetworked)
+            {
+                session.DeathCustodyPending = true;
+                session.NextDeathCustodyAttemptAt = 0f;
+                if (session.Rig != null) session.Rig.SetInputEnabled(false);
+                TryCommitDeathCustody(session);
+                return;
+            }
             CompletePlayer(session, RunState.Dead);
+        }
+
+        private void RetryPendingDeathCustody()
+        {
+            float now = Time.unscaledTime;
+            for (int i = 0; i < _sessions.Count; i++)
+            {
+                PlayerSession session = _sessions[i];
+                if (session.DeathCustodyPending && now >= session.NextDeathCustodyAttemptAt)
+                    TryCommitDeathCustody(session);
+            }
+        }
+
+        private void TryCommitDeathCustody(PlayerSession session)
+        {
+            if (session == null || !session.IsRunning || !session.DeathCustodyPending) return;
+            session.NextDeathCustodyAttemptAt = Time.unscaledTime + 1f;
+            if (!GameServices.TryGet<ICorpseDeathCustodian>(out ICorpseDeathCustodian custodian) || custodian == null)
+            {
+                Debug.LogError("[RunDirector] dead player " + session.PlayerId + " remains pending: network corpse custody service is unavailable");
+                return;
+            }
+            PlayerRig rig = session.Rig;
+            if (rig == null || rig.Inventory == null || rig.Equipment == null)
+            {
+                Debug.LogError("[RunDirector] dead player " + session.PlayerId + " remains pending: source rig/loadout is unavailable");
+                return;
+            }
+            if (!custodian.TryCommitDeath(session.PlayerId, rig.transform.position, rig.Inventory, rig.Equipment, out string reason))
+            {
+                Debug.LogWarning("[RunDirector] death custody pending for player " + session.PlayerId + ": " + reason);
+                return;
+            }
+            session.DeathCustodyPending = false;
+            CompletePlayer(session, RunState.Dead);
+        }
+
+        /// <summary>
+        /// Ends each player still in the raid when its timer expires. Timeout is a death outcome: it uses the normal
+        /// health/death path so networked loadouts enter session-only corpse custody before the owner result is sent.
+        /// No loot is banked or written to durable storage here.
+        /// </summary>
+        private void ExpireRaid()
+        {
+            if (_raidExpired) return;
+            _raidExpired = true;
+
+            // Snapshot the count because completing the final session can end the run while this loop is executing.
+            // HandlePlayerDeath applies the same custody and exact-once result rules as any other lethal event.
+            int count = _sessions.Count;
+            for (int i = 0; i < count; i++)
+            {
+                PlayerSession session = _sessions[i];
+                if (session == null || !session.IsRunning || session.Rig == null || session.Rig.Health == null) continue;
+
+                PlayerRig rig = session.Rig;
+                DamageInfo timeoutDamage = new DamageInfo(
+                    rig.Health.CurrentHealth + 1f,
+                    rig.transform.position,
+                    Vector3.zero,
+                    rig.transform.position,
+                    0,
+                    EntityKind.Neutral,
+                    DamageType.Physical,
+                    false,
+                    false,
+                    0f);
+                rig.ApplyDamage(timeoutDamage);
+            }
         }
 
         /// <summary>R2: the extraction rule for ONE actor: that player must still be in the run, alive, and (data) carrying value.</summary>
@@ -804,6 +1056,12 @@ namespace Emberdelve.Flow
             if (session == null)
             {
                 reason = "Not a player of this run";
+                return false;
+            }
+
+            if (_raidExpired || RaidDeadlineReached)
+            {
+                reason = "The raid timer has expired";
                 return false;
             }
 
@@ -855,7 +1113,7 @@ namespace Emberdelve.Flow
             if (session == null || !session.IsRunning) return;
 
             session.State = outcome;
-            session.EndedAt = Time.unscaledTime;
+            session.EndedAt = Elapsed;
 
             PlayerRig rig = session.Rig;
             if (rig != null)
@@ -871,7 +1129,7 @@ namespace Emberdelve.Flow
                 session.Inventory != null ? session.Inventory.RecoveredValue : 0,
                 session.Inventory != null ? session.Inventory.LifetimeCollected : 0,
                 session.Kills,
-                Mathf.Max(0f, session.EndedAt - _startedAt),
+                session.EndedAt,
                 session.PlayerId,
                 rig != null ? Emberdelve.Items.GearScore.ForEquipment(rig.Equipment) : 0);
             session.HasResult = true;
@@ -1003,8 +1261,9 @@ namespace Emberdelve.Flow
         }
 
         /// <summary>U5A: the ground half of a drop. The server lays the dropped instance in the world as a pickup holding that very instance.</summary>
-        public bool TrySpawnDropped(ItemInstance instance, Vector3 position, out string reason)
+        public bool TryPrepareDropped(ItemInstance instance, Vector3 position, out IPreparedGroundDrop prepared, out string reason)
         {
+            prepared = null;
             if (instance == null || instance.Definition == null)
             {
                 reason = "no item to lay on the ground";
@@ -1017,8 +1276,71 @@ namespace Emberdelve.Flow
                 return false;
             }
 
-            reason = SpawnLootInstance(instance, position) != null ? null : "the ground refused the item";
-            return reason == null;
+            PreparedGroundDrop staged = null;
+            try
+            {
+                LootPickup pickup = BuildPickupBody(instance.Definition, position, false);
+                if (pickup == null)
+                {
+                    reason = "the ground refused the item";
+                    return false;
+                }
+
+                staged = new PreparedGroundDrop(pickup, this);
+                pickup.Configure(instance, this);
+                prepared = staged;
+                reason = null;
+                return true;
+            }
+            catch
+            {
+                staged?.Cancel();
+                throw;
+            }
+        }
+
+        /// <summary>A staged pickup remains inactive until ownership is removed from its source.</summary>
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        public bool FailNextGroundDropPublicationForProof { get; set; }
+#endif
+        private sealed class PreparedGroundDrop : IPreparedGroundDrop
+        {
+            private LootPickup _pickup;
+            private bool _published;
+
+            private readonly RunDirector _owner;
+            internal PreparedGroundDrop(LootPickup pickup, RunDirector owner) { _pickup = pickup; _owner = owner; }
+
+            public void Publish()
+            {
+                if (_pickup == null || _published) throw new InvalidOperationException("prepared ground drop is no longer publishable");
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                if (_owner.FailNextGroundDropPublicationForProof)
+                {
+                    _owner.FailNextGroundDropPublicationForProof = false;
+                    throw new InvalidOperationException("injected ground publication failure");
+                }
+#endif
+                _published = true;
+                _pickup.gameObject.SetActive(true);
+            }
+
+            public void Cancel()
+            {
+                LootPickup pickup = _pickup;
+                _pickup = null;
+                if (pickup == null) return;
+                GameObject root = pickup.gameObject;
+                pickup.ClearPreparedInstance();
+                try { root.SetActive(false); }
+                finally { UnityEngine.Object.Destroy(root); }
+            }
+
+            public void Dispose()
+            {
+                if (!_published) Cancel();
+                _pickup = null;
+            }
         }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -1083,10 +1405,13 @@ namespace Emberdelve.Flow
             if (pickup != null) pickup.Configure(item, Mathf.Max(1, amount), this);
         }
 
-        private LootPickup BuildPickupBody(ItemData item, Vector3 worldPosition)
+        private LootPickup BuildPickupBody(ItemData item, Vector3 worldPosition, bool activate = true)
         {
             GameObject root = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            root.name = "Loot_" + item.displayName;
+            // Primitive creation itself has no gameplay scripts. Deactivate before adding LootPickup so its Awake
+            // runs only after the source has committed and the prepared item becomes visible.
+            if (!activate) root.SetActive(false);
+            root.name = $"Loot_{item.displayName}";
             root.transform.position = worldPosition;
             root.transform.localScale = new Vector3(
                 Mathf.Max(0.12f, item.worldSize.x),
@@ -1097,15 +1422,13 @@ namespace Emberdelve.Flow
             if (lootLayer >= 0) root.layer = lootLayer;
 
             BoxCollider box = root.GetComponent<BoxCollider>();
-            if (box != null)
-            {
-                box.size = new Vector3(1.9f, 1.9f, 1.9f);
-            }
+            if (box != null) box.size = new Vector3(1.9f, 1.9f, 1.9f);
 
             Renderer renderer = root.GetComponent<Renderer>();
             if (renderer != null && item.worldMaterial != null) renderer.material = item.worldMaterial;
 
-            return root.AddComponent<LootPickup>();
+            LootPickup pickup = root.AddComponent<LootPickup>();
+            return pickup;
         }
 
         public void RestartRun()
@@ -1117,7 +1440,9 @@ namespace Emberdelve.Flow
             }
 
             Time.timeScale = 1f;
-            SceneManager.LoadScene(config != null ? config.dungeonSceneName : SceneManager.GetActiveScene().name);
+            SceneManager.LoadScene(!string.IsNullOrEmpty(_runtimeDungeonSceneName)
+                ? _runtimeDungeonSceneName
+                : GameConfig.DefaultDungeonSceneName);
         }
 
         public void ReturnToLobby()

@@ -25,6 +25,8 @@ User rejected the chibi KayKit dungeon props (wanted a grim, less cartoony Dark 
 
 User rejected the chibi KayKit skeletons and chose a free CC0 animated human model turned into grim undead. Enemies now use the Quaternius Universal Animation Library 1 + 2 (Standard) mannequin, Humanoid. License CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/); author Quaternius (https://quaternius.com). The KayKit skeleton characters are no longer used; the KayKit blade / axe / small shield meshes remain as weapon placeholders until the weapon-visual slice.
 
+**5 Nov update:** enemy bodies now use the rigged Human Skeleton by Grab3D, CC0-1.0, https://grab3d.com/models/anatomy/human-skeleton/ ; source GLB `Art/ThirdParty/Grab3D/HumanSkeleton/human-skeleton-rigged.glb`, SHA-256 `40e26b694ecbb89ea1f00f1d0a8ecd4a2d9a1d48f70b10ae8aec15593bd30e73`. Original license and manifest are alongside it. The author states the mesh and textures were AI-generated and cleaned up in Blender, with automatic rigging. `Tools/OptimizeGrab3DSkeleton.py` uses Blender to make the skinned FBX and extract its texture: 270,030 → 22,952 triangles, preserving the rig and weights; Unity imports the result as Humanoid. The existing CC0 Quaternius animation library remains in use. Four variants use the same skeleton with different bone tones and equipment; the game currently maps Minion, Rogue and Warrior. Finger bones are absent and extreme retargeted poses need in-game review. Client-only enemy views remain separate proxies.
+
 | Asset | Source | License | SHA256 | Unity path | Use |
 |---|---|---|---|---|---|
 | Universal Animation Library Standard (mannequin + 46 clips) | https://opengameart.org/node/174563 (universal_animation_librarystandard.zip) | CC0-1.0 | 42f16a4ed61d1e9f5fc7c2526894c5487148ac6ba82b64281ceb7943570f3c37 | `Art/ThirdParty/Quaternius/UAL1/AnimationLibrary_Unity_Standard.fbx` | male mannequin (Minion, Warrior, Mage), clips (idle, walk, jog, sword attack, hit, death, spell) |
@@ -63,3 +65,7 @@ Two CC0 models for the arming sword and the two-handed sword (Poly Haven has no 
 | One Handed Sword texture (.jpg) | LordNeo | same page | CC0-1.0 | e9334d76e18c0fdd62e492693b69ff127cddfb0291038717f88700338e14cdbe | texture of the above |
 
 - Rejected: Great Sword by Mikeask (toy-like, no crossguard); stretching the estoc (not acceptable). Better option for later: Quaternius Modular Weapons (Claymore), CC0, if its download works.
+
+## Network client enemy visual reuse (7 Nov 2026)
+
+`Resources/Emberdelve/NetEnemyVisual.prefab` is a runtime-loadable copy of the existing `Prefabs/Visual/EnemyVisual_Minion.prefab`; it introduces no new third-party files. Mesh, materials, rig and Quaternius animation controller retain their original asset GUID references. Source assets and their CC0-1.0 licenses are listed under V3b above. The client proxy removes the prefab's server-side visual driver and blood particle child after instantiation.

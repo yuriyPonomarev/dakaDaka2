@@ -113,7 +113,14 @@ namespace Emberdelve.InputLayer
         public string SkillKeyLabel(int slot)
         {
             InputAction action = slot == 0 ? _skill1 : slot == 1 ? _skill2 : null;
-            if (action == null || action.bindings.Count == 0) return slot == 0 ? "F" : "G";
+            return KeyLabel(action, slot == 0 ? "F" : "G");
+        }
+
+        public string InteractKeyLabel => KeyLabel(_interact, "E");
+
+        private static string KeyLabel(InputAction action, string fallback)
+        {
+            if (action == null || action.bindings.Count == 0) return fallback;
 
             for (int i = 0; i < action.bindings.Count; i++)
             {

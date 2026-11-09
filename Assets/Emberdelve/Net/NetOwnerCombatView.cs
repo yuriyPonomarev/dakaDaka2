@@ -45,5 +45,19 @@ namespace Emberdelve.Net
             if (_owner == null || !_owner.IsSpawned) return;
             NetEnemyViews.TickSummary(Time.unscaledTime);
         }
+
+        private void LateUpdate()
+        {
+            if (_owner == null || !_owner.IsSpawned || !_owner.IsOwner || _owner.IsServer) return;
+            var rig = _owner.Rig;
+            if (rig != null && rig.Loadout != null)
+                rig.Loadout.SetGuardHeldVisual(_owner.GuardRaised.Value && !rig.IsDead);
+        }
+
+        private void OnDisable()
+        {
+            if (_owner != null && !_owner.IsServer && _owner.Rig != null && _owner.Rig.Loadout != null)
+                _owner.Rig.Loadout.SetGuardHeldVisual(false);
+        }
     }
 }

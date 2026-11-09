@@ -99,6 +99,8 @@ namespace Emberdelve.Net
             }
 
             if (!_useRealInput || _rig == null || _rig.Input == null) return;
+            var inventory = GetComponent<NetInventoryClient>();
+            if (inventory != null && inventory.IsOpen) return;
             if (_rig.Input.Skill1Pressed) TryRequest(0);
             if (_rig.Input.Skill2Pressed) TryRequest(1);
         }

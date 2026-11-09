@@ -66,7 +66,7 @@ namespace Emberdelve.Items
             ExpectedTargetGearUid = expectedTargetGearUid;
         }
 
-        internal bool IsStructurallyValid(out string reason)
+        public bool IsStructurallyValid(out string reason)
         {
             if (OwnerPlayerId == GameEvents.NoPlayer || Sequence == 0)
             {

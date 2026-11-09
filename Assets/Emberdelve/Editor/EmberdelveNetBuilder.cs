@@ -17,7 +17,7 @@ namespace Emberdelve.EditorTools
     /// (EmberdelveWindowsBuild.BuildNetProofPlayer), so the regular lobby-first builds are unchanged.
     ///
     /// U3A2 adds the network player prefab: <c>Assets/Emberdelve/Prefabs/Net/Emberdelve_NetPlayer.prefab</c>, derived from
-    /// the Level01 scene rig (every current component and wiring) plus NetworkObject, NetworkTransform (server authority,
+    /// the Modular Crypts scene rig (every current component and wiring) plus NetworkObject, NetworkTransform (server authority,
     /// interpolated, position + yaw only, no scale) and NetPlayerRig, and the small NetPrefabCatalog asset
     /// (<c>Assets/Emberdelve/Resources/Net/EmberdelveNetPrefabs.asset</c>) that NetBootstrap registers it from.
     /// </summary>
@@ -60,10 +60,9 @@ namespace Emberdelve.EditorTools
         }
 
         /// <summary>
-        /// (Re)generates the network player prefab from the saved Level01 scene's PlayerRig and points the catalog at it. The
+        /// (Re)generates the network player prefab from the saved Modular Crypts scene's PlayerRig and points the catalog at it. The
         /// scene is only read: it is opened additively when it is not open already and closed again, and the rig is saved as a
-        /// prefab straight from the scene object, so nothing in the scene changes. Requires the Level01 scene to exist (build
-        /// the slice first).
+        /// prefab straight from the scene object, so nothing in the scene changes. Requires Modular Crypts to exist.
         /// </summary>
         public static bool BuildPlayerPrefab(out string error)
         {
@@ -73,16 +72,16 @@ namespace Emberdelve.EditorTools
 
             try
             {
-                if (!File.Exists(EmberdelvePaths.DungeonScenePath))
+                if (!File.Exists(EmberdelvePaths.ModularDungeonScenePath))
                 {
-                    error = "Level01 scene is missing (" + EmberdelvePaths.DungeonScenePath + "); build the slice first";
+                    error = "required Modular Crypts scene is missing (" + EmberdelvePaths.ModularDungeonScenePath + ")";
                     return false;
                 }
 
-                scene = SceneManager.GetSceneByPath(EmberdelvePaths.DungeonScenePath);
+                scene = SceneManager.GetSceneByPath(EmberdelvePaths.ModularDungeonScenePath);
                 if (!scene.IsValid() || !scene.isLoaded)
                 {
-                    scene = EditorSceneManager.OpenScene(EmberdelvePaths.DungeonScenePath, OpenSceneMode.Additive);
+                    scene = EditorSceneManager.OpenScene(EmberdelvePaths.ModularDungeonScenePath, OpenSceneMode.Additive);
                     openedHere = true;
                 }
 
@@ -95,7 +94,7 @@ namespace Emberdelve.EditorTools
 
                 if (sceneRig == null)
                 {
-                    error = "no PlayerRig in " + EmberdelvePaths.DungeonScenePath;
+                    error = "no PlayerRig in " + EmberdelvePaths.ModularDungeonScenePath;
                     return false;
                 }
 

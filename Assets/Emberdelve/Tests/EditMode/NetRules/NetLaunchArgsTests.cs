@@ -1,4 +1,5 @@
 using Emberdelve.Net.Rules;
+using Emberdelve.Core;
 using NUnit.Framework;
 
 namespace Emberdelve.NetRules.Tests
@@ -43,6 +44,64 @@ namespace Emberdelve.NetRules.Tests
             Assert.That(a.ListenAddress, Is.EqualTo("127.0.0.1"));
             Assert.That(a.MaxPlayers, Is.EqualTo(9));
             Assert.That(a.Port, Is.EqualTo(7777));
+        }
+
+        [Test]
+        public void ServerHasNoLegacyOrOptionalMapSwitch()
+        {
+            Assert.That(GameConfig.DefaultDungeonSceneName, Is.EqualTo(NetTuning.ModularDungeonSceneName),
+                "The product default and network authority must target the same required map.");
+            NetLaunchArgs args = NetLaunchArgs.Parse(new[] { "-ember-net", "server" });
+            Assert.That(args.IsValid, Is.True);
+
+            NetLaunchArgs legacyOptOut = NetLaunchArgs.Parse(new[] { "-ember-net", "server", "-ember-net-modular-map", "false" });
+            Assert.That(legacyOptOut.IsValid, Is.False, "An obsolete opt-out flag must fail argument validation instead of selecting Level01.");
+        }
+
+        [Test]
+        public void CorpseDeathProofArguments_ParseOnlyAsExplicitServerFixture()
+        {
+            NetLaunchArgs args = NetLaunchArgs.Parse(new[]
+            {
+                "-ember-net", "server", "-ember-net-corpse-death-proof-server",
+                "-ember-net-corpse-death-proof-action-file", "death-action.txt"
+            });
+            Assert.That(args.IsValid, Is.True);
+            Assert.That(args.CorpseDeathProofServer, Is.True);
+            Assert.That(args.CorpseDeathProofActionFile, Is.EqualTo("death-action.txt"));
+            Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "server" }).CorpseDeathProofServer, Is.False);
+        }
+
+        [Test]
+        public void TimeoutProofArgument_IsAnExplicitDevelopmentServerFixture()
+        {
+            NetLaunchArgs args = NetLaunchArgs.Parse(new[] { "-ember-net", "server", "-ember-net-timeout-proof-server" });
+            Assert.That(args.IsValid, Is.True);
+            Assert.That(args.TimeoutProofServer, Is.True);
+            Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "server" }).TimeoutProofServer, Is.False);
+        }
+
+        [Test]
+        public void DoorProofArgumentsRequireKnownRolesAndPreserveActionFiles()
+        {
+            NetLaunchArgs server = NetLaunchArgs.Parse(new[]
+            {
+                "-ember-net", "server", "-ember-net-door-proof-server",
+                "-ember-net-door-proof-server-action-file", "server-stage.txt"
+            });
+            Assert.That(server.IsValid, Is.True);
+            Assert.That(server.DoorProofServer, Is.True);
+            Assert.That(server.DoorProofServerActionFile, Is.EqualTo("server-stage.txt"));
+
+            NetLaunchArgs client = NetLaunchArgs.Parse(new[]
+            {
+                "-ember-net", "client", "-ember-net-door-proof-role", "late",
+                "-ember-net-door-proof-action-file", "late-command.txt"
+            });
+            Assert.That(client.IsValid, Is.True);
+            Assert.That(client.DoorProofRole, Is.EqualTo("late"));
+            Assert.That(client.DoorProofActionFile, Is.EqualTo("late-command.txt"));
+            Assert.That(NetLaunchArgs.Parse(new[] { "-ember-net", "client", "-ember-net-door-proof-role", "unknown" }).IsValid, Is.False);
         }
 
         [TestCase("0")]

@@ -26,6 +26,7 @@ namespace Emberdelve.Interaction
         private MonoBehaviour _currentHost;
         private float _holdProgress;
         private float _holdDuration;
+        private bool _holdLifecycleActive;
         private string _lastPrompt = string.Empty;
         private HealthComponent _health;
         private bool _runEnded;
@@ -56,6 +57,7 @@ namespace Emberdelve.Interaction
 
             if (!ReferenceEquals(target, _current))
             {
+                CancelHoldLifecycle();
                 _current = target;
                 _currentHost = target as MonoBehaviour;
                 ResetHold();
@@ -79,6 +81,19 @@ namespace Emberdelve.Interaction
             {
                 if (input.InteractHeld)
                 {
+                    if (!_holdLifecycleActive && _current is IInteractableHoldLifecycle lifecycle)
+                    {
+                        if (!lifecycle.OnHoldStarted(rig))
+                        {
+                            ResetHold();
+                            return;
+                        }
+                        _holdLifecycleActive = true;
+                    }
+
+                    if (_holdLifecycleActive && _current is IInteractableHoldLifecycle progressing)
+                        progressing.OnHoldProgress(rig);
+
                     float duration;
                     if (_current is IActorHoldDuration timed)
                     {
@@ -96,6 +111,7 @@ namespace Emberdelve.Interaction
 
                     if (_holdProgress >= 1f)
                     {
+                        _holdLifecycleActive = false;
                         ResetHold();
 
                         // The target may have become invalid during the hold (rule changed, run ended):
@@ -110,11 +126,23 @@ namespace Emberdelve.Interaction
                         }
                     }
                 }
-                else if (_holdProgress > 0f)
+                else if (_holdLifecycleActive && NetRole.IsClientOnly)
                 {
-                    _holdProgress = Mathf.Max(0f, _holdProgress - Time.deltaTime * 1.6f);
-                    if (_holdProgress <= 0f) _holdDuration = 0f;
-                    GameEvents.RaiseInteractionHold(rig.PlayerId, _holdProgress);
+                    // A network hold is a continuous server lease. Releasing the key ends the attempt now;
+                    // a later press must obtain a fresh server lease and start its timer again.
+                    CancelActiveHold();
+                }
+                else
+                {
+                    // Offline holds keep their original partial-decay/regear behavior even when the target
+                    // participates in the lifecycle API for network clients.
+                    if (_holdLifecycleActive) CancelHoldLifecycle();
+                    if (_holdProgress > 0f)
+                    {
+                        _holdProgress = Mathf.Max(0f, _holdProgress - Time.deltaTime * 1.6f);
+                        if (_holdProgress <= 0f) _holdDuration = 0f;
+                        GameEvents.RaiseInteractionHold(rig.PlayerId, _holdProgress);
+                    }
                 }
             }
             else if (input.InteractPressed)
@@ -194,8 +222,23 @@ namespace Emberdelve.Interaction
             GameEvents.RaiseInteractionHold(rig.PlayerId, 0f);
         }
 
+        /// <summary>Server rejection/interrupt hook used by the owner-side network interaction bridge.</summary>
+        public void CancelActiveHold()
+        {
+            CancelHoldLifecycle();
+            ResetHold();
+        }
+
+        private void CancelHoldLifecycle()
+        {
+            if (!_holdLifecycleActive) return;
+            _holdLifecycleActive = false;
+            if (_current is IInteractableHoldLifecycle lifecycle) lifecycle.OnHoldCanceled(rig);
+        }
+
         private void ClearTarget()
         {
+            CancelHoldLifecycle();
             if (_current != null)
             {
                 _current = null;
@@ -225,11 +268,12 @@ namespace Emberdelve.Interaction
         private void OnDamaged(DamageInfo info)
         {
             if (_holdProgress <= 0f && _holdDuration <= 0f) return;
-            ResetHold();
+            CancelActiveHold();
         }
 
         private void OnDisable()
         {
+            CancelHoldLifecycle();
             if (_health != null) _health.Damaged -= OnDamaged;
             GameEvents.PlayerRunStateChanged -= OnRunState;
             _health = null;

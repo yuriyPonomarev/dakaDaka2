@@ -29,5 +29,5 @@ MonoBehaviour:
   useChannelSeconds: 0
   healOverTimeSeconds: 0
   iconColor: {r: 0.5, g: 0.35, b: 0.22, a: 1}
-  worldMaterial: {fileID: 2100000, guid: 5f8239465488dc5489a22b7c5643b37b, type: 2}
+  worldMaterial: {fileID: 2100000, guid: 72acac9e04034ef5bb5e876c91c947d0, type: 2}
   worldSize: {x: 0.3, y: 0.5, z: 0.2}

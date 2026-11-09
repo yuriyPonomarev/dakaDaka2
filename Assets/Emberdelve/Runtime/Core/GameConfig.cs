@@ -11,7 +11,8 @@ namespace Emberdelve.Core
     public class GameConfig : ScriptableObject
     {
         public const string DefaultLobbySceneName = "Lobby";
-        public const string DefaultDungeonSceneName = "Emberdelve_Level01";
+        public const string DefaultDungeonSceneName = "Emberdelve_ModularCrypts";
+        public const string LegacyDungeonSceneName = "Emberdelve_Level01";
 
         [Header("Scenes")]
         public string lobbySceneName = DefaultLobbySceneName;
@@ -22,6 +23,10 @@ namespace Emberdelve.Core
         public string objectiveText = "Recover at least one relic, then hold the escape at the Ember Gate.";
         public bool requireLootToExtract = true;
         public float extractionHoldDuration = 3f;
+        [Tooltip("U4B WIP: enable only with timeout finalization implemented. When enabled, the server denies extraction and new joins at expiry.")]
+        public bool enableRaidCountdown;
+        [Tooltip("U4B: server-owned maximum raid duration; defaults to the design's 10 minutes.")]
+        public int raidDurationSeconds = Emberdelve.Rules.RaidCountdownRules.DefaultDurationSeconds;
 
         [Header("Interaction")]
         public float interactionRange = 2.4f;
@@ -81,6 +86,7 @@ namespace Emberdelve.Core
             if (inventoryGridWidth <= 0) inventoryGridWidth = 10;
             if (inventoryGridHeight <= 0) inventoryGridHeight = 4;
             if (extractionHoldDuration <= 0f) extractionHoldDuration = 3f;
+            raidDurationSeconds = Emberdelve.Rules.RaidCountdownRules.NormalizeDurationSeconds(raidDurationSeconds);
             if (interactionAuthorityRange <= 0f) interactionAuthorityRange = 3f;
             maxPartySize = Mathf.Clamp(maxPartySize, 1, 3);
             if (hitMask.value == 0) hitMask = LayerMask.GetMask(PlayerLayerName, EnemyLayerName);

@@ -29,6 +29,17 @@ namespace Emberdelve.Net.Rules
         /// <summary>The sequence number of the most recent frame produced (0 before the first).</summary>
         public uint LastSeq => _nextSeq - 1u;
 
+        /// <summary>Discard unsent input when a modal screen takes control, without resetting sequence history.</summary>
+        public void ClearPendingInput()
+        {
+            _moveX = 0f; _moveY = 0f; _sprint = false;
+            _jumpEdge = false; _crouchEdge = false;
+            // Old frames are retransmitted with the same sequence number. Rewriting their payload
+            // would make duplicates depend on arrival order, so discard the history and let the
+            // next neutral frame advance the sequence normally.
+            _historyCount = 0;
+        }
+
         public void Sample(float moveX, float moveY, bool sprintHeld, bool jumpPressed, bool crouchPressed, float yaw, float pitch)
         {
             _moveX = moveX;

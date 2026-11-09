@@ -107,6 +107,21 @@ namespace Emberdelve.Tests.Visual
 
         // ---------------------------------------------------------------- variants
 
+        [Test]
+        public void SkeletonModel_IsHumanoidSkinnedAndWithinPolygonBudget()
+        {
+            var model = AssetDatabase.LoadAssetAtPath<GameObject>(EmberdelveSkeletonAssets.ModelPath);
+            Assert.IsNotNull(model);
+            var skin = model.GetComponentInChildren<SkinnedMeshRenderer>(true);
+            Assert.IsNotNull(skin);
+            Assert.Greater(skin.bones.Length, 10);
+            Assert.AreEqual(skin.sharedMesh.vertexCount, skin.sharedMesh.boneWeights.Length);
+            Assert.LessOrEqual(skin.sharedMesh.triangles.Length / 3, 25000);
+            var avatar = System.Array.Find(AssetDatabase.LoadAllAssetsAtPath(EmberdelveSkeletonAssets.ModelPath), x => x is Avatar) as Avatar;
+            Assert.IsNotNull(avatar);
+            Assert.IsTrue(avatar.isValid && avatar.isHuman);
+        }
+
         [TestCaseSource(nameof(VariantNames))]
         public void Variant_Clips_AllResolve_AndLocomotionClipsLoop(string name)
         {
@@ -205,6 +220,8 @@ namespace Emberdelve.Tests.Visual
                 Assert.Greater(renderers.Length, 0);
                 for (int r = 0; r < renderers.Length; r++)
                 {
+                    // Particle renderers use their own unlit effect material, not a body/weapon material.
+                    if (renderers[r] is ParticleSystemRenderer) continue;
                     Material[] materials = renderers[r].sharedMaterials;
                     Assert.Greater(materials.Length, 0, renderers[r].name);
                     for (int m = 0; m < materials.Length; m++)
@@ -219,7 +236,8 @@ namespace Emberdelve.Tests.Visual
                 }
 
                 SkinnedMeshRenderer body = instance.GetComponentInChildren<SkinnedMeshRenderer>(true);
-                Assert.AreEqual(EmberdelveUndeadMaterials.BodyMaterialPath(name), AssetDatabase.GetAssetPath(body.sharedMaterial), "body material of the variant");
+                Assert.AreEqual(EmberdelveSkeletonAssets.MaterialPath(name), AssetDatabase.GetAssetPath(body.sharedMaterial), "body material of the variant");
+                Assert.AreEqual(EmberdelveSkeletonAssets.ModelPath, AssetDatabase.GetAssetPath(body.sharedMesh), "uses the skinned skeleton mesh");
                 Assert.IsNotNull(body.sharedMaterial.GetTexture("_BaseMap"));
             }
             finally { Object.DestroyImmediate(instance); }

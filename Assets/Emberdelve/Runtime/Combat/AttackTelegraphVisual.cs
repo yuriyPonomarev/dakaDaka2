@@ -22,6 +22,9 @@ namespace Emberdelve.Combat
         private MeshRenderer _renderer;
         private Mesh _mesh;
         private Material _material;
+        private Mesh _directionMesh;
+        private MeshRenderer _directionRenderer;
+        private Material _directionMaterial;
         private Color _baseColor = new Color(1f, 0.32f, 0.18f, 1f);
 
         /// <summary>Lowest blade yaw of the drawn wedge (degrees from the committed direction, positive to the right).</summary>
@@ -75,6 +78,17 @@ namespace Emberdelve.Combat
             _material = CreateMaterial(_baseColor);
             if (_material != null) _renderer.sharedMaterial = _material;
 
+            // The wedge communicates the danger area; a narrow arrow inside it makes the committed
+            // attack direction legible at a glance, especially on wide horizontal swings.
+            GameObject direction = new GameObject("Attack_Direction");
+            direction.transform.SetParent(transform, false);
+            MeshFilter directionFilter = direction.AddComponent<MeshFilter>();
+            _directionRenderer = direction.AddComponent<MeshRenderer>();
+            _directionMesh = BuildDirectionArrow();
+            directionFilter.sharedMesh = _directionMesh;
+            _directionMaterial = CreateMaterial(new Color(1f, 0.88f, 0.58f, 1f));
+            if (_directionMaterial != null) _directionRenderer.sharedMaterial = _directionMaterial;
+
             _renderer.shadowCastingMode = ShadowCastingMode.Off;
             _renderer.receiveShadows = false;
             _renderer.lightProbeUsage = LightProbeUsage.Off;
@@ -127,6 +141,14 @@ namespace Emberdelve.Combat
                 SetColor(_material, "_Color", lit);
                 SetColor(_material, "_EmissionColor", lit);
             }
+
+            if (_directionMaterial != null)
+            {
+                Color arrow = Color.Lerp(new Color(0.7f, 0.45f, 0.2f, 1f), new Color(1f, 0.92f, 0.68f, 1f), t);
+                SetColor(_directionMaterial, "_BaseColor", arrow);
+                SetColor(_directionMaterial, "_Color", arrow);
+                SetColor(_directionMaterial, "_EmissionColor", arrow);
+            }
         }
 
         /// <summary>Unit wedge: apex at the origin, opening along +Z, radius 1, both facings so it reads from above and below.</summary>
@@ -164,6 +186,22 @@ namespace Emberdelve.Combat
             mesh.SetVertices(vertices);
             mesh.SetNormals(normals);
             mesh.SetTriangles(triangles, 0);
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static Mesh BuildDirectionArrow()
+        {
+            const float halfWidth = 0.018f;
+            var mesh = new Mesh { name = "Emberdelve_TelegraphDirection" };
+            mesh.vertices = new[]
+            {
+                new Vector3(-halfWidth, 0.004f, 0.08f), new Vector3(halfWidth, 0.004f, 0.08f),
+                new Vector3(-halfWidth, 0.004f, 0.78f), new Vector3(halfWidth, 0.004f, 0.78f),
+                new Vector3(-0.075f, 0.004f, 0.76f), new Vector3(0f, 0.004f, 0.98f), new Vector3(0.075f, 0.004f, 0.76f)
+            };
+            mesh.triangles = new[] { 0, 2, 1, 1, 2, 3, 4, 5, 6 };
+            mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             return mesh;
         }
@@ -209,6 +247,8 @@ namespace Emberdelve.Combat
         {
             if (_mesh != null) Destroy(_mesh);
             if (_material != null) Destroy(_material);
+            if (_directionMesh != null) Destroy(_directionMesh);
+            if (_directionMaterial != null) Destroy(_directionMaterial);
         }
     }
 }

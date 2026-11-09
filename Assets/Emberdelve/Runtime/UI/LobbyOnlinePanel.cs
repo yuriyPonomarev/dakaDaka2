@@ -1,16 +1,18 @@
 using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using Emberdelve.Core;
 using Emberdelve.Data;
+using Emberdelve.Level;
 using Emberdelve.Net.Rules;
 
 namespace Emberdelve.UI
 {
     /// <summary>
-    /// U3A5: the lobby's minimal Online panel, built from UiFactory like the rest of the lobby: an address field (default
-    /// 127.0.0.1:7777), Host and Join buttons, and one status line (connecting / connected / refused: reason). The class is the
+    /// U3A5: the lobby's Online panel: an address field, Host and Join buttons, and one status line. Hosting always starts
+    /// the same authored modular crypt scene; a joining client follows the server's scene. The class is the
     /// lobby's current selection. It only talks to <see cref="NetLobbyBridge"/>; the network layer does the rest. It exists only when
     /// the bridge has a handler (the Net assembly is in the build), and it never touches the offline "Descend" flow.
     ///
@@ -48,10 +50,10 @@ namespace Emberdelve.UI
             _classProvider = classProvider;
 
             RectTransform root = UiFactory.CreateGroup(canvas.transform, "OnlinePanel");
-            UiFactory.SetRect(root, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(340f, 190f), new Vector2(20f, -20f), new Vector2(0f, 1f));
+            UiFactory.SetRect(root, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(340f, 225f), new Vector2(20f, -20f), new Vector2(0f, 1f));
 
-            UiFactory.CreateImage(root, "Bg", new Color(0.05f, 0.04f, 0.03f, 0.9f), new Vector2(340f, 190f),
-                new Vector2(170f, -95f), new Vector2(0f, 1f), new Vector2(0f, 1f));
+            UiFactory.CreateImage(root, "Bg", new Color(0.05f, 0.04f, 0.03f, 0.9f), new Vector2(340f, 225f),
+                new Vector2(170f, -112.5f), new Vector2(0f, 1f), new Vector2(0f, 1f));
 
             Text header = UiFactory.CreateText(root, "Header", "ONLINE", 17, new Color(0.95f, 0.78f, 0.4f, 1f), TextAnchor.MiddleLeft);
             UiFactory.SetRect(header.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(320f, 24f), new Vector2(170f, -20f));
@@ -67,20 +69,20 @@ namespace Emberdelve.UI
 
             _join = UiFactory.CreateButton(root, "JoinButton", "JOIN", () => StartSession(false),
                 new Vector2(100f, 38f), new Color(0.2f, 0.36f, 0.22f, 1f), new Color(0.95f, 0.98f, 0.9f, 1f), 20);
-            PlaceTopLeft(_join, new Vector2(100f, 38f), new Vector2(60f, -104f));
+            PlaceTopLeft(_join, new Vector2(100f, 38f), new Vector2(60f, -112f));
 
             _host = UiFactory.CreateButton(root, "HostButton", "HOST", () => StartSession(true),
                 new Vector2(100f, 38f), new Color(0.3f, 0.24f, 0.12f, 1f), new Color(1f, 0.95f, 0.85f, 1f), 20);
-            PlaceTopLeft(_host, new Vector2(100f, 38f), new Vector2(170f, -104f));
+            PlaceTopLeft(_host, new Vector2(100f, 38f), new Vector2(170f, -112f));
 
             _cancel = UiFactory.CreateButton(root, "CancelButton", "CANCEL", () => { SetFocus(false); NetLobbyBridge.Cancel(); },
                 new Vector2(210f, 38f), new Color(0.45f, 0.18f, 0.14f, 1f), new Color(1f, 0.92f, 0.88f, 1f), 20);
-            PlaceTopLeft(_cancel, new Vector2(210f, 38f), new Vector2(115f, -104f));
+            PlaceTopLeft(_cancel, new Vector2(210f, 38f), new Vector2(115f, -112f));
 
             _statusText = UiFactory.CreateText(root, "Status", "", 15, new Color(0.8f, 0.76f, 0.68f, 1f), TextAnchor.UpperLeft);
             _statusText.horizontalOverflow = HorizontalWrapMode.Wrap;
             _statusText.verticalOverflow = VerticalWrapMode.Truncate;
-            UiFactory.SetRect(_statusText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(320f, 56f), new Vector2(170f, -158f));
+            UiFactory.SetRect(_statusText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(320f, 46f), new Vector2(170f, -174f));
 
             NetLobbyBridge.Changed += Refresh;
             Refresh();
@@ -114,6 +116,7 @@ namespace Emberdelve.UI
         private void Update()
         {
             if (!_built) return;
+            NetLobbyBridge.StartPendingRetry();
 
             if (_autoJoinAt > 0f && Time.unscaledTime >= _autoJoinAt)
             {
@@ -210,6 +213,15 @@ namespace Emberdelve.UI
 
             if (NetLobbyBridge.Phase == NetLobbyPhase.Connecting || NetLobbyBridge.Phase == NetLobbyPhase.Connected) return;
 
+            string modularScenePath = "Assets/Emberdelve/Scenes/" + NetTuning.ModularDungeonSceneName + ".unity";
+            if (SceneUtility.GetBuildIndexByScenePath(modularScenePath) < 0 ||
+                Resources.Load<DungeonModuleCatalog>("Emberdelve/DungeonModuleCatalog") == null)
+            {
+                NetLobbyBridge.Report(NetLobbyPhase.Failed, "required Modular Crypts scene/catalog is missing from this build");
+                GameEvents.RaiseToast("This build is missing the required modular crypt scene or catalog.");
+                return;
+            }
+
             CharacterClassData selected = _classProvider != null ? _classProvider() : null;
             if (selected == null)
             {
@@ -223,7 +235,8 @@ namespace Emberdelve.UI
                 return;
             }
 
-            Debug.Log(LogPrefix + "online " + (host ? "host" : "join") + " address=" + address + " port=" + port + " class=" + selected.classId);
+            Debug.Log(LogPrefix + "online " + (host ? "host" : "join") + " map=" + (host ? "modular-3x3" : "server-selected") +
+                " address=" + address + " port=" + port + " class=" + selected.classId);
             NetLobbyBridge.TryStart(host, address, port, selected.classId, out _);
         }
 
@@ -235,7 +248,9 @@ namespace Emberdelve.UI
 
             NetLobbyPhase phase = NetLobbyBridge.Phase;
             string status = NetLobbyBridge.Status;
-            _statusText.text = status.Length == 0 ? "Join a server (IPv4:port) or host one. Your class is the one selected below." : status;
+            _statusText.text = status.Length == 0
+                ? "Host loads the modular crypt map; Join follows the server. Select a class below."
+                : status;
 
             switch (phase)
             {

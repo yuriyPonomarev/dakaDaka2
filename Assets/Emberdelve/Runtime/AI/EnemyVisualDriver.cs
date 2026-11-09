@@ -23,18 +23,18 @@ namespace Emberdelve.AI
         public const string DeadParameter = "Dead";
 
         [SerializeField] private Animator animator;
+        [SerializeField] private ParticleSystem bloodEffect;
         [Tooltip("Seconds the measured speed takes to settle (smoothing of the finite difference of the root position).")]
         [SerializeField] private float speedSmoothing = 0.08f;
-        [Tooltip("Extra seconds assumed for the swing that follows the brain's windup when matching the Attack clip length.")]
-        [SerializeField] private float swingSeconds = 0.5f;
+
 
         private EnemyAgent _agent;
         private HealthComponent _health;
         private Vector3 _lastPosition;
         private float _speed;
-        private bool _wasWindingUp;
-        private int _lastSwingsBegun;
+        private bool _phaseDriven;
         private float _attackPlayedAt = -10f;
+        private float _attackPlaybackDuration;
         private float _attackClipLength = 1f;
         private bool _dead;
         private bool _hasParameters;
@@ -70,7 +70,6 @@ namespace Emberdelve.AI
             if (_agent == null) return;
 
             _lastPosition = _agent.transform.position;
-            _lastSwingsBegun = _agent.SwingsBegun;
             _health = _agent.Health != null ? _agent.Health : _agent.GetComponent<HealthComponent>();
             if (_health != null) _health.Damaged += HandleDamaged;
         }
@@ -108,6 +107,8 @@ namespace Emberdelve.AI
                 if (!_dead)
                 {
                     _dead = true;
+                    animator.ResetTrigger(_attackHash);
+                    animator.ResetTrigger(_hitHash);
                     animator.SetBool(_deadHash, true);
                 }
 
@@ -126,33 +127,62 @@ namespace Emberdelve.AI
             _speed = Mathf.Lerp(_speed, raw, blend);
             animator.SetFloat(_speedHash, _speed);
 
-            // Attack: the brain's windup is the telegraph, so the clip starts with it. A swing the authority accepted without a
-            // windup (a gate driving a frozen agent) still plays the clip.
-            bool windingUp = _agent.IsWindingUp;
-            int swings = _agent.SwingsBegun;
-            // A swing that follows a windup begins on the frame the windup ends (the previous frame was still winding up).
-            bool swingWithoutWindup = swings != _lastSwingsBegun && !_wasWindingUp && !windingUp;
-            _lastSwingsBegun = swings;
-
-            if ((windingUp && !_wasWindingUp) || swingWithoutWindup) PlayAttack(windingUp);
-            _wasWindingUp = windingUp;
+            EnemyAttackPhase phase = _agent.AttackPresentation;
+            if (phase.Phase != 0)
+            {
+                _phaseDriven = true;
+                animator.ResetTrigger(_attackHash);
+                animator.ResetTrigger(_hitHash);
+                animator.SetFloat(_attackSpeedHash, 0f);
+                animator.Play("Attack", 0, phase.NormalizedTime());
+                animator.Update(0f);
+            }
+            else if (_phaseDriven)
+            {
+                _phaseDriven = false;
+                animator.SetFloat(_attackSpeedHash, 1f);
+                animator.CrossFadeInFixedTime("Idle", 0.08f);
+            }
         }
+
+        public static float AttackPlaybackSeconds(bool fromWindup, float telegraphSeconds, float swingSeconds) =>
+            Mathf.Max(0.02f, (fromWindup ? Mathf.Max(0f, telegraphSeconds) : 0f) + Mathf.Max(0f, swingSeconds));
 
         private void PlayAttack(bool fromWindup)
         {
-            float windup = _agent != null && _agent.Data != null ? Mathf.Max(0.1f, _agent.Data.attackWindup) : 0.65f;
-            float planned = fromWindup ? windup + swingSeconds : swingSeconds + 0.3f;
-            animator.SetFloat(_attackSpeedHash, Mathf.Clamp(_attackClipLength / planned, 0.6f, 2.2f));
+            float planned = AttackPlaybackSeconds(fromWindup, _agent != null ? _agent.WindupSeconds : 0f,
+                _agent != null ? _agent.AttackSwingSeconds : _attackClipLength);
+            float playbackSpeed = _attackClipLength / planned;
+            animator.SetFloat(_attackSpeedHash, playbackSpeed);
+            _attackPlaybackDuration = _attackClipLength / playbackSpeed;
+            // A hit queued earlier in this frame must not interrupt the telegraph on the
+            // next Animator evaluation after Attack has consumed its own trigger.
+            animator.ResetTrigger(_hitHash);
             animator.SetTrigger(_attackHash);
             _attackPlayedAt = Time.time;
         }
 
         private void HandleDamaged(DamageInfo damage)
         {
+            if (bloodEffect != null && _agent != null && damage.Amount > 0f)
+            {
+                Vector3 point = damage.Point;
+                if (!float.IsFinite(point.x) || !float.IsFinite(point.y) || !float.IsFinite(point.z) ||
+                    (point - _agent.transform.position).sqrMagnitude > 16f)
+                    point = _agent.transform.position + Vector3.up;
+                bloodEffect.transform.position = point;
+                Vector3 direction = damage.Direction;
+                if (float.IsFinite(direction.x) && float.IsFinite(direction.y) && float.IsFinite(direction.z) && direction.sqrMagnitude > 0.001f)
+                    // DamageInfo.Direction points from the attacker into the target. Blood must travel back
+                    // out of the impact surface or the target mesh can occlude the whole spray.
+                    bloodEffect.transform.rotation = Quaternion.LookRotation(-direction.normalized);
+                if (!bloodEffect.isPlaying) bloodEffect.Play();
+                bloodEffect.Emit(18);
+            }
             if (animator == null || !_hasParameters || _agent == null || _agent.IsDead) return;
 
             // A flinch must never hide the telegraph: no Hit clip while the windup is running or a swing was just played.
-            if (_agent.IsWindingUp || Time.time - _attackPlayedAt < _attackClipLength) return;
+            if (_agent.AttackPresentation.Phase != 0 || Time.time - _attackPlayedAt < _attackPlaybackDuration) return;
             animator.SetTrigger(_hitHash);
         }
 

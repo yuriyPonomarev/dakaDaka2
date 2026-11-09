@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using Emberdelve.BladeDefense;
+using Emberdelve.AI;
 using Emberdelve.Combat;
 using Emberdelve.Core;
 using Emberdelve.Data;
@@ -80,11 +81,14 @@ namespace Emberdelve.Net
         private readonly Dictionary<ulong, Conn> _conns = new Dictionary<ulong, Conn>();
         private readonly Dictionary<int, Conn> _byCombatId = new Dictionary<int, Conn>();
         private readonly Dictionary<int, CombatVitalsData> _enemyVitals = new Dictionary<int, CombatVitalsData>();
+        private readonly Dictionary<int, EnemyPresentationWire> _enemyPresentation = new Dictionary<int, EnemyPresentationWire>();
+        private readonly HashSet<int> _enemyPresentationChanges = new HashSet<int>();
         private readonly List<ulong> _scratch = new List<ulong>();
         private readonly List<int> _scratchIds = new List<int>();
         private LocalCombatAuthority _subscribed;
         private float _nextPublish;
         private float _nextEnemyPose;
+        private ulong _nextHitEvent;
 
         public NetCombatServer(NetworkManager nm, NetIdentityTable table, NetSkillServer skills, Action<string> log, Action<string> logError)
         {
@@ -109,6 +113,8 @@ namespace Emberdelve.Net
             _conns.Clear();
             _byCombatId.Clear();
             _enemyVitals.Clear();
+            _enemyPresentation.Clear();
+            _enemyPresentationChanges.Clear();
             if (Current == this) Current = null;
         }
 
@@ -458,6 +464,8 @@ namespace Emberdelve.Net
             {
                 carrier.CombatHitRpc(new CombatHitWire
                 {
+                    EventId = ++_nextHitEvent,
+                    PointX = r.Point.x, PointY = r.Point.y, PointZ = r.Point.z,
                     Source = (byte)r.Source,
                     Attacker = attackerId,
                     Target = targetIsEnemy ? r.TargetId : targetId,
@@ -506,6 +514,8 @@ namespace Emberdelve.Net
             NetPlayerRig netRig = conn.NetRig;
             if (netRig == null || !netRig.IsSpawned) return;
 
+            // Guard can change without any health change (release, stagger recovery, equipment swap).
+            netRig.GuardRaised.Value = conn.Rig.IsGuarding;
             CombatVitalsData vitals = new CombatVitalsData(conn.Rig.CurrentHealth, conn.Rig.MaxHealth, conn.Rig.IsDead).Quantized();
             if (conn.Published && vitals.Equals(conn.LastVitals)) return;
             conn.Published = true;
@@ -543,6 +553,28 @@ namespace Emberdelve.Net
                 }
             }
 
+            _enemyPresentationChanges.Clear();
+            for (int i = 0; i < _scratchIds.Count; i++)
+            {
+                int id = _scratchIds[i];
+                if (!CombatRegistry.TryGet(id, out ICombatEntity entity)) continue;
+                EnemyPresentationWire current = BuildEnemyPresentation(entity);
+                bool known = _enemyPresentation.TryGetValue(id, out EnemyPresentationWire previous);
+                bool changed = !known || previous.VisualKind != current.VisualKind || previous.Flags != current.Flags ||
+                    previous.SwingsBegun != current.SwingsBegun || previous.HitSequence != current.HitSequence ||
+                    previous.WindupSeconds != current.WindupSeconds || previous.SwingSeconds != current.SwingSeconds ||
+                    previous.AttackPhase != current.AttackPhase || previous.PhaseDuration != current.PhaseDuration ||
+                    previous.RecoilStart != current.RecoilStart;
+                _enemyPresentation[id] = current;
+                if (changed)
+                {
+                    _enemyPresentationChanges.Add(id);
+                    _log("combat-enemy-presentation id=" + id + " kind=" + current.VisualKindName + " windingUp=" + current.IsWindingUp +
+                         " swings=" + current.SwingsBegun + " hits=" + current.HitSequence + " dead=" + current.IsDead +
+                         " phase=" + current.AttackPhase + " duration=" + current.PhaseDuration.ToString("F3", CultureInfo.InvariantCulture));
+                }
+            }
+
             foreach (KeyValuePair<ulong, Conn> pair in _conns)
             {
                 Conn conn = pair.Value;
@@ -558,11 +590,14 @@ namespace Emberdelve.Net
                         int id = _scratchIds[i];
                         if (!CombatRegistry.TryGet(id, out ICombatEntity entity)) continue;
                         CombatVitalsData v = _enemyVitals[id];
+                        EnemyPresentationWire presentation = _enemyPresentation[id];
                         if (full || anyChange)
                         {
                             // vitals are small and rare; resending all on any change keeps the client trivially consistent
                             carrier.EnemyVitalsRpc(new EnemyVitalsWire { Enemy = id, Health = v.Health, MaxHealth = v.MaxHealth, Dead = v.Dead });
                         }
+
+                        if (full || _enemyPresentationChanges.Contains(id)) carrier.EnemyPresentationRpc(presentation);
 
                         if (v.Dead) continue;
                         Vector3 pos = entity.CombatCenter;
@@ -575,6 +610,46 @@ namespace Emberdelve.Net
                 }
                 catch (Exception e) { _logError("enemy snapshot threw: " + e.Message); }
             }
+        }
+
+        private static EnemyPresentationWire BuildEnemyPresentation(ICombatEntity entity)
+        {
+            EnemyAgent agent = entity as EnemyAgent;
+            byte kind = ResolveVisualKind(agent);
+            EnemyAttackPhase phase = agent != null ? agent.AttackPresentation : default;
+            byte flags = 0;
+            if (agent != null && agent.IsWindingUp) flags |= EnemyPresentationWire.WindingUpFlag;
+            if (entity.IsDead) flags |= EnemyPresentationWire.DeadFlag;
+            return new EnemyPresentationWire
+            {
+                Version = EnemyPresentationWire.CurrentVersion,
+                Enemy = entity.CombatId,
+                VisualKind = kind,
+                Flags = flags,
+                SwingsBegun = agent != null ? (uint)Math.Max(0, agent.SwingsBegun) : 0u,
+                HitSequence = agent != null ? agent.DamageSequence : 0u,
+                WindupSeconds = agent != null ? agent.WindupSeconds : 0f,
+                SwingSeconds = agent != null ? agent.AttackSwingSeconds : 0f,
+                AttackPhase = phase.Phase,
+                PhaseElapsed = phase.Elapsed,
+                PhaseDuration = phase.Duration,
+                RecoilStart = phase.RecoilStart,
+                SampleTime = NetworkManager.Singleton != null ? NetworkManager.Singleton.ServerTime.Time : 0d
+            };
+        }
+
+        // The server reads the actual authored visual binding. Data.elite is only a fail-safe when no built visual/controller is present.
+        private static byte ResolveVisualKind(EnemyAgent agent)
+        {
+            if (agent == null) return 0;
+            EnemyVisualDriver driver = agent.GetComponentInChildren<EnemyVisualDriver>(true);
+            RuntimeAnimatorController controller = driver != null && driver.Animator != null ? driver.Animator.runtimeAnimatorController : null;
+            string name = controller != null ? controller.name : string.Empty;
+            if (name.EndsWith("_Rogue", StringComparison.Ordinal)) return 1;
+            if (name.EndsWith("_Warrior", StringComparison.Ordinal)) return 2;
+            if (name.EndsWith("_Mage", StringComparison.Ordinal)) return 3;
+            if (name.EndsWith("_Minion", StringComparison.Ordinal)) return 0;
+            return agent.Data != null && agent.Data.isElite ? (byte)2 : (byte)0;
         }
 
         // ---- helpers ---------------------------------------------------------------------------

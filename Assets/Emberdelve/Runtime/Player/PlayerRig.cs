@@ -476,18 +476,21 @@ namespace Emberdelve.Player
 
             RebuildAttributeStatsFromGear();
 
-            VitalLimits limits = ResolveVitalLimits();
-
-            if (health != null) health.SetMax(limits.MaxHealth);
-
-            if (mana != null)
+            // Client equipment snapshots dress the rig; vitals arrive on their own server-owned stream.
+            // A later loadout refresh must not clamp a previously received health sample to local kit stats.
+            if (!NetRole.IsClientOnly)
             {
-                mana.SetMax(limits.MaxMana);
-                mana.SetRegen(limits.ManaRegen, limits.ManaRegenDelay);
-            }
+                VitalLimits limits = ResolveVitalLimits();
+                if (health != null) health.SetMax(limits.MaxHealth);
+                if (mana != null)
+                {
+                    mana.SetMax(limits.MaxMana);
+                    mana.SetRegen(limits.ManaRegen, limits.ManaRegenDelay);
+                }
 
-            // R1c2: an equipment revision tells the authority the new ceiling/regen. Clamp-only there: never a refill.
-            SeedKit(KitSeedReason.Revision);
+                // An equipment revision updates the authoritative ceiling/regen without refilling.
+                SeedKit(KitSeedReason.Revision);
+            }
 
             if (movement != null) PushMovementStatSources();
 
@@ -626,6 +629,18 @@ namespace Emberdelve.Player
         {
             if (movement != null) movement.TeleportTo(position);
             else transform.position = position;
+        }
+
+        /// <summary>Initializes a client view without minting items, filling vitals or starting simulation.</summary>
+        public void InitializeReplicatedClass(CharacterClassData data, GameConfig config)
+        {
+            if (!NetRole.IsClientOnly || data == null || config == null) return;
+            WireRig();
+            _class = data;
+            _mainHand = null;
+            _offhand = null;
+            equipment.Initialize(this);
+            if (loadout != null) loadout.InitializeReplicatedClass(data, config, this);
         }
 
         public void ApplyClass(CharacterClassData data, GameConfig config)

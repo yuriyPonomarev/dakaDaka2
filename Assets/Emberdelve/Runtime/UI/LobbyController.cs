@@ -2,6 +2,8 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using Emberdelve.Core;
 using Emberdelve.Data;
+using Emberdelve.Net.Rules;
+using Emberdelve.Level;
 using Emberdelve.UI;
 
 namespace Emberdelve.Flow
@@ -73,6 +75,11 @@ namespace Emberdelve.Flow
 
         private void HandleStart()
         {
+            StartOfflineRun();
+        }
+
+        private void StartOfflineRun()
+        {
             if (_selected == null)
             {
                 GameEvents.RaiseToast("Choose a class first");
@@ -86,8 +93,26 @@ namespace Emberdelve.Flow
                 return;
             }
 
+            const string modularScenePath = "Assets/Emberdelve/Scenes/Emberdelve_ModularCrypts.unity";
+            if (SceneUtility.GetBuildIndexByScenePath(modularScenePath) < 0)
+            {
+                GameEvents.RaiseToast("The crypt map is unavailable in this build. Rebuild with Emberdelve_ModularCrypts included.");
+                Debug.LogError("[Emberdelve][Lobby] cannot start raid: required modular scene is missing from Build Settings");
+                return;
+            }
+
+            DungeonModuleCatalog catalog = Resources.Load<DungeonModuleCatalog>("Emberdelve/DungeonModuleCatalog");
+            if (catalog == null || catalog.Modules == null || catalog.Modules.Length == 0)
+            {
+                GameEvents.RaiseToast("The required modular crypt catalog is missing. No raid was started.");
+                Debug.LogError("[Emberdelve][Lobby] cannot start raid: required Resources/Emberdelve/DungeonModuleCatalog is missing or empty");
+                return;
+            }
+
             RunContext.SelectClass(_selected);
-            SceneManager.LoadScene(config != null ? config.dungeonSceneName : Emberdelve.Core.GameConfig.DefaultDungeonSceneName);
+            RunContext.ClearNextRaidSeed();
+            Debug.Log("[Emberdelve][Lobby] starting modular crypt raid offline");
+            SceneManager.LoadScene(NetTuning.ModularDungeonSceneName);
         }
     }
 }

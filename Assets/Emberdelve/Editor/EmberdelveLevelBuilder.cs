@@ -30,7 +30,73 @@ namespace Emberdelve.EditorTools
     {
         public static Scene Build()
         {
-            Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            return BuildScene(EmberdelvePaths.DungeonScenePath, NewSceneMode.Single, false);
+        }
+
+        [MenuItem("Emberdelve/Scenes/Build Modular Crypts Scene")]
+        public static void BuildModularScene()
+        {
+            string absoluteTarget = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath, "Emberdelve/Scenes/Emberdelve_ModularCrypts.unity"));
+            if (System.IO.File.Exists(absoluteTarget))
+            {
+                Debug.LogError("Modular crypt scene already exists; refusing to overwrite it. The current scene was left untouched.");
+                return;
+            }
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                Scene loaded = SceneManager.GetSceneAt(i);
+                if (loaded.path == EmberdelvePaths.ModularDungeonScenePath)
+                {
+                    Debug.LogError("Modular crypt scene is already open; close it before generating a separate copy. No scene was changed.");
+                    return;
+                }
+            }
+
+            DungeonModuleCatalog catalog = AssetDatabase.LoadAssetAtPath<DungeonModuleCatalog>(
+                EmberdelvePaths.Root + "/Resources/Emberdelve/DungeonModuleCatalog.asset");
+            if (catalog == null)
+            {
+                Debug.LogError("Build the Dungeon Module Catalog first (Emberdelve/Build Dungeon Module Catalog). The current scene was left untouched.");
+                return;
+            }
+
+            Scene previousActive = SceneManager.GetActiveScene();
+            Scene generated = default;
+            try
+            {
+                generated = BuildScene(EmberdelvePaths.ModularDungeonScenePath, NewSceneMode.Additive, true);
+                if (!generated.IsValid() || !System.IO.File.Exists(absoluteTarget))
+                {
+                    Debug.LogError("Modular crypt scene was not saved; it was not added to Build Settings.");
+                    return;
+                }
+                EnsureBuildSettingsScene(EmberdelvePaths.ModularDungeonScenePath);
+                Debug.Log("Built modular crypt scene without closing or replacing the previously open scene.");
+            }
+            finally
+            {
+                if (generated.IsValid() && generated.isLoaded) EditorSceneManager.CloseScene(generated, true);
+                if (previousActive.IsValid() && previousActive.isLoaded) SceneManager.SetActiveScene(previousActive);
+            }
+        }
+
+        private static void EnsureBuildSettingsScene(string path)
+        {
+            EditorBuildSettingsScene[] current = EditorBuildSettings.scenes;
+            for (int i = 0; i < current.Length; i++)
+                if (current[i].path == path) return;
+
+            List<EditorBuildSettingsScene> updated = new List<EditorBuildSettingsScene>(current)
+            {
+                new EditorBuildSettingsScene(path, true)
+            };
+            EditorBuildSettings.scenes = updated.ToArray();
+        }
+
+        private static Scene BuildScene(string scenePath, NewSceneMode sceneMode, bool modularScene)
+        {
+            Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, sceneMode);
+            SceneManager.SetActiveScene(scene);
 
             // Re-load every data asset and material now: creating a new scene unloads assets that
             // no loaded scene references yet, which can leave earlier references destroyed.
@@ -57,13 +123,14 @@ namespace Emberdelve.EditorTools
             BuildEnemies(layout, config, director);
             EmberdelvePropFactory.BuildProps(layout);
             BuildExtractionGate(layout, config, director);
-            BuildNetSceneRoles(master, rig);
+            BuildDungeonModuleAssembler(layout, modularScene);
+            BuildNetSceneRoles(master, rig, modularScene);
 
             // V1: material / mesh / volume-profile assets were created or modified through the AssetDatabase.
             AssetDatabase.SaveAssets();
 
             EditorSceneManager.MarkSceneDirty(scene);
-            EditorSceneManager.SaveScene(scene, EmberdelvePaths.DungeonScenePath);
+            EditorSceneManager.SaveScene(scene, scenePath);
 
             return scene;
         }
@@ -72,23 +139,26 @@ namespace Emberdelve.EditorTools
 
         private static void SetupEnvironment()
         {
-            // V1: an underground crypt. Near-black, slightly cool ambient; only the torches light it.
+            // An underground crypt opens into a broken-roof court over the Ember Gate.
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-            RenderSettings.ambientLight = new Color(0.02f, 0.023f, 0.032f, 1f);
+            RenderSettings.ambientLight = new Color(0.055f, 0.064f, 0.09f, 1f);
             RenderSettings.ambientIntensity = 1f;
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.Exponential;
-            RenderSettings.fogColor = new Color(0.035f, 0.026f, 0.02f, 1f);
-            RenderSettings.fogDensity = 0.055f;
+            RenderSettings.fogColor = new Color(0.075f, 0.067f, 0.075f, 1f);
+            RenderSettings.fogDensity = 0.028f;
+            Material skybox = EnsureCryptSkybox();
+            if (skybox != null) RenderSettings.skybox = skybox;
 
             // The object stays (gates and tooling may look it up), but it is practically off: no sky underground.
             GameObject lightGo = new GameObject("Moon_Slit_Directional");
-            lightGo.transform.rotation = Quaternion.Euler(58f, 32f, 0f);
+            lightGo.transform.rotation = Quaternion.Euler(38f, 32f, 0f);
             Light light = lightGo.AddComponent<Light>();
             light.type = LightType.Directional;
             light.color = new Color(0.42f, 0.52f, 0.78f, 1f);
-            light.intensity = 0.05f;
-            light.shadows = LightShadows.None;
+            light.intensity = 0.35f;
+            light.shadows = LightShadows.Soft;
+            light.shadowStrength = 0.65f;
             RenderSettings.sun = light;
 
             EmberdelveVisualSetup.AddGlobalVolume("Post_Volume_Dungeon");
@@ -111,13 +181,32 @@ namespace Emberdelve.EditorTools
 
             List<RectInt> patches = MergeRectangles(walkable);
 
+            bool[,] roof = (bool[,])walkable.Clone();
+            // The extraction chamber is an open-air ruin. A broad aperture over the gate lets the sky
+            // read from the floor while leaving the surrounding crypt roof intact.
+            RoomSpec court = layout.rooms.Find(r => r != null && r.roomName == "Ember Gate");
+            if (court != null)
+            {
+                int xMin = Mathf.Clamp(court.minCell.x + 1, 0, width - 1);
+                int xMax = Mathf.Clamp(court.maxCell.x - 1, 0, width - 1);
+                int yMin = Mathf.Clamp(court.minCell.y + 1, 0, height - 1);
+                int yMax = Mathf.Clamp(court.maxCell.y - 1, 0, height - 1);
+                for (int y = yMin; y <= yMax; y++)
+                    for (int x = xMin; x <= xMax; x++)
+                        roof[x, y] = false;
+            }
+            List<RectInt> roofPatches = MergeRectangles(roof);
+
             for (int i = 0; i < patches.Count; i++)
             {
                 RectInt patch = patches[i];
                 Vector3 min = origin + new Vector3(patch.xMin * cell, -layout.floorThickness, patch.yMin * cell);
                 Vector3 max = origin + new Vector3(patch.xMax * cell, 0f, patch.yMax * cell);
                 CreateBox(levelRoot.transform, "Floor_" + i, min, max, EmberdelveMaterials.StoneFloor, levelLayer, FloorTile, FloorTile);
-
+            }
+            for (int i = 0; i < roofPatches.Count; i++)
+            {
+                RectInt patch = roofPatches[i];
                 Vector3 ceilingMin = origin + new Vector3(patch.xMin * cell, layout.wallHeight, patch.yMin * cell);
                 Vector3 ceilingMax = origin + new Vector3(patch.xMax * cell, layout.wallHeight + layout.ceilingThickness, patch.yMax * cell);
                 CreateBox(levelRoot.transform, "Ceiling_" + i, ceilingMin, ceilingMax, EmberdelveMaterials.StoneCeiling, levelLayer, CeilingTile, CeilingTile);
@@ -175,7 +264,188 @@ namespace Emberdelve.EditorTools
             }
 
             BuildRoomMarkers(levelRoot.transform, layout);
+            BuildCryptArchitecture(levelRoot.transform, layout, levelLayer);
+            BuildArchPortals(levelRoot.transform, layout, levelLayer);
+            BuildCryptTombs(levelRoot.transform, layout, levelLayer);
             EmberdelveVisualSetup.PruneMeshes(MeshPrefix);
+        }
+
+        private const string CryptSkyboxPath = "Assets/Emberdelve/Art/Materials/Crypt_Skybox.mat";
+
+        private static Material EnsureCryptSkybox()
+        {
+            Material sky = AssetDatabase.LoadAssetAtPath<Material>(CryptSkyboxPath);
+            if (sky == null)
+            {
+                Shader shader = Shader.Find("Skybox/Procedural");
+                if (shader == null) return null;
+                sky = new Material(shader) { name = "Crypt_Skybox" };
+                AssetDatabase.CreateAsset(sky, CryptSkyboxPath);
+            }
+            sky.SetColor("_SkyTint", new Color(0.48f, 0.56f, 0.76f));
+            sky.SetColor("_GroundColor", new Color(0.11f, 0.105f, 0.13f));
+            sky.SetFloat("_Exposure", 0.55f);
+            sky.SetFloat("_AtmosphereThickness", 0.7f);
+            EditorUtility.SetDirty(sky);
+            return sky;
+        }
+
+        private static void BuildCryptArchitecture(Transform parent, DungeonLayoutData layout, int layer)
+        {
+            GameObject architecture = new GameObject("Crypt_Architecture");
+            architecture.transform.SetParent(parent, false);
+            float cell = layout.CellSize;
+            float wallHalf = Mathf.Max(0.05f, layout.wallThickness) * 0.5f;
+            for (int i = 0; i < layout.rooms.Count; i++)
+            {
+                RoomSpec room = layout.rooms[i];
+                float x0 = layout.origin.x + room.minCell.x * cell + 0.7f;
+                float x1 = layout.origin.x + (room.maxCell.x + 1) * cell - 0.7f;
+                float northFace = layout.origin.z + (room.maxCell.y + 1) * cell - wallHalf;
+                float southFace = layout.origin.z + room.minCell.y * cell + wallHalf;
+                float h = layout.wallHeight;
+                float width = room.roomName == "Central Hall" ? 0.8f : 0.62f;
+                // Flat wall pilasters keep the carved-stone rhythm without projecting columns into routes.
+                for (int p = 0; p < 4; p++)
+                {
+                    float x = p % 2 == 0 ? x0 : x1;
+                    float z = p < 2 ? northFace - 0.035f : southFace + 0.035f;
+                    Vector3 c = new Vector3(x, h * 0.5f, z);
+                    AddVisualBlock(architecture.transform, room.roomName + "_Pilaster_" + p, c, new Vector3(width, h, 0.06f), EmberdelveMaterials.StoneWall, layer);
+                    c.y = 0.18f;
+                    AddVisualBlock(architecture.transform, room.roomName + "_Plinth_" + p, c, new Vector3(width + 0.2f, 0.36f, 0.08f), EmberdelveMaterials.StoneCeiling, layer);
+                    c.y = h - 0.2f;
+                    AddVisualBlock(architecture.transform, room.roomName + "_Capital_" + p, c, new Vector3(width + 0.3f, 0.4f, 0.08f), EmberdelveMaterials.StoneCeiling, layer);
+                }
+                // Broken parapet stones around the roof aperture make it read as a ruined courtyard.
+                if (room.roomName == "Ember Gate")
+                {
+                    float y = layout.wallHeight + 0.2f;
+                    float span = Mathf.Max(cell, (room.maxCell.x - room.minCell.x - 1) * cell);
+                    float courtNorth = layout.origin.z + (room.minCell.y + 1) * cell;
+                    float courtSouth = layout.origin.z + room.maxCell.y * cell;
+                    Vector3 mid = new Vector3((x0 + x1) * 0.5f, y, courtNorth - 0.45f);
+                    AddVisualBlock(architecture.transform, "Court_Ruined_Parapet_N", mid, new Vector3(span, 0.4f, 0.9f), EmberdelveMaterials.StoneWall, layer);
+                    mid.z = courtSouth + 0.45f;
+                    AddVisualBlock(architecture.transform, "Court_Ruined_Parapet_S", mid, new Vector3(span, 0.4f, 0.9f), EmberdelveMaterials.StoneWall, layer);
+                }
+            }
+        }
+
+        private static void BuildArchPortals(Transform parent, DungeonLayoutData layout, int layer)
+        {
+            GameObject root = new GameObject("Crypt_Archways");
+            root.transform.SetParent(parent, false);
+            float cell = layout.CellSize;
+            for (int i = 0; i < layout.corridors.Count; i++)
+            {
+                CorridorSpec corridor = layout.corridors[i];
+                float span = Mathf.Max(1, corridor.width) * cell;
+                int lowOffset = -(Mathf.Max(1, corridor.width) / 2);
+                int highOffset = (Mathf.Max(1, corridor.width) - 1) / 2;
+                // Match DungeonLayoutData.BuildWalkableGrid: an even-width corridor straddles
+                // its authored axis, while an odd-width corridor is centered on the axis cell.
+                float crossOffset = (lowOffset + highOffset + 1f) * 0.5f;
+                if (corridor.fromCell.y == corridor.toCell.y)
+                {
+                    int low = Mathf.Min(corridor.fromCell.x, corridor.toCell.x);
+                    int high = Mathf.Max(corridor.fromCell.x, corridor.toCell.x);
+                    float z = layout.origin.z + (corridor.fromCell.y + crossOffset) * cell;
+                    AddArch(root.transform, corridor.corridorName + "_Entry", new Vector3(layout.origin.x + (low + 1) * cell, 0f, z), span, true, layout.wallHeight, layer);
+                    AddArch(root.transform, corridor.corridorName + "_Exit", new Vector3(layout.origin.x + high * cell, 0f, z), span, true, layout.wallHeight, layer);
+                }
+                else if (corridor.fromCell.x == corridor.toCell.x)
+                {
+                    int low = Mathf.Min(corridor.fromCell.y, corridor.toCell.y);
+                    int high = Mathf.Max(corridor.fromCell.y, corridor.toCell.y);
+                    float x = layout.origin.x + (corridor.fromCell.x + crossOffset) * cell;
+                    AddArch(root.transform, corridor.corridorName + "_Entry", new Vector3(x, 0f, layout.origin.z + (low + 1) * cell), span, false, layout.wallHeight, layer);
+                    AddArch(root.transform, corridor.corridorName + "_Exit", new Vector3(x, 0f, layout.origin.z + high * cell), span, false, layout.wallHeight, layer);
+                }
+            }
+        }
+
+        private static void AddArch(Transform parent, string name, Vector3 center, float span, bool alongX, float wallHeight, int layer)
+        {
+            float radius = Mathf.Min(span * 0.43f, wallHeight * 0.46f);
+            float spring = wallHeight - radius - 0.16f;
+            Vector3 across = alongX ? Vector3.forward : Vector3.right;
+            Vector3 normal = alongX ? Vector3.right : Vector3.forward;
+            float depth = 0.52f;
+            float jambOffset = radius + 0.12f;
+            AddVisualBlock(parent, name + "_Jamb_L", center + across * -jambOffset + Vector3.up * (spring * 0.5f), alongX ? new Vector3(depth, spring, 0.42f) : new Vector3(0.42f, spring, depth), EmberdelveMaterials.StoneCeiling, layer, true);
+            AddVisualBlock(parent, name + "_Jamb_R", center + across * jambOffset + Vector3.up * (spring * 0.5f), alongX ? new Vector3(depth, spring, 0.42f) : new Vector3(0.42f, spring, depth), EmberdelveMaterials.StoneCeiling, layer, true);
+            // Seven individually keyed voussoirs make a readable rounded silhouette from the existing stone material.
+            const int stones = 7;
+            for (int i = 0; i < stones; i++)
+            {
+                float angle = Mathf.PI * i / (stones - 1);
+                Vector3 p = center + across * (radius * Mathf.Cos(angle)) + Vector3.up * (spring + radius * Mathf.Sin(angle));
+                GameObject voussoir = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                voussoir.name = name + "_Voussoir_" + i;
+                voussoir.transform.SetParent(parent, false);
+                voussoir.transform.position = p;
+                voussoir.transform.localScale = alongX ? new Vector3(depth, 0.48f, radius * 0.55f) : new Vector3(radius * 0.55f, 0.48f, depth);
+                voussoir.transform.rotation = Quaternion.AngleAxis(alongX ? -Mathf.Cos(angle) * 42f : Mathf.Cos(angle) * 42f, normal) * Quaternion.identity;
+                Renderer renderer = voussoir.GetComponent<Renderer>();
+                if (renderer != null)
+                {
+                    renderer.sharedMaterial = i == stones / 2 ? EmberdelveMaterials.StoneWall : EmberdelveMaterials.StoneCeiling;
+                    renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                    renderer.receiveShadows = true;
+                }
+                if (layer >= 0) voussoir.layer = layer;
+            }
+            Vector3 key = center + Vector3.up * (spring + radius - 0.18f);
+            AddVisualBlock(parent, name + "_Keystone", key, alongX ? new Vector3(depth + 0.08f, 0.45f, 0.62f) : new Vector3(0.62f, 0.45f, depth + 0.08f), EmberdelveMaterials.StoneWall, layer, true);
+        }
+
+        private static void BuildCryptTombs(Transform parent, DungeonLayoutData layout, int layer)
+        {
+            RoomSpec crypt = layout.rooms.Find(r => r != null && r.roomName == "Crypt");
+            if (crypt == null) return;
+            GameObject root = new GameObject("Crypt_Wall_Tombs");
+            root.transform.SetParent(parent, false);
+            float cell = layout.CellSize;
+            float z = layout.origin.z + (crypt.maxCell.y + 1) * cell - Mathf.Max(0.05f, layout.wallThickness) * 0.5f;
+            float left = layout.origin.x + (crypt.minCell.x + 1.5f) * cell;
+            float right = layout.origin.x + (crypt.maxCell.x - 1.5f) * cell;
+            BuildTomb(root.transform, "Crypt_Tomb_Left", new Vector3(left, 0f, z), layer);
+            BuildTomb(root.transform, "Crypt_Tomb_Right", new Vector3(right, 0f, z), layer);
+        }
+
+        private static void BuildTomb(Transform parent, string name, Vector3 center, int layer)
+        {
+            // Shallow bas-relief sits in front of the existing wall face, with no hidden bulky volume.
+            float overlayZ = center.z - 0.025f;
+            AddVisualBlock(parent, name + "_Recess", new Vector3(center.x, 1.0f, overlayZ), new Vector3(2.5f, 1.8f, 0.04f), EmberdelveMaterials.IronDark, layer);
+            AddVisualBlock(parent, name + "_Frame_L", new Vector3(center.x - 1.28f, 1.0f, overlayZ), new Vector3(0.18f, 2.0f, 0.04f), EmberdelveMaterials.StoneCeiling, layer);
+            AddVisualBlock(parent, name + "_Frame_R", new Vector3(center.x + 1.28f, 1.0f, overlayZ), new Vector3(0.18f, 2.0f, 0.04f), EmberdelveMaterials.StoneCeiling, layer);
+            AddVisualBlock(parent, name + "_Lintel", new Vector3(center.x, 1.92f, overlayZ), new Vector3(2.7f, 0.24f, 0.05f), EmberdelveMaterials.StoneCeiling, layer);
+            AddVisualBlock(parent, name + "_Sarcophagus", new Vector3(center.x, 0.34f, overlayZ - 0.012f), new Vector3(2.2f, 0.62f, 0.04f), EmberdelveMaterials.StoneWall, layer);
+            AddVisualBlock(parent, name + "_Lid", new Vector3(center.x, 0.72f, overlayZ - 0.012f), new Vector3(2.28f, 0.22f, 0.04f), EmberdelveMaterials.StoneCeiling, layer);
+        }
+
+        private static void AddVisualBlock(Transform parent, string name, Vector3 position, Vector3 scale, Material material, int layer, bool physical = false)
+        {
+            GameObject block = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            block.name = name;
+            block.transform.SetParent(parent, false);
+            block.transform.position = position;
+            block.transform.localScale = scale;
+            if (!physical)
+            {
+                Collider collider = block.GetComponent<Collider>();
+                if (collider != null) UnityEngine.Object.DestroyImmediate(collider);
+            }
+            if (layer >= 0) block.layer = layer;
+            Renderer renderer = block.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                renderer.sharedMaterial = material;
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                renderer.receiveShadows = true;
+            }
         }
 
         private static void BuildRoomMarkers(Transform parent, DungeonLayoutData layout)
@@ -347,9 +617,10 @@ namespace Emberdelve.EditorTools
         /// One scene object that switches the offline-only parts off for networked roles (see NetSceneRoles). Offline it is a
         /// no-op, so the authored offline scene behaves exactly as before. The scene rig is switched off for every networked
         /// role (players come from the network prefab); clients also lose the game master (combat authority, run director,
-        /// HUD), enemies, loot and the extraction gate; a dedicated server disables its HUD, result screen and feedback.
+        /// HUD) and enemies. The modular scene keeps a visible, read-only floor-loot presentation and its extraction interactable;
+        /// the legacy scene keeps its original client deactivations. A dedicated server disables its HUD, result screen and feedback.
         /// </summary>
-        private static void BuildNetSceneRoles(GameObject master, PlayerRig rig)
+        private static void BuildNetSceneRoles(GameObject master, PlayerRig rig, bool modularScene)
         {
             GameObject enemies = GameObject.Find("Enemies");
             GameObject loot = GameObject.Find("Loot");
@@ -357,8 +628,8 @@ namespace Emberdelve.EditorTools
 
             List<GameObject> client = new List<GameObject> { master };
             if (enemies != null) client.Add(enemies);
-            if (loot != null) client.Add(loot);
-            if (gate != null) client.Add(gate);
+            if (loot != null && !modularScene) client.Add(loot);
+            if (gate != null && !modularScene) client.Add(gate);
 
             List<Behaviour> server = new List<Behaviour>();
             HudController hud = master.GetComponent<HudController>();
@@ -370,8 +641,19 @@ namespace Emberdelve.EditorTools
 
             GameObject roles = new GameObject("Net_SceneRoles");
             NetSceneRoles component = roles.AddComponent<NetSceneRoles>();
-            component.Configure(new[] { rig.gameObject }, client.ToArray(), server.ToArray());
+            component.Configure(new[] { rig.gameObject }, client.ToArray(), server.ToArray(), modularScene);
             EditorUtility.SetDirty(component);
+        }
+
+        /// <summary>Wires authored prefab modules into newly built dungeon scenes; existing/open scenes are never rewritten by this helper.</summary>
+        private static void BuildDungeonModuleAssembler(DungeonLayoutData layout, bool enableOfflineModules)
+        {
+            string catalogPath = EmberdelvePaths.Root + "/Resources/Emberdelve/DungeonModuleCatalog.asset";
+            DungeonModuleCatalog catalog = AssetDatabase.LoadAssetAtPath<DungeonModuleCatalog>(catalogPath);
+            GameObject host = new GameObject("Dungeon_Module_Assembler");
+            DungeonModuleSceneAssembler assembler = host.AddComponent<DungeonModuleSceneAssembler>();
+            assembler.Configure(layout, catalog, enableOfflineModules);
+            EditorUtility.SetDirty(assembler);
         }
 
         // ---------------------------------------------------------------- player

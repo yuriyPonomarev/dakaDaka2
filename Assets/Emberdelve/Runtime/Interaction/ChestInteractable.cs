@@ -7,6 +7,17 @@ using Emberdelve.Stats;
 
 namespace Emberdelve.Interaction
 {
+    /// <summary>Network bridge used by a client chest view; the server remains the only loot authority.</summary>
+    public interface IChestInteractionAuthority
+    {
+        bool ChestStateReady { get; }
+        bool RequestChestOpen(string chestId);
+        bool BeginChestHold(string chestId);
+        void ContinueChestHold(string chestId);
+        void CancelChestHold(string chestId);
+        bool CompleteChestHold(string chestId);
+    }
+
     /// <summary>
     /// How a chest behaves and how good its table is. The variant is data on the component and decides the
     /// open rules and the blockout shape; it is never compared against an id or a display name.
@@ -40,7 +51,7 @@ namespace Emberdelve.Interaction
     /// identity it already carries.
     /// </summary>
     [DisallowMultipleComponent]
-    public sealed class ChestInteractable : MonoBehaviour, IInteractable, IActorHoldDuration
+    public sealed class ChestInteractable : MonoBehaviour, IInteractable, IActorHoldDuration, IInteractableHoldLifecycle
     {
         [Header("Content")]
         [SerializeField] private ChestVariant variant = ChestVariant.Supply;
@@ -59,6 +70,13 @@ namespace Emberdelve.Interaction
         private ILootHost _host;
         private bool _rolled;
         private bool _opened;
+        private bool _opening;
+        private bool _presentationOnly;
+        private bool _replicatedStateKnown;
+        private bool _replicatedRolled;
+        private bool _replicatedOpened;
+        private int _replicatedRemainingUnits;
+        private uint _stateRevision;
         private int _takenCount;
         private int _takenValue;
         private int _leftBehind;
@@ -75,7 +93,9 @@ namespace Emberdelve.Interaction
         /// and layout index. Renaming a chest changes its loot, like changing its salt does.
         /// </summary>
         public string ChestId => name;
-        public bool Opened => _opened;
+        public bool Opened => Emberdelve.Core.NetRole.IsClientOnly && _replicatedStateKnown ? _replicatedOpened : _opened;
+        public bool IsRolled => Emberdelve.Core.NetRole.IsClientOnly && _replicatedStateKnown ? _replicatedRolled : _rolled;
+        public uint StateRevision => _stateRevision;
         public IReadOnlyList<LootDrop> Remaining => _remaining;
 
         /// <summary>Units this chest has actually handed over, counted per unit rather than per rolled drop.</summary>
@@ -89,11 +109,13 @@ namespace Emberdelve.Interaction
         {
             get
             {
+                if (Emberdelve.Core.NetRole.IsClientOnly && _replicatedStateKnown) return _replicatedRemainingUnits;
                 int units = 0;
                 for (int i = 0; i < _remaining.Count; i++) units += Mathf.Max(0, _remaining[i].Amount);
                 return units;
             }
         }
+        public bool IsPresentationOnly => _presentationOnly;
 
         /// <summary>Units the host could not take, across every open this chest has had.</summary>
         public int LeftBehindCount => _leftBehind;
@@ -111,6 +133,12 @@ namespace Emberdelve.Interaction
         {
             get
             {
+                if (Emberdelve.Core.NetRole.IsClientOnly)
+                {
+                    if (!_replicatedStateKnown) return "Syncing chest...";
+                    if (_replicatedRolled && _replicatedRemainingUnits == 0) return "Chest (empty)";
+                    if (!_replicatedRolled) return RequiresHold ? "Hold to open chest" : "Open chest";
+                }
                 if (_remaining.Count == 0 && _rolled) return _opened ? "Chest (empty)" : "Open chest";
                 return RequiresHold ? "Hold to open chest" : "Open chest";
             }
@@ -163,9 +191,49 @@ namespace Emberdelve.Interaction
             if (_host == null) _host = GetComponentInParent<ILootHost>();
         }
 
+        /// <summary>Marks a client replica as display/interaction geometry only; it can never roll or grant loot locally.</summary>
+        public void SetPresentationOnly()
+        {
+            _presentationOnly = true;
+            lootHost = null;
+            _host = null;
+            _remaining.Clear();
+            _rolled = false;
+            _opened = false;
+        }
+
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        /// <summary>Harness-only setup: seeds one real instance; opening and admission still use normal production logic.</summary>
+        public bool InstallContestFixtureInstance(ItemInstance instance)
+        {
+            if (variant != ChestVariant.Supply || instance == null || !instance.IsEquippable || lootTable == null) return false;
+            _remaining.Clear();
+            _remaining.Add(new LootDrop(instance.Definition, 1, instance));
+            _rolled = true;
+            _opened = false;
+            _opening = false;
+            AdvanceStateRevision();
+            return true;
+        }
+#endif
+
         public bool CanInteract(IInteractionActor actor, out string blockedReason)
         {
-            if (!InteractionRules.Validate(actor, this, InteractionRules.ReachOf(_host), _host, out blockedReason)) return false;
+            if (Emberdelve.Core.NetRole.IsClientOnly)
+            {
+                if (!TryGetNetworkAuthority(actor, out IChestInteractionAuthority authority) || !authority.ChestStateReady)
+                {
+                    blockedReason = "Chest state is syncing";
+                    return false;
+                }
+                if (!InteractionRules.Validate(actor, this, InteractionRules.ReachOf(_host), out blockedReason)) return false;
+                if (_replicatedStateKnown && _replicatedRolled && _replicatedRemainingUnits == 0)
+                {
+                    blockedReason = "This chest is empty";
+                    return false;
+                }
+            }
+            else if (!InteractionRules.Validate(actor, this, InteractionRules.ReachOf(_host), _host, out blockedReason)) return false;
 
             if (lootTable == null)
             {
@@ -173,7 +241,7 @@ namespace Emberdelve.Interaction
                 return false;
             }
 
-            if (_rolled && _remaining.Count == 0)
+            if (!Emberdelve.Core.NetRole.IsClientOnly && _rolled && _remaining.Count == 0)
             {
                 blockedReason = "This chest is empty";
                 return false;
@@ -196,7 +264,29 @@ namespace Emberdelve.Interaction
 
         public void OnInteractInstant(IInteractionActor actor) => Open(actor);
 
-        public void OnHoldComplete(IInteractionActor actor) => Open(actor);
+        public bool OnHoldStarted(IInteractionActor actor)
+        {
+            if (!Emberdelve.Core.NetRole.IsClientOnly) return true;
+            return TryGetNetworkAuthority(actor, out IChestInteractionAuthority authority) && authority.BeginChestHold(ChestId);
+        }
+
+        public void OnHoldCanceled(IInteractionActor actor)
+        {
+            if (Emberdelve.Core.NetRole.IsClientOnly && TryGetNetworkAuthority(actor, out IChestInteractionAuthority authority))
+                authority.CancelChestHold(ChestId);
+        }
+
+        public void OnHoldProgress(IInteractionActor actor)
+        {
+            if (Emberdelve.Core.NetRole.IsClientOnly && TryGetNetworkAuthority(actor, out IChestInteractionAuthority authority))
+                authority.ContinueChestHold(ChestId);
+        }
+
+        public void OnHoldComplete(IInteractionActor actor)
+        {
+            if (!Emberdelve.Core.NetRole.IsClientOnly) { Open(actor); return; }
+            if (TryGetNetworkAuthority(actor, out IChestInteractionAuthority authority)) authority.CompleteChestHold(ChestId);
+        }
 
         /// <summary>
         /// Rolls the table once and hands each drop to the run host, counting the units the host actually
@@ -215,7 +305,78 @@ namespace Emberdelve.Interaction
         /// </summary>
         public bool Open(IInteractionActor actor)
         {
+            if (Emberdelve.Core.NetRole.IsClientOnly)
+            {
+                if (!CanInteract(actor, out string reason))
+                {
+                    GameEvents.RaiseToast(actor != null ? actor.PlayerId : GameEvents.NoPlayer, reason);
+                    return false;
+                }
+                if (!TryGetNetworkAuthority(actor, out IChestInteractionAuthority authority) || !authority.RequestChestOpen(ChestId))
+                {
+                    GameEvents.RaiseToast(actor != null ? actor.PlayerId : GameEvents.NoPlayer, "Waiting for the server");
+                    return false;
+                }
+                return true;
+            }
+
+            // Inventory notifications may synchronously trigger another interaction before the first transfer returns.
+            if (_opening) return false;
+            _opening = true;
+            try
+            {
+                // Publish inventory notifications only after the source has recorded the transfer.
+                using (GameEventTransaction.Defer()) return OpenCore(actor);
+            }
+            finally { _opening = false; }
+        }
+
+        /// <summary>Applies only server-authored presentation state; clients never receive or grant the chest's loot objects.</summary>
+        public bool ApplyReplicatedState(string chestId, bool rolled, bool opened, int remainingUnits)
+        {
+            if (!string.Equals(ChestId, chestId, System.StringComparison.Ordinal) || remainingUnits < 0 || (opened && !rolled)) return false;
+            _replicatedStateKnown = true;
+            _replicatedRolled = rolled;
+            _replicatedOpened = opened;
+            _replicatedRemainingUnits = remainingUnits;
+            _opened = opened;
+            return true;
+        }
+
+        public static bool IsValidNetworkChestId(string chestId)
+        {
+            if (string.IsNullOrEmpty(chestId) || chestId.Length > 64) return false;
+            for (int i = 0; i < chestId.Length; i++)
+            {
+                char c = chestId[i];
+                if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'))
+                    return false;
+            }
+            return true;
+        }
+
+        private static bool TryGetNetworkAuthority(IInteractionActor actor, out IChestInteractionAuthority authority)
+        {
+            authority = null;
+            Component actorComponent = actor as Component;
+            if (actorComponent == null) return false;
+            MonoBehaviour[] behaviours = actorComponent.GetComponents<MonoBehaviour>();
+            for (int i = 0; i < behaviours.Length; i++)
+            {
+                authority = behaviours[i] as IChestInteractionAuthority;
+                if (authority != null) return true;
+            }
+            return false;
+        }
+
+        private bool OpenCore(IInteractionActor actor)
+        {
             int owner = actor != null ? actor.PlayerId : GameEvents.NoPlayer;
+            if (_presentationOnly)
+            {
+                GameEvents.RaiseToast(owner, "Chest contents are controlled by the server");
+                return false;
+            }
             if (!CanInteract(actor, out string reason))
             {
                 GameEvents.RaiseToast(owner, reason);
@@ -247,6 +408,7 @@ namespace Emberdelve.Interaction
                 }
 
                 _rolled = true;
+                AdvanceStateRevision();
             }
 
             if (_host == null)
@@ -314,6 +476,7 @@ namespace Emberdelve.Interaction
             }
 
             _opened = true;
+            AdvanceStateRevision();
 
             Debug.Log($"[Emberdelve][Chest] {name} variant={variant} salt={seed} opened: takenUnits={takenUnits} " +
                       $"value={takenValue} leftUnits={leftUnits} stacks={_remaining.Count} " +
@@ -326,7 +489,11 @@ namespace Emberdelve.Interaction
         }
 
         /// <summary>True once the chest has been rolled and has nothing left to give.</summary>
-        public bool IsEmpty => _rolled && _remaining.Count == 0;
+        public bool IsEmpty => Emberdelve.Core.NetRole.IsClientOnly && _replicatedStateKnown
+            ? _replicatedRolled && _replicatedRemainingUnits == 0
+            : _rolled && _remaining.Count == 0;
+
+        private void AdvanceStateRevision() { unchecked { _stateRevision++; } }
 
         /// <summary>Value the player must have recovered before a sealed chest will open.</summary>
         public const int SealedUnlockValue = 60;

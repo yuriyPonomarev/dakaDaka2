@@ -31,7 +31,7 @@ namespace Emberdelve.UI
             UiFactory.SetRect(title.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
                 new Vector2(1200f, 80f), new Vector2(0f, -80f));
 
-            Text subtitle = UiFactory.CreateText(root, "Subtitle", "Choose a class, descend into the Ashen Halls, and get out alive.",
+            Text subtitle = UiFactory.CreateText(root, "Subtitle", "Choose a class and descend into the Modular Crypts.",
                 20, new Color(0.8f, 0.75f, 0.66f, 1f), TextAnchor.MiddleCenter);
             UiFactory.SetRect(subtitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
                 new Vector2(1200f, 40f), new Vector2(0f, -150f));
@@ -105,9 +105,9 @@ namespace Emberdelve.UI
             }
 
             Button descend = UiFactory.CreateButton(root, "DescendButton", "DESCEND", () => onStart?.Invoke(),
-                new Vector2(320f, 62f), new Color(0.55f, 0.28f, 0.1f, 1f), new Color(1f, 0.95f, 0.85f, 1f), 26);
+                new Vector2(300f, 62f), new Color(0.55f, 0.28f, 0.1f, 1f), new Color(1f, 0.95f, 0.85f, 1f), 24);
             UiFactory.SetRect(((Image)descend.targetGraphic).rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-                new Vector2(320f, 62f), new Vector2(0f, 90f));
+                new Vector2(300f, 62f), new Vector2(0f, 90f));
 
             Text controls = UiFactory.CreateText(root, "Controls",
                 "WASD move  |  Mouse look  |  Shift sprint  |  Ctrl crouch  |  Space jump\n" +

@@ -62,7 +62,7 @@ namespace Emberdelve.Net
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(PlayerRig))]
-    public sealed class NetPlayerRig : NetworkBehaviour
+    public sealed class NetPlayerRig : NetworkBehaviour, IDoorInteractionAuthority, IFloorLootInteractionAuthority
     {
         public readonly NetworkVariable<int> ServerPlayerId = new NetworkVariable<int>(
             0, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
@@ -90,6 +90,10 @@ namespace Emberdelve.Net
         public readonly NetworkVariable<SkillStateWire> SkillState = new NetworkVariable<SkillStateWire>(
             default(SkillStateWire), NetworkVariableReadPermission.Owner, NetworkVariableWritePermission.Server);
 
+        /// <summary>The server's run-wide countdown sample for this owner; clients cannot author or change the raid clock.</summary>
+        public readonly NetworkVariable<RaidClockWire> RaidClock = new NetworkVariable<RaidClockWire>(
+            default(RaidClockWire), NetworkVariableReadPermission.Owner, NetworkVariableWritePermission.Server);
+
         /// <summary>
         /// U3B3: the server's health, maximum and death flag of this player, readable by everyone, written by the server only (see
         /// NetCombatServer.Tick, a few times a second while it changes). Clients show it through HealthComponent.ApplyReplicatedState and never
@@ -98,22 +102,47 @@ namespace Emberdelve.Net
         public readonly NetworkVariable<CombatVitalsWire> Vitals = new NetworkVariable<CombatVitalsWire>(
             default(CombatVitalsWire), NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
+        /// <summary>Effective server guard, including stagger/death; presentation only on the owner.</summary>
+        public readonly NetworkVariable<bool> GuardRaised = new NetworkVariable<bool>(
+            false, NetworkVariableReadPermission.Owner, NetworkVariableWritePermission.Server);
+
         private static readonly List<NetPlayerRig> SpawnedRigs = new List<NetPlayerRig>();
 
         /// <summary>Every spawned player object this process knows (the server: all admitted; a client: all views, owned or not).</summary>
         public static IReadOnlyList<NetPlayerRig> Spawned => SpawnedRigs;
 
         private PlayerRig _rig;
+        private uint _floorLootSequence;
 
         /// <summary>The replicated class id as text ("" before the first value).</summary>
         public string ClassIdText => ServerClassId.Value.ToString();
 
         public NetPlayerRole Role { get; private set; }
         public PlayerRig Rig => _rig != null ? _rig : (_rig = GetComponent<PlayerRig>());
+        public bool DoorStateReady => Role == NetPlayerRole.HostPlayer ||
+            (Role == NetPlayerRole.Owner && GetComponent<NetInventoryClient>() != null && GetComponent<NetInventoryClient>().DoorStateReady);
+
+        public bool RequestDoorToggle(string doorId)
+        {
+            if (!DungeonDoorInteractable.IsValidDoorId(doorId) || !IsSpawned) return false;
+            if (ShouldUseHostDoorBridge(Role))
+            {
+                NetInventoryServer server = NetInventoryServer.Current;
+                if (server == null) return false;
+                server.RequestDoorToggle(NetworkManager.ServerClientId, NetworkObject, new FixedString128Bytes(doorId));
+                return true;
+            }
+            if (Role == NetPlayerRole.Owner)
+                return GetComponent<NetInventoryClient>() != null && GetComponent<NetInventoryClient>().RequestDoorToggle(doorId);
+            return false;
+        }
+
+        public static bool ShouldUseHostDoorBridge(NetPlayerRole role) => role == NetPlayerRole.HostPlayer;
 
         public override void OnNetworkSpawn()
         {
             _rig = GetComponent<PlayerRig>();
+            if (IsOwner && NetRole.IsClientOnly && _rig.Inventory != null) _rig.Inventory.BeginNetworkSession();
 
             if (IsServer)
             {
@@ -138,10 +167,23 @@ namespace Emberdelve.Net
 
             if (!SpawnedRigs.Contains(this)) SpawnedRigs.Add(this);
 
+            // Listen-host owns a simulated server rig rather than a client inventory replica. Give that local
+            // player the same corpse locator, but keep its inventory authority and interactions server-local.
+            if (ShouldEnableHostCorpsePresenter(Role) && GetComponent<CorpseLootWorldPresenter>() == null)
+            {
+                Emberdelve.Flow.RunDirector director = FindFirstObjectByType<Emberdelve.Flow.RunDirector>(FindObjectsInactive.Include);
+                gameObject.AddComponent<CorpseLootWorldPresenter>().ConfigureHost(this, _rig,
+                    director != null ? director.InteractionReach : Emberdelve.Interaction.InteractionRules.DefaultReach);
+            }
+
             // U3A4a: the owning client of a remote-simulated player streams its input (host's own player moves with its own Update).
             // U3A4b: and predicts it locally (the prediction exists first so the sender can hand it every frame).
             if (Role == NetPlayerRole.Owner)
             {
+                if (GetComponent<NetInventoryClient>() == null)
+                    gameObject.AddComponent<NetInventoryClient>().Configure(this);
+                if (GetComponent<NetExtractionClient>() == null)
+                    gameObject.AddComponent<NetExtractionClient>().Configure(this);
                 // U3B2: the server's skill picture for this player, and the sender of its skill key presses.
                 if (GetComponent<NetOwnerSkillView>() == null)
                 {
@@ -149,6 +191,8 @@ namespace Emberdelve.Net
                     SkillState.OnValueChanged += OnSkillStateChanged;
                     if (SkillState.Value.MaxMana > 0f) OnSkillStateChanged(default(SkillStateWire), SkillState.Value);
                 }
+                RaidClock.OnValueChanged += OnRaidClockChanged;
+                OnRaidClockChanged(default, RaidClock.Value);
 
                 if (GetComponent<NetSkillSender>() == null)
                     gameObject.AddComponent<NetSkillSender>().Configure(this, NetBootstrap.LaunchArgs);
@@ -168,6 +212,22 @@ namespace Emberdelve.Net
                 if (GetComponent<NetInputSender>() == null)
                     gameObject.AddComponent<NetInputSender>().Configure(this, NetBootstrap.LaunchArgs);
             }
+            else if (Role == NetPlayerRole.HostPlayer && GetComponent<NetExtractionClient>() == null)
+            {
+                // Host extraction uses the same server lease directly in-process.
+                gameObject.AddComponent<NetExtractionClient>().Configure(this);
+            }
+
+            if (NetOwnerRunResultView.IsOwnerView(Role) && GetComponent<NetOwnerRunResultView>() == null)
+                gameObject.AddComponent<NetOwnerRunResultView>().Configure(this);
+            if (Role == NetPlayerRole.Owner)
+            {
+                PlayerView.BindNetworkLocalPlayer(_rig.PlayerId);
+                // The scene's Game_Master (including its offline result screen) is disabled on clients.
+                // Bind presentation to the local network actor; observers must not create result UI.
+                if (GetComponent<Emberdelve.UI.ResultScreenController>() == null)
+                    gameObject.AddComponent<Emberdelve.UI.ResultScreenController>();
+            }
 
             Debug.Log(Emberdelve.Net.Rules.NetTuning.LogPrefix + "[" + (IsServer ? (IsOwner ? "host" : "server") : "client") +
                       "] player object spawned role=" + Role + " netId=" + NetworkObjectId + " owner=" + OwnerClientId +
@@ -176,12 +236,15 @@ namespace Emberdelve.Net
 
         public override void OnNetworkDespawn()
         {
+            int despawningPlayerId = ServerPlayerId.Value;
+            if (Role == NetPlayerRole.Owner) PlayerView.ClearNetworkLocalPlayer(despawningPlayerId);
             ServerPlayerId.OnValueChanged -= OnServerPlayerIdChanged;
             ServerPartyId.OnValueChanged -= OnServerPartyIdChanged;
             SpawnedRigs.Remove(this);
 
             MoveParams.OnValueChanged -= OnMoveParamsChanged;
             SkillState.OnValueChanged -= OnSkillStateChanged;
+            RaidClock.OnValueChanged -= OnRaidClockChanged;
             Vitals.OnValueChanged -= OnVitalsChanged;
 
             NetCombatSender combatSender = GetComponent<NetCombatSender>();
@@ -193,7 +256,13 @@ namespace Emberdelve.Net
 
             NetOwnerCombatView combatView = GetComponent<NetOwnerCombatView>();
             if (combatView != null) Destroy(combatView);
-            if (Role == NetPlayerRole.Owner) NetEnemyViews.Clear();
+            if (Role == NetPlayerRole.Owner)
+            {
+                var inventoryClient = GetComponent<NetInventoryClient>();
+                if (inventoryClient != null) Destroy(inventoryClient);
+                NetEnemyViews.Clear();
+                NetCombatFx.ClearBloodHistory();
+            }
 
             NetSkillSender skillSender = GetComponent<NetSkillSender>();
             if (skillSender != null)
@@ -204,6 +273,9 @@ namespace Emberdelve.Net
 
             NetOwnerSkillView skillView = GetComponent<NetOwnerSkillView>();
             if (skillView != null) Destroy(skillView);
+
+            NetOwnerRunResultView resultView = GetComponent<NetOwnerRunResultView>();
+            if (resultView != null) Destroy(resultView);
 
             NetInputSender sender = GetComponent<NetInputSender>();
             if (sender != null) Destroy(sender);
@@ -308,6 +380,19 @@ namespace Emberdelve.Net
             if (view != null) view.OnState(current);
         }
 
+        private void OnRaidClockChanged(RaidClockWire previous, RaidClockWire current)
+        {
+            NetOwnerSkillView view = GetComponent<NetOwnerSkillView>();
+            if (view != null) view.OnRaidClock(current);
+        }
+
+        /// <summary>Writes the newest server clock sample to this player's owner-only replicated value.</summary>
+        public void SetRaidClockFromServer(RaidClockWire sample)
+        {
+            if (!IsServer || !IsSpawned || !sample.IsValid) return;
+            if (!RaidClock.Value.Equals(sample)) RaidClock.Value = sample;
+        }
+
         // ---- U3B3: weapon combat --------------------------------------------------------------------------------
 
         /// <summary>
@@ -324,6 +409,209 @@ namespace Emberdelve.Net
             NetCombatServer combat = NetCombatServer.Current;
             if (combat == null) return;
             combat.Receive(this, rpcParams.Receive.SenderClientId, kind, sequence);
+        }
+
+        /// <summary>Reliable inventory intent; the server checks sender ownership before executing it.</summary>
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void InventoryIntentRpc(InventoryIntentWire intent, RpcParams rpcParams = default)
+        {
+            var server = NetInventoryServer.Current;
+            if (server == null || !server.Receive(rpcParams.Receive.SenderClientId, NetworkObject, intent, out var result)) return;
+            InventoryResultRpc(new InventoryResultWire { Sequence = intent.Sequence, Accepted = result.Accepted,
+                Changed = result.Changed, Revision = result.Revision });
+        }
+
+        /// <summary>Owner-only acknowledgement; no local inventory state is applied by this message.</summary>
+        public event System.Action<InventoryResultWire> InventoryResultReceived;
+        [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
+        public void InventoryResultRpc(InventoryResultWire result) => InventoryResultReceived?.Invoke(result);
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void InventorySnapshotRequestRpc(RpcParams rpcParams = default)
+        {
+            NetInventoryServer.Current?.RequestSnapshot(rpcParams.Receive.SenderClientId, NetworkObject);
+        }
+
+        public bool RequestFloorLootPickup(ulong pickupId)
+        {
+            if (pickupId == 0 || !IsOwner || _floorLootSequence >= FloorLootIntentGate.MaxSequence) return false;
+            uint sequence = ++_floorLootSequence;
+            if (Role == NetPlayerRole.HostPlayer)
+                return NetInventoryServer.Current != null && NetInventoryServer.Current.RequestFloorLootPickup(
+                    NetworkManager.ServerClientId, NetworkObject, pickupId, sequence);
+            if (Role != NetPlayerRole.Owner) return false;
+            FloorLootPickupIntentRpc(pickupId, sequence);
+            return true;
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void FloorLootPickupIntentRpc(ulong pickupId, uint sequence, RpcParams rpcParams = default)
+        {
+            bool accepted = NetInventoryServer.Current != null && NetInventoryServer.Current.RequestFloorLootPickup(
+                rpcParams.Receive.SenderClientId, NetworkObject, pickupId, sequence);
+            FloorLootPickupResultRpc(sequence, accepted, new FixedString128Bytes(accepted ? string.Empty : "Pickup request refused"));
+        }
+
+        [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
+        public void FloorLootPickupResultRpc(uint sequence, bool accepted, FixedString128Bytes reason)
+        {
+            if (Role != NetPlayerRole.Owner) return;
+            if (!accepted) GameEvents.RaiseToast(_rig != null ? _rig.PlayerId : GameEvents.NoPlayer, reason.ToString());
+        }
+
+        [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
+        public void FloorLootStateRpc(FloorLootWire state)
+        {
+            if (Role != NetPlayerRole.Owner) return;
+            GetComponent<NetInventoryClient>()?.OnFloorLootState(state);
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void ChestOpenIntentRpc(FixedString128Bytes chestId, RpcParams rpcParams = default)
+        {
+            NetInventoryServer.Current?.RequestChestOpen(rpcParams.Receive.SenderClientId, NetworkObject, chestId);
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void DoorToggleIntentRpc(FixedString128Bytes doorId, RpcParams rpcParams = default)
+        {
+            NetInventoryServer.Current?.RequestDoorToggle(rpcParams.Receive.SenderClientId, NetworkObject, doorId);
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void DoorSnapshotRequestRpc(RpcParams rpcParams = default)
+        {
+            NetInventoryServer.Current?.RequestDoorSnapshot(rpcParams.Receive.SenderClientId, NetworkObject);
+        }
+
+        [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
+        public void DoorStateRpc(FixedString128Bytes doorId, bool isOpen, uint revision, bool snapshotStart, bool snapshotEnd)
+        {
+            if (!NetRole.IsClientOnly || !IsOwner) return;
+            GetComponent<NetInventoryClient>()?.OnDoorState(doorId.ToString(), isOpen, revision, snapshotStart, snapshotEnd);
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void ChestHoldBeginRpc(FixedString128Bytes chestId, uint sequence, RpcParams rpcParams = default)
+        {
+            NetInventoryServer.Current?.BeginChestHold(rpcParams.Receive.SenderClientId, NetworkObject, chestId, sequence);
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void ChestHoldHeartbeatRpc(FixedString128Bytes chestId, uint sequence, RpcParams rpcParams = default)
+        {
+            NetInventoryServer.Current?.HeartbeatChestHold(rpcParams.Receive.SenderClientId, NetworkObject, chestId, sequence);
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void ChestHoldCancelRpc(FixedString128Bytes chestId, uint sequence, RpcParams rpcParams = default)
+        {
+            NetInventoryServer.Current?.CancelChestHold(rpcParams.Receive.SenderClientId, NetworkObject, chestId, sequence);
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void ChestHoldCompleteRpc(FixedString128Bytes chestId, uint sequence, RpcParams rpcParams = default)
+        {
+            NetInventoryServer.Current?.CompleteChestHold(rpcParams.Receive.SenderClientId, NetworkObject, chestId, sequence);
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void CorpseStateRequestRpc(ulong corpseId, uint sequence, RpcParams rpcParams = default)
+        {
+            NetInventoryServer.Current?.RequestCorpseState(rpcParams.Receive.SenderClientId, NetworkObject, corpseId, sequence);
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void CorpseTransferIntentRpc(ulong corpseId, ulong entryId, int amount,
+            ulong corpseRevision, ulong bagRevision, uint sequence, RpcParams rpcParams = default)
+        {
+            NetInventoryServer.Current?.RequestCorpseTransfer(rpcParams.Receive.SenderClientId, NetworkObject,
+                corpseId, entryId, amount, corpseRevision, bagRevision, sequence);
+        }
+
+        [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
+        public void CorpseContainerStateRpc(CorpseContainerWire state)
+        {
+            if (!NetRole.IsClientOnly || !IsOwner) return;
+            GetComponent<NetInventoryClient>()?.OnCorpseState(state);
+        }
+
+        [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
+        public void CorpsePresenceRpc(ulong corpseId, Vector3 position, ulong revision, bool removed)
+        {
+            if (!NetRole.IsClientOnly || !IsOwner) return;
+            GetComponent<NetInventoryClient>()?.OnCorpsePresence(corpseId, position, revision, removed);
+        }
+
+        [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
+        public void CorpseTransferResultRpc(ulong corpseId, uint sequence, bool accepted,
+            ulong corpseRevision, ulong bagRevision, FixedString128Bytes reason)
+        {
+            if (!NetRole.IsClientOnly || !IsOwner) return;
+            GetComponent<NetInventoryClient>()?.OnCorpseResult(corpseId, sequence, accepted,
+                corpseRevision, bagRevision, reason.ToString());
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void ExtractionHoldBeginRpc(uint sequence, RpcParams rpcParams = default)
+        {
+            NetExtractionServer.Current?.BeginHold(rpcParams.Receive.SenderClientId, NetworkObject, sequence);
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void ExtractionHoldHeartbeatRpc(uint sequence, RpcParams rpcParams = default)
+        {
+            NetExtractionServer.Current?.Heartbeat(rpcParams.Receive.SenderClientId, NetworkObject, sequence);
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void ExtractionHoldCancelRpc(uint sequence, RpcParams rpcParams = default)
+        {
+            NetExtractionServer.Current?.CancelHold(rpcParams.Receive.SenderClientId, NetworkObject, sequence);
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void ExtractionHoldCompleteRpc(uint sequence, RpcParams rpcParams = default)
+        {
+            NetExtractionServer.Current?.CompleteHold(rpcParams.Receive.SenderClientId, NetworkObject, sequence);
+        }
+
+        [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
+        public void ExtractionHoldResultRpc(uint sequence, bool accepted, FixedString128Bytes reason)
+        {
+            if (!NetRole.IsClientOnly || !IsOwner) return;
+            GetComponent<NetExtractionClient>()?.OnResult(sequence, accepted, reason.ToString());
+        }
+
+        /// <summary>U4B: the exact server-authored terminal result, delivered to this player's owner only.</summary>
+        [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
+        public void RunResultRpc(RunResultWire result)
+        {
+            if (!NetRole.IsClientOnly || !IsOwner) return;
+            GetComponent<NetOwnerRunResultView>()?.ReceiveServerResult(result);
+        }
+
+        /// <summary>Server-authored chest presentation state, delivered only to this player's owner client.</summary>
+        [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
+        public void ChestStateRpc(FixedString128Bytes chestId, bool rolled, bool opened, int remainingUnits, bool snapshotStart, bool snapshotEnd)
+        {
+            if (!NetRole.IsClientOnly || !IsOwner) return;
+            GetComponent<NetInventoryClient>()?.OnChestState(chestId.ToString(), rolled, opened, remainingUnits, snapshotStart, snapshotEnd);
+        }
+
+        [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
+        public void ChestResultRpc(bool accepted, FixedString128Bytes chestId, uint sequence, FixedString128Bytes reason)
+        {
+            if (!NetRole.IsClientOnly || !IsOwner) return;
+            GetComponent<NetInventoryClient>()?.OnChestResult(accepted, chestId.ToString(), sequence, reason.ToString());
+        }
+
+        [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
+        public void InventoryStateRpc(NetworkLoadoutWire state)
+        {
+            if (!NetRole.IsClientOnly || !IsOwner) return;
+            var client = GetComponent<NetInventoryClient>();
+            if (client != null) client.OnSnapshot(state);
         }
 
         /// <summary>U3B3, server to owner, reliable: the server's answer to one combat request that passed the wire gate (see CombatResultWire).</summary>
@@ -380,6 +668,14 @@ namespace Emberdelve.Net
         {
             if (!NetRole.IsClientOnly) return;
             NetEnemyViews.OnVitals(in vitals);
+        }
+
+        /// <summary>Server-authored, versioned visual identity and action edges for one enemy.</summary>
+        [Rpc(SendTo.Owner)]
+        public void EnemyPresentationRpc(EnemyPresentationWire presentation)
+        {
+            if (!NetRole.IsClientOnly) return;
+            NetEnemyViews.OnPresentation(in presentation);
         }
 
         private void OnVitalsChanged(CombatVitalsWire previous, CombatVitalsWire current)
@@ -475,6 +771,9 @@ namespace Emberdelve.Net
         private void ApplyClientView()
         {
             ApplyReplicatedIdentity();
+            var director = FindFirstObjectByType<Emberdelve.Flow.RunDirector>(FindObjectsInactive.Include);
+            if (director != null && director.TryResolveClass(ClassIdText, out var data))
+                _rig.InitializeReplicatedClass(data, director.Config);
 
             if (_rig.Movement != null) _rig.Movement.ExternalDriven = true;
             _rig.SetInputEnabled(false);
@@ -485,7 +784,8 @@ namespace Emberdelve.Net
             DisableBehaviour<PlayerLook>();
             DisableBehaviour<MeleeCombat>();
             DisableBehaviour<RangedCombat>();
-            DisableBehaviour<Interactor>();
+            if (ShouldEnableOwnerInteractor(Role)) EnableBehaviour<Interactor>();
+            else DisableBehaviour<Interactor>();
             DisableBehaviour<HotbarController>();
 
             if (Role == NetPlayerRole.Observer) StripPresentation();
@@ -513,10 +813,20 @@ namespace Emberdelve.Net
             if (component != null) component.enabled = false;
         }
 
+        private void EnableBehaviour<T>() where T : Behaviour
+        {
+            T component = GetComponent<T>();
+            if (component != null) component.enabled = true;
+        }
+
+        public static bool ShouldEnableOwnerInteractor(NetPlayerRole role) => role == NetPlayerRole.Owner;
+        public static bool ShouldEnableHostCorpsePresenter(NetPlayerRole role) => role == NetPlayerRole.HostPlayer;
+
         private void ApplyReplicatedIdentity()
         {
             _rig.SetNetworkPlayerId(ServerPlayerId.Value);
             _rig.AssignParty(ServerPartyId.Value, IsOwner);
+            if (Role == NetPlayerRole.Owner) PlayerView.BindNetworkLocalPlayer(_rig.PlayerId);
         }
 
         private void OnServerPlayerIdChanged(int previous, int current) => ApplyReplicatedIdentity();

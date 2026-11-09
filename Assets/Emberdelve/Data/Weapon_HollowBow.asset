@@ -71,6 +71,6 @@ MonoBehaviour:
   capabilities: 0
   blockReductionOverride: -1
   blockArcOverride: -1
-  shaftMaterial: {fileID: 2100000, guid: 5f8239465488dc5489a22b7c5643b37b, type: 2}
+  shaftMaterial: {fileID: 2100000, guid: 72acac9e04034ef5bb5e876c91c947d0, type: 2}
   edgeMaterial: {fileID: 2100000, guid: f4115d57bd8d322489a672ab46a79b43, type: 2}
   gripMaterial: {fileID: 2100000, guid: dbbcb94c1c991e3418d36e4675a2dfda, type: 2}

@@ -1,0 +1,14 @@
+# Modular spawn clearance — 8 November 2026
+
+> Historical implementation note. Current acceptance and remaining work: [CURRENT_WORK](../CURRENT_WORK.md) and [raid acceptance](RAID_UI_ACCEPTANCE_20261108.md). Status statements below describe the original slice.
+
+
+On map seed `2301646920`, hash `1ACD8678`, NetMovement registered W at `(61.000, 0.150, 13.000)`. On the first physics tick, without queued input, its controller moved to `(61.370, 1.030, 13.000)` and recorded 11.100 m/s. The logical nav grid treated the module interior as walkable but did not test authored obstacles. A separate collision during A's walk produced a 26.100 m/s peak.
+
+`DungeonModuleSceneAssembler` now selects the nearest deterministic cell within each module whose standing capsule is clear of that module's solid colliders and has upward-facing support at the layout floor. It refuses installation when no such cell exists. Existing layout validation also requires at least two cells of separation between player spawn cells. The search uses only the instantiated module geometry so unrelated local actors do not change the result between server and clients. EditMode covers obstructed anchors, repeatability, fully blocked candidates and unsupported voids.
+
+Before the support check was added, the same seed produced NetMovement 171/8 (previously 171/15), with A's peak 7.81 <= 8.98 and W's 4.04 <= 5.62; NetDoor passed 37/0 and NetInventory passed 146/0 (`Logs/runs/20261108-051524`). After the support check, EditMode passed 879/0 and NetDoor passed 37/0 at the same seed (`Logs/runs/20261108-052059`); NetInventory passed 146/0 at seed `1542870691` (`Logs/runs/20261108-052347`).
+
+NetMovement is not yet accepted. Its gate still computes spawn points, walk paths and wall distances from the obsolete Ashen Halls layout, while the running server uses a modular layout. In the run above A walked from `(37,11)` to `(47.52,11)` and stopped at the module boundary, so the expected three-second path was not clear. A replacement must independently derive the actual server-plan geometry and choose a measured free lane and wall approach; the original speed and movement tolerances must remain. NetFinal similarly requires modular-plan-aware expectations. The full suite remains failed.
+
+The 3 s walk fixture requires a clear lane of approximately 19.4 m with the existing margin. Modules are 24 m across, and a centered spawn is approximately 11 m from a closed doorway. Reconstructing the generated scene alone therefore does not guarantee a suitable lane from an authentic spawn. A safe future fixture must first independently check the actual server-plan spawn, then have the server stage actors at measured clear positions, verify the matching owner/observer positions on clients, and only then run the unchanged walk, wall and speed assertions. The current gate is deliberately not modified to accept the old route or discard the speed assertions.

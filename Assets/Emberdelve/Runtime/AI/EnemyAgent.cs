@@ -5,6 +5,7 @@ using Emberdelve.Core;
 using Emberdelve.Combat;
 using Emberdelve.Data;
 using Emberdelve.Items;
+using Emberdelve.Interaction;
 
 namespace Emberdelve.AI
 {
@@ -41,6 +42,8 @@ namespace Emberdelve.AI
         private NavGridPathfinder _nav;
         private EnemyBrain _brain;
         private readonly List<Vector3> _path = new List<Vector3>(64);
+        private readonly RaycastHit[] _doorMoveHits = new RaycastHit[16];
+        private readonly Collider[] _doorOverlapHits = new Collider[8];
         private int _pathIndex;
         private float _repathTimer;
         private float _timeSinceDamage;
@@ -51,6 +54,7 @@ namespace Emberdelve.AI
         private AttackTelegraphVisual _telegraph;
         private StatusComponent _status;
         private float _whiffTimer;
+        private float _enemyDoorCooldown;
         private string _dropKey;
 
         private const float AggressorMemorySeconds = 4f;
@@ -113,8 +117,52 @@ namespace Emberdelve.AI
         /// <summary>True when the last committed swing warned a wedge the player was not inside, so nothing was submitted.</summary>
         public bool LastAttackWhiffed { get; private set; }
         public bool IsWindingUp => _brain != null && _brain.IsWindingUp;
+        /// <summary>Authoritative, monotonically increasing count of accepted damage events, for remote flinch presentation.</summary>
+        public uint DamageSequence { get; private set; }
+        public float WindupSeconds => data != null ? Mathf.Clamp(data.attackWindup, 0f, 10f) : 0f;
+
+        /// <summary>Accepted authority timing when swinging; authored first-step timing during the telegraph.</summary>
+        public float AttackSwingSeconds
+        {
+            get
+            {
+                if (_swingId != 0 && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) &&
+                    authority.TryGetMeleeSwingStatus(_swingId, out MeleeSwingStatus status))
+                    return status.Timing.Total;
+                SwingPatternData pattern = AttackPattern;
+                return pattern != null && data != null && data.attackWeapon != null
+                    ? data.attackWeapon.ComboTiming(0, pattern).Total : 0f;
+            }
+        }
 
         public StatusComponent Status => _status;
+
+        public EnemyAttackPhase AttackPresentation
+        {
+            get
+            {
+                if (IsDead) return default;
+                float telegraph = Mathf.Max(0.05f, WindupSeconds);
+                if (_swingId != 0 && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) &&
+                    authority.TryGetMeleeSwingStatus(_swingId, out MeleeSwingStatus status) && !status.Finished)
+                {
+                    SwingTiming timing = status.Timing;
+                    if (status.Phase == SwingPhase.Windup)
+                        return new EnemyAttackPhase(1, telegraph + status.Elapsed, telegraph + timing.Windup);
+                    if (status.Phase == SwingPhase.Active)
+                        return new EnemyAttackPhase(2, status.Elapsed - timing.Windup, timing.Active);
+                    return EnemyAttackPhase.Recovery(status);
+                }
+                if (_brain != null && _brain.IsWindingUp)
+                {
+                    SwingPatternData pattern = AttackPattern;
+                    float swingWindup = pattern != null && data.attackWeapon != null
+                        ? data.attackWeapon.ComboTiming(0, pattern).Windup : 0f;
+                    return new EnemyAttackPhase(1, telegraph - _brain.WindupRemaining, telegraph + swingWindup);
+                }
+                return default;
+            }
+        }
 
         /// <summary>The swing pattern this monster's attack weapon swings (its first pattern), or null for a weapon without one.</summary>
         public SwingPatternData AttackPattern
@@ -186,6 +234,13 @@ namespace Emberdelve.AI
         public float EffectiveChaseSpeed => data != null
             ? data.chaseSpeed * (_status != null ? _status.SpeedMultiplier : 1f)
             : 0f;
+
+        /// <summary>Rebinds the grid before Start when the modular scene assembler installs this raid's nav layout.</summary>
+        public void ConfigureNavigationGrid(NavGridData grid)
+        {
+            navGrid = grid;
+            if (_nav != null) _nav = new NavGridPathfinder(navGrid);
+        }
 
         private void Awake()
         {
@@ -266,6 +321,7 @@ namespace Emberdelve.AI
 
         private void HandleDamaged(DamageInfo damage)
         {
+            if (DamageSequence != uint.MaxValue) DamageSequence++;
             _brain?.NotifyDamaged(damage);
             _timeSinceDamage = 0f;
 
@@ -356,6 +412,7 @@ namespace Emberdelve.AI
 
             float dt = Time.deltaTime;
             _timeSinceDamage += dt;
+            _enemyDoorCooldown = Mathf.Max(0f, _enemyDoorCooldown - dt);
 
             float perceptionRadius = Mathf.Max(data.sightRange, data.hearingRange) + 6f;
             // R7: the nearest living, in-play player this monster is hostile to (any party, any controller). The current
@@ -412,13 +469,44 @@ namespace Emberdelve.AI
             float step = Mathf.Min(order.Speed, 12f) * statusMultiplier * dt;
             if (step <= 0.0001f) return;
 
-            Vector3 next = transform.position + flat.normalized * step;
+            Vector3 movement = flat.normalized * step;
+            Vector3 requestedMovement = movement;
+            int levelMask = config != null && config.levelMask.value != 0
+                ? config.levelMask.value : Physics.DefaultRaycastLayers;
+            movement = DoorwayMovementBlocker.ClampDelta(transform.position, movement, 1.0f, 0.22f,
+                levelMask, _doorMoveHits, _doorOverlapHits, out DungeonDoorInteractable blockingDoor);
+            if (blockingDoor != null && movement.sqrMagnitude < requestedMovement.sqrMagnitude * 0.25f)
+                TryOpenDoorForCurrentTarget(blockingDoor);
+            if (movement.sqrMagnitude <= 0.000001f) return;
+
+            Vector3 next = transform.position + movement;
             next.y = groundHeight;
             transform.position = next;
 
             // Colliders are only moved with transforms on the next physics step. Combat queries run in
             // Update, so sync now or a raycast/overlap this frame would use last frame's position.
             Physics.SyncTransforms();
+        }
+
+        private void TryOpenDoorForCurrentTarget(DungeonDoorInteractable door)
+        {
+            if (door == null || !NetRole.RunsSimulation || !CombatRegistry.TryGet(_currentTargetId, out ICombatEntity target) ||
+                target == null || target.IsDead || !EntityKinds.IsPlayer(target.Kind)) return;
+
+            Vector3 delta = door.transform.position - transform.position;
+            delta.y = 0f;
+            if (!DoorwayMovementBlocker.ShouldEnemyOpenDoor(true, delta.magnitude, _enemyDoorCooldown)) return;
+
+            // Throttle attempts even if the network service is not ready yet; no client is allowed to mutate door state.
+            _enemyDoorCooldown = 1.25f;
+            if (NetRole.IsOffline)
+            {
+                door.ApplyReplicatedState(door.DoorId, true);
+                return;
+            }
+
+            if (GameServices.TryGet<IDoorAiAuthority>(out IDoorAiAuthority authority))
+                authority.RequestEnemyDoorOpen(door.DoorId);
         }
 
         private bool ShouldRepath(Vector3 destination)

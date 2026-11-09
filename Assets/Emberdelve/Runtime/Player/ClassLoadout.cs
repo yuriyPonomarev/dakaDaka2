@@ -82,9 +82,22 @@ namespace Emberdelve.Player
             if (targetCamera == null && GetComponentInParent<Camera>() != null) targetCamera = GetComponentInParent<Camera>();
         }
 
+        internal void InitializeReplicatedClass(CharacterClassData data, GameConfig config, PlayerRig rig)
+        {
+            _appliedClass = data;
+            _rig = rig;
+            _unarmed = config.unarmedWeapon;
+            _slots[0] = _unarmed;
+            _slots[1] = null;
+            _activeSlot = 0;
+            // The first authoritative snapshot supplies every item. Never mint a local kit.
+            rig.Equipment.BeginKit();
+        }
+
         public void Apply(CharacterClassData data, GameConfig config, PlayerRig rig)
         {
             if (data == null || rig == null) return;
+            if (rig.Inventory != null && !rig.Inventory.CanCommitRevision(out _)) return;
             _appliedClass = data;
             _rig = rig;
 
@@ -242,8 +255,23 @@ namespace Emberdelve.Player
         /// </summary>
         internal void ClearSecondaryWeapon()
         {
+            ClearSecondaryWeaponCore(true);
+        }
+
+        internal void ClearSecondaryWeaponSilently()
+        {
+            ClearSecondaryWeaponCore(false);
+        }
+
+        private void ClearSecondaryWeaponCore(bool publishEvents)
+        {
+            if (publishEvents && !CanMutateHands()) return;
             if (_slots[1] == null) return;
-            if (_activeSlot == 1 && _slots[0] != null) Equip(0);
+            if (_activeSlot == 1 && _slots[0] != null)
+            {
+                if (publishEvents) Equip(0);
+                else EquipSilently(0);
+            }
             if (_activeSlot != 1) _slots[1] = null;
         }
 
@@ -273,6 +301,7 @@ namespace Emberdelve.Player
             if (slot < 0 || slot >= SlotCapacity) return false;
             if (slot == _activeSlot) return false;
             if (_slots[slot] == null) return false;
+            if (!CanMutateHands()) return false;
 
             if (IsActionLocked)
             {
@@ -292,6 +321,7 @@ namespace Emberdelve.Player
         public bool ForceSwitchToSlot(int slot)
         {
             if (slot < 0 || slot >= SlotCapacity || slot == _activeSlot || _slots[slot] == null) return false;
+            if (!CanMutateHands()) return false;
             Equip(slot);
             return true;
         }
@@ -304,6 +334,17 @@ namespace Emberdelve.Player
         /// </summary>
         public WeaponData TryReplaceWeaponSlot(int slot, WeaponData weapon)
         {
+            return TryReplaceWeaponSlotCore(slot, weapon, true);
+        }
+
+        internal WeaponData TryReplaceWeaponSlotSilently(int slot, WeaponData weapon)
+        {
+            return TryReplaceWeaponSlotCore(slot, weapon, false);
+        }
+
+        private WeaponData TryReplaceWeaponSlotCore(int slot, WeaponData weapon, bool publishEvents)
+        {
+            if (publishEvents && !CanMutateHands()) return null;
             if (slot < 0 || slot >= SlotCapacity) return null;
             if (weapon == null) return null;
 
@@ -336,17 +377,118 @@ namespace Emberdelve.Player
                 SeedAmmo(slot, reserve, maxReserve);
             }
 
-            if (slot == _activeSlot) Equip(slot);
+            if (slot == _activeSlot)
+            {
+                if (publishEvents) Equip(slot);
+                else EquipSilently(slot);
+            }
 
             return previous;
         }
 
-        private void Equip(int slot)
+        private bool CanMutateHands()
         {
-            using (GameEventTransaction.Defer()) EquipState(slot);
+            Inventory inventory = _rig != null ? _rig.Inventory : null;
+            return inventory == null || inventory.CanCommitRevision(out _);
         }
 
-        private void EquipState(int slot)
+        internal sealed class DropHandSnapshot
+        {
+            internal WeaponData[] Weapons;
+            internal int ActiveSlot;
+            internal int ChangeCount;
+            internal RangedAmmoState[] Ammo;
+        }
+
+        internal DropHandSnapshot CaptureDropHandSnapshot()
+        {
+            var snapshot = new DropHandSnapshot
+            {
+                Weapons = (WeaponData[])_slots.Clone(),
+                ActiveSlot = _activeSlot,
+                ChangeCount = WeaponChangeCount,
+                Ammo = new RangedAmmoState[_ammo.Count]
+            };
+            for (int i = 0; i < _ammo.Count; i++) snapshot.Ammo[i] = CopyAmmo(_ammo[i]);
+            return snapshot;
+        }
+
+        internal void RestoreDropHandSnapshot(DropHandSnapshot snapshot)
+        {
+            if (snapshot == null) return;
+            for (int i = 0; i < SlotCapacity; i++) _slots[i] = snapshot.Weapons[i];
+            _ammo.Clear();
+            for (int i = 0; i < snapshot.Ammo.Length; i++) _ammo.Add(CopyAmmo(snapshot.Ammo[i]));
+            _activeSlot = snapshot.ActiveSlot;
+
+            WeaponData weapon = ActiveWeapon;
+            bool melee = weapon != null && !weapon.IsRanged;
+            bool ranged = weapon != null && weapon.IsRanged;
+            if (meleeCombat != null)
+            {
+                meleeCombat.enabled = melee && !NetRole.IsClientOnly;
+                meleeCombat.Initialize(weapon);
+            }
+            if (rangedCombat != null)
+            {
+                rangedCombat.enabled = ranged && !NetRole.IsClientOnly;
+                if (ranged)
+                {
+                    RangedAmmoState state = FindAmmo(weapon) ?? CreateAmmo(weapon, 0, 0);
+                    rangedCombat.Initialize(weapon, state.reserve, state.maxReserve, state.magazine);
+                }
+                else rangedCombat.Initialize(weapon);
+            }
+
+            RebuildWeaponVisual(weapon);
+            if (_rig != null && _rig.Equipment != null) _rig.Equipment.BeginWeaponSet(_activeSlot, false);
+            if (_rig != null) _rig.ApplyMainHandWeapon(weapon);
+            if (_arms != null) SyncArms(weapon);
+            WeaponChangeCount = snapshot.ChangeCount;
+        }
+
+        internal bool MatchesDropHandSnapshot(DropHandSnapshot snapshot)
+        {
+            if (snapshot == null || snapshot.Weapons == null || snapshot.Weapons.Length != SlotCapacity ||
+                snapshot.ActiveSlot != _activeSlot || snapshot.ChangeCount != WeaponChangeCount ||
+                snapshot.Ammo == null || snapshot.Ammo.Length != _ammo.Count) return false;
+            for (int i = 0; i < SlotCapacity; i++)
+                if (!ReferenceEquals(snapshot.Weapons[i], _slots[i])) return false;
+            for (int i = 0; i < _ammo.Count; i++)
+            {
+                RangedAmmoState expected = snapshot.Ammo[i];
+                RangedAmmoState actual = _ammo[i];
+                if (expected == null || actual == null)
+                {
+                    if (!ReferenceEquals(expected, actual)) return false;
+                    continue;
+                }
+                if (expected.weaponId != actual.weaponId ||
+                    expected.magazine != actual.magazine || expected.reserve != actual.reserve ||
+                    expected.maxReserve != actual.maxReserve) return false;
+            }
+            return true;
+        }
+
+        private static RangedAmmoState CopyAmmo(RangedAmmoState state)
+        {
+            return state == null ? null : new RangedAmmoState
+            {
+                weaponId = state.weaponId,
+                magazine = state.magazine,
+                reserve = state.reserve,
+                maxReserve = state.maxReserve
+            };
+        }
+
+        private void Equip(int slot)
+        {
+            using (GameEventTransaction.Defer()) EquipState(slot, true);
+        }
+
+        private void EquipSilently(int slot) => EquipState(slot, false);
+
+        private void EquipState(int slot, bool publishEvents)
         {
             // -1 means nothing has been equipped yet, which is the case on the very first Equip from Apply.
             // Storing at that point would copy the component's uninitialized ammo over the seeded state.
@@ -375,13 +517,13 @@ namespace Emberdelve.Player
             // Exactly one combat component is live at a time, and it is the weapon that decides which one.
             if (meleeCombat != null)
             {
-                meleeCombat.enabled = weaponIsMelee;
+                meleeCombat.enabled = weaponIsMelee && !NetRole.IsClientOnly;
                 meleeCombat.Initialize(weapon);
             }
 
             if (rangedCombat != null)
             {
-                rangedCombat.enabled = weaponIsRanged;
+                rangedCombat.enabled = weaponIsRanged && !NetRole.IsClientOnly;
 
                 if (weaponIsRanged)
                 {
@@ -407,8 +549,14 @@ namespace Emberdelve.Player
             // V3d: the off hand is final only now (the set's off hand is restored by BeginWeaponSet / ApplyMainHandWeapon above), so the first-person hands are dressed again from the settled state.
             if (_arms != null) SyncArms(weapon);
 
-            GameEvents.RaiseActiveWeapon(OwnerId, weapon);
-            if (weapon != null) GameEvents.RaiseToast(OwnerId, $"Equipped {weapon.displayName}");
+            if (publishEvents)
+            {
+                GameEvents.RaiseActiveWeapon(OwnerId, weapon);
+                // Client hands are reconstructed from snapshots, including bag-only changes.
+                // Keep the presentation event, but do not announce those refreshes as equip actions.
+                if (weapon != null && !NetRole.IsClientOnly)
+                    GameEvents.RaiseToast(OwnerId, $"Equipped {weapon.displayName}");
+            }
         }
 
         private void SeedAmmo(int slot, int startingReserve, int maxReserve)

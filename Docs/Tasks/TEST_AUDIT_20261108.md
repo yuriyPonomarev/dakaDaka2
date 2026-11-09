@@ -1,8 +1,19 @@
-# Test audit РІР‚вЂќ 8 November 2026
+# Test audit — 8 November 2026
 
 Scope: inventory of all 67 EditMode C# files, 887 NUnit results from run 190122; gate-set membership; selected high-risk implementation/assertions (movement, final, inventory/drop/hands, draw speed, skills, enemy visual/wire); timing from full run 042911. This is not a claim that every assertion received semantic review or mutation testing.
 
-## Findings, priority and action
+## Closure update — 9 November 2026
+
+The findings below preserve the original audit. Since then:
+- Atomic equip rollback closed in commit14c070ba with focused failure coverage and real inventory/hands gates.
+- Live drop publication failure now exercises rollback through the existing equipment-drop scenario: exact UID/affixes/revision retained, owner/peer see no floor copy, retry and late join pass21/0 (20261109-054809-916).
+- Real two-client UI, reconnect, corpse transfer, results and simultaneous exact-UID contention accepted; see RAID_UI_ACCEPTANCE_20261108.md.
+- Enemy presentation uses authoritative phase timing and contact-based recoil; host/client motion and actual damage reviewed. Final suite20261109-055711-479 plus targeted corrections accepted; details in CURRENT_WORK.
+- Verified build reuse and file-based test selection are implemented and committed; passing test verdicts are never cached. Do not remove fast complementary tests to save editor startup time.
+
+Remaining coverage limits: controlled packet-loss/latency campaign, nine-client capacity and a wider independent runtime map corpus. These are future robustness/release checks, not established defects or claims of supported load. Two layouts were traversed live, including the bridge regression seed. Shield assertion now checks rendered bounds and passes1/1; wall-run fixture now handles fragmented telemetry and passes190/0 on the original failure seed.
+
+## Original findings, priority and action
 
 | Priority | Finding | Evidence / decision |
 |---|---|---|

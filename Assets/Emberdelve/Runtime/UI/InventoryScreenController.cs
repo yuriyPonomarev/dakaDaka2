@@ -162,7 +162,8 @@ namespace Emberdelve.UI
             || _director.LocalPlayerState == RunState.Dead || _director.LocalPlayerState == RunState.Extracted);
 
         /// <summary>R7: the bag screen shows the bag of the player it is bound to; an event about another player never rebuilds it.</summary>
-        private bool IsMine(int playerId) => PlayerView.Shows(playerId);
+        private bool IsMine(int playerId) => NetRole.IsClientOnly && _rig != null
+            ? playerId == _rig.PlayerId : PlayerView.Shows(playerId);
 
         private int ToastOwner => _model.ToastOwner;
 
@@ -210,6 +211,11 @@ namespace Emberdelve.UI
             // Dying, pausing out of the run or the HUD being torn down must not leave a selection behind
             // that someone later tries to put somewhere. The stack was never removed, so clearing is free.
             ClearSelection();
+        }
+
+        private void OnDestroy()
+        {
+            if (_root != null) Destroy(_root.gameObject);
         }
 
         public void Open()

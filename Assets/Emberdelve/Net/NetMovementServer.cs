@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using Emberdelve.Movement;
+using Emberdelve.Level;
 using Emberdelve.Net.Rules;
 using Emberdelve.Player;
 using Unity.Netcode;
@@ -128,6 +129,10 @@ namespace Emberdelve.Net
         private float _maxGapSinceQuietLog;
         private int _noPlayer;
         private bool _shoveDone;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        private bool _movementProofStaged;
+        private bool _finalProofStaged;
+#endif
 
         public NetMovementServer(NetworkManager nm, NetIdentityTable table, Action<string> log, Action<string> logError)
         {
@@ -322,6 +327,8 @@ namespace Emberdelve.Net
             bool ackTick = _tick % ReconcileRules.AckEveryTicks == 0;
 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
+            MaybeStageMovementProof();
+            MaybeStageFinalProof();
             MaybeShove();
 #endif
 
@@ -461,6 +468,94 @@ namespace Emberdelve.Net
         }
 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
+        // A proof-only channel enabled solely by the test runner's environment. The normal server never
+        // listens for this file; no client can request a test teleport over the network.
+        private void MaybeStageMovementProof()
+        {
+            if (_movementProofStaged || _tick % ShovePollTicks != 0) return;
+            string path = Environment.GetEnvironmentVariable("EMBER_MOVEMENT_PROOF_PATH");
+            if (string.IsNullOrEmpty(path) || !File.Exists(path + ".stage")) return;
+            MoveState a = null, b = null, w = null, v = null;
+            foreach (MoveState state in _order)
+            {
+                switch (state.Slot)
+                {
+                    case "mv-a": a = state; break;
+                    case "mv-b": b = state; break;
+                    case "mv-w": w = state; break;
+                    case "mv-v": v = state; break;
+                }
+            }
+            if (a == null || b == null || w == null || v == null) return;
+            DungeonModuleSceneAssembler assembler = UnityEngine.Object.FindFirstObjectByType<DungeonModuleSceneAssembler>();
+            if (assembler == null || !assembler.RuntimeMapValidationComplete) return;
+            _movementProofStaged = true;
+            CharacterController controller = a.Rig.GetComponent<CharacterController>();
+            CharacterController wallController = w.Rig.GetComponent<CharacterController>();
+            float height = controller != null && wallController != null ? Mathf.Max(controller.height, wallController.height) : 0f;
+            float walkDistance = a.Rig.Movement.ResolveGroundSpeed(false, false) * 3f * 1.2f + 0.5f;
+            float sprintDistance = a.Rig.Movement.ResolveGroundSpeed(true, false) * 1.5f * 1.2f + 0.5f;
+            float routeDistance = Mathf.Max(walkDistance, sprintDistance);
+            Physics.SyncTransforms();
+            if (!MovementProofGeometry.TryFindLanes(assembler.RuntimeLayout,
+                    new[] { b.Rig.transform.position, v.Rig.transform.position }, height, walkDistance,
+                    a.Rig.Movement.ResolveGroundSpeed(false, false) * 3f, sprintDistance, out Vector3 walk, out Vector3 wall, out float wallDistance))
+            {
+                _logError("movement-proof no supported collision-free walk and wall lanes hash=" + assembler.AppliedLayoutHash);
+                File.WriteAllText(path + ".failed", "no physically valid movement proof lanes");
+                return;
+            }
+            StageProofActor(a, walk);
+            StageProofActor(w, wall);
+            Physics.SyncTransforms();
+            string data = "hash=" + assembler.AppliedLayoutHash + " a=" + P(a.LastPos) + " w=" + P(w.LastPos) +
+                          " wall=" + F(wallDistance) + " distance=" + F(routeDistance) + " tick=" + _tick;
+            _log("movement-proof staged " + data);
+            File.WriteAllText(path + ".ready", data);
+        }
+
+        private void MaybeStageFinalProof()
+        {
+            if (_finalProofStaged || _tick % ShovePollTicks != 0) return;
+            string path = Environment.GetEnvironmentVariable("EMBER_FINAL_PROOF_PATH");
+            if (string.IsNullOrEmpty(path) || !File.Exists(path + ".stage")) return;
+            MoveState a = null, b = null;
+            foreach (MoveState state in _order)
+            {
+                if (state.Slot == "fin-a") a = state;
+                else if (state.Slot == "fin-b") b = state;
+            }
+            if (a == null || b == null) return;
+            DungeonModuleSceneAssembler assembler = UnityEngine.Object.FindFirstObjectByType<DungeonModuleSceneAssembler>();
+            if (assembler == null || !assembler.RuntimeMapValidationComplete) return;
+            _finalProofStaged = true;
+            CharacterController controller = a.Rig.GetComponent<CharacterController>();
+            float height = controller != null ? controller.height : 0f;
+            float distance = a.Rig.Movement.ResolveGroundSpeed(false, false) * 3f * 1.2f + 0.5f;
+            Physics.SyncTransforms();
+            if (!MovementProofGeometry.TryFindWalkLane(assembler.RuntimeLayout,
+                    new[] { b.Rig.transform.position }, height, distance, out Vector3 start))
+            {
+                _logError("final-proof no supported collision-free walk lane hash=" + assembler.AppliedLayoutHash);
+                File.WriteAllText(path + ".failed", "no physically valid final proof lane");
+                return;
+            }
+            StageProofActor(a, start);
+            Physics.SyncTransforms();
+            string data = "hash=" + assembler.AppliedLayoutHash + " a=" + P(a.LastPos) +
+                          " distance=" + F(distance) + " tick=" + _tick;
+            _log("final-proof staged " + data);
+            File.WriteAllText(path + ".ready", data);
+        }
+
+        private static void StageProofActor(MoveState state, Vector3 position)
+        {
+            state.Rig.Movement.TeleportTo(position);
+            state.LastPos = state.Rig.transform.position;
+            state.LoggedPos = state.LastPos;
+            state.RestY = state.LastPos.y;
+        }
+
         /// <summary>
         /// Development only (-ember-net-dev-shove SLOT:YAW[:M] with -ember-net-dev-shove-file PATH): once, when the file exists, the
         /// named player is teleported M meters along YAW. Done between two steps, and the speed tracker is told, so the jump is not

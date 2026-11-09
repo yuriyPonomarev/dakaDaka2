@@ -1,4 +1,5 @@
 using UnityEngine;
+using Emberdelve.Items;
 
 namespace Emberdelve.Core
 {
@@ -29,17 +30,19 @@ namespace Emberdelve.Core
         [SerializeField] private GameObject[] deactivateWhenNetworked;
         [SerializeField] private GameObject[] deactivateOnClient;
         [SerializeField] private Behaviour[] disableOnDedicatedServer;
+        [SerializeField] private bool showLootAsReadOnlyOnClient;
 
         public GameObject[] DeactivateWhenNetworked => deactivateWhenNetworked;
         public GameObject[] DeactivateOnClient => deactivateOnClient;
         public Behaviour[] DisableOnDedicatedServer => disableOnDedicatedServer;
 
         /// <summary>Builder / test hook: the three lists, in the order of the fields above.</summary>
-        public void Configure(GameObject[] networked, GameObject[] client, Behaviour[] dedicatedServer)
+        public void Configure(GameObject[] networked, GameObject[] client, Behaviour[] dedicatedServer, bool readOnlyLootOnClient = false)
         {
             deactivateWhenNetworked = networked;
             deactivateOnClient = client;
             disableOnDedicatedServer = dedicatedServer;
+            showLootAsReadOnlyOnClient = readOnlyLootOnClient;
         }
 
         private void Awake()
@@ -53,7 +56,11 @@ namespace Emberdelve.Core
             if (role == NetRoleKind.Offline) return;
 
             Deactivate(deactivateWhenNetworked);
-            if (role == NetRoleKind.Client) Deactivate(deactivateOnClient);
+            if (role == NetRoleKind.Client)
+            {
+                Deactivate(deactivateOnClient);
+                if (showLootAsReadOnlyOnClient) MakeLootReadOnly();
+            }
             else if (NetRole.EnemiesDisabled) DeactivateEnemies();
 
             if (role == NetRoleKind.DedicatedServer && disableOnDedicatedServer != null)
@@ -63,6 +70,18 @@ namespace Emberdelve.Core
                     Behaviour behaviour = disableOnDedicatedServer[i];
                     if (behaviour != null) behaviour.enabled = false;
                 }
+            }
+        }
+
+        private static void MakeLootReadOnly()
+        {
+            GameObject root = GameObject.Find("Loot");
+            if (root == null) return;
+            LootPickup[] pickups = root.GetComponentsInChildren<LootPickup>(true);
+            for (int i = 0; i < pickups.Length; i++)
+            {
+                Collider[] colliders = pickups[i].GetComponentsInChildren<Collider>(true);
+                for (int k = 0; k < colliders.Length; k++) if (colliders[k] != null) colliders[k].enabled = false;
             }
         }
 

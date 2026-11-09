@@ -28,6 +28,8 @@ namespace Emberdelve.Core
 
         private static StartHandler _start;
         private static Action _cancel;
+        private static Func<bool, bool> _resultNavigation;
+        private static Action _pendingRetry;
         private static string _sessionSlot;
 
         public static bool IsAvailable => _start != null;
@@ -51,10 +53,28 @@ namespace Emberdelve.Core
             }
         }
 
-        public static void Register(StartHandler start, Action cancel)
+        public static void Register(StartHandler start, Action cancel, Func<bool, bool> resultNavigation = null)
         {
             _start = start;
             _cancel = cancel;
+            _resultNavigation = resultNavigation;
+        }
+
+        /// <summary>Leave or retry an ended network run through the network session owner.</summary>
+        public static bool NavigateResult(bool retry) => _resultNavigation != null && _resultNavigation(retry);
+
+        /// <summary>Queued only after the old network manager is destroyed; consumed by the next lobby update.</summary>
+        public static void QueueRetry(bool host, string address, int port, string classId)
+        {
+            _pendingRetry = () => TryStart(host, address, port, classId, out _);
+        }
+
+        public static void StartPendingRetry()
+        {
+            if (NetRole.IsNetworked || _pendingRetry == null) return;
+            Action retry = _pendingRetry;
+            _pendingRetry = null;
+            retry();
         }
 
         /// <summary>Asks the network layer to start. A false result carries the reason (also reported as the status).</summary>
@@ -108,6 +128,7 @@ namespace Emberdelve.Core
             Phase = NetLobbyPhase.Idle;
             Status = "";
             _sessionSlot = null;
+            _pendingRetry = null;
         }
     }
 }

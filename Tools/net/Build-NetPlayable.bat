@@ -1,5 +1,5 @@
 @echo off
-rem Builds the playable network player (scenes Lobby + Level01, Development) into Builds\EmberdelveNet.
+rem Builds the playable network player (scenes Lobby + Modular Crypts, Development) into Builds\EmberdelveNet.
 rem Close the Unity Editor for this project first (batch mode cannot open a project that is already open).
 rem Usage: Build-NetPlayable.bat [absolute path of the output .exe]
 setlocal

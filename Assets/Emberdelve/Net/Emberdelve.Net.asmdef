@@ -2,6 +2,7 @@
   "name": "Emberdelve.Net",
   "references": [
     "Emberdelve.Runtime",
+    "Emberdelve.UI",
     "Emberdelve.Rules",
     "Emberdelve.NetRules",
     "Unity.Netcode.Runtime",

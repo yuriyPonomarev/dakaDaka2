@@ -15,9 +15,47 @@ namespace Emberdelve.Level
     public sealed class ChestSpawner : MonoBehaviour
     {
         private readonly List<ChestInteractable> _chests = new List<ChestInteractable>();
+        private bool _presentationOnly;
+        private DungeonLayoutData _builtLayout;
 
         public IReadOnlyList<ChestInteractable> Chests => _chests;
         public int Count => _chests.Count;
+
+        /// <summary>
+        /// Builds only the authored chest views on a network client. These components have no loot host and
+        /// are guarded against local opening; they exist so server chest IDs and interaction geometry resolve.
+        /// </summary>
+        public static ChestSpawner EnsureClientPresentation(DungeonLayoutData layout)
+        {
+            if (!NetRole.IsClientOnly || layout == null) return null;
+            ChestSpawner[] existingSpawners = FindObjectsByType<ChestSpawner>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            ChestSpawner matching = null;
+            for (int i = 0; i < existingSpawners.Length; i++)
+            {
+                ChestSpawner existing = existingSpawners[i];
+                if (existing == null || !existing._presentationOnly) continue;
+                if (existing._builtLayout == layout && matching == null)
+                {
+                    matching = existing;
+                    continue;
+                }
+
+                // Only this system's isolated presentation root is eligible for cleanup. Authored chest objects and
+                // server spawners are never removed when a client changes layouts.
+                existing.gameObject.SetActive(false);
+                if (Application.isPlaying) Destroy(existing.gameObject);
+                else DestroyImmediate(existing.gameObject);
+            }
+
+            if (matching != null) return matching;
+
+            GameObject root = new GameObject("NetworkChestPresentation");
+            ChestSpawner spawner = root.AddComponent<ChestSpawner>();
+            spawner._presentationOnly = true;
+            spawner._builtLayout = layout;
+            spawner.BuildInternal(layout, null, null, true);
+            return spawner;
+        }
 
         /// <summary>
         /// Creates the spawner on a host (the RunDirector) and builds every chest the layout declares. Safe to
@@ -37,6 +75,13 @@ namespace Emberdelve.Level
 
         public void Build(DungeonLayoutData layout, GameConfig config, MonoBehaviour lootHost)
         {
+            _presentationOnly = false;
+            _builtLayout = layout;
+            BuildInternal(layout, config, lootHost, false);
+        }
+
+        private void BuildInternal(DungeonLayoutData layout, GameConfig config, MonoBehaviour lootHost, bool presentationOnly)
+        {
             _chests.Clear();
 
             if (layout == null || layout.chestSpawns == null || layout.chestSpawns.Count == 0) return;
@@ -44,7 +89,7 @@ namespace Emberdelve.Level
             int interactLayer = LayerMask.NameToLayer(GameConfig.InteractLayerName);
             bool[,] walkable = layout.BuildWalkableGrid();
             GameObject root = new GameObject("Chests");
-            root.transform.SetParent(lootHost.transform, false);
+            root.transform.SetParent(presentationOnly ? transform : lootHost.transform, false);
 
             for (int i = 0; i < layout.chestSpawns.Count; i++)
             {
@@ -79,7 +124,8 @@ namespace Emberdelve.Level
                 if (lidRenderer != null && spec.lidMaterial != null) lidRenderer.sharedMaterial = spec.lidMaterial;
 
                 ChestInteractable chest = body.AddComponent<ChestInteractable>();
-                chest.Configure(spec.variant, spec.lootTable, spec.seed, lootHost);
+                chest.Configure(spec.variant, spec.lootTable, spec.seed, presentationOnly ? null : lootHost);
+                if (presentationOnly) chest.SetPresentationOnly();
                 chest.ConfigureBody(size, lid.transform);
 
                 // V2: dress the blockout cubes with a model (visual only; colliders, layers and wiring above are untouched).

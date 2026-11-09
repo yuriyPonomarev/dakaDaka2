@@ -174,6 +174,8 @@ namespace Emberdelve.Net
     /// </summary>
     public struct CombatHitWire : INetworkSerializable
     {
+        public ulong EventId;
+        public float PointX, PointY, PointZ;
         public byte Source;
         public int Attacker;
         public int Target;
@@ -186,6 +188,10 @@ namespace Emberdelve.Net
 
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
+            serializer.SerializeValue(ref EventId);
+            serializer.SerializeValue(ref PointX);
+            serializer.SerializeValue(ref PointY);
+            serializer.SerializeValue(ref PointZ);
             serializer.SerializeValue(ref Source);
             serializer.SerializeValue(ref Attacker);
             serializer.SerializeValue(ref Target);
@@ -237,6 +243,10 @@ namespace Emberdelve.Net
         public float X, Y, Z;
         public float Yaw;
 
+        public bool IsValid => Enemy > 0 && IsFinite(X) && IsFinite(Y) && IsFinite(Z) && IsFinite(Yaw);
+
+        private static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
+
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
             serializer.SerializeValue(ref Enemy);
@@ -261,6 +271,58 @@ namespace Emberdelve.Net
             serializer.SerializeValue(ref Health);
             serializer.SerializeValue(ref MaxHealth);
             serializer.SerializeValue(ref Dead);
+        }
+    }
+
+    /// <summary>Versioned server-authored enemy presentation state. Gameplay decisions and health stay exclusively on the server.</summary>
+    public struct EnemyPresentationWire : INetworkSerializable
+    {
+        public const byte CurrentVersion = 3;
+        public const byte WindingUpFlag = 1;
+        public const byte DeadFlag = 2;
+        public const byte KnownFlags = WindingUpFlag | DeadFlag;
+
+        public byte Version;
+        public int Enemy;
+        public byte VisualKind;
+        public byte Flags;
+        public uint SwingsBegun;
+        public uint HitSequence;
+        public float WindupSeconds;
+        public float SwingSeconds;
+        public byte AttackPhase;
+        public float PhaseElapsed;
+        public float PhaseDuration;
+        public float RecoilStart;
+        public double SampleTime;
+
+        public bool IsWindingUp => (Flags & WindingUpFlag) != 0;
+        public bool IsDead => (Flags & DeadFlag) != 0;
+        public string VisualKindName => VisualKind <= 3 ? new[] { "Minion", "Rogue", "Warrior", "Mage" }[VisualKind] : "Unknown";
+        public bool IsValid => Version == CurrentVersion && Enemy > 0 && VisualKind <= 3 && (Flags & ~KnownFlags) == 0 &&
+                               !float.IsNaN(WindupSeconds) && !float.IsInfinity(WindupSeconds) && WindupSeconds >= 0f && WindupSeconds <= 10f &&
+                               float.IsFinite(SwingSeconds) && SwingSeconds >= 0f && SwingSeconds <= 30f && AttackPhase <= 4 &&
+                               float.IsFinite(PhaseElapsed) && PhaseElapsed >= 0f &&
+                               float.IsFinite(PhaseDuration) && PhaseDuration >= 0f && PhaseDuration <= 40f &&
+                               float.IsFinite(RecoilStart) && RecoilStart >= 0f && RecoilStart <= 1f &&
+                               PhaseElapsed <= PhaseDuration && (AttackPhase == 0 || PhaseDuration >= 0.02f) &&
+                               !double.IsNaN(SampleTime) && !double.IsInfinity(SampleTime) && SampleTime >= 0d;
+
+        public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+        {
+            serializer.SerializeValue(ref Version);
+            serializer.SerializeValue(ref Enemy);
+            serializer.SerializeValue(ref VisualKind);
+            serializer.SerializeValue(ref Flags);
+            serializer.SerializeValue(ref SwingsBegun);
+            serializer.SerializeValue(ref HitSequence);
+            serializer.SerializeValue(ref WindupSeconds);
+            serializer.SerializeValue(ref SwingSeconds);
+            serializer.SerializeValue(ref AttackPhase);
+            serializer.SerializeValue(ref PhaseElapsed);
+            serializer.SerializeValue(ref PhaseDuration);
+            serializer.SerializeValue(ref RecoilStart);
+            serializer.SerializeValue(ref SampleTime);
         }
     }
 }

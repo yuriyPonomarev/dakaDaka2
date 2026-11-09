@@ -1,34 +1,38 @@
-# DakaDaka - current work
+# DakaDaka — current work
 
-Updated 8 November 2026. Process commit: 3616c4fc.
-Roadmap: ROADMAP.md. Open risks: CRITICAL_DEBT.md. Rules: ../AGENTS.md.
-Compact readout: powershell -NoProfile -ExecutionPolicy Bypass -File Tools/Get-WorkStatus.ps1
+Updated 9 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
+Detailed evidence: Tasks/RAID_UI_ACCEPTANCE_20261108.md.
+User priority: finish existing features; minimal sufficient checks; commit only completed milestones.
 
-## Current evidence
+## Completed scope
 
-- ITEMS-01 completed: atomic offhand/main-hand bag transfer; refused exchange restores exact bag state without changing hands/revision. Run 20261108-202148-890: EditMode 902/0, NetInventory 146/0, Hands 92/0. See Tasks/ITEMS01_ATOMIC_EQUIP.md.
+Existing network raid, modular map, inventory/corpse/extraction/results/retry, hands/guard/enemy timing and readable HUD/countdown are accepted together. Shared dependencies make stages1–4 one integrated milestone; infrastructure and atomic equip were committed separately (3616c4fc/f7670ef2 and14c070ba).
 
-- Development harness milestone completed: change-based selection, verified build cache and stable localhost test paths. Final 201255-412: NetAdmission 107/0, NetProof 35/0; fresh/store 36.32s, HIT 8.18s. Planner 13/13 and final cache fixture 13/13 pass. Details: Tasks/HARNESS_20261108.md; commands: HARNESS.md.
-- Uncommitted-work inventory: Tasks/WORKTREE_AUDIT_20261108.md. Commit only completed tasks by milestone; no WIP snapshots. Map/inventory/animation changes remain pending their acceptance criteria.
-- Full mirror run 20261108-190643: EditMode 887/887; 68 of 69 gates passed. Sole failure: smoke loot fixture placed player on a modular plinth. This full run is FAIL, not green.
-- Fresh passes in that full run: NetMovement 189/0, NetFinal 172/0, NetInventory 146/0, NetDoor 37/0, NetCombat 312/0, NetExtraction 136/0, NetSkill 127/0, Hands 92/0, Visual 207/0, DrawSpeed 203/0.
-- Fixed smoke fixture to choose supported capsule clearance, probe reach and production LOS; original target/collection assertions retained. Focused 20261108-193032: smoke 249/0 and equipment-drop 17/0 PASS. Original failing seed rerun 20261108-193253 passed 249/0 (same map hash; selected pickup differs).
-- NetMovement telemetry race fixed by bounded fresh-counter AND owner/observer convergence wait; original tolerances retained.
-- Audit found equipment-drop missing from net/all. Added it (now all=70); full 190643 predates this membership change, so drop was verified separately. No single 70-gate green run yet.
+- Real two-client UI: equip/drop/pickup/rejoin, combat/disconnect corpse custody, exact-UID simultaneous pickup (one winner), death/extraction/result/retry/lobby, host restart and peer rejoin.
+- Live publication failure retains exact equipped UID/affixes/revision with no owner/peer floor duplicate; retry and late join pass equipment-drop21/0.
+- Host/client grip and guard accepted. Enemy attack uses server phase timing; removed baked horizontal travel; wall recoil rewinds from actual contact. Client real hit12 matches phases. V24 real blocked hit0, HP120/120, shield contact/return and weapon swap return reviewed.
+- Production600s timer enabled in asset/builder, readable on host/client; process-local5s timeout results reviewed. No claim of waiting600s live.
+- Bridge rotation follows connected deck ends. Original regression seed2043687868 and seed11 traversed through deck and both doorways with ordinary movement/E.
 
-## Next three actions
+## Final verification
 
-User priority: finish existing features first; no stash/new systems or harness expansion. One acceptance scenario per slice, focused checks only, no repeated broad runs without a concrete reason.
+Full20261109-055711-479: EditMode924/925,68/70 gates,1184.6s. Its three failures are closed by focused follow-up, with no gameplay changes after that run:
+1. Shield test used an offscreen model pivot instead of rendered bounds. Corrected assertion; final-shield-visibility-recovered PASS1/1.
+2. NetMovement read only the first telemetry segment of an interrupted walk. Now checks continuity, every endpoint/peak and final displacement at unchanged thresholds. Run20261109-062114-364 PASS190/0 on exact seed-1799084838/hashCF6B9D32.
+3. Windows denied stable build directory promotion, preventing NetFinal execution. Prepared payload safely restored; same targeted run NetFinal PASS172/0 with successful stable build publication.
 
-1. Perform real two-client equip/drop/contention and reconnect acceptance; use the harness checkpoint/selection loop.
-2. Complete death/corpse/extraction/result/retry UI acceptance; commit completed milestone tasks only.
-3. Hands/block and authoritative attack phase timing in motion. Retain full + targeted evidence; next full run only at substantive integration/release.
+Combined evidence accepts the milestone. The historical full run remains FAIL; do not rerun passing suites merely to obtain one green aggregate. Source/code diff whitespace check passes. Actual visual evidence is separate from automated proof.
 
-## Limits and ownership
+## Handoff and limits
 
-- Test audit: Tasks/TEST_AUDIT_20261108.md (67 test files, measured runtime, overlap, omissions and missing critical scenarios). No tests deleted or tolerances weakened.
-- Hands grip/guard and enemy trigger fixes have automated coverage; appearance unaccepted, enemy swing duration still approximate. Production timer remains disabled pending HUD review. Stash not implemented.
-- Default session size is 9; parser allows up to 64, not measured capacity. Network movement proof uses four clients; nine-client load acceptance missing.
-- Preserve inherited mixed changes (map/content, inventory/extraction, combat/visuals, gates). Process/harness work is separate from unfinished gameplay; no blanket commit/reset. Exclude material drift and local Pipeline settings.
+- Main user Editor untouched. All tests/builds used ../DakaDaka_ci. V24 test players quit B10/A1; no test/build/player intentionally left running.
+- Explicit milestone manifest398 paths. Six local-only changes retained outside commit: Stone_Ceiling.mat, Stone_Floor.mat, Assets/Logs.meta, connection-check screenshot/meta, Pipeline EditorPipelineConfig.json.
+- Default session9 players; parser permits64, neither is measured capacity. Four-client movement proof exists. Controlled loss/latency and nine-client load are future release coverage.
+- Persistent stash, new content/art/sound/balance are deferred. Existing corpse loot is session-only; procedural ranged art is retained.
+- Historical reports are labeled; this file and the acceptance report own current status.
 
-Run 193510 was a redundant full rerun, explicitly cancelled after user feedback; raw runner exit is not a newly discovered regression. Main Editor preserved. No tests remain running from this work.
+## Next optional steps
+
+1. Use the accepted raid for user playtesting; fix concrete findings with focused checks.
+2. Before wider multiplayer release, run bounded packet-loss/latency and nine-client capacity acceptance.
+3. Start persistent stash or new content only as a new agreed milestone.

@@ -67,6 +67,36 @@ namespace Emberdelve.NetRules.Tests
         }
 
         [Test]
+        public void InventoryProcessProbes_AreIsolatedDevelopmentScripts()
+        {
+            NetScriptSpec owner = Parse("inventory-owner");
+            NetScriptSpec forge = Parse("inventory-forge");
+            Assert.That(owner.IsProbeOnly, Is.True);
+            Assert.That(owner.IsInventoryOwnerOnly, Is.True);
+            Assert.That(forge.IsProbeOnly, Is.True);
+            Assert.That(forge.IsInventoryForgeOnly, Is.True);
+            Assert.That(NetScriptSpec.IsDevelopmentOnly(owner.Steps[0].Kind), Is.True);
+            Assert.That(NetScriptSpec.IsDevelopmentOnly(forge.Steps[0].Kind), Is.True);
+            Assert.That(NetScriptSpec.TryParse("inventory-owner,jump", out _, out string chained), Is.False);
+            Assert.That(chained, Does.Contain("chained"));
+        }
+
+        [Test]
+        public void ExtractionProcessProbes_AreIsolatedDevelopmentScripts()
+        {
+            NetScriptSpec owner = Parse("extraction-owner");
+            NetScriptSpec forge = Parse("extraction-forge");
+            Assert.That(owner.IsProbeOnly && owner.IsExtractionOwnerOnly, Is.True);
+            Assert.That(forge.IsProbeOnly && forge.IsExtractionForgeOnly, Is.True);
+            Assert.That(NetScriptSpec.IsDevelopmentOnly(owner.Steps[0].Kind), Is.True);
+            Assert.That(NetScriptSpec.IsDevelopmentOnly(forge.Steps[0].Kind), Is.True);
+            Assert.That(NetScriptSpec.TryParse("extraction-owner,jump", out _, out _), Is.False);
+            NetScriptSpec interrupt = Parse("extraction-interrupt");
+            Assert.That(interrupt.IsProbeOnly && interrupt.IsExtractionInterruptOnly, Is.True);
+            Assert.That(NetScriptSpec.IsDevelopmentOnly(interrupt.Steps[0].Kind), Is.True);
+        }
+
+        [Test]
         public void SkillProof_IsAnIsolatedProbe()
         {
             NetScriptSpec spec = Parse("skill-proof");
@@ -75,6 +105,17 @@ namespace Emberdelve.NetRules.Tests
             Assert.That(NetScriptSpec.NameOf(spec.Steps[0].Kind), Is.EqualTo("skill-proof"));
             Assert.That(NetScriptSpec.TryParse("skill-proof,jump", out _, out _), Is.False);
             Assert.That(NetScriptSpec.TryParse("skill-proof:3", out _, out _), Is.False);
+        }
+
+        [Test]
+        public void EnemyHit_IsAnIsolatedDevelopmentCombatProbe()
+        {
+            NetScriptSpec spec = Parse("enemy-hit");
+            Assert.That(spec.IsEnemyHitOnly, Is.True);
+            Assert.That(spec.IsCombatScript, Is.True);
+            Assert.That(NetScriptSpec.IsDevelopmentOnly(spec.Steps[0].Kind), Is.True);
+            Assert.That(NetScriptSpec.TryParse("enemy-hit,jump", out _, out _), Is.False);
+            Assert.That(NetScriptSpec.TryParse("enemy-hit:3", out _, out _), Is.False);
         }
 
         [TestCase("")]

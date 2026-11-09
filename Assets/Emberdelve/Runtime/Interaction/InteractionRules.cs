@@ -87,15 +87,10 @@ namespace Emberdelve.Interaction
                 return false;
             }
 
-            if (distance > LineOfSightSlack * 2f)
+            if (TryGetLineOfSightBlocker(actor, target, out _, out _))
             {
-                Vector3 direction = (point - origin) / distance;
-                int levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
-                if (levelMask != 0 && Physics.Raycast(origin, direction, out RaycastHit hit, distance - LineOfSightSlack, levelMask, QueryTriggerInteraction.Ignore))
-                {
-                    reason = "No line of sight";
-                    return false;
-                }
+                reason = "No line of sight";
+                return false;
             }
 
             return true;
@@ -107,6 +102,24 @@ namespace Emberdelve.Interaction
             if (host is IInteractionAdmissionSource admission
                 && !admission.IsInteractionActorAdmitted(actor, out reason)) return false;
             return Validate(actor, target, reach, out reason);
+        }
+
+        /// <summary>Returns the exact level collider that makes a valid target ray fail; used by dev proof diagnostics.</summary>
+        public static bool TryGetLineOfSightBlocker(IInteractionActor actor, Component target, out RaycastHit hit, out Vector3 targetPoint)
+        {
+            hit = default;
+            targetPoint = Vector3.zero;
+            if (actor == null || target == null) return false;
+            Vector3 origin = actor.InteractionOrigin;
+            if (!IsFinite(origin)) return false;
+            targetPoint = ClosestPoint(target, origin);
+            if (!IsFinite(targetPoint)) return false;
+            Vector3 offset = targetPoint - origin;
+            float distance = offset.magnitude;
+            if (!IsFinite(distance) || distance <= LineOfSightSlack * 2f) return false;
+            int levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
+            return levelMask != 0 && Physics.Raycast(origin, offset / distance, out hit,
+                distance - LineOfSightSlack, levelMask, QueryTriggerInteraction.Ignore);
         }
 
         private static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);

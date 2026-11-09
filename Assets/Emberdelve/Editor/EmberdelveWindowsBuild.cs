@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEditor.Build.Reporting;
@@ -13,8 +14,8 @@ namespace Emberdelve.EditorTools
     ///             -executeMethod Emberdelve.EditorTools.EmberdelveWindowsBuild.BuildReview
     ///             --ember-build-output C:\absolute\path\EmberdelveReview.exe
     ///
-    /// It builds the two saved Emberdelve scenes (lobby first, then the dungeon) with
-    /// BuildOptions.Development. It does not launch the Player, does not regenerate data, scenes or
+    /// It builds the saved lobby and required modular crypt scene (in that order), plus the
+    /// saved modular scene when present, with BuildOptions.Development. It does not launch the Player, does not regenerate data, scenes or
     /// packages, does not touch the template Cockpit scenes, shows no dialog and changes no project
     /// setting. The caller supplies a fresh output directory, so nothing here deletes anything.
     /// </summary>
@@ -43,31 +44,33 @@ namespace Emberdelve.EditorTools
                 }
 
                 string lobby = EmberdelvePaths.LobbyScenePath;
-                string dungeon = EmberdelvePaths.DungeonScenePath;
+                string modularDungeon = EmberdelvePaths.ModularDungeonScenePath;
 
                 // Saved scenes only. Missing scenes are a blocker, not something to regenerate here.
-                if (!File.Exists(lobby) || !File.Exists(dungeon))
+                if (!File.Exists(lobby) || !File.Exists(modularDungeon))
                 {
-                    Debug.LogError(Tag + " FAIL: saved scene(s) missing - lobby='" + lobby + "' exists=" + File.Exists(lobby) +
-                                   " dungeon='" + dungeon + "' exists=" + File.Exists(dungeon) +
-                                   ". Run the Emberdelve editor builders first; this task does not rebuild scenes.");
+                    Debug.LogError(Tag + " FAIL: required saved scene(s) missing - lobby='" + lobby + "' exists=" + File.Exists(lobby) +
+                                   " modular='" + modularDungeon + "' exists=" + File.Exists(modularDungeon) +
+                                   ". Build Modular Crypts first; Level01 is not a gameplay fallback.");
                     EmberdelveGateExit.Exit(1);
                     return;
                 }
+
+                string[] scenes = { lobby, modularDungeon };
 
                 string parent = Path.GetDirectoryName(location);
                 if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
 
                 BuildPlayerOptions options = new BuildPlayerOptions
                 {
-                    scenes = new string[] { lobby, dungeon },
+                    scenes = scenes,
                     locationPathName = location,
                     target = BuildTarget.StandaloneWindows64,
                     options = BuildOptions.Development
                 };
 
                 Debug.Log(Tag + " start target=StandaloneWindows64 options=Development scenes=[" +
-                          lobby + ", " + dungeon + "] output=" + location);
+                          string.Join(", ", scenes) + "] output=" + location);
 
                 BuildReport report = BuildPipeline.BuildPlayer(options);
                 BuildSummary summary = report.summary;
@@ -118,9 +121,7 @@ namespace Emberdelve.EditorTools
         }
 
         /// <summary>
-        /// U3A1: builds the network proof Player (Development, Windows x64) from the NetBoot scene (index 0)
-        /// and, since U3A3, the dungeon scene (index 1, loaded by the server through NGO scene management), without
-        /// the lobby. Does not touch the
+        /// Builds the network proof Player (Development, Windows x64) from NetBoot and the required Modular Crypts scene. Does not touch the
         /// editor build settings, other scenes or the existing BuildReview flow, and never exits the
         /// Editor. Returns true only for BuildResult.Succeeded with the .exe present.
         /// </summary>
@@ -137,11 +138,13 @@ namespace Emberdelve.EditorTools
 
                 // U3A3: the server loads the dungeon through NGO scene management, so the dungeon scene ships in the proof
                 // player after the NetBoot scene, and the network player prefab + its catalog (Resources) must exist.
-                if (!File.Exists(EmberdelvePaths.DungeonScenePath))
+                if (!File.Exists(EmberdelvePaths.ModularDungeonScenePath))
                 {
-                    error = "dungeon scene missing: " + EmberdelvePaths.DungeonScenePath + " (build the vertical slice first)";
+                    error = "required modular dungeon scene missing: " + EmberdelvePaths.ModularDungeonScenePath;
                     return false;
                 }
+
+                string[] proofScenes = { EmberdelveNetBuilder.NetBootScenePath, EmberdelvePaths.ModularDungeonScenePath };
 
                 if (!EmberdelveNetBuilder.EnsureNetPlayerPrefab(out string prefabError))
                 {
@@ -154,13 +157,14 @@ namespace Emberdelve.EditorTools
 
                 BuildPlayerOptions options = new BuildPlayerOptions
                 {
-                    scenes = new string[] { EmberdelveNetBuilder.NetBootScenePath, EmberdelvePaths.DungeonScenePath },
+                    scenes = proofScenes,
                     locationPathName = exePath,
                     target = BuildTarget.StandaloneWindows64,
                     options = BuildOptions.Development
                 };
 
-                Debug.Log(Tag + " net-proof start scenes=[" + EmberdelveNetBuilder.NetBootScenePath + ", " + EmberdelvePaths.DungeonScenePath + "] output=" + exePath);
+                Debug.Log(Tag + " net-proof start scenes=[" + string.Join(", ", proofScenes) + "] output=" + exePath +
+                          " modularSceneRequired=true");
                 return EmberdelvePlayerBuildCache.Build(options, "net-proof", out error);
             }
             catch (Exception exception)
@@ -171,7 +175,7 @@ namespace Emberdelve.EditorTools
         }
 
         /// <summary>
-        /// U3A5: batch entry for the playable network build (lobby first, then the dungeon, Development, with the network player
+        /// U3A5: batch entry for the playable network build (lobby first, then required Modular Crypts, Development, with the network player
         /// prefab and its catalog generated first when missing). The same exe is the offline game (no arguments), the dedicated
         /// server (-ember-net server), a command-line client, and a client/host started from the lobby's Online panel.
         ///
@@ -205,7 +209,7 @@ namespace Emberdelve.EditorTools
         }
 
         /// <summary>
-        /// U3A5: builds the Development Windows x64 player with scenes [Lobby, Level01] (the lobby-first game) plus everything the
+        /// U3A5: builds the Development Windows x64 player with scenes [Lobby, ModularCrypts], plus everything the
         /// network layer needs at run time (the generated player prefab and its Resources catalog; the Net assembly is auto-referenced).
         /// Used by the final proof gate and by BuildNetPlayable. Does not touch the editor build settings and never exits the Editor.
         /// </summary>
@@ -215,10 +219,11 @@ namespace Emberdelve.EditorTools
             try
             {
                 string lobby = EmberdelvePaths.LobbyScenePath;
-                string dungeon = EmberdelvePaths.DungeonScenePath;
-                if (!File.Exists(lobby) || !File.Exists(dungeon))
+                string modularDungeon = EmberdelvePaths.ModularDungeonScenePath;
+                if (!File.Exists(lobby) || !File.Exists(modularDungeon))
                 {
-                    error = "saved scene(s) missing - lobby exists=" + File.Exists(lobby) + " dungeon exists=" + File.Exists(dungeon);
+                    error = "required saved scene(s) missing - lobby exists=" + File.Exists(lobby) +
+                            " modular crypts exists=" + File.Exists(modularDungeon);
                     return false;
                 }
 
@@ -233,13 +238,13 @@ namespace Emberdelve.EditorTools
 
                 BuildPlayerOptions options = new BuildPlayerOptions
                 {
-                    scenes = new string[] { lobby, dungeon },
+                    scenes = new[] { lobby, modularDungeon },
                     locationPathName = exePath,
                     target = BuildTarget.StandaloneWindows64,
                     options = BuildOptions.Development
                 };
 
-                Debug.Log(Tag + " net-final start scenes=[" + lobby + ", " + dungeon + "] output=" + exePath);
+                Debug.Log(Tag + " net-final start scenes=[" + string.Join(", ", options.scenes) + "] output=" + exePath);
                 return EmberdelvePlayerBuildCache.Build(options, "net-final", out error);
             }
             catch (Exception exception)

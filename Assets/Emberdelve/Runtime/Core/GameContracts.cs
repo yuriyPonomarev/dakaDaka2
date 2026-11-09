@@ -421,6 +421,14 @@ namespace Emberdelve.Core
         float ResolveHoldDuration(IInteractionActor actor);
     }
 
+    /// <summary>Optional begin/cancel notifications for holds whose authority must observe the uninterrupted attempt.</summary>
+    public interface IInteractableHoldLifecycle
+    {
+        bool OnHoldStarted(IInteractionActor actor);
+        void OnHoldProgress(IInteractionActor actor);
+        void OnHoldCanceled(IInteractionActor actor);
+    }
+
     /// <summary>Anything a player can act on with the interact key. R2: every call carries the acting entity.</summary>
     public interface IInteractable
     {

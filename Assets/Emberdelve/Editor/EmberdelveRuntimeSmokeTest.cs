@@ -89,7 +89,7 @@ namespace Emberdelve.EditorTools
             // HUD that builds the screen it clicks, so it descends through the lobby too.
             string scenePath = (mode == "lobby" || mode == "archer" || mode == "items" || mode == "inventoryui" || mode == "realcombatarcher")
                 ? EmberdelvePaths.LobbyScenePath
-                : EmberdelvePaths.DungeonScenePath;
+                : EmberdelvePaths.ModularDungeonScenePath;
             EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
 
             Debug.Log($"[Emberdelve][Smoke] Requesting play mode for '{mode}' in {scenePath}");
@@ -213,8 +213,19 @@ namespace Emberdelve.EditorTools
 
                 _rig = FindFirstObjectByType<PlayerRig>();
                 _director = FindFirstObjectByType<RunDirector>();
-                _layout = AssetDatabase.LoadAssetAtPath<DungeonLayoutData>(EmberdelvePaths.Data + "/DungeonLayout_AshenHalls.asset");
-                _grid = AssetDatabase.LoadAssetAtPath<NavGridData>(EmberdelvePaths.Data + "/EmberdelveNavGrid.asset");
+                // The active modular level owns its runtime layout and navigation grid. The authored
+                // Ashen Halls assets describe a different map and are not a valid geometry oracle here.
+                DungeonModuleSceneAssembler assembler = FindFirstObjectByType<DungeonModuleSceneAssembler>();
+                if (Mode == "combat")
+                {
+                    _layout = assembler != null ? assembler.RuntimeLayout : null;
+                    _grid = assembler != null ? assembler.RuntimeNavGrid : null;
+                }
+                else
+                {
+                    _layout = AssetDatabase.LoadAssetAtPath<DungeonLayoutData>(EmberdelvePaths.Data + "/DungeonLayout_AshenHalls.asset");
+                    _grid = AssetDatabase.LoadAssetAtPath<NavGridData>(EmberdelvePaths.Data + "/EmberdelveNavGrid.asset");
+                }
 
                 if (Mode == "lobby")
                 {
@@ -321,6 +332,12 @@ namespace Emberdelve.EditorTools
                 // shared allocator can be asserted from observed sequences.
                 _claims.Clear();
                 WatchComponentSequences();
+
+                // Select an actual clear lane before positioning the target. Logical walkability alone
+                // does not account for the modular level's authored pillars and closed doors.
+                bool combatLane = PlacePlayerInClearLane(5f, 0.5f, "combat opening", out _, out _);
+                Check(combatLane, "a physically clear combat opening exists");
+                if (!combatLane) yield break;
 
                 // Runs first so the real crossbow shot happens before the synthetic authority tests below
                 // have spent the sword cooldown clock. (Those tests now wait for the authority's own
@@ -725,9 +742,10 @@ namespace Emberdelve.EditorTools
                 Check(enemy != null, "an alive enemy is available for the defense tests");
                 if (enemy == null) yield break;
 
-                if (!TryPlaceEnemyBesideSpawn(enemy, _rig.transform.position, 1, DominantAxis(_rig.transform.forward), out Vector3 enemySpot))
+                if (!PlacePlayerInClearLane(3f, 0.5f, "defense telegraph", out _, out _) ||
+                    !TryPlaceEnemyBesideSpawn(enemy, _rig.transform.position, 1, DominantAxis(_rig.transform.forward), out Vector3 enemySpot))
                 {
-                    Check(false, "no walkable cell next to the player for the telegraph test");
+                    Check(false, "no clear placement next to the player for the telegraph test");
                     yield break;
                 }
 
@@ -979,14 +997,16 @@ namespace Emberdelve.EditorTools
                     return true;
                 };
 
-                // Candidate enemy spots around the anchor: the one DefenseFlow used first, then every cell 1-2 away.
+                // Search the active modular layout if the immediate surroundings do not offer an arena.
+                // All candidates still pass the original volume, LOS and full swing-arc checks.
+                // Candidate enemy spots around the anchor: the one DefenseFlow used first, then nearby cells.
                 Vector3 chosenHome = enemyHome;
                 bool found = allSpotsGood(enemyHome, anchor.y, anchor - enemyHome);
                 if (!found && _layout != null)
                 {
                     Vector2Int from = _layout.CellFromWorld(anchor);
                     Vector2Int[] dirs = { new Vector2Int(1, 0), new Vector2Int(-1, 0), new Vector2Int(0, 1), new Vector2Int(0, -1) };
-                    for (int offsetCells = 1; offsetCells <= 2 && !found; offsetCells++)
+                    for (int offsetCells = 1; offsetCells <= 10 && !found; offsetCells++)
                     {
                         for (int d = 0; d < dirs.Length && !found; d++)
                         {
@@ -1323,16 +1343,42 @@ namespace Emberdelve.EditorTools
                 Check(_director.ItemsCollected > collectedBefore, "dropped loot can be collected");
             }
 
+            // A modular room may have a plinth directly behind a pickup. Never place the
+            // controller by a fixed offset and let collision resolution lift it above the probe.
+            private bool PlacePlayerForLoot(LootPickup loot)
+            {
+                Collider target = loot.GetComponent<Collider>();
+                if (target == null || _layout == null) return false;
+                CharacterController controller = _rig.GetComponent<CharacterController>();
+                float height = controller != null ? controller.height : 1.8f;
+                float range = Mathf.Max(0.5f, _director.Config.interactionRange);
+                float radius = Mathf.Max(0.2f, _director.Config.interactSphereRadius) + 0.9f;
+                for (int i = 0; i < 16; i++)
+                {
+                    Vector3 outward = Quaternion.Euler(0f, i * 22.5f, 0f) * Vector3.back;
+                    Vector3 candidate = target.bounds.center + outward * 1.4f;
+                    candidate.y = _layout.origin.y + 0.05f;
+                    Vector3 forward = -outward;
+                    if (MovementProofGeometry.MeasureLane(candidate, forward, height, 0.05f) < 0.049f) continue;
+                    Vector3 probe = candidate + Vector3.up + forward * (range * 0.5f);
+                    if (Vector3.Distance(target.ClosestPoint(probe), probe) > radius) continue;
+                    _rig.Movement.TeleportTo(candidate);
+                    _rig.transform.rotation = Quaternion.LookRotation(forward);
+                    Physics.SyncTransforms();
+                    if (InteractionRules.Validate(_rig, loot, range, out _)) return true;
+                }
+                return false;
+            }
+
             private IEnumerator LootFlow()
             {
                 LootPickup loot = _sceneLoot != null ? _sceneLoot : FindFirstObjectByType<LootPickup>();
                 Check(loot != null, "loot pickups exist in the level");
                 if (loot == null) yield break;
 
-                Vector3 lootPosition = loot.transform.position;
-                _rig.transform.rotation = Quaternion.LookRotation(FlatForward(_rig.transform));
-                _rig.transform.position = lootPosition - FlatForward(_rig.transform) * 1.4f + Vector3.up * 0.15f;
-                Physics.SyncTransforms();
+                bool placed = PlacePlayerForLoot(loot);
+                Check(placed, "loot interaction fixture has supported capsule clearance and line of sight");
+                if (!placed) yield break;
                 yield return WaitFrames(3);
 
                 Collider lootCollider = loot.GetComponent<Collider>();
@@ -4805,7 +4851,11 @@ namespace Emberdelve.EditorTools
                 Check(mightTarget != null, "an enemy is available for the Ashen Might swing");
                 if (mightTarget != null && melee != null && melee.enabled && sword != null)
                 {
-                    Check(PlacePlayerAtSpawnFacing(1), "player re-seated at the spawn cell for the skill tests");
+                    if (!PlacePlayerInClearLane(3f, 0.5f, "Ashen Might", out _, out _))
+                    {
+                        Check(false, "a physically clear lane exists for the Ashen Might swing");
+                        yield break;
+                    }
                     mightTarget.enabled = false;
                     PlaceCombatCenterInRange(mightTarget, _rig.AimOrigin, _rig.transform.position,
                         _rig.transform.position + FlatForward(_rig.transform) * 2f, 1.9f);
@@ -4830,8 +4880,21 @@ namespace Emberdelve.EditorTools
                     float healthBefore = mightTarget.CurrentHealth;
                     int acceptedBefore = _localAuthority != null ? _localAuthority.AcceptedCount : 0;
                     DamageInfo captured = DamageInfo.Invalid;
-                    System.Action<DamageInfo> onDamaged = damage => captured = damage;
+                    Vector3 predictedRigPosition = _rig.transform.position;
+                    Quaternion predictedTargetRotation = mightTarget.transform.rotation;
+                    Vector3 predictedTargetPosition = mightTarget.transform.position;
+                    System.Action<DamageInfo> onDamaged = damage =>
+                    {
+                        captured = damage;
+                        Debug.Log($"[Emberdelve][Smoke:{Mode}] passive contact pose rig={_rig.transform.position} target={mightTarget.transform.position} targetYaw={mightTarget.transform.eulerAngles.y:F2} aim={_rig.AimOrigin} targetMoved={Vector3.Distance(predictedTargetPosition, mightTarget.transform.position):F3} rigMoved={Vector3.Distance(predictedRigPosition, _rig.transform.position):F3} targetTurn={Quaternion.Angle(predictedTargetRotation, mightTarget.transform.rotation):F2}");
+                    };
                     if (mightTarget.Health != null) mightTarget.Health.Damaged += onDamaged;
+
+                    // Freeze the seated rig while comparing a precomputed contact against the real
+                    // swing: gravity settling would otherwise change its aim origin after prediction.
+                    PlayerMovement passiveMovement = _rig.Movement;
+                    bool passiveMovementWasEnabled = passiveMovement != null && passiveMovement.enabled;
+                    if (passiveMovement != null) passiveMovement.enabled = false;
 
                     // D1b: the expected contact (location and zone) is predicted HERE, before the swing, from the rig's aim pose, the
                     // frozen target's own hit volumes and the sword's pattern data, with this test's own sampler (not the authority's record).
@@ -4840,6 +4903,7 @@ namespace Emberdelve.EditorTools
 
                     melee.BeginSwing();
                     yield return WaitSeconds(1.1f);
+                    if (passiveMovement != null) passiveMovement.enabled = passiveMovementWasEnabled;
 
                     if (mightTarget.Health != null) mightTarget.Health.Damaged -= onDamaged;
                     ParkEnemyFar(mightTarget, "keep the Dash corridor clear of the melee test target");
@@ -4891,7 +4955,9 @@ namespace Emberdelve.EditorTools
                 if (dash != null)
                 {
                     // Dash asks for 4.6m, so the test needs a corridor at least that long: three clear cells.
-                    Check(PlacePlayerAtSpawnFacing(3), "player re-seated with three clear cells for the full Dash distance");
+                    bool dashLane = PlacePlayerInClearLane(dash.dashDistance + 0.6f, 0.6f, "the Dash corridor", out _, out _);
+                    Check(dashLane, "player re-seated in a physically clear lane for the full Dash distance");
+                    if (!dashLane) yield break;
                     ClearEnemiesNear(_rig.transform.position, 9f, "the Dash corridor");
                     ClearCorridorAhead(_rig.transform.position, FlatForward(_rig.transform), dash.dashDistance, 0.6f, "the Dash corridor");
                     yield return WaitFrames(3);
@@ -5900,7 +5966,20 @@ namespace Emberdelve.EditorTools
 
                         for (int d = 0; d < directions.Length; d++)
                         {
-                            if (_grid.IsWalkable(x + directions[d].x, y + directions[d].y)) continue;
+                            Vector3 candidate = _layout.CellCenterWorld(new Vector2Int(x, y)) + Vector3.up * 0.15f;
+                            Vector3 forward = new Vector3(directions[d].x, 0f, directions[d].y);
+                            int levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
+                            if (!StandingSpotIsFree(candidate)) continue;
+                            // The test needs a real obstacle within the original 60% dash threshold,
+                            // not merely a blocked cell in a logical navigation map.
+                            if (!Physics.SphereCast(candidate + Vector3.up * 0.9f, 0.35f, forward,
+                                    out RaycastHit hit, 2.3f, levelMask, QueryTriggerInteraction.Ignore)) continue;
+                            if (hit.distance < 0.1f) continue;
+                            // The controller stops with its centre short of this cast hit. Require a
+                            // walkable cell beyond the hit with extra margin so the existing landing
+                            // assertion remains meaningful even at a logical module boundary.
+                            Vector2Int afterHit = _layout.CellFromWorld(candidate + forward * (hit.distance + 0.3f));
+                            if (!_grid.IsWalkable(afterHit.x, afterHit.y)) continue;
 
                             best = distance;
                             walkableCell = new Vector2Int(x, y);
@@ -6217,7 +6296,14 @@ namespace Emberdelve.EditorTools
 
                     if (!clear) continue;
 
-                    position = _layout.CellCenterWorld(goal);
+                    Vector3 candidate = _layout.CellCenterWorld(goal);
+                    int levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
+                    if (Physics.CheckCapsule(candidate + Vector3.up * 0.4f, candidate + Vector3.up * 1.4f,
+                            0.35f, levelMask, QueryTriggerInteraction.Ignore)) continue;
+                    Vector3 candidateCenter = candidate + (enemy.CombatCenter - enemy.transform.position);
+                    if (!HitScanner.HasLineOfSight(_rig.AimOrigin, candidateCenter, levelMask, 0.3f) ||
+                        !HitScanner.HasLineOfSight(_rig.GetMuzzlePosition(), candidateCenter, levelMask, 0.3f)) continue;
+                    position = candidate;
                     return true;
                 }
 

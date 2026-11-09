@@ -81,7 +81,7 @@ namespace Emberdelve.EditorTools
         // ---------------------------------------------------------------- orchestration
 
         [MenuItem("Emberdelve/Visual/Build First Person Arms")]
-        private static void MenuBuild() { Debug.Log("[Emberdelve][FirstPersonArms] " + EnsureAll(true)); }
+        public static void MenuBuild() { Debug.Log("[Emberdelve][FirstPersonArms] " + EnsureAll(true)); }
 
         public static string EnsureAll(bool force)
         {
@@ -668,7 +668,12 @@ namespace Emberdelve.EditorTools
                 Transform leftHand = animator.GetBoneTransform(HumanBodyBones.LeftHand);
                 Vector3 shieldFacing = (facing - right * 0.3f).normalized;
                 Quaternion shieldWorld = Quaternion.LookRotation(shieldFacing, Vector3.up);
-                Vector3 centre = leftHand.position + shieldFacing * 0.09f;
+                // Anchor the shield to the palm, as for a weapon grip. A world-forward
+                // offset becomes a sideways/downward gap when the animated wrist turns.
+                Transform leftKnuckle = animator.GetBoneTransform(HumanBodyBones.LeftMiddleProximal);
+                Vector3 centre = leftKnuckle != null
+                    ? Vector3.Lerp(leftHand.position, leftKnuckle.position, 0.75f)
+                    : leftHand.position;
                 gripPositionLeft = leftHand.InverseTransformPoint(centre);
                 gripRotationLeft = Quaternion.Inverse(leftHand.rotation) * shieldWorld;
                 handLeftShield = leftHand.position;

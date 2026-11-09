@@ -1,0 +1,19 @@
+# Network inventory drop status
+
+> Historical implementation note. Current acceptance and remaining work: [CURRENT_WORK](../CURRENT_WORK.md) and [raid acceptance](RAID_UI_ACCEPTANCE_20261108.md). Status statements below describe the original slice.
+
+
+Latest targeted runtime evidence: the separate `net-inventory-drop` gate passed **17/0** in run `20261108-001556`. A real owner dropped an equipped Rare chest item with affixes; the exact UID and affix snapshot appeared once for the owner, peer and late join. Focused equipment rollback tests passed **10/10**, and Hands tests passed **6/6**. Broader `Logs/runs/20261107-040249/summary.txt` NetInventory previously failed 146/6, including occluded pickup rejection, UID contention and remote convergence; the targeted drop pass does not resolve those independent failures.
+
+- Bag and equipment drops now reserve the shared inventory revision while the sink prepares an inactive exact-instance pickup. Direct bag mutation APIs and public class-hand mutation paths reject while this lease is held.
+- Source detach is provisional and silent. Equipment removal restores class hands/stats through silent APIs and emits no intermediate snapshots. The exact `ItemInstance` stays the same object; one shared revision and settled inventory/equipment notifications are committed only after publication succeeds.
+- Preparation refusal changes nothing. A publication exception cancels the staged pickup and restores the exact bag stack or equipment slot before revision/events commit. If preparation or publication re-enters bag mutation, the lease rejects it.
+- Production `RunDirector` stages the primitive inactive before adding `LootPickup`, so pickup `Awake` does not run during preparation. Prepared publication has no explicit game-event callback; `LootPickup.Awake` only initializes local presentation state.
+- Focused EditMode evidence: equipment tests passed 10/10 and Hands tests passed 6/6. Coverage includes preparation refusal, publication failure rollback, successful equipment publication/revision/events, direct bag/equipment/rebind re-entry, and controlled finalize/rollback exceptions across main hand, off hand, and item-kit restoration. Forced publication failure was verified by focused tests only; there is no network forced-failure scenario.
+- Separate issue: the existing two-handed equip/offhand displacement path still calls `TryUnequipSlotState` as its own committed transfer before the subsequent equip step. It can produce two revisions/events and is not covered by the drop transaction changes.
+- Added a separate dev-only `net-inventory-drop` live gate. Its server fixture rolls Rare chest gear through the trusted catalog/raid issuer, equips the exact instance on the admitted owner, and writes an expected `ItemSnapshot`. The owner sends the production equipment Drop intent only after its replicated equipment UID and bag revision match the fixture. Server verification requires the source no longer holds that UID and the floor registry contains the same `ItemInstance` exactly once; owner, peer, and late join each compare UID, item id, quantity, rarity, every affix id/key/value, and UID count in the authoritative floor snapshot.
+- The visual review remains blocked by app approval. The live gate proves the successful network drop path only; forced publication failure/rollback is covered by focused tests, not by a network run.
+
+## NetInventory rerun — 8 Nov 2026
+
+Full NetInventory passed **146/0** at `Logs/runs/20261108-042623/summary.txt`. The floor-loot fixture now selects player positions using `ValidateNetworkInteraction`, the same network reach and line-of-sight check used for real requests. The separate obstruction rejection remains in the scenario. Contention over one UID, client convergence, replay rejection and dead-player rejection passed. Real client UI and reconnect remain unverified.

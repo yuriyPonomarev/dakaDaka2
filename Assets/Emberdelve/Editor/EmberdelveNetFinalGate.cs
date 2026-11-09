@@ -28,10 +28,10 @@ namespace Emberdelve.EditorTools
     ///             -executeMethod Emberdelve.EditorTools.EmberdelveNetFinalGate.Run
     ///
     /// (Do NOT pass -quit.) Optional: -ember-proof-dir ABS_DIR (default ProjectRoot/Builds/net-final/yyyyMMdd-HHmmss),
-    /// -ember-proof-reuse-exe ABS_EXE (skip the build; the exe must be a U3A5 final player: scenes Lobby + Level01). A live Editor
+    /// -ember-proof-reuse-exe ABS_EXE (skip the build; the exe must be a U3A5 final player: scenes Lobby + Modular Crypts). A live Editor
     /// only blocks and returns; the Editor is exited only in batch mode, through EmberdelveGateExit.
     ///
-    /// One player build (BuildNetFinalPlayer: Lobby, then Level01) serves every process:
+    /// One player build (BuildNetFinalPlayer: Lobby, then Modular Crypts) serves every process:
     ///   1  server --ember-net-max-players 3 --ember-net-no-enemies
     ///   2  A (warrior) and B (archer) connect; each logs owner id views=2 owned=1
     ///   3  A walks forward 3 s: the server's displacement is the resolved walk speed x 3 s (+-20 %); B's view of A follows
@@ -47,7 +47,7 @@ namespace Emberdelve.EditorTools
     ///  11  the UDP port is free again, every PID is gone, no forbidden log pattern in any log
     /// Offline retention: (a) the earlier gates are separate entries (see the run order in Docs/Tasks/U3A5.md); (b) the same
     /// build launched WITHOUT network arguments for 8 s reaches the lobby and writes zero "[Emberdelve][Net]" lines; (c) without play
-    /// mode, the saved Level01 and Lobby scene files reference no NetworkObject / NetworkManager / any Unity.Netcode or Emberdelve.Net
+    /// mode, the saved Modular Crypts and Lobby scene files reference no NetworkObject / NetworkManager / any Unity.Netcode or Emberdelve.Net
     /// script (the same scanner finds them in the network player prefab, so it is not vacuous) and NetworkManager.Singleton is null.
     /// Also: the documented launch scripts under Tools/net parse with the real launch-argument parser.
     /// Only PIDs this gate started are ever killed. A kill forced by a timeout is a failure; the hard kill of B and the stop of the
@@ -188,43 +188,15 @@ namespace Emberdelve.EditorTools
 
         // ---- layout geometry ----------------------------------------------------------------------------------------------
 
-        private static bool Walkable(DungeonLayoutData layout, bool[,] grid, Vector3 p)
-        {
-            Vector2Int c = layout.CellFromWorld(p);
-            return c.x >= 0 && c.y >= 0 && c.x < grid.GetLength(0) && c.y < grid.GetLength(1) && grid[c.x, c.y];
-        }
-
         private static Vector3 Dir(float yawDegrees)
         {
             float r = yawDegrees * Mathf.Deg2Rad;
             return new Vector3(Mathf.Sin(r), 0f, Mathf.Cos(r));
         }
 
-        /// <summary>How far a capsule-wide lane from <paramref name="start"/> along <paramref name="yaw"/> stays on walkable cells and 1 m clear of the given points.</summary>
-        private static float FreeDistance(DungeonLayoutData layout, bool[,] grid, Vector3 start, float yaw, float max, float lateral, List<Vector3> others)
-        {
-            Vector3 dir = Dir(yaw);
-            Vector3 right = Dir(yaw + 90f);
-            float[] offsets = lateral > 0f ? new[] { 0f, lateral, -lateral } : new[] { 0f };
-
-            for (float d = 0f; d <= max; d += 0.1f)
-            {
-                for (int i = 0; i < offsets.Length; i++)
-                {
-                    if (!Walkable(layout, grid, start + dir * d + right * offsets[i])) return Mathf.Max(0f, d - 0.1f);
-                }
-
-                Vector3 centre = start + dir * d;
-                for (int i = 0; others != null && i < others.Count; i++)
-                {
-                    if (Flat(centre, others[i]) < 1.0f) return Mathf.Max(0f, d - 0.1f);
-                }
-            }
-
-            return max;
-        }
-
         // ---- the scenario -------------------------------------------------------------------------------------------------
+
+        private static string _finalProofPath;
 
         private static int Execute()
         {
@@ -246,31 +218,16 @@ namespace Emberdelve.EditorTools
             // ---- 0. static checks (no processes, no play mode) --------------------------------------------------------------
             CheckLaunchScripts(projectRoot);
 
-            DungeonLayoutData layout = AssetDatabase.LoadAssetAtPath<DungeonLayoutData>(EmberdelvePaths.Data + "/DungeonLayout_AshenHalls.asset");
             CharacterClassData warrior = AssetDatabase.LoadAssetAtPath<CharacterClassData>(EmberdelvePaths.Data + "/Class_Warrior.asset");
             CharacterClassData archer = AssetDatabase.LoadAssetAtPath<CharacterClassData>(EmberdelvePaths.Data + "/Class_Archer.asset");
-            Check(layout != null && warrior != null && archer != null, "layout and both class assets load");
-            if (layout == null || warrior == null || archer == null) return 1;
-            Check(layout.playerSpawns != null && layout.playerSpawns.Count >= 4, "the layout has at least 4 player spawns (" + (layout.playerSpawns != null ? layout.playerSpawns.Count : 0) + ")");
-            if (layout.playerSpawns == null || layout.playerSpawns.Count < 4) return 1;
-
-            bool[,] grid = layout.BuildWalkableGrid();
-            int spawnCount = layout.playerSpawns.Count;
-            Vector3[] spawn = new Vector3[spawnCount];
-            for (int i = 0; i < spawnCount; i++) spawn[i] = layout.PlayerSpawnWorld(i);
-
-            // A joins first (spawn 0), B second (spawn 1). A walks along the freest axis, clear of B's spawn.
-            List<Vector3> aOthers = new List<Vector3> { spawn[1] };
-            float yawA = 0f, bestFree = -1f;
-            foreach (float candidate in new[] { 0f, 90f, 180f, 270f })
-            {
-                float free = FreeDistance(layout, grid, spawn[0], candidate, 40f, 0.45f, aOthers);
-                if (free > bestFree) { bestFree = free; yawA = candidate; }
-            }
-
-            float walkNeeded = warrior.moveSpeed * 3f * 1.2f + 0.5f;
-            Check(bestFree >= walkNeeded, "A's lane is free for the whole walk: yaw " + yawA + " free " + F2(bestFree) + " m >= " + F2(walkNeeded));
-            if (bestFree < walkNeeded) return 1;
+            Check(warrior != null && archer != null, "both class assets load");
+            if (warrior == null || archer == null) return 1;
+            Vector3[] spawn;
+            int spawnCount;
+            const float yawA = 0f;
+            _finalProofPath = Path.Combine(runDir, "final-proof");
+            foreach (string suffix in new[] { ".stage", ".ready", ".failed" })
+                if (File.Exists(_finalProofPath + suffix)) File.Delete(_finalProofPath + suffix);
 
             // ---- 1. player ----------------------------------------------------------------------------------------------------
             string exe = ArgValue("-ember-proof-reuse-exe");
@@ -279,7 +236,7 @@ namespace Emberdelve.EditorTools
                 exe = Path.Combine(runDir, "player", "EmberdelveNet.exe");
                 exe = EmberdelvePlayerBuildCache.TestPlayerPath(exe, "net-final");
                 bool built = EmberdelveWindowsBuild.BuildNetFinalPlayer(exe, out string buildError);
-                Check(built, "final player build (Lobby + Level01)" + (built ? "" : " failed: " + buildError));
+                Check(built, "final player build (Lobby + Modular Crypts)" + (built ? "" : " failed: " + buildError));
                 if (!built) return 1;
             }
             else
@@ -318,6 +275,15 @@ namespace Emberdelve.EditorTools
             if (ready == null) return 1;
             Check(ready.Groups[1].Value == "0" && ready.Groups[2].Value == "0" && ready.Groups[3].Value == "0", "ready with players=0 senders=0 registry=0");
             Check(LogContains(serverLog, "[Emberdelve][Lobby] skipped: process role is DedicatedServer"), "the server did not build the lobby screen (network role)");
+            Match serverPlan = Regex.Match(ReadShared(serverLog), @"modular plan seed=(-?\d+) hash=([0-9A-F]+)");
+            Check(serverPlan.Success, "server declared its modular plan seed and hash");
+            if (!serverPlan.Success) return 1;
+            bool reconstructed = EmberdelveModularSpawnProof.TryExpectedModularSpawns(int.Parse(serverPlan.Groups[1].Value, CultureInfo.InvariantCulture),
+                serverPlan.Groups[2].Value, out Vector3[] modularSpawns, out string planError);
+            Check(reconstructed && modularSpawns.Length >= 4, "independent authored plan reconstruction" + (reconstructed ? "" : ": " + planError));
+            if (!reconstructed || modularSpawns.Length < 4) return 1;
+            spawn = modularSpawns;
+            spawnCount = spawn.Length;
 
             // ---- 3. A (warrior, walks) and B (archer, cheats) ------------------------------------------------------------------
             string logA = Path.Combine(logs, "client_a.log");
@@ -353,6 +319,19 @@ namespace Emberdelve.EditorTools
             Check(WaitForRegex(logA, @"\[client\] owner id=" + idA + @" views=2 owned=1 class=warrior party=\d+ ids=" + idsAB, 60, a) != null, "A logs owner id=" + idA + " views=2 owned=1 ids=" + idsAB);
             Check(WaitForRegex(logB, @"\[client\] owner id=" + idB + @" views=2 owned=1 class=archer party=\d+ ids=" + idsAB, 60, b) != null, "B logs owner id=" + idB + " views=2 owned=1 ids=" + idsAB);
 
+            // Validate production spawns above, then measure the unchanged three-second walk on a
+            // server-selected physical lane. This local development fixture is not a client command.
+            File.WriteAllText(_finalProofPath + ".stage", "stage");
+            Match staged = WaitForRegex(serverLog, @"final-proof staged hash=([0-9A-F]+) a=" + Vec +
+                " distance=" + Num + @" tick=(\d+)", 60, server);
+            Check(staged != null, "server staged A on a supported capsule-clear lane");
+            if (staged == null) return 1;
+            Vector3 stagedA = V3(staged, 2);
+            float measuredDistance = Fl(staged.Groups[5].Value);
+            Check(staged.Groups[1].Value == serverPlan.Groups[2].Value && measuredDistance >= regA.Walk * 3f * 1.2f + 0.49f,
+                "staged lane matches the server map and covers the unchanged walk bound");
+            if (!WaitForStagedViews(logA, logB, idA, stagedA)) return 1;
+
             // ---- 4. go: A walks, B cheats --------------------------------------------------------------------------------------
             File.WriteAllText(startA, "go");
             File.WriteAllText(startB, "go");
@@ -366,6 +345,7 @@ namespace Emberdelve.EditorTools
             Seg walk = segA.Count > 0 ? segA[0] : null;
             if (walk != null)
             {
+                Check(Flat(walk.From, stagedA) < 0.3f, "A began walking at the replicated staged position");
                 float expected = regA.Walk * 3f;
                 Check(walk.Disp >= expected * 0.8f && walk.Disp <= expected * 1.2f,
                     "A walked " + F2(walk.Disp) + " m in 3 s; expected " + F2(expected) + " m (resolved walk speed " + F2(regA.Walk) + " x 3 s) +-20%");
@@ -388,9 +368,10 @@ namespace Emberdelve.EditorTools
                 "B's last view of A is within 0.15 m of the server position (" + (seenAbyB ? F2(Vector3.Distance(viewedAbyB, lastA.Pos)) : "?") + " m)");
 
             string textA = ReadShared(logA);
-            Match reconA = Regex.Match(textA, @"\[client\] reconcile acks=(\d+) maxErr=" + Num + " meanErr=" + Num + @" blends=(\d+) snaps=(\d+) replays=(\d+) replayFrames=\d+ missing=\d+ stale=\d+ fights=(\d+) at=script-end");
-            Check(reconA.Success && reconA.Groups[5].Value == "0" && reconA.Groups[7].Value == "0",
-                "A's own walk had no prediction snap and no fight with the transform sync" + (reconA.Success ? " (snaps=" + reconA.Groups[5].Value + ")" : " (no script-end reconcile line)"));
+            Match reconA = Regex.Match(textA, @"\[client\] reconcile proof-interval valid=(true|false) acks=(\d+) meanErr=([0-9.eE+-]+) snaps=(\d+) replays=(\d+) fights=(\d+) at=script-end");
+            Check(reconA.Success && reconA.Groups[1].Value == "true" && int.Parse(reconA.Groups[2].Value, CultureInfo.InvariantCulture) > 0 &&
+                  reconA.Groups[4].Value == "0" && reconA.Groups[6].Value == "0",
+                "A's own walk had no prediction snap and no fight with the transform sync (measured after staging)");
 
             // B's six cheats: one REJECT each, B itself did not move, nobody went faster than the bound
             foreach (string kind in new[] { "nan", "big-move", "seq-jump", "replay", "flood", "forge-move" })
@@ -425,7 +406,7 @@ namespace Emberdelve.EditorTools
             int firstNet = textC0.IndexOf("[Emberdelve][Net]", StringComparison.Ordinal);
             Check(lobbyReady >= 0 && firstNet > lobbyReady, "C reached the lobby first and wrote its first network line only after that");
             Check(textC0.Contains("[Emberdelve][Lobby] autojoin armed address=127.0.0.1:" + port) &&
-                  textC0.Contains("[Emberdelve][Lobby] online join address=127.0.0.1 port=" + port + " class="),
+                  textC0.Contains("[Emberdelve][Lobby] online join map=server-selected address=127.0.0.1 port=" + port + " class=" + admC.Groups[3].Value),
                 "C's Online panel parsed the address and started a Join with the lobby's class");
             Check(textC0.Contains("[Emberdelve][Net][client] boot ") && textC0.Contains("slot=fin-c"), "C booted the client role from the panel (same bootstrap as the command line)");
 
@@ -687,7 +668,7 @@ namespace Emberdelve.EditorTools
         }
 
         /// <summary>
-        /// Offline retention (c), without play mode: the saved Level01 and Lobby scene files reference no NetworkObject, NetworkManager,
+        /// Offline retention (c), without play mode: the saved Modular Crypts and Lobby scene files reference no NetworkObject, NetworkManager,
         /// NetworkBehaviour or Emberdelve.Net script and no instance of the network player prefab. The scanner reads the scene YAML,
         /// resolves every script GUID to its class and tests the type; the same scanner must find network components in the network
         /// player prefab (a control, so a broken scanner cannot pass), and the scene must show non-network Emberdelve scripts (so
@@ -703,7 +684,7 @@ namespace Emberdelve.EditorTools
             int controlHits = ScanForNetworkScripts(EmberdelveNetBuilder.PlayerPrefabPath, null, out int controlScripts, out _);
             Check(controlScripts > 5 && controlHits >= 3, "scanner control: the network player prefab references " + controlHits + " network scripts among " + controlScripts + " (NetworkObject, NetworkTransform, NetPlayerRig)");
 
-            foreach (string scenePath in new[] { EmberdelvePaths.DungeonScenePath, EmberdelvePaths.LobbyScenePath })
+            foreach (string scenePath in new[] { EmberdelvePaths.ModularDungeonScenePath, EmberdelvePaths.LobbyScenePath })
             {
                 int hits = ScanForNetworkScripts(scenePath, prefabGuid, out int scripts, out string offenders);
                 string name = Path.GetFileName(scenePath);
@@ -779,6 +760,8 @@ namespace Emberdelve.EditorTools
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
+                if (gameArgs.StartsWith("-ember-net server", StringComparison.Ordinal))
+                    info.EnvironmentVariables["EMBER_FINAL_PROOF_PATH"] = _finalProofPath;
                 Process process = Process.Start(info);
                 if (process != null) Started.Add(process);
                 Debug.Log(Tag + " launched pid=" + (process != null ? process.Id.ToString() : "-") + " " + info.Arguments);
@@ -789,6 +772,22 @@ namespace Emberdelve.EditorTools
                 Debug.LogError(Tag + " launch failed: " + e.Message);
                 return null;
             }
+        }
+
+        private static bool WaitForStagedViews(string ownerLog, string peerLog, int ownerId, Vector3 position)
+        {
+            DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+            bool converged;
+            do
+            {
+                MatchCollection predicted = Regex.Matches(ReadShared(ownerLog), @"\[client\] predict pos=" + Vec);
+                bool ownerReady = predicted.Count > 0 && Vector3.Distance(V3(predicted[predicted.Count - 1], 1), position) <= 0.15f;
+                bool peerReady = TryLastView(ReadShared(peerLog), ownerId, out Vector3 peerPosition) && Vector3.Distance(peerPosition, position) <= 0.15f;
+                converged = ownerReady && peerReady;
+                if (!converged) Thread.Sleep(200);
+            } while (!converged && DateTime.UtcNow < deadline);
+            Check(converged, "A's prediction and B's observer view converged before the walk");
+            return converged;
         }
 
         private static bool WaitForLog(string path, string needle, double seconds, Process owner)

@@ -52,6 +52,32 @@ namespace Emberdelve.NetRules.Tests
         }
 
         [Test]
+        public void ClearingForModal_DiscardsOldRetransmissionsAndKeepsSequenceMonotonic()
+        {
+            MoveInputAggregator a = new MoveInputAggregator();
+            MoveInputFrame[] batch = new MoveInputFrame[MoveInputAggregator.BatchSize];
+            InputSanitizer sanitizer = new InputSanitizer();
+            a.Sample(1f, 1f, true, true, true, 0f, 0f);
+            MoveInputFrame first = a.Flush();
+            Assert.That(sanitizer.Submit(first, true, 0.0, out _), Is.EqualTo(SanitizeVerdict.Accepted));
+            a.ClearPendingInput();
+            a.Sample(0f, 0f, false, false, false, 0f, 0f);
+            MoveInputFrame next = a.Flush();
+            Assert.That(next.Seq, Is.EqualTo(first.Seq + 1));
+            Assert.That(next.MoveX, Is.EqualTo(0f));
+            Assert.That(next.MoveY, Is.EqualTo(0f));
+            Assert.That(next.Sprint, Is.False);
+            Assert.That(next.Jump, Is.False);
+            Assert.That(next.CrouchToggle, Is.False);
+            Assert.That(a.FillBatch(batch), Is.EqualTo(1), "the stale sequence is not retransmitted with edited contents");
+            Assert.That(batch[0].Seq, Is.EqualTo(next.Seq));
+            Assert.That(sanitizer.Submit(next, true, 0.1, out _), Is.EqualTo(SanitizeVerdict.Accepted));
+            var missedPriorPacket = new InputSanitizer();
+            Assert.That(missedPriorPacket.Submit(next, true, 0.0, out _), Is.EqualTo(SanitizeVerdict.Accepted),
+                "the next monotonic sequence remains valid if the discarded prior packet was lost");
+        }
+
+        [Test]
         public void Frames_AreInTheQuantizedWireForm_AndHonestNaNBecomesZero()
         {
             MoveInputAggregator a = new MoveInputAggregator();

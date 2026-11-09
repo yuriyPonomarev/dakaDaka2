@@ -97,6 +97,32 @@ namespace Emberdelve.Net.Rules
         }
     }
 
+    /// <summary>Non-mutating cumulative snapshot for measuring a reconciliation interval.</summary>
+    public readonly struct ReconcileStatsSnapshot
+    {
+        public readonly int Acks, Snaps, Replays, Fights;
+        public readonly double SumError;
+
+        public ReconcileStatsSnapshot(int acks, double sumError, int snaps, int replays, int fights)
+        {
+            Acks = acks; SumError = sumError; Snaps = snaps; Replays = replays; Fights = fights;
+        }
+
+        /// <summary>Returns false for an empty interval or a counter reset, never silently accepting missing samples.</summary>
+        public bool TryInterval(ReconcileStatsSnapshot end, out double meanError, out int acks,
+            out int snaps, out int replays, out int fights)
+        {
+            meanError = 0d;
+            acks = end.Acks - Acks; snaps = end.Snaps - Snaps;
+            replays = end.Replays - Replays; fights = end.Fights - Fights;
+            double sum = end.SumError - SumError;
+            if (acks <= 0 || snaps < 0 || replays < 0 || fights < 0 ||
+                double.IsNaN(sum) || double.IsInfinity(sum) || sum < 0d) return false;
+            meanError = sum / acks;
+            return true;
+        }
+    }
+
     /// <summary>What the owner reports about its own prediction (the line the gate reads).</summary>
     public sealed class ReconcileStats
     {
@@ -114,6 +140,8 @@ namespace Emberdelve.Net.Rules
         public int Fights;
 
         public float MeanError => Acks > 0 ? (float)(SumError / Acks) : 0f;
+
+        public ReconcileStatsSnapshot Capture() => new ReconcileStatsSnapshot(Acks, SumError, Snaps, Replays, Fights);
 
         public void RecordAck(float error)
         {

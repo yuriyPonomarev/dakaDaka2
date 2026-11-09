@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.IO;
 using Emberdelve.Net.Rules;
 using Emberdelve.Player;
@@ -83,6 +83,9 @@ namespace Emberdelve.Net
             _pitch = MoveInputFrame.ClampPitch(pitchDegrees);
         }
 
+        /// <summary>Discard buffered local movement when a modal inventory takes control of input.</summary>
+        public void ClearPendingMovement() => _aggregator.ClearPendingInput();
+
         public void Configure(NetPlayerRig owner, NetLaunchArgs args)
         {
             _owner = owner;
@@ -93,7 +96,7 @@ namespace Emberdelve.Net
             _spawnedAt = Time.unscaledTime;
 
             NetScriptSpec spec = args != null ? args.ScriptSpec : null;
-            _spec = spec != null && !spec.IsProbeOnly ? spec : null; // probe scripts (forge-owner, skill-*) are not movement scripts
+            _spec = spec != null && !spec.IsProbeOnly ? spec : null; // isolated probes (inventory / extraction included) do not steer movement
             // U3B2: a client that was given ANY script is a scripted client and takes no real input, even in a window (a probe script
             // used to leave the keyboard live because _spec was nulled above).
             _useRealInput = spec == null && !Application.isBatchMode && _rig != null && _rig.Input != null;
@@ -122,6 +125,14 @@ namespace Emberdelve.Net
         {
             if (_owner == null || !_owner.IsSpawned) return;
             if (!_viewInitialized) InitializeView();
+
+            var inventory = GetComponent<NetInventoryClient>();
+            if (_spec == null && inventory != null && inventory.IsOpen)
+            {
+                _aggregator.ClearPendingInput();
+                _aggregator.Sample(0f, 0f, false, false, false, _yaw, _pitch);
+                return;
+            }
 
             if (_spec != null) SampleScript();
             else if (_combatDrive) _aggregator.Sample(0f, _driveMoveY, false, false, false, _yaw, _pitch);
@@ -169,6 +180,9 @@ namespace Emberdelve.Net
                 {
                     _scriptStarted = true;
                     _scriptStartedAt = Time.unscaledTime;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                    if (_prediction != null) _prediction.BeginProofInterval();
+#endif
                     Debug.Log(NetTuning.LogPrefix + "[client] script " + _spec.Text + " start pos=" + Pos(_owner.transform.position));
                 }
                 else
@@ -197,6 +211,9 @@ namespace Emberdelve.Net
                 _scriptCompleted++;
                 Debug.Log(NetTuning.LogPrefix + "[client] script " + step.Name + " done pos=" + Pos(_owner.transform.position));
                 if (_prediction != null) _prediction.LogStats("step:" + step.Name);
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                if (_prediction != null && step.Name == "jump") _prediction.LogProofInterval("step:jump");
+#endif
             }
 
             if (intent.Done && !_scriptLoggedAll)
@@ -204,6 +221,9 @@ namespace Emberdelve.Net
                 _scriptLoggedAll = true;
                 Debug.Log(NetTuning.LogPrefix + "[client] script chain done steps=" + _spec.Steps.Count + " pos=" + Pos(_owner.transform.position));
                 if (_prediction != null) _prediction.LogStats("script-end");
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                if (_prediction != null) _prediction.LogProofInterval("script-end");
+#endif
             }
         }
 

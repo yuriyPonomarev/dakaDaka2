@@ -3,7 +3,8 @@
   "references": [
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner",
-    "Emberdelve.NetRules"
+    "Emberdelve.NetRules",
+    "Emberdelve.Runtime"
   ],
   "includePlatforms": [
     "Editor"

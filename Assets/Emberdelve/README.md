@@ -12,11 +12,12 @@ Unity version used: **6000.2.5f1** (URP, new Input System).
 
 1. Open `Assets/Emberdelve/Scenes/Lobby.unity`.
 2. Press Play. Pick **Warrior** or **Archer**, then click **DESCEND**.
-3. In the Ashen Halls: kill Hollow Servitors / Ashen Wardens, take loot, then stand on the
+3. In the modular crypts: kill Hollow Servitors / Ashen Wardens, take loot, then stand on the
    **Ember Gate** and hold **E** for 3 seconds to extract.
 
-The build settings already list `Lobby` first and `Emberdelve_Level01` second, so *Play from
-browser* / a standalone build starts in the lobby too.
+The build settings list `Lobby` first and `Emberdelve_ModularCrypts` second, so *Play from
+browser* / a standalone build starts in the lobby and always descends into the modular map.
+The legacy `Emberdelve_Level01` scene stays in the project for reference and editing; it is not a gameplay option.
 
 ### Controls
 
@@ -45,11 +46,11 @@ charge affects damage.
 
 | Menu item | What it does |
 | --- | --- |
-| Build Vertical Slice (all) | Re-creates data assets, materials, lobby scene and dungeon scene |
+| Build Vertical Slice (all) | Creates data assets, materials and lobby; creates Modular Crypts only when that scene is missing |
 | Build Data Assets Only | ScriptableObject classes / weapons / items / enemies / layout / nav grid |
-| Build Dungeon Scene Only | Regenerates `Emberdelve_Level01` from the layout asset |
+| Build Dungeon Scene Only | Opens the required Modular Crypts scene, creating it only when missing |
 | Build Lobby Scene Only | Regenerates `Lobby` |
-| Open Lobby / Open Dungeon Scene | Loads the generated scene |
+| Open Lobby / Open Dungeon Scene | Loads the lobby or Modular Crypts scene |
 | Validate Slice | Headless check: nav grid matches the layout, every cell reachable from spawn, A* route to the gate, and every gameplay reference in the scene resolves |
 
 Command-line equivalents (used to verify this build):
@@ -125,7 +126,7 @@ Assets/Emberdelve/
                 bootstrap menu, runtime smoke test
   Data/         ScriptableObjects (classes, weapons, items, enemies, layout, nav grid, config)
   Art/Material/ generated placeholder materials
-  Scenes/       Lobby.unity, Emberdelve_Level01.unity
+  Scenes/       Lobby.unity, Emberdelve_ModularCrypts.unity, Emberdelve_Level01.unity (legacy reference)
 ```
 
 ### Multiplayer seams already in place

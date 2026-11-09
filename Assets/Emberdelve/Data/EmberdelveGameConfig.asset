@@ -13,11 +13,13 @@ MonoBehaviour:
   m_Name: EmberdelveGameConfig
   m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Core.GameConfig
   lobbySceneName: Lobby
-  dungeonSceneName: Emberdelve_Level01
+  dungeonSceneName: Emberdelve_ModularCrypts
   levelTitle: The Ashen Halls
   objectiveText: Recover at least one relic, then hold [E] at the Ember Gate.
   requireLootToExtract: 1
   extractionHoldDuration: 3
+  enableRaidCountdown: 1
+  raidDurationSeconds: 600
   interactionRange: 2.4
   interactSphereRadius: 0.45
   interactionAuthorityRange: 3

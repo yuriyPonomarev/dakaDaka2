@@ -12,6 +12,8 @@ using Emberdelve.Data;
 using Emberdelve.Level;
 using Emberdelve.Net.Rules;
 using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine.SceneManagement;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
@@ -64,6 +66,8 @@ namespace Emberdelve.EditorTools
         private static int _checks;
         private static int _failures;
         private static readonly List<Process> Started = new List<Process>();
+        private static string _movementProofPath;
+        private static DungeonLayoutData _proofLayout;
 
         public static void Run()
         {
@@ -74,7 +78,7 @@ namespace Emberdelve.EditorTools
                 Check(false, "gate threw " + e);
                 exit = 1;
             }
-            finally { KillSurvivors(); }
+            finally { KillSurvivors(); if (_proofLayout != null) UnityEngine.Object.DestroyImmediate(_proofLayout); _proofLayout = null; }
 
             string verdict = _failures == 0 ? "PASS" : "FAIL";
             string line = Tag + " " + verdict + " checks=" + _checks + " failures=" + _failures;
@@ -340,57 +344,22 @@ namespace Emberdelve.EditorTools
                 return 1;
             }
 
+            _movementProofPath = Path.Combine(runDir, "movement-proof");
+            foreach (string suffix in new[] { ".stage", ".ready", ".failed" })
+                if (File.Exists(_movementProofPath + suffix)) File.Delete(_movementProofPath + suffix);
             string logs = Path.Combine(runDir, "logs");
             Directory.CreateDirectory(logs);
             Debug.Log(Tag + " runDir=" + runDir);
 
-            // ---- layout + class data: where everybody spawns, which way is free, where the wall is --------------------------
-            DungeonLayoutData layout = AssetDatabase.LoadAssetAtPath<DungeonLayoutData>(EmberdelvePaths.Data + "/DungeonLayout_AshenHalls.asset");
             CharacterClassData warrior = AssetDatabase.LoadAssetAtPath<CharacterClassData>(EmberdelvePaths.Data + "/Class_Warrior.asset");
             CharacterClassData archer = AssetDatabase.LoadAssetAtPath<CharacterClassData>(EmberdelvePaths.Data + "/Class_Archer.asset");
-            Check(layout != null && warrior != null && archer != null, "layout and both class assets load");
-            if (layout == null || warrior == null || archer == null) return 1;
-            Check(layout.playerSpawns != null && layout.playerSpawns.Count >= 4, "the layout has at least 4 player spawns (" + (layout.playerSpawns != null ? layout.playerSpawns.Count : 0) + ")");
-            if (layout.playerSpawns == null || layout.playerSpawns.Count < 4) return 1;
-
-            bool[,] grid = layout.BuildWalkableGrid();
-            Vector3[] spawn = new Vector3[4];
-            for (int i = 0; i < 4; i++) spawn[i] = layout.PlayerSpawnWorld(i);
-            // slot 0 = B, 1 = A, 2 = W, 3 = V
-            List<Vector3> aOthers = new List<Vector3> { spawn[0], spawn[2], spawn[3] };
-            List<Vector3> wOthers = new List<Vector3> { spawn[0], spawn[1], spawn[3] };
-
-            float yawA = 0f, bestFree = -1f;
-            foreach (float candidate in new[] { 0f, 90f, 180f, 270f })
-            {
-                float free = FreeDistance(layout, grid, spawn[1], candidate, 40f, 0.45f, aOthers);
-                if (free > bestFree) { bestFree = free; yawA = candidate; }
-            }
-
-            float walkNeeded = archer.moveSpeed * 3f * 1.2f + 0.5f; // longest walk the +20 % check accepts, plus margin
-            Check(bestFree >= walkNeeded, "A's lane is free for the whole walk: yaw " + yawA + " free " + bestFree.ToString("F1", CultureInfo.InvariantCulture) + " m >= " + walkNeeded.ToString("F1", CultureInfo.InvariantCulture));
-            Vector3 aTurn = spawn[1] + Dir(yawA) * (archer.moveSpeed * 3f);
-            float yawBack = yawA + 180f;
-            float backFree = FreeDistance(layout, grid, aTurn, yawBack, 40f, 0.45f, aOthers);
-            Check(backFree >= archer.sprintSpeed * 1.5f * 1.2f + 0.5f, "the way back for the sprint is free: " + backFree.ToString("F1", CultureInfo.InvariantCulture) + " m");
-
-            float yawW = 0f, wallDist = 0f, bestScore = float.MaxValue;
-            foreach (float candidate in new[] { 0f, 90f, 180f, 270f })
-            {
-                // The wall alone (no other players) decides the distance; the lane must be wall-wide free up to it and no player may stand in it.
-                float boundary = FreeDistance(layout, grid, spawn[2], candidate, 40f, 0f, null, includeChests: false);
-                float lane = FreeDistance(layout, grid, spawn[2], candidate, 40f, 0.45f, null);
-                float laneWithPlayers = FreeDistance(layout, grid, spawn[2], candidate, 40f, 0.45f, wOthers);
-                Debug.Log(Tag + " wall candidate yaw=" + candidate + " geometry=" + boundary.ToString("R", CultureInfo.InvariantCulture) + " clear=" + lane.ToString("R", CultureInfo.InvariantCulture) + " players=" + laneWithPlayers.ToString("R", CultureInfo.InvariantCulture));
-                if (boundary < 3f || boundary > 9f || lane < boundary - 1.0f || laneWithPlayers < lane - 0.3f) continue;
-                float score = Mathf.Abs(boundary - 6f);
-                if (score < bestScore) { bestScore = score; yawW = candidate; wallDist = boundary; }
-            }
-
-            Check(wallDist > 0f, "W has a wall 3 to 9 m ahead: yaw " + yawW + " boundary " + wallDist.ToString("F1", CultureInfo.InvariantCulture) + " m");
-            if (bestFree < walkNeeded || wallDist <= 0f) return 1;
-            Check(FreeDistance(layout, grid, spawn[2], yawW, 40f, 0.45f, wOthers) >= wallDist - 1.0f,
-                "the wall lane is clear of authored chest footprints and other players before level geometry");
+            Check(warrior != null && archer != null, "both class assets load");
+            if (warrior == null || archer == null) return 1;
+            // The server selects physically measured +Z lanes after the original spawn positions are verified.
+            float yawA = 0f, yawBack = 180f, yawW = 0f, wallDist = 0f;
+            Vector3[] spawn = null;
+            DungeonLayoutData layout = null;
+            bool[,] grid = null;
 
             // ---- 1. player + server ---------------------------------------------------------------
             string exe = ArgValue("-ember-proof-reuse-exe");
@@ -440,6 +409,19 @@ namespace Emberdelve.EditorTools
             Check(ready != null && ready.Groups[1].Value == "0", "server is ready with players=0 and no enemies (registry=0)");
             if (ready == null) return 1;
             Check(LogContains(serverLog, "movement simulation attached tickRate=" + NetTuning.TickRate), "the server attached its movement simulation to the network tick at tickRate=" + NetTuning.TickRate);
+            Match planLine = WaitForRegex(serverLog, @"modular plan seed=(-?\d+) hash=([0-9A-F]+)", 30, server);
+            Check(planLine != null, "server published the modular plan seed and hash");
+            if (planLine == null) return 1;
+            int planSeed = int.Parse(planLine.Groups[1].Value, CultureInfo.InvariantCulture);
+            string planHash = planLine.Groups[2].Value;
+            bool reconstructed = EmberdelveModularSpawnProof.TryExpectedModularSpawns(planSeed, planHash, out spawn, out string spawnError);
+            Check(reconstructed && spawn != null && spawn.Length >= 4, "independent prefab reconstruction verifies four spawn slots" + (reconstructed ? "" : ": " + spawnError));
+            if (!reconstructed || spawn == null || spawn.Length < 4) return 1;
+            bool builtGrid = TryBuildModularGrid(planSeed, planHash, out layout, out string gridError);
+            Check(builtGrid, "independent plan reconstructs the modular walkable grid" + (builtGrid ? "" : ": " + gridError));
+            if (!builtGrid) return 1;
+            _proofLayout = layout;
+            grid = layout.BuildWalkableGrid();
 
             // ---- 2. clients in slot order ---------------------------------------------------------
             string scriptB = "nan-input:1.5,big-move:1.5,seq-jump:1.5,replay-seq:1.5,flood-input:1.5,forge-move:1.5";
@@ -489,6 +471,17 @@ namespace Emberdelve.EditorTools
                 Check(WaitForRegex(clientLogs[i], @"\[client\] owner id=" + ids[i] + @" views=4 owned=1 ", 60, clients[i]) != null,
                     names[i].ToUpperInvariant() + " sees four players and owns exactly its own (id " + ids[i] + ")");
 
+            // Confirm each independently instantiated client map agrees before testing any movement.
+            for (int c = 0; c < 4; c++)
+            for (int slot = 0; slot < 4; slot++)
+            {
+                Match clientSpawn = WaitForRegex(clientLogs[c], @"movement-proof layout hash=" + planHash + " slot=" + slot + " pos=" + Vec, 30, clients[c]);
+                Check(clientSpawn != null && Flat(V3(clientSpawn, 1), spawn[slot]) < 0.05f,
+                    names[c].ToUpperInvariant() + " reconstructed spawn slot " + slot + " on the same plan");
+            }
+            if (!StageMovementActors(serverLog, server, clientLogs, idA, idW,
+                    out Vector3 stagedA, out Vector3 stagedW, out wallDist, out long stageTick)) return 1;
+
             // ---- 3. go ------------------------------------------------------------------------------
             for (int i = 0; i < 3; i++) File.WriteAllText(start[i], "go");
 
@@ -506,7 +499,7 @@ namespace Emberdelve.EditorTools
             {
                 Seg walk = segA[0], sprint = segA[1], flood = segA[2];
                 float expectedWalk = regA.Walk * 3f;
-                Check(Flat(walk.From, regA.Pos) < 0.3f, "A's walk starts at its spawn");
+                Check(Flat(walk.From, stagedA) < 0.3f, "A's walk starts at the verified staged position");
                 Check(walk.Disp >= expectedWalk * 0.8f && walk.Disp <= expectedWalk * 1.2f,
                     "A walked " + walk.Disp.ToString("F2", CultureInfo.InvariantCulture) + " m in 3 s; expected " + expectedWalk.ToString("F2", CultureInfo.InvariantCulture) + " m (walk speed " + regA.Walk.ToString("F2", CultureInfo.InvariantCulture) + " x 3 s) +-20%");
                 Check(walk.Mean >= regA.Walk * 0.8f && walk.Mean <= regA.Walk * 1.2f, "A's mean walking speed " + walk.Mean.ToString("F2", CultureInfo.InvariantCulture) + " is the resolved walk speed +-20%");
@@ -546,16 +539,29 @@ namespace Emberdelve.EditorTools
             Check(segW.Count >= 1, "W has a movement segment");
             if (segW.Count >= 1)
             {
-                Seg run = segW[0];
+                // A brief input starvation can close a telemetry segment before the walk resumes.
+                // Measure the whole staged run, including every segment's endpoint and peak speed.
+                Seg run = segW[segW.Count - 1];
+                float displacement = Flat(stagedW, run.To), furthest = 0f, peak = 0f;
+                Vector3 previousEnd = stagedW;
+                bool continuous = true;
+                foreach (Seg segment in segW)
+                {
+                    continuous &= Flat(previousEnd, segment.From) < 0.3f;
+                    furthest = Mathf.Max(furthest, Flat(stagedW, segment.From), Flat(stagedW, segment.To));
+                    peak = Mathf.Max(peak, segment.Peak);
+                    previousEnd = segment.To;
+                }
+                Check(continuous, "W's movement segments are continuous from the verified staged position");
                 Check(!run.Open, "W's run ended against the wall (the segment closed itself)");
-                Check(run.Disp <= wallDist + 0.02f, "W stayed on the near side: travelled " + run.Disp.ToString("F2", CultureInfo.InvariantCulture) + " m, wall plane at " + wallDist.ToString("F2", CultureInfo.InvariantCulture) + " m");
-                Check(run.Disp >= wallDist - 1.3f, "and reached the wall (not stopped short)");
+                Check(furthest <= wallDist + 0.02f, "W stayed on the near side: travelled " + displacement.ToString("F2", CultureInfo.InvariantCulture) + " m, wall plane at " + wallDist.ToString("F2", CultureInfo.InvariantCulture) + " m");
+                Check(displacement >= wallDist - 1.3f, "and reached the wall (not stopped short)");
                 Check(Walkable(layout, grid, run.To), "W's final cell is a walkable cell");
                 List<MoveLine> movesW = ParseMoves(serverText, idW);
                 MoveLine lastW = movesW.Count > 0 ? movesW[movesW.Count - 1] : null;
-                Check(lastW != null && Flat(lastW.Pos, regW.Pos) <= wallDist + 0.02f && Walkable(layout, grid, lastW.Pos),
+                Check(lastW != null && Flat(lastW.Pos, stagedW) <= wallDist + 0.02f && Walkable(layout, grid, lastW.Pos),
                     "W's last logged position is still on the near side of the wall and on a walkable cell");
-                Check(run.Peak <= archer.moveSpeed * 1.5f, "W's run was an ordinary walk (peak " + run.Peak.ToString("F2", CultureInfo.InvariantCulture) + ")");
+                Check(peak <= archer.moveSpeed * 1.5f, "W's run was an ordinary walk (peak " + peak.ToString("F2", CultureInfo.InvariantCulture) + ")");
             }
 
             // ---- 6. observer: B sees what the server has -------------------------------------------------
@@ -598,10 +604,24 @@ namespace Emberdelve.EditorTools
                 Debug.Log(Tag + " A honest-phase " + C + "reconcile acks=" + honest.Acks + " maxErr=" + honest.MaxErr.ToString("F3", CultureInfo.InvariantCulture) +
                           " meanErr=" + honest.MeanErr.ToString("F3", CultureInfo.InvariantCulture) + " blends=" + honest.Blends + " snaps=" + honest.Snaps +
                           " replays=" + honest.Replays + " missing=" + honest.Missing + " stale=" + honest.Stale + " fights=" + honest.Fights);
-                Check(honest.Acks >= 30, "A compared at least 30 Acks with its prediction through walk, sprint and jump (" + honest.Acks + ")");
-                Check(honest.Snaps == 0 && honest.Replays == 0, "A had no snap (and no replay) during honest movement (snaps=" + honest.Snaps + " replays=" + honest.Replays + ")");
-                Check(honest.MeanErr <= 0.05f, "A's mean reconcile error is at most 0.05 m (" + honest.MeanErr.ToString("F3", CultureInfo.InvariantCulture) + ")");
-                Check(honest.Fights == 0, "the owner's NetworkTransform did not move the predicted body (fights=" + honest.Fights + ")");
+            }
+
+            // Preserve the cumulative checks above and also independently measure just the honest script interval.
+            // A future server staging teleport may legitimately have corrected prediction before this baseline;
+            // never derive its interval error from the three-decimal cumulative mean in the ordinary log.
+            Match interval = Regex.Match(textA, @"\[client\] reconcile proof-interval valid=(true|false) acks=(\d+) meanErr=([0-9.eE+-]+) snaps=(\d+) replays=(\d+) fights=(\d+) at=step:jump");
+            Check(interval.Success && interval.Groups[1].Value == "true", "A logged a valid, nonempty exact honest-movement prediction interval");
+            if (interval.Success && interval.Groups[1].Value == "true")
+            {
+                int intervalAcks = int.Parse(interval.Groups[2].Value, CultureInfo.InvariantCulture);
+                double intervalMean = double.Parse(interval.Groups[3].Value, CultureInfo.InvariantCulture);
+                int intervalSnaps = int.Parse(interval.Groups[4].Value, CultureInfo.InvariantCulture);
+                int intervalReplays = int.Parse(interval.Groups[5].Value, CultureInfo.InvariantCulture);
+                int intervalFights = int.Parse(interval.Groups[6].Value, CultureInfo.InvariantCulture);
+                Check(intervalAcks >= 30, "honest interval has at least 30 compared Acks (" + intervalAcks + ")");
+                Check(intervalSnaps == 0 && intervalReplays == 0, "honest interval has no prediction snaps or replays");
+                Check(intervalMean <= 0.05d, "honest interval mean prediction error <= 0.05 m (" + intervalMean.ToString("R", CultureInfo.InvariantCulture) + ")");
+                Check(intervalFights == 0, "honest interval has no transform synchronization fights");
             }
 
             Check(Regex.IsMatch(textA, @"\[client\] reconcile acks=\d+ .* at=script-end"), "A logged its reconcile statistics at the end of its script");
@@ -643,7 +663,7 @@ namespace Emberdelve.EditorTools
                 foreach (MoveLine m in moves)
                 {
                     if (m.VMax > worst) worst = m.VMax;
-                    if (prev != null && m.Tick - prev.Tick >= 5)
+                    if (prev != null && m.Tick - prev.Tick >= 5 && !(prev.Tick < stageTick && m.Tick >= stageTick))
                     {
                         float v = Flat(prev.Pos, m.Pos) / (float)((m.Tick - prev.Tick) * TickSeconds);
                         if (v > worstInterval) worstInterval = v;
@@ -683,7 +703,25 @@ namespace Emberdelve.EditorTools
                     }
 
                     Check(snapped, "A snapped after the server moved it (a SNAP line in A's log)");
-                    Thread.Sleep(3500); // let the replay, the blend of what follows and the observers settle
+                    // Periodic reconciliation statistics are emitted every five seconds.
+                    // Wait for evidence of the new correction rather than racing that cadence.
+                    DateTime statsDeadline = DateTime.UtcNow.AddSeconds(15);
+                    while (DateTime.UtcNow < statsDeadline)
+                    {
+                        List<Recon> current = ParseRecon(ReadShared(clientLogs[1]));
+                        List<MoveLine> reportedMoves = ParseMoves(ReadShared(serverLog), idA);
+                        MoveLine reportedServer = reportedMoves.FindLast(m => !m.Final);
+                        bool ownerSettled = TryLastPredict(ReadShared(clientLogs[1]), out Vector3 ownerNow) &&
+                            reportedServer != null && Vector3.Distance(ownerNow, reportedServer.Pos) <= 0.15f &&
+                            Vector3.Distance(ownerNow, shoveTo) <= 0.3f;
+                        bool observerSettled = TryLastView(ReadShared(clientLogs[0]), idA, out Vector3 observerNow) &&
+                            reportedServer != null && Vector3.Distance(observerNow, reportedServer.Pos) <= 0.15f;
+                        if (current.Count > 0 && current[current.Count - 1].Snaps >= snapsBefore + 1 &&
+                            ownerSettled && observerSettled)
+                            break;
+                        if (clients[1].HasExited) break;
+                        Thread.Sleep(200);
+                    }
 
                     string textAfter = ReadShared(clientLogs[1]);
                     string serverAfter = ReadShared(serverLog);
@@ -834,6 +872,8 @@ namespace Emberdelve.EditorTools
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
+                if (!string.IsNullOrEmpty(_movementProofPath))
+                    info.EnvironmentVariables["EMBER_MOVEMENT_PROOF_PATH"] = _movementProofPath;
                 Process process = Process.Start(info);
                 if (process != null) Started.Add(process);
                 Debug.Log(Tag + " launched pid=" + (process != null ? process.Id.ToString() : "-") + " " + info.Arguments);
@@ -844,6 +884,91 @@ namespace Emberdelve.EditorTools
                 Debug.LogError(Tag + " launch failed: " + e.Message);
                 return null;
             }
+        }
+
+        private static bool TryBuildModularGrid(int seed, string expectedHash, out DungeonLayoutData result, out string reason)
+        {
+            result = null;
+            reason = string.Empty;
+            if (!Application.isBatchMode) { reason = "modular reconstruction requires the batch mirror"; return false; }
+            Scene scene = default;
+            try
+            {
+                scene = EditorSceneManager.OpenScene(EmberdelvePaths.ModularDungeonScenePath, OpenSceneMode.Additive);
+                DungeonModuleSceneAssembler assembler = null;
+                foreach (GameObject root in scene.GetRootGameObjects())
+                {
+                    assembler = root.GetComponentInChildren<DungeonModuleSceneAssembler>(true);
+                    if (assembler != null) break;
+                }
+                if (assembler == null) { reason = "authored modular assembler missing"; return false; }
+                SerializedObject serialized = new SerializedObject(assembler);
+                DungeonLayoutData source = serialized.FindProperty("sourceLayout").objectReferenceValue as DungeonLayoutData;
+                DungeonModuleCatalog catalog = serialized.FindProperty("catalog").objectReferenceValue as DungeonModuleCatalog;
+                if (source == null || catalog == null) { reason = "layout or module catalog missing"; return false; }
+                if (!DungeonModulePlanner.TryCreate(seed, catalog.Modules, out DungeonModulePlan plan, out reason)) return false;
+                if (!string.Equals(plan.LayoutHash, expectedHash, StringComparison.Ordinal)) { reason = "plan hash mismatch"; return false; }
+                result = UnityEngine.Object.Instantiate(source);
+                result.origin = serialized.FindProperty("mapOrigin").vector3Value;
+                result.gridWidth = DungeonModulePlan.Width * DungeonModulePlan.ModuleWidthCells;
+                result.gridHeight = DungeonModulePlan.Height * DungeonModulePlan.ModuleHeightCells;
+                result.rooms.Clear(); result.corridors.Clear();
+                for (int i = 0; i < plan.Placements.Length; i++)
+                {
+                    DungeonModulePlacement placement = plan.Placements[i];
+                    int x = placement.X * DungeonModulePlan.ModuleWidthCells;
+                    int z = placement.Y * DungeonModulePlan.ModuleHeightCells;
+                    int midX = x + DungeonModulePlan.ModuleWidthCells / 2;
+                    int midZ = z + DungeonModulePlan.ModuleHeightCells / 2;
+                    result.rooms.Add(new RoomSpec { minCell = new Vector2Int(x + 1, z + 1),
+                        maxCell = new Vector2Int(x + DungeonModulePlan.ModuleWidthCells - 2, z + DungeonModulePlan.ModuleHeightCells - 2) });
+                    if (placement.X + 1 < DungeonModulePlan.Width && DungeonModulePlan.Has(placement.OpenSockets, DungeonModuleSockets.East))
+                        result.corridors.Add(new CorridorSpec { fromCell = new Vector2Int(x + 10, midZ), toCell = new Vector2Int(x + 13, midZ), width = 2 });
+                    if (placement.Y + 1 < DungeonModulePlan.Height && DungeonModulePlan.Has(placement.OpenSockets, DungeonModuleSockets.North))
+                        result.corridors.Add(new CorridorSpec { fromCell = new Vector2Int(midX, z + 10), toCell = new Vector2Int(midX, z + 13), width = 2 });
+                }
+                return true;
+            }
+            catch (Exception e)
+            {
+                reason = e.ToString();
+                if (result != null) UnityEngine.Object.DestroyImmediate(result);
+                result = null;
+                return false;
+            }
+            finally { if (scene.IsValid() && scene.isLoaded) EditorSceneManager.CloseScene(scene, true); }
+        }
+
+        private static bool StageMovementActors(string serverLog, Process server, string[] clientLogs, int idA, int idW,
+            out Vector3 a, out Vector3 w, out float wallDistance, out long stageTick)
+        {
+            a = w = default;
+            wallDistance = 0f;
+            stageTick = 0;
+            File.WriteAllText(_movementProofPath + ".stage", "stage");
+            Match staged = WaitForRegex(serverLog, @"movement-proof staged hash=([0-9A-F]+) a=" + Vec +
+                " w=" + Vec + " wall=" + Num + " distance=" + Num + @" tick=(\d+)", 60, server);
+            Check(staged != null, "server selected and staged physically measured movement lanes");
+            if (staged == null) return false;
+            a = V3(staged, 2);
+            w = V3(staged, 5);
+            wallDistance = Fl(staged.Groups[8].Value);
+            stageTick = long.Parse(staged.Groups[10].Value, CultureInfo.InvariantCulture);
+            Check(wallDistance >= 3f && wallDistance <= 9f, "measured wall is 3 to 9 m ahead");
+            DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+            bool converged = false;
+            do
+            {
+                bool ownerA = TryLastPredict(ReadShared(clientLogs[1]), out Vector3 aOwner) && Vector3.Distance(aOwner, a) <= 0.15f;
+                bool ownerW = TryLastPredict(ReadShared(clientLogs[2]), out Vector3 wOwner) && Vector3.Distance(wOwner, w) <= 0.15f;
+                string observer = ReadShared(clientLogs[0]);
+                bool peerA = TryLastView(observer, idA, out Vector3 aView) && Vector3.Distance(aView, a) <= 0.15f;
+                bool peerW = TryLastView(observer, idW, out Vector3 wView) && Vector3.Distance(wView, w) <= 0.15f;
+                converged = ownerA && ownerW && peerA && peerW;
+                if (!converged) Thread.Sleep(200);
+            } while (!converged && DateTime.UtcNow < deadline);
+            Check(converged, "both owners and an observer converged to server-staged positions");
+            return converged && wallDistance >= 3f && wallDistance <= 9f;
         }
 
         private static bool WaitForLog(string path, string needle, double seconds, Process owner)

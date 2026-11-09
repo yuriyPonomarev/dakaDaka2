@@ -29,7 +29,7 @@ namespace Emberdelve.Net.Rules
     public static class NetTuning
     {
         /// <summary>Wire protocol version checked in connection approval.</summary>
-        public const int ProtocolVersion = 1;
+        public const int ProtocolVersion = 5;
 
         public const int DefaultPort = 7777;
         public const string DefaultAddress = "127.0.0.1";
@@ -51,6 +51,7 @@ namespace Emberdelve.Net.Rules
         /// <summary>The class a client asks for when none is given (a server-approved id; the server resolves it).</summary>
         public const string DefaultClassId = "warrior";
         public const string LogPrefix = "[Emberdelve][Net]";
+        public const string ModularDungeonSceneName = "Emberdelve_ModularCrypts";
     }
 
     /// <summary>Process exit codes of a networked player (0 only for a clean, expected end).</summary>
@@ -84,6 +85,18 @@ namespace Emberdelve.Net.Rules
     ///   -ember-net-disconnect-timeout-ms MS  transport disconnect timeout (0 = transport default)
     ///   -ember-net-protocol-override N       test only: the client announces another protocol version
     ///   -ember-net-no-enemies [true|false]   server/host: the dungeon's enemies are not started (proof scenarios); a bare flag = true
+    ///   -ember-net-corpse-proof-server      server, development-only: register a unique-UID corpse model and stage reach/LOS checks
+    ///   -ember-net-corpse-proof-action-file PATH   server, development-only: stage B as distant, occluded, then nearby
+    ///   -ember-net-corpse-proof-role a|b    client, development-only: drive real corpse state/transfer RPCs from the process gate
+    ///   -ember-net-combat-enemy-proof-server server, development-only: stage ene-a beside a live enemy with clear line of sight for the real melee proof
+    ///   -ember-net-combat-test-fixture-server server, development-only: stage two gate players in validated clear positions in the modular entry room
+    ///   -ember-net-door-proof-server      server, development-only: live door state, authority, range, LOS and late-join proof
+    ///   -ember-net-door-proof-role a|b|late client, development-only: participate in the live door proof
+    ///   -ember-net-door-proof-action-file PATH client: command file used to issue proof door toggles
+    ///   -ember-net-floor-loot-proof-server [true]    server, development-only: stage a unique rolled world pickup for the floor-loot process gate
+    ///   -ember-net-floor-loot-proof-role a|b|late    client, development-only: participate in the floor-loot proof
+    ///   -ember-net-floor-loot-proof-action-file PATH server: staged far/LOS/contest commands from the process gate
+    ///   -ember-net-door-proof-server-action-file PATH server: stage the proof actor at range or behind an occluder
     ///   -ember-net-script SPEC               client test driver (dev/proof): "" (none), "forge-owner", or a movement script / comma separated
     ///                                        chain such as "walk-forward:3@90,sprint-forward:1.5@270,jump" (see NetScriptSpec)
     ///   -ember-net-script-start-file PATH    client: the script starts when this file exists (default: 1.5 s after the player spawned)
@@ -123,10 +136,50 @@ namespace Emberdelve.Net.Rules
         public int DisconnectTimeoutMs { get; private set; }
         public int ProtocolOverride { get; private set; } = -1;
         public bool NoEnemies { get; private set; }
+        /// <summary>Development-only acceptance proof for a two-client modular-map server session.</summary>
+        public bool ModularMapProofServer { get; private set; }
         public string Script { get; private set; } = "";
         /// <summary>The parsed script, null when none was given.</summary>
         public NetScriptSpec ScriptSpec { get; private set; }
         public string ScriptStartFile { get; private set; } = "";
+        public bool InventoryContestServer { get; private set; }
+        public bool FloorLootProofServer { get; private set; }
+        public string FloorLootProofRole { get; private set; } = "";
+        public string FloorLootProofActionFile { get; private set; } = "";
+        public bool InventoryDropProofServer { get; private set; }
+        public string InventoryDropProofRole { get; private set; } = "";
+        public string InventoryDropProofActionFile { get; private set; } = "";
+        public string InventoryDropProofExpectedFile { get; private set; } = "";
+        /// <summary>Development-only server fixture for the real corpse container RPC proof.</summary>
+        public bool CorpseProofServer { get; private set; }
+        /// <summary>Development-only proof that an actual admitted actor death commits corpse custody with rollback/retry.</summary>
+        public bool CorpseDeathProofServer { get; private set; }
+        public string CorpseDeathProofActionFile { get; private set; } = "";
+        /// <summary>Development-only client probe role for the real corpse container RPC proof.</summary>
+        public string CorpseProofRole { get; private set; } = "";
+        /// <summary>Development-only server action file used to stage corpse proof range/LOS scenarios.</summary>
+        public string CorpseProofActionFile { get; private set; } = "";
+        /// <summary>Development-only server fixture for the real enemy melee proof gate.</summary>
+        public bool CombatEnemyProofServer { get; private set; }
+        /// <summary>Development-only real-network combat gate fixture: stage two admitted players in the entry module arena.</summary>
+        public bool CombatTestFixtureServer { get; private set; }
+        /// <summary>Development-only server fixture that positions extraction proof actors at the real extraction point.</summary>
+        public bool ExtractionProofServer { get; private set; }
+        /// <summary>Development-only short raid deadline proof; never changes the GameConfig asset.</summary>
+        public bool TimeoutProofServer { get; private set; }
+        /// <summary>Development-only client probe: start a real extraction hold when the scripted movement start file appears.</summary>
+        public bool ExtractionProofOwner { get; private set; }
+        /// <summary>Development-only live door state / authority proof fixture.</summary>
+        public bool DoorProofServer { get; private set; }
+        /// <summary>Development-only live door proof client role: a, b, or late.</summary>
+        public string DoorProofRole { get; private set; } = "";
+        /// <summary>Development-only client action file used by the real door RPC proof.</summary>
+        public string DoorProofActionFile { get; private set; } = "";
+        /// <summary>Development-only server action file for range and LOS rejection stages.</summary>
+        public string DoorProofServerActionFile { get; private set; } = "";
+        /// <summary>Optional development-only action file used to trigger an authoritative extraction interruption after begin.</summary>
+        public string ExtractionProofActionFile { get; private set; } = "";
+        public string InventoryContestRole { get; private set; } = "";
         public bool HasScriptYaw { get; private set; }
         public float ScriptYaw { get; private set; }
         /// <summary>U3A4b development shove (server); null when not given.</summary>
@@ -236,6 +289,32 @@ namespace Emberdelve.Net.Rules
                 case "ember-net-disconnect-timeout-ms":
                 case "ember-net-protocol-override":
                 case "ember-net-no-enemies":
+                case "ember-net-modular-map": // obsolete opt-out; recognized only so old launch scripts fail closed
+                case "ember-net-modular-proof-server":
+                case "ember-net-inventory-contest-server":
+                case "ember-net-floor-loot-proof-server":
+                case "ember-net-inventory-drop-proof-server":
+                case "ember-net-corpse-proof-server":
+                case "ember-net-corpse-death-proof-server":
+                case "ember-net-combat-enemy-proof-server":
+                case "ember-net-combat-test-fixture-server":
+                case "ember-net-extraction-proof-server":
+                case "ember-net-timeout-proof-server":
+                case "ember-net-door-proof-server":
+                case "ember-net-door-proof-role":
+                case "ember-net-door-proof-action-file":
+                case "ember-net-door-proof-server-action-file":
+                case "ember-net-floor-loot-proof-role":
+                case "ember-net-floor-loot-proof-action-file":
+                case "ember-net-inventory-drop-proof-role":
+                case "ember-net-inventory-drop-proof-action-file":
+                case "ember-net-inventory-drop-proof-expected-file":
+                case "ember-net-extraction-proof-owner":
+                case "ember-net-extraction-proof-action-file":
+                case "ember-net-inventory-contest-role":
+                case "ember-net-corpse-proof-role":
+                case "ember-net-corpse-proof-action-file":
+                case "ember-net-corpse-death-proof-action-file":
                 case "ember-net-script":
                 case "ember-net-script-start-file":
                 case "ember-net-script-yaw":
@@ -255,7 +334,7 @@ namespace Emberdelve.Net.Rules
             }
         }
 
-        private static bool IsFlag(string name) { return name == "ember-net-no-enemies" || name == "ember-net-udp-reset-fix"; }
+        private static bool IsFlag(string name) { return name == "ember-net-no-enemies" || name == "ember-net-modular-proof-server" || name == "ember-net-udp-reset-fix" || name == "ember-net-inventory-contest-server" || name == "ember-net-floor-loot-proof-server" || name == "ember-net-inventory-drop-proof-server" || name == "ember-net-corpse-proof-server" || name == "ember-net-corpse-death-proof-server" || name == "ember-net-combat-enemy-proof-server" || name == "ember-net-combat-test-fixture-server" || name == "ember-net-extraction-proof-server" || name == "ember-net-timeout-proof-server" || name == "ember-net-extraction-proof-owner" || name == "ember-net-door-proof-server"; }
 
         private static bool IsBoolLiteral(string text)
         {
@@ -330,6 +409,99 @@ namespace Emberdelve.Net.Rules
                         else if (b == "false" || b == "0") NoEnemies = false;
                         else _errors.Add("invalid no-enemies '" + value + "' (true|false)");
                     }
+                    break;
+                case "ember-net-modular-map":
+                    _errors.Add("map selection is no longer supported; every gameplay mode uses Modular Crypts");
+                    break;
+                case "ember-net-modular-proof-server":
+                    {
+                        string b = value.ToLowerInvariant();
+                        if (b == "true" || b == "1" || b == "") ModularMapProofServer = true;
+                        else if (b == "false" || b == "0") ModularMapProofServer = false;
+                        else _errors.Add("invalid modular-proof-server '" + value + "' (true|false)");
+                    }
+                    break;
+                case "ember-net-inventory-contest-server":
+                    InventoryContestServer = value == "true" || value == "1";
+                    break;
+                case "ember-net-floor-loot-proof-server":
+                    FloorLootProofServer = value == "true" || value == "1";
+                    break;
+                case "ember-net-floor-loot-proof-role":
+                    value = value.Trim().ToLowerInvariant();
+                    if (value == "a" || value == "b" || value == "late") FloorLootProofRole = value;
+                    else _errors.Add("invalid floor-loot proof role '" + value + "' (a|b|late)");
+                    break;
+                case "ember-net-floor-loot-proof-action-file":
+                    FloorLootProofActionFile = value;
+                    break;
+                case "ember-net-inventory-drop-proof-server":
+                    InventoryDropProofServer = value == "true" || value == "1";
+                    break;
+                case "ember-net-inventory-drop-proof-role":
+                    value = value.Trim().ToLowerInvariant();
+                    if (value == "owner" || value == "peer" || value == "late") InventoryDropProofRole = value;
+                    else _errors.Add("invalid inventory-drop proof role '" + value + "' (owner|peer|late)");
+                    break;
+                case "ember-net-inventory-drop-proof-action-file":
+                    InventoryDropProofActionFile = value;
+                    break;
+                case "ember-net-inventory-drop-proof-expected-file":
+                    InventoryDropProofExpectedFile = value;
+                    break;
+                case "ember-net-corpse-proof-server":
+                    CorpseProofServer = value == "true" || value == "1";
+                    break;
+                case "ember-net-corpse-death-proof-server":
+                    CorpseDeathProofServer = value == "true" || value == "1";
+                    break;
+                case "ember-net-corpse-death-proof-action-file":
+                    CorpseDeathProofActionFile = value;
+                    break;
+                case "ember-net-corpse-proof-role":
+                    value = value.Trim().ToLowerInvariant();
+                    if (value == "a" || value == "b") CorpseProofRole = value;
+                    else _errors.Add("invalid corpse proof role '" + value + "' (a|b)");
+                    break;
+                case "ember-net-corpse-proof-action-file":
+                    CorpseProofActionFile = value;
+                    break;
+                case "ember-net-combat-enemy-proof-server":
+                    CombatEnemyProofServer = value == "true" || value == "1";
+                    break;
+                case "ember-net-combat-test-fixture-server":
+                    CombatTestFixtureServer = value == "true" || value == "1";
+                    break;
+                case "ember-net-extraction-proof-server":
+                    ExtractionProofServer = value == "true" || value == "1";
+                    break;
+                case "ember-net-timeout-proof-server":
+                    TimeoutProofServer = value == "true" || value == "1";
+                    break;
+                case "ember-net-door-proof-server":
+                    DoorProofServer = value == "true" || value == "1";
+                    break;
+                case "ember-net-door-proof-role":
+                    value = value.Trim().ToLowerInvariant();
+                    if (value == "a" || value == "b" || value == "late") DoorProofRole = value;
+                    else _errors.Add("invalid door proof role '" + value + "' (a|b|late)");
+                    break;
+                case "ember-net-door-proof-action-file":
+                    DoorProofActionFile = value;
+                    break;
+                case "ember-net-door-proof-server-action-file":
+                    DoorProofServerActionFile = value;
+                    break;
+                case "ember-net-extraction-proof-owner":
+                    ExtractionProofOwner = value == "true" || value == "1";
+                    break;
+                case "ember-net-extraction-proof-action-file":
+                    ExtractionProofActionFile = value;
+                    break;
+                case "ember-net-inventory-contest-role":
+                    value = value.Trim().ToLowerInvariant();
+                    if (value == "a" || value == "b") InventoryContestRole = value;
+                    else _errors.Add("invalid inventory contest role '" + value + "' (a|b)");
                     break;
                 case "ember-net-udp-reset-fix":
                     {

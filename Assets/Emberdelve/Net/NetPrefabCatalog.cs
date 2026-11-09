@@ -16,7 +16,7 @@ namespace Emberdelve.Net
 
         [SerializeField] private GameObject playerPrefab;
 
-        /// <summary>The player prefab (NetworkObject + NetworkTransform + NetPlayerRig on the Level01 rig).</summary>
+        /// <summary>The player prefab (NetworkObject + NetworkTransform + NetPlayerRig from the Modular Crypts scene rig).</summary>
         public GameObject PlayerPrefab => playerPrefab;
 
         /// <summary>Builder hook.</summary>

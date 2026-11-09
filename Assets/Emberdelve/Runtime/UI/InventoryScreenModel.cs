@@ -73,6 +73,8 @@ namespace Emberdelve.UI
         public bool EnsureLiveRig(out bool bagChanged)
         {
             bagChanged = false;
+            // A client screen belongs to its replicated owner, never the disabled scene rig.
+            if (NetRole.IsClientOnly && _rig != null) return false;
             if (_director == null) GameServices.TryGet<RunDirector>(out _director);
 
             PlayerRig live = _director != null ? _director.Player : null;

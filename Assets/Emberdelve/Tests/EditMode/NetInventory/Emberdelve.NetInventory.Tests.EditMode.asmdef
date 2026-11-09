@@ -1,0 +1,9 @@
+{
+  "name": "Emberdelve.NetInventory.Tests.EditMode",
+  "references": ["UnityEngine.TestRunner", "UnityEditor.TestRunner", "Emberdelve.Runtime", "Emberdelve.Rules", "Emberdelve.NetRules", "Emberdelve.Net", "Unity.Netcode.Runtime", "Unity.Collections"],
+  "includePlatforms": ["Editor"],
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll"],
+  "autoReferenced": true,
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"]
+}

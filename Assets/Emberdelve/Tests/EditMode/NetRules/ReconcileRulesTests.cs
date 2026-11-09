@@ -97,6 +97,27 @@ namespace Emberdelve.NetRules.Tests
         }
 
         [Test]
+        public void Stats_IntervalIgnoresEarlierCorrectionsAndUsesUnroundedErrorSum()
+        {
+            ReconcileStats stats = new ReconcileStats();
+            stats.RecordAck(1.25f);
+            stats.Snaps = stats.Replays = 1;
+            ReconcileStatsSnapshot baseline = stats.Capture();
+            stats.RecordAck(0.0494f);
+            stats.RecordAck(0.0504f);
+            Assert.That(baseline.TryInterval(stats.Capture(), out double mean, out int acks,
+                out int snaps, out int replays, out int fights), Is.True);
+            Assert.That(acks, Is.EqualTo(2));
+            Assert.That(mean, Is.EqualTo(0.0499d).Within(1e-6d));
+            Assert.That(snaps, Is.Zero);
+            Assert.That(replays, Is.Zero);
+            Assert.That(fights, Is.Zero);
+            Assert.That(stats.Snaps, Is.EqualTo(1), "capturing does not reset cumulative counters");
+            Assert.That(baseline.TryInterval(baseline, out _, out _, out _, out _, out _), Is.False);
+            Assert.That(stats.Capture().TryInterval(baseline, out _, out _, out _, out _, out _), Is.False);
+        }
+
+        [Test]
         public void Stats_MaxMeanAndLogLine()
         {
             ReconcileStats stats = new ReconcileStats();

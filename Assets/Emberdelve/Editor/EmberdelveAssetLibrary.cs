@@ -7,6 +7,7 @@ using Emberdelve.Data;
 using Emberdelve.Items;
 using Emberdelve.Level;
 using Emberdelve.Stats;
+using Emberdelve.Rules;
 
 namespace Emberdelve.EditorTools
 {
@@ -2414,6 +2415,8 @@ namespace Emberdelve.EditorTools
             Config.objectiveText = "Recover at least one relic, then hold [E] at the Ember Gate.";
             Config.requireLootToExtract = true;
             Config.extractionHoldDuration = 3f;
+            Config.enableRaidCountdown = true;
+            Config.raidDurationSeconds = RaidCountdownRules.DefaultDurationSeconds;
             Config.interactionRange = 2.4f;
             Config.interactSphereRadius = 0.45f;
             Config.inventoryCapacity = 8;

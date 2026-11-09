@@ -61,6 +61,7 @@ namespace Emberdelve.EditorTools
             AssetDatabase.SaveAssets();
 
             CheckLevelBoxes(scene);
+            CheckCryptArchitecture(scene);
             CheckVolume();
             CheckTorches(scene);
             CheckCamera();
@@ -253,13 +254,123 @@ namespace Emberdelve.EditorTools
         private static void CheckEnvironment()
         {
             Color ambient = RenderSettings.ambientLight;
-            Check(ambient.maxColorComponent < 0.06f, "ambient is near black (" + ambient + ")");
+            Check(ambient.maxColorComponent <= 0.1f && ambient.b > ambient.r, "ambient remains near-black and cool (" + ambient + ")");
             Check(RenderSettings.fog && RenderSettings.fogMode == FogMode.Exponential, "exponential fog on");
-            Check(RenderSettings.fogDensity >= 0.04f && RenderSettings.fogDensity <= 0.07f, "fog density " + RenderSettings.fogDensity + " in 0.04-0.07");
+            Check(RenderSettings.fogDensity >= 0.025f && RenderSettings.fogDensity <= 0.032f, "fog density " + RenderSettings.fogDensity + " in crypt atmosphere range 0.025-0.032");
+            Check(RenderSettings.skybox != null && RenderSettings.skybox.shader != null && RenderSettings.skybox.shader.name == "Skybox/Procedural",
+                "broken-roof court has a procedural skybox");
 
             GameObject moon = GameObject.Find("Moon_Slit_Directional");
             Light moonLight = moon != null ? moon.GetComponent<Light>() : null;
-            Check(moonLight != null && moonLight.intensity <= 0.1f && moonLight.shadows == LightShadows.None, "moon light is practically off and casts no shadows");
+            Check(moonLight != null && moonLight.intensity >= 0.3f && moonLight.intensity <= 0.4f &&
+                  moonLight.shadows == LightShadows.Soft && moonLight.shadowStrength >= 0.5f,
+                "moon slit gives restrained directional fill with soft shadows");
+        }
+
+        private static void CheckCryptArchitecture(Scene scene)
+        {
+            DungeonLayoutData layout = EmberdelveAssetLibrary.Layout;
+            Transform level = FindRoot(scene, "Level_Blockout");
+            Transform architecture = level != null ? level.Find("Crypt_Architecture") : null;
+            Transform arches = level != null ? level.Find("Crypt_Archways") : null;
+            Transform tombs = level != null ? level.Find("Crypt_Wall_Tombs") : null;
+            Check(layout != null && level != null && architecture != null && arches != null && tombs != null,
+                "crypt architecture, archways, and wall tombs are present");
+            if (layout == null || level == null || architecture == null || arches == null || tombs == null) return;
+
+            CheckOpenRoofAperture(level, layout);
+            CheckArchwayCenter(arches, layout, false);
+            CheckArchwayCenter(arches, layout, true);
+            CheckArchColliders(arches);
+            CheckWallMountedDetails(architecture, tombs, layout);
+        }
+
+        private static void CheckOpenRoofAperture(Transform level, DungeonLayoutData layout)
+        {
+            RoomSpec court = layout.rooms.Find(r => r != null && r.roomName == "Ember Gate");
+            Check(court != null, "Ember Gate court is defined");
+            if (court == null) return;
+
+            float cell = layout.CellSize;
+            float xMin = layout.origin.x + (court.minCell.x + 1) * cell;
+            float xMax = layout.origin.x + court.maxCell.x * cell;
+            float zMin = layout.origin.z + (court.minCell.y + 1) * cell;
+            float zMax = layout.origin.z + court.maxCell.y * cell;
+            bool roofClear = true;
+            for (int i = 0; i < level.childCount; i++)
+            {
+                Transform child = level.GetChild(i);
+                if (!child.name.StartsWith("Ceiling_")) continue;
+                Renderer renderer = child.GetComponent<Renderer>();
+                if (renderer == null) { roofClear = false; continue; }
+                Bounds b = renderer.bounds;
+                bool overlaps = b.max.x > xMin && b.min.x < xMax && b.max.z > zMin && b.min.z < zMax;
+                if (overlaps) roofClear = false;
+            }
+            Check(roofClear, "Ember Gate aperture is clear of ceiling meshes");
+        }
+
+        private static void CheckArchwayCenter(Transform arches, DungeonLayoutData layout, bool vertical)
+        {
+            CorridorSpec corridor = layout.corridors.Find(c => vertical
+                ? c.fromCell.x == c.toCell.x && c.fromCell.y != c.toCell.y
+                : c.fromCell.y == c.toCell.y && c.fromCell.x != c.toCell.x);
+            Check(corridor != null, vertical ? "a vertical corridor exists for arch alignment" : "a horizontal corridor exists for arch alignment");
+            if (corridor == null) return;
+
+            int axis = vertical ? corridor.fromCell.x : corridor.fromCell.y;
+            int width = Mathf.Max(1, corridor.width);
+            int lowOffset = -(width / 2);
+            int highOffset = (width - 1) / 2;
+            float expected = (vertical ? layout.origin.x : layout.origin.z) +
+                             (axis + (lowOffset + highOffset + 1f) * 0.5f) * layout.CellSize;
+            Transform left = arches.Find(corridor.corridorName + "_Entry_Jamb_L");
+            Transform right = arches.Find(corridor.corridorName + "_Entry_Jamb_R");
+            Check(left != null && right != null, (vertical ? "vertical" : "horizontal") + " corridor entry jambs exist");
+            if (left == null || right == null) return;
+
+            float actual = vertical ? (left.position.x + right.position.x) * 0.5f : (left.position.z + right.position.z) * 0.5f;
+            Check(Mathf.Abs(actual - expected) <= 0.001f,
+                (vertical ? "vertical" : "horizontal") + " arch is centered on BuildWalkableGrid corridor width (" + actual + " vs " + expected + ")");
+        }
+
+        private static void CheckArchColliders(Transform arches)
+        {
+            int layer = LayerMask.NameToLayer(GameConfig.LevelLayerName);
+            string[] parts = { "Entry to Library_Entry_Jamb_L", "Entry to Library_Entry_Voussoir_3", "Entry to Library_Entry_Keystone" };
+            bool valid = true;
+            for (int i = 0; i < parts.Length; i++)
+            {
+                Transform part = arches.Find(parts[i]);
+                if (part == null || part.GetComponent<BoxCollider>() == null || (layer >= 0 && part.gameObject.layer != layer)) valid = false;
+            }
+            Check(valid, "arch jambs, voussoirs, and keystones block on the Level layer");
+        }
+
+        private static void CheckWallMountedDetails(Transform architecture, Transform tombs, DungeonLayoutData layout)
+        {
+            Transform pilaster = architecture.Find("Entry Hall_Pilaster_0");
+            Renderer pilasterRenderer = pilaster != null ? pilaster.GetComponent<Renderer>() : null;
+            Check(pilasterRenderer != null && pilaster.GetComponent<Collider>() == null && pilasterRenderer.bounds.size.z <= 0.08f,
+                "pilasters are thin wall-mounted visuals without ghost colliders");
+
+            RoomSpec crypt = layout.rooms.Find(r => r != null && r.roomName == "Crypt");
+            Transform recess = tombs.Find("Crypt_Tomb_Left_Recess");
+            Renderer recessRenderer = recess != null ? recess.GetComponent<Renderer>() : null;
+            if (crypt == null || recessRenderer == null)
+            {
+                Check(false, "crypt tomb recess is visible in front of the blocking wall");
+                return;
+            }
+            float wallFace = layout.origin.z + (crypt.maxCell.y + 1) * layout.CellSize - Mathf.Max(0.05f, layout.wallThickness) * 0.5f;
+            Bounds recessBounds = recessRenderer.bounds;
+            Check(recess.GetComponent<Collider>() == null && recessBounds.size.z <= 0.05f &&
+                  recessBounds.max.z < wallFace && wallFace - recessBounds.min.z <= 0.06f,
+                "crypt tomb recess is a visible shallow overlay in front of the blocking wall");
+            Transform sarcophagus = tombs.Find("Crypt_Tomb_Left_Sarcophagus");
+            Renderer sarcophagusRenderer = sarcophagus != null ? sarcophagus.GetComponent<Renderer>() : null;
+            Check(sarcophagusRenderer != null && sarcophagus.GetComponent<Collider>() == null && sarcophagusRenderer.bounds.size.z <= 0.05f,
+                "sarcophagus is a shallow wall relief without a hidden passage volume");
         }
 
         // ---------------------------------------------------------------- torches

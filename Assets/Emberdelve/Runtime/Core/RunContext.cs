@@ -52,6 +52,7 @@ namespace Emberdelve.Core
             LastResult = default;
             HasResult = false;
             _hasPendingRaidSeed = false;
+            _raidSeedOverrideConsumed = false;
         }
 
         // ------------------------------------------------------------------ raid seed (R5)
@@ -62,6 +63,7 @@ namespace Emberdelve.Core
         private static bool _hasPendingRaidSeed;
         private static ulong _pendingRaidSeed;
         private static long _entropyCounter;
+        private static bool _raidSeedOverrideConsumed;
 
         /// <summary>
         /// Chooses the seed of the NEXT raid explicitly (a lobby / server / test). It is consumed by exactly one
@@ -82,8 +84,8 @@ namespace Emberdelve.Core
         /// <summary>
         /// The seed for the raid that is starting now, and where it came from. Order: 1. the seed set with
         /// <see cref="SetNextRaidSeed"/> (consumed); 2. in the editor and development builds only, the
-        /// <c>-emberdelveRaidSeed N</c> argument or the <c>EMBERDELVE_RAID_SEED</c> environment variable (a fixed seed
-        /// for reproducing a bug or a gate); 3. a high-entropy default from <see cref="DefaultRaidSeed"/>.
+        /// <c>-emberdelveRaidSeed N</c> argument or the <c>EMBERDELVE_RAID_SEED</c> environment variable once per process
+        /// (a fixed first seed for reproducing a bug or a gate); 3. a high-entropy default from <see cref="DefaultRaidSeed"/>.
         /// </summary>
         public static ulong ResolveRaidSeed(out string source)
         {
@@ -95,21 +97,26 @@ namespace Emberdelve.Core
             }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            string[] args = Environment.GetCommandLineArgs();
-            for (int i = 0; i + 1 < args.Length; i++)
+            if (!_raidSeedOverrideConsumed)
             {
-                if (args[i] == RaidSeedArgument && ulong.TryParse(args[i + 1], out ulong fromArgument))
+                string[] args = Environment.GetCommandLineArgs();
+                for (int i = 0; i + 1 < args.Length; i++)
                 {
-                    source = "command line";
-                    return fromArgument;
+                    if (args[i] == RaidSeedArgument && ulong.TryParse(args[i + 1], out ulong fromArgument))
+                    {
+                        _raidSeedOverrideConsumed = true;
+                        source = "command line";
+                        return fromArgument;
+                    }
                 }
-            }
 
-            string fromEnvironment = Environment.GetEnvironmentVariable("EMBERDELVE_RAID_SEED");
-            if (!string.IsNullOrEmpty(fromEnvironment) && ulong.TryParse(fromEnvironment, out ulong envSeed))
-            {
-                source = "environment";
-                return envSeed;
+                string fromEnvironment = Environment.GetEnvironmentVariable("EMBERDELVE_RAID_SEED");
+                if (!string.IsNullOrEmpty(fromEnvironment) && ulong.TryParse(fromEnvironment, out ulong envSeed))
+                {
+                    _raidSeedOverrideConsumed = true;
+                    source = "environment";
+                    return envSeed;
+                }
             }
 #endif
 

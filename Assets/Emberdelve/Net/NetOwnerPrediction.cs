@@ -192,6 +192,35 @@ namespace Emberdelve.Net
                       " seq=" + _lastAckSeq + " to=" + Pos(new Vector3(server.X, server.Y, server.Z)) + " replayed=" + count);
         }
 
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        private ReconcileStatsSnapshot _proofIntervalStart;
+        private bool _proofIntervalArmed;
+
+        /// <summary>Starts a proof interval without changing cumulative prediction statistics.</summary>
+        public void BeginProofInterval()
+        {
+            _proofIntervalStart = _recon.Stats.Capture();
+            _proofIntervalArmed = true;
+            Debug.Log(NetTuning.LogPrefix + "[client] reconcile proof-baseline acks=" + _proofIntervalStart.Acks +
+                      " sumError=" + _proofIntervalStart.SumError.ToString("R", CultureInfo.InvariantCulture) +
+                      " snaps=" + _proofIntervalStart.Snaps + " replays=" + _proofIntervalStart.Replays +
+                      " fights=" + _proofIntervalStart.Fights);
+        }
+
+        /// <summary>Logs exact deltas, refusing an empty interval or counters that went backwards.</summary>
+        public void LogProofInterval(string tag)
+        {
+            ReconcileStatsSnapshot end = _recon.Stats.Capture();
+            bool valid = _proofIntervalArmed && _proofIntervalStart.TryInterval(end, out _, out _, out _, out _, out _);
+            double mean = 0d;
+            int acks = 0, snaps = 0, replays = 0, fights = 0;
+            if (valid) _proofIntervalStart.TryInterval(end, out mean, out acks, out snaps, out replays, out fights);
+            Debug.Log(NetTuning.LogPrefix + "[client] reconcile proof-interval valid=" + (valid ? "true" : "false") +
+                      " acks=" + acks + " meanErr=" + mean.ToString("R", CultureInfo.InvariantCulture) +
+                      " snaps=" + snaps + " replays=" + replays + " fights=" + fights + " at=" + tag);
+        }
+#endif
+
         // ---- logging ---------------------------------------------------------------------------------------------
 
         /// <summary>Writes the reconcile statistics line now (tag: what the moment is, e.g. "step:jump", "script-end", "final").</summary>

@@ -16,6 +16,7 @@ namespace Emberdelve.UI
         private Text _titleLabel;
         private Text _detailLabel;
         private RunDirector _director;
+        private bool _navigationRequested;
 
         private void OnEnable() => GameEvents.RunEnded += OnRunEnded;
         private void OnDisable() => GameEvents.RunEnded -= OnRunEnded;
@@ -29,6 +30,9 @@ namespace Emberdelve.UI
 
             _root.gameObject.SetActive(true);
             UiFactory.EnsureEventSystem();
+            _navigationRequested = false;
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
 
             bool escaped = result.Outcome == RunState.Extracted;
 
@@ -78,12 +82,22 @@ namespace Emberdelve.UI
 
         private void OnRestart()
         {
+            if (NetRole.IsNetworked)
+            {
+                if (!_navigationRequested) _navigationRequested = NetLobbyBridge.NavigateResult(true);
+                return;
+            }
             if (_director == null) GameServices.TryGet<RunDirector>(out _director);
             if (_director != null) _director.RestartRun();
         }
 
         private void OnLobby()
         {
+            if (NetRole.IsNetworked)
+            {
+                if (!_navigationRequested) _navigationRequested = NetLobbyBridge.NavigateResult(false);
+                return;
+            }
             if (_director == null) GameServices.TryGet<RunDirector>(out _director);
             if (_director != null) _director.ReturnToLobby();
             else if (GameServices.TryGet<LobbyReturnTarget>(out LobbyReturnTarget target)) target.ReturnToLobby();

@@ -2,6 +2,7 @@ using UnityEngine;
 using Emberdelve.Combat;
 using Emberdelve.Core;
 using Emberdelve.Data;
+using UnityEngine.Rendering;
 
 namespace Emberdelve.Player
 {
@@ -73,12 +74,16 @@ namespace Emberdelve.Player
         /// <summary>Elbow hints (aim frame): below and a little outwards.</summary>
         private static readonly Vector3 RightPole = new Vector3(0.7f, -1f, -0.4f);
         private static readonly Vector3 LeftPole = new Vector3(-0.7f, -1f, -0.4f);
+        private static Material _guardDirectionMaterial;
+        private static Mesh _guardDirectionMesh;
 
         /// <summary>The weapon rig's blade runs along its forward; a model grip has the tip on +Y and the flat face on +Z.</summary>
         public static readonly Quaternion GripFromRig = Quaternion.Euler(90f, 0f, 0f);
 
         /// <summary>The shield model is shown a little smaller than its world size so that it frames the view instead of filling it.</summary>
         public const float ShieldScale = 0.72f;
+        // The kite shield's rear straps sit above its geometric centre.
+        public static readonly Vector3 ShieldMountOffset = new Vector3(0f, -0.115f, 0f);
 
         public const float MinModelScale = 0.9f;
         public const float MaxModelScale = 1.5f;
@@ -105,6 +110,7 @@ namespace Emberdelve.Player
         private HealthComponent _health;
         private GameObject _mainHand;
         private GameObject _offHand;
+        private GameObject _guardDirectionMarker;
         private WeaponData _mainData;
         private WeaponViewModelSet.Entry _mainEntry;
         private float _bladeLength;
@@ -116,6 +122,11 @@ namespace Emberdelve.Player
         private bool _blockHeld;
         private bool _hasWeaponModel;
         private float _guardBlend;
+        private bool _hasPresentedPose;
+        private Vector3 _presentedBase, _guardFromBase;
+        private Quaternion _presentedRotation = Quaternion.identity, _guardFromRotation = Quaternion.identity;
+        private float _guardChangedAt = float.NegativeInfinity;
+        private const float GuardTransitionSeconds = 0.14f;
         private float _bobPhase;
         private Vector3 _joltRight;
         private Vector3 _joltLeft;
@@ -187,7 +198,10 @@ namespace Emberdelve.Player
         {
             DestroyHeld(ref _mainHand);
             DestroyHeld(ref _offHand);
+            DestroyHeld(ref _guardDirectionMarker);
             _hasWeaponModel = false;
+            _hasPresentedPose = false;
+            _guardChangedAt = float.NegativeInfinity;
             _mainData = main;
             _mainEntry = null;
             _bladeLength = 0f;
@@ -204,6 +218,7 @@ namespace Emberdelve.Player
                     _bladeLength = DamageBladeLength(main);
                     WeaponScale = ModelScaleFor(_bladeLength, entry.length);
                     if (_mainHand != null) _mainHand.transform.localScale = Vector3.one * WeaponScale;
+                    if (_mainHand != null && main.CanBlock) _guardDirectionMarker = CreateGuardDirectionMarker(_mainHand.transform);
                 }
             }
 
@@ -212,6 +227,7 @@ namespace Emberdelve.Player
             WeaponViewModelSet.Entry shield = _set != null && off != null && off.IsShield && !twoHanded ? _set.Find(off.weaponId) : null;
             if (shield != null && gripLeft != null) _offHand = Hold(shield, gripLeft, "Held_" + off.weaponId);
 
+            UpdateGuardDirectionMarker();
             ApplyBlockClip(_offHand != null);
             return _hasWeaponModel;
         }
@@ -248,6 +264,55 @@ namespace Emberdelve.Player
             }
             SetLayerRecursive(held, LayerMask.NameToLayer("Ignore Raycast"));
             return held;
+        }
+
+        /// <summary>Small camera-visible arrow on block-capable blades; points along the same local blade axis as the guard pose.</summary>
+        private static GameObject CreateGuardDirectionMarker(Transform weapon)
+        {
+            if (weapon == null) return null;
+            if (_guardDirectionMaterial == null)
+            {
+                Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+                if (shader == null) shader = Shader.Find("Unlit/Color");
+                if (shader == null) shader = Shader.Find("Standard");
+                if (shader == null) return null;
+                _guardDirectionMaterial = new Material(shader)
+                {
+                    name = "Emberdelve_GuardDirection",
+                    hideFlags = HideFlags.HideAndDontSave,
+                    color = new Color(1f, 0.68f, 0.18f, 1f)
+                };
+                if (_guardDirectionMaterial.HasProperty("_BaseColor")) _guardDirectionMaterial.SetColor("_BaseColor", _guardDirectionMaterial.color);
+                if (_guardDirectionMaterial.HasProperty("_EmissionColor"))
+                {
+                    _guardDirectionMaterial.SetColor("_EmissionColor", _guardDirectionMaterial.color);
+                    _guardDirectionMaterial.EnableKeyword("_EMISSION");
+                }
+            }
+
+            GameObject marker = new GameObject("Guard_Direction_Marker");
+            marker.transform.SetParent(weapon, false);
+            MeshFilter filter = marker.AddComponent<MeshFilter>();
+            MeshRenderer renderer = marker.AddComponent<MeshRenderer>();
+            if (_guardDirectionMesh == null)
+            {
+                _guardDirectionMesh = new Mesh { name = "Emberdelve_GuardDirectionArrow", hideFlags = HideFlags.HideAndDontSave };
+                _guardDirectionMesh.vertices = new[]
+                {
+                    new Vector3(0.032f, 0.16f, 0.045f), new Vector3(0.052f, 0.16f, 0.045f),
+                    new Vector3(0.032f, 0.34f, 0.045f), new Vector3(0.052f, 0.34f, 0.045f),
+                    new Vector3(0.012f, 0.32f, 0.045f), new Vector3(0.042f, 0.43f, 0.045f), new Vector3(0.072f, 0.32f, 0.045f)
+                };
+                _guardDirectionMesh.triangles = new[] { 0, 1, 2, 1, 3, 2, 4, 6, 5 };
+                _guardDirectionMesh.RecalculateNormals();
+                _guardDirectionMesh.RecalculateBounds();
+            }
+            filter.sharedMesh = _guardDirectionMesh;
+            renderer.sharedMaterial = _guardDirectionMaterial;
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            marker.SetActive(false);
+            return marker;
         }
 
         private static void SetLayerRecursive(GameObject go, int layer)
@@ -288,7 +353,20 @@ namespace Emberdelve.Player
 
         public void SetBlock(bool held)
         {
+            if (held != _blockHeld && _hasPresentedPose)
+            {
+                _guardFromBase = _presentedBase;
+                _guardFromRotation = _presentedRotation;
+                _guardChangedAt = Time.time;
+            }
             _blockHeld = held;
+            UpdateGuardDirectionMarker();
+        }
+
+        private void UpdateGuardDirectionMarker()
+        {
+            if (_guardDirectionMarker != null)
+                _guardDirectionMarker.SetActive(_blockHeld && _offHand == null && (_rig == null || !_rig.Defense.HasShield));
         }
 
         private void OnDamaged(DamageInfo damage)
@@ -301,16 +379,22 @@ namespace Emberdelve.Player
                 if (toSource.sqrMagnitude > 1e-4f) away = -toSource.normalized;
             }
 
-            if (damage.Blocked && damage.Amount <= 0.001f)
+            if (damage.Blocked)
             {
-                // A block held at 0 HP: the guarding hand takes the hit (a short push back and up).
-                AddJolt(new Vector3(0f, 0.025f, -0.07f), _offHand != null);
+                PlayConfirmedBlockImpact(_rig != null && _rig.Defense.HasShield);
                 return;
             }
 
             if (damage.Amount <= 0f) return;
             AddJolt(new Vector3(away.x * 0.05f, -0.035f, -0.045f), false);
             AddJolt(new Vector3(away.x * 0.05f, -0.035f, -0.045f), true);
+        }
+
+        /// <summary>Presentation only: called from authoritative damage feedback, including the network hit report.</summary>
+        public void PlayConfirmedBlockImpact(bool shieldBlock)
+        {
+            if (!shieldBlock && _visual != null) _visual.PlayBlockImpact();
+            AddJolt(new Vector3(0f, 0.025f, -0.07f), shieldBlock);
         }
 
         /// <summary>A short camera-relative push of a hand (decays in a third of a second).</summary>
@@ -373,6 +457,18 @@ namespace Emberdelve.Player
 
             float guardTarget = _blockHeld ? 1f : 0f;
             _guardBlend = Mathf.MoveTowards(_guardBlend, guardTarget, 7f * dt);
+            // Ease only the rendered hands when entering/leaving guard. The weapon rig also
+            // supplies the authority's guard volume, so its transform must remain immediate.
+            if (_visual == null || !_visual.IsSwinging)
+            {
+                float blend = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((Time.time - _guardChangedAt) / GuardTransitionSeconds));
+                localBase = Vector3.Lerp(_guardFromBase, localBase, blend);
+                localRotation = Quaternion.Slerp(_guardFromRotation, localRotation, blend);
+            }
+            else _guardChangedAt = float.NegativeInfinity;
+            _presentedBase = localBase;
+            _presentedRotation = localRotation;
+            _hasPresentedPose = true;
             Pose(frame, _camera, localBase, localRotation, _guardBlend, bob + _joltRight, bob + _joltLeft);
         }
 
@@ -407,15 +503,18 @@ namespace Emberdelve.Player
             if (_offHand != null && gripLeft != null)
             {
                 _offHand.transform.localScale = Vector3.one * ShieldScale;
+                _offHand.transform.localPosition = ShieldMountOffset;
                 Vector3 shieldPosition = Vector3.Lerp(ShieldRest, ShieldRaised, guardBlend) + offsetLeft;
                 Quaternion shieldRotation = Quaternion.Euler(Vector3.Lerp(ShieldRestEuler, ShieldRaisedEuler, guardBlend));
                 SolveArm(_upperL, _lowerL, _handL, gripLeft, frame.TransformPoint(ClampToView(camera, shieldPosition)), frame.rotation * shieldRotation, frame.rotation * LeftPole);
             }
-            else if (_mainData != null && _mainData.twoHanded && gripRight != null)
+            else if (_mainData != null && _mainData.twoHanded && gripRight != null && gripLeft != null)
             {
                 Vector3 axis = _mainHand != null ? _mainHand.transform.up : gripRight.up;
                 Vector3 second = gripRight.position - axis * (SecondGripOffset * WeaponScale);
-                SolveArm(_upperL, _lowerL, _handL, _handL, second, _handL.rotation, frame.rotation * LeftPole);
+                // Solve the palm's authored grip, not the wrist. Keep its grasp aligned with the
+                // handle throughout the swing instead of preserving the idle wrist rotation.
+                SolveArm(_upperL, _lowerL, _handL, gripLeft, second, gripRight.rotation, frame.rotation * LeftPole);
             }
         }
 
@@ -464,7 +563,9 @@ namespace Emberdelve.Player
         /// </summary>
         public static void SolveArm(Transform upper, Transform lower, Transform hand, Transform effector, Vector3 targetPosition, Quaternion targetRotation, Vector3 poleDirection)
         {
-            Vector3 effectorLocal = hand.InverseTransformPoint(effector.position);
+            // Rotation-only local offset retains the mannequin's scale. InverseTransformPoint
+            // removes that scale and leaves the grip short of its target on scaled viewmodels.
+            Vector3 effectorLocal = Quaternion.Inverse(hand.rotation) * (effector.position - hand.position);
             Quaternion effectorRotationLocal = Quaternion.Inverse(hand.rotation) * effector.rotation;
             Quaternion handRotation = targetRotation * Quaternion.Inverse(effectorRotationLocal);
             Vector3 wrist = targetPosition - handRotation * effectorLocal;
@@ -472,6 +573,7 @@ namespace Emberdelve.Player
             Vector3 a = upper.position;
             float l1 = (lower.position - a).magnitude;
             float l2 = (hand.position - lower.position).magnitude;
+            if (l1 < 1e-4f || l2 < 1e-4f) return;
             Vector3 toTarget = wrist - a;
             float distance = toTarget.magnitude;
             if (distance < 1e-4f) return;
@@ -483,6 +585,7 @@ namespace Emberdelve.Player
             float sin = Mathf.Sqrt(1f - cos * cos);
             Vector3 pole = Vector3.ProjectOnPlane(poleDirection, direction);
             if (pole.sqrMagnitude < 1e-6f) pole = Vector3.ProjectOnPlane(Vector3.down, direction);
+            if (pole.sqrMagnitude < 1e-6f) pole = Vector3.ProjectOnPlane(Vector3.right, direction);
             pole.Normalize();
             Vector3 elbow = a + direction * (l1 * cos) + pole * (l1 * sin);
 

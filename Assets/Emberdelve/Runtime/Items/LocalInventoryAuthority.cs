@@ -63,6 +63,7 @@ namespace Emberdelve.Items
 
         public InventoryCommandResult Submit(PlayerRig requester, InventoryCommand command)
         {
+            if (NetRole.IsClientOnly) return Refused("inventory changes require the server");
             if (_busy) return Refused("inventory authority is already processing a command");
             if (requester == null || _rig == null || !ReferenceEquals(requester, _rig))
                 return Refused("requester is not the player bound to this inventory authority");
@@ -227,6 +228,11 @@ namespace Emberdelve.Items
 
         private bool ExecuteDrop(InventoryCommand command, out string reason)
         {
+            using (GameEventTransaction.Defer()) return ExecuteDropTransaction(command, out reason);
+        }
+
+        private bool ExecuteDropTransaction(InventoryCommand command, out string reason)
+        {
             IGroundItemSink sink = GroundSinkOverride;
             if (sink == null && GameServices.TryGet<RunDirector>(out RunDirector director)) sink = director;
             if (sink == null)
@@ -235,43 +241,166 @@ namespace Emberdelve.Items
                 return false;
             }
 
+            if (!_inventory.TryBeginDropMutation(out Inventory.DropMutationLease lease, out reason)) return false;
+            using (lease)
+            {
+            IPreparedGroundDrop prepared = null;
             ItemInstance instance;
             EquipmentSlot fromSlot = EquipmentSlot.None;
+            Equipment.DropStateSnapshot equipmentSnapshot = null;
+            Vector2Int fromOrigin = Vector2Int.zero;
+            ulong fromStackId = 0;
+            ulong originalRevision = _inventory.Revision;
+            Vector3 at = _rig.transform.position + _rig.transform.forward * 1.1f + Vector3.up * 0.5f;
             if (command.SourceStackId != 0)
             {
-                if (!ResolveBagStack(command.SourceStackId, command.ExpectedSourceGearUid, out InventorySlot stack, out int index, out reason)) return false;
-                instance = stack.Instance;
-                if (instance == null)
+                if (!_inventory.TryGetStack(command.SourceStackId, out InventorySlot source) || source.Instance == null ||
+                    source.Instance.Uid != command.ExpectedSourceGearUid)
                 {
-                    reason = "only gear can be dropped";
+                    reason = "source stack identity is unknown or no longer holds the expected gear";
                     return false;
                 }
-
-                if (!_inventory.CanCommitRevision(out reason)) return false;
-                if (_inventory.TryRemoveAt(index, 1) != 1)
-                {
-                    reason = "the item could not leave the bag";
-                    return false;
-                }
+                instance = source.Instance;
             }
             else
             {
-                fromSlot = command.DestinationSlot;
-                if (!_equipment.TryDetachSlot(fromSlot, command.ExpectedSourceGearUid, out instance, out reason)) return false;
+                instance = _equipment.EquippedInstance(command.DestinationSlot);
+                if (instance == null || instance.Uid != command.ExpectedSourceGearUid)
+                {
+                    reason = "the requested gear identity is no longer worn in that slot";
+                    return false;
+                }
             }
-
-            Vector3 at = _rig.transform.position + _rig.transform.forward * 1.1f + Vector3.up * 0.5f;
-            if (!sink.TrySpawnDropped(instance, at, out reason))
+            try
             {
-                // The ground refused: the item goes back exactly where it came from, so the uid is never in zero places.
-                if (fromSlot == EquipmentSlot.None) _inventory.TryAddInstance(instance, out _);
-                else _equipment.ReattachSlot(fromSlot, instance);
+                if (!sink.TryPrepareDropped(instance, at, out prepared, out reason))
+                {
+                    SafeCancelPrepared(prepared);
+                    return false;
+                }
+            }
+            catch (Exception exception)
+            {
+                SafeCancelPrepared(prepared);
+                reason = "the ground could not prepare the drop: " + exception.Message;
                 return false;
             }
 
-            AttemptNotification(() => GameEvents.RaiseToast(_rig.PlayerId, $"Dropped {instance.Definition.displayName}"));
-            reason = null;
-            return true;
+            if (prepared == null)
+            {
+                if (string.IsNullOrEmpty(reason)) reason = "the ground refused to prepare the item";
+                return false;
+            }
+
+            try
+            {
+                if (command.SourceStackId != 0)
+                {
+                    if (!_inventory.TryDetachInstanceForDrop(lease, command.SourceStackId, command.ExpectedSourceGearUid,
+                            out ItemInstance detached, out fromOrigin, out originalRevision, out reason))
+                    {
+                        SafeCancelPrepared(prepared);
+                        return false;
+                    }
+                    instance = detached;
+                    fromStackId = command.SourceStackId;
+                }
+                else
+                {
+                    fromSlot = command.DestinationSlot;
+                    if (!_equipment.TryDetachSlotForDrop(lease, fromSlot, command.ExpectedSourceGearUid,
+                            out ItemInstance detached, out equipmentSnapshot, out reason))
+                    {
+                        SafeCancelPrepared(prepared);
+                        return false;
+                    }
+                    instance = detached;
+                }
+
+                // Publication is the only operation that can still refuse. It occurs while the source is provisional
+                // and before revision/events commit, so a throwing or reentrant sink can be compensated exactly.
+                try { prepared.Publish(); }
+                catch (Exception exception)
+                {
+                    SafeCancelPrepared(prepared);
+                    string rollbackReason;
+                    bool restored = fromSlot == EquipmentSlot.None
+                        ? _inventory.TryRestoreInstanceAfterDropRefusal(lease, instance, fromStackId, fromOrigin,
+                            originalRevision, out rollbackReason)
+                        : _equipment.TryRestoreSlotAfterDropFailure(lease, fromSlot, instance, equipmentSnapshot, out rollbackReason);
+                    reason = "the ground could not publish the drop: " + exception.Message;
+                    if (!restored) reason += "; rollback failed: " + rollbackReason;
+                    return false;
+                }
+
+                if (fromSlot != EquipmentSlot.None && !_equipment.FinalizeDropDetach(lease, fromSlot, instance))
+                {
+                    SafeCancelPrepared(prepared);
+                    string rollbackReason;
+                    bool restored = _equipment.TryRestoreSlotAfterDropFailure(lease, fromSlot, instance, equipmentSnapshot, out rollbackReason);
+                    reason = "equipment drop finalization was refused";
+                    if (!restored) reason += "; rollback failed: " + rollbackReason;
+                    return false;
+                }
+
+                if (!_inventory.CommitDroppedInstance(lease, originalRevision, out reason))
+                {
+                    SafeCancelPrepared(prepared);
+                    string rollbackReason;
+                    bool restored = fromSlot == EquipmentSlot.None
+                        ? _inventory.TryRestoreInstanceAfterDropRefusal(lease, instance, fromStackId, fromOrigin,
+                            originalRevision, out rollbackReason)
+                        : _equipment.TryRestoreSlotAfterDropFailure(lease, fromSlot, instance, equipmentSnapshot, out rollbackReason);
+                    if (!restored) reason = (reason ?? "drop commit refused") + "; rollback failed: " + rollbackReason;
+                    return false;
+                }
+
+                if (fromSlot != EquipmentSlot.None)
+                {
+                    GameEvents.RaiseEquipmentChanged(_rig.PlayerId, instance.Definition, false);
+                    if (instance.Definition.GrantsWeapon && _rig.Loadout != null)
+                        GameEvents.RaiseActiveWeapon(_rig.PlayerId, _rig.Loadout.ActiveWeapon);
+                }
+
+                AttemptNotification(() => GameEvents.RaiseToast(_rig.PlayerId, $"Dropped {instance.Definition.displayName}"));
+                reason = null;
+                return true;
+            }
+            catch (Exception exception)
+            {
+                SafeCancelPrepared(prepared);
+                bool stillAtSource = fromSlot == EquipmentSlot.None
+                    ? (_inventory.TryGetStack(fromStackId != 0 ? fromStackId : command.SourceStackId, out InventorySlot live) &&
+                       ReferenceEquals(live.Instance, instance))
+                    : ReferenceEquals(_equipment.EquippedInstance(fromSlot), instance);
+                if (!stillAtSource && _inventory.Revision == originalRevision)
+                {
+                    string rollbackReason;
+                    bool restored = fromSlot == EquipmentSlot.None
+                        ? _inventory.TryRestoreInstanceAfterDropRefusal(lease, instance,
+                            fromStackId != 0 ? fromStackId : command.SourceStackId, fromOrigin, originalRevision, out rollbackReason)
+                        : _equipment.TryRestoreSlotAfterDropFailure(lease, fromSlot, instance, equipmentSnapshot, out rollbackReason);
+                    if (!restored) reason = "; rollback failed: " + rollbackReason;
+                }
+                reason = "the drop transaction failed: " + exception.Message + (reason ?? string.Empty);
+                return false;
+            }
+            finally { SafeDisposePrepared(prepared); }
+            }
+        }
+
+        private static void SafeCancelPrepared(IPreparedGroundDrop prepared)
+        {
+            if (prepared == null) return;
+            try { prepared.Cancel(); }
+            catch (Exception exception) { Debug.LogException(exception); }
+        }
+
+        private static void SafeDisposePrepared(IPreparedGroundDrop prepared)
+        {
+            if (prepared == null) return;
+            try { prepared.Dispose(); }
+            catch (Exception exception) { Debug.LogException(exception); }
         }
 
         private bool ResolveBagStack(ulong stackId, Guid expectedUid, out InventorySlot slot,

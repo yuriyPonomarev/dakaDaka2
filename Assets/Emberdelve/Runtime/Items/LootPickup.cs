@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Data;
@@ -55,10 +56,25 @@ namespace Emberdelve.Items
         bool TryCollectLootInstance(IInteractionActor actor, ItemInstance instance, out string reason);
     }
 
-    /// <summary>U5A: where a dropped item goes. The server lays the exact instance on the ground; false changes nothing (the caller puts the item back).</summary>
+    /// <summary>A prepared, inactive representation of an exact dropped instance.</summary>
+    public interface IPreparedGroundDrop : IDisposable
+    {
+        /// <summary>Publishes the staged pickup. Implementations must not notify or re-enter gameplay observers and must not fail after successful preparation.</summary>
+        void Publish();
+        /// <summary>Removes an unpublished or failed staged pickup. It must clear its UID reference before teardown can throw.</summary>
+        void Cancel();
+    }
+
+    /// <summary>U5A: prepares an inactive ground representation of the exact instance before source ownership changes.</summary>
     public interface IGroundItemSink
     {
-        bool TrySpawnDropped(ItemInstance instance, Vector3 position, out string reason);
+        bool TryPrepareDropped(ItemInstance instance, Vector3 position, out IPreparedGroundDrop prepared, out string reason);
+    }
+
+    /// <summary>Owner-side bridge for a public pickup. The server resolves and validates the item id.</summary>
+    public interface IFloorLootInteractionAuthority
+    {
+        bool RequestFloorLootPickup(ulong pickupId);
     }
 
     /// <summary>
@@ -192,14 +208,19 @@ namespace Emberdelve.Items
 
         private ILootHost _host;
         private bool _taken; // U5A: once an instance has been handed to a bag the pickup is spent, even within the frame Unity still lists it
+        private bool _collecting;
         private Vector3 _home;
         private float _phase;
+        private ulong _networkLootId;
 
         public ItemData Item => _instance != null ? _instance.Definition : item;
         public int Amount => _instance != null ? 1 : Mathf.Max(1, amount);
 
         /// <summary>The concrete item this pickup holds, or null for a definition+amount pickup.</summary>
         public ItemInstance Instance => _instance;
+        public ulong NetworkLootId => _networkLootId;
+        public bool IsSpent => _taken;
+        public Vector3 HomePosition => _home;
 
         public string PromptText
         {
@@ -235,6 +256,37 @@ namespace Emberdelve.Items
             _host = newHost as ILootHost;
         }
 
+        /// <summary>Server-only registry hook; zero means this is still an offline-only pickup.</summary>
+        public void SetNetworkLootId(ulong id) => _networkLootId = id;
+
+        /// <summary>Configures a local client replica. It contains presentation data only; the server keeps the item instance.</summary>
+        public void ConfigureNetworkReplica(ItemData newItem, int newAmount, ulong id, MonoBehaviour interactionHost = null)
+        {
+            Configure(newItem, newAmount, interactionHost);
+            _networkLootId = id;
+        }
+
+        /// <summary>Server invokes the existing source transaction after it has validated the owner, range and LOS.</summary>
+        public bool TryCollectFromNetwork(IInteractionActor actor)
+        {
+            if (_taken || _collecting || Item == null || _host == null) return false;
+            int beforeAmount = amount;
+            _collecting = true;
+            try
+            {
+                using (GameEventTransaction.Defer()) CollectCore(actor);
+                return _taken || amount < beforeAmount;
+            }
+            finally { _collecting = false; }
+        }
+
+        /// <summary>Repositions authored ground loot when a modular run layout is installed after this view has awakened.</summary>
+        public void PlaceAt(Vector3 worldPosition)
+        {
+            transform.position = worldPosition;
+            _home = worldPosition;
+        }
+
         /// <summary>Configures this pickup as one concrete item: taking it hands the very same instance to the bag.</summary>
         public void Configure(ItemInstance instance, MonoBehaviour newHost)
         {
@@ -245,9 +297,27 @@ namespace Emberdelve.Items
             _host = newHost as ILootHost;
         }
 
+        /// <summary>Clears an unpublished staged UID before its inactive pickup is destroyed.</summary>
+        internal void ClearPreparedInstance()
+        {
+            _instance = null;
+            item = null;
+            amount = 0;
+            _taken = true;
+        }
+
         public bool CanInteract(IInteractionActor actor, out string reason)
         {
-            if (!Emberdelve.Interaction.InteractionRules.Validate(actor, this,
+            if (_taken || _collecting)
+            {
+                reason = "Already taken";
+                return false;
+            }
+            if (_networkLootId != 0)
+            {
+                if (!ValidateNetworkInteraction(actor, Emberdelve.Interaction.InteractionRules.ReachOf(_host), out reason)) return false;
+            }
+            else if (!Emberdelve.Interaction.InteractionRules.Validate(actor, this,
                 Emberdelve.Interaction.InteractionRules.ReachOf(_host), _host, out reason)) return false;
 
             if (Item == null)
@@ -256,7 +326,7 @@ namespace Emberdelve.Items
                 return false;
             }
 
-            if (_host == null)
+            if (_host == null && _networkLootId == 0)
             {
                 reason = "No inventory available";
                 return false;
@@ -266,9 +336,59 @@ namespace Emberdelve.Items
             return true;
         }
 
+        /// <summary>Shared, animation-stable reach/LOS contract used by the client replica and server authority.</summary>
+        public bool ValidateNetworkInteraction(IInteractionActor actor, float reach, out string reason)
+        {
+            if (actor == null || !actor.IsAlive)
+            { reason = "The dead cannot interact"; return false; }
+            Vector3 origin = actor.InteractionOrigin;
+            Vector3 point = _home;
+            if (!IsFinite(origin) || !IsFinite(point) || float.IsNaN(reach) || float.IsInfinity(reach))
+            { reason = "Invalid pickup interaction geometry"; return false; }
+            Vector3 offset = point - origin;
+            float distance = offset.magnitude;
+            if (float.IsNaN(distance) || float.IsInfinity(distance) || distance > Mathf.Max(.5f, reach))
+            { reason = "Too far away"; return false; }
+            if (distance > .24f)
+            {
+                int levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
+                if (levelMask != 0 && Physics.Raycast(origin, offset / distance, out _, distance - .12f,
+                        levelMask, QueryTriggerInteraction.Ignore))
+                { reason = "No line of sight"; return false; }
+            }
+            reason = null;
+            return true;
+        }
+
+        private static bool IsFinite(Vector3 value) => IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
+        private static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
+
         public void OnInteractInstant(IInteractionActor actor)
         {
-            if (!CanInteract(actor, out string reason))
+            if (_taken || _collecting) return;
+            if (_networkLootId != 0)
+            {
+                Component component = actor as Component;
+                MonoBehaviour[] behaviours = component != null ? component.GetComponents<MonoBehaviour>() : Array.Empty<MonoBehaviour>();
+                for (int i = 0; i < behaviours.Length; i++)
+                    if (behaviours[i] is IFloorLootInteractionAuthority authority)
+                    { authority.RequestFloorLootPickup(_networkLootId); return; }
+                return;
+            }
+            _collecting = true;
+            try
+            {
+                // Observers run after the source has recorded the accepted quantity.
+                using (GameEventTransaction.Defer()) CollectCore(actor);
+            }
+            finally { _collecting = false; }
+        }
+
+        private void CollectCore(IInteractionActor actor)
+        {
+            // Validate before the busy guard applies to external callers.
+            if (!Emberdelve.Interaction.InteractionRules.Validate(actor, this,
+                Emberdelve.Interaction.InteractionRules.ReachOf(_host), _host, out string reason) || Item == null || _host == null)
             {
                 GameEvents.RaiseToast(actor != null ? actor.PlayerId : GameEvents.NoPlayer, reason ?? "Cannot take item");
                 return;
@@ -305,6 +425,7 @@ namespace Emberdelve.Items
             int left = requested - accepted;
             if (left <= 0)
             {
+                _taken = true;
                 Destroy(gameObject);
                 return;
             }

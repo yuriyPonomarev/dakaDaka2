@@ -4,6 +4,7 @@ using Emberdelve.Ballistics;
 using Emberdelve.Combat;
 using Emberdelve.Core;
 using Emberdelve.Net.Rules;
+using Emberdelve.Player;
 using UnityEngine;
 
 namespace Emberdelve.Net
@@ -12,7 +13,7 @@ namespace Emberdelve.Net
     /// U3B3, client process: presents what the SERVER reported about combat. Nothing here decides or applies anything: a swing is a log line
     /// (the offline visual needs the weapon and pattern assets, which the client resolves by id later), a shot is a small replica body that is
     /// advanced with the same fixed-step integrator the server uses (ProjectileBallistics.Advance from the parameters the server sent) and
-    /// is retired where the server says the flight ended, a hit is a counted line. Health never changes here: it arrives through the
+    /// is retired where the server says the flight ended, and an enemy hit can emit blood at the server's point. Health never changes here: it arrives through the
     /// player's replicated Vitals variable and the enemy vitals snapshots.
     ///
     ///   [client] server-swing id=.. weapon=.. pattern=.. step=.. windup=.. active=.. recovery=..
@@ -26,10 +27,13 @@ namespace Emberdelve.Net
         private static readonly Dictionary<uint, NetArrowReplica> Replicas = new Dictionary<uint, NetArrowReplica>();
         private static readonly Dictionary<int, int> HitsOnPlayer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> BlockedOnPlayer = new Dictionary<int, int>();
+        private static readonly BloodHitWindow BloodEvents = new BloodHitWindow();
+        private const string BloodPrefabPath = "Emberdelve/NetBloodHit";
 
         public static int Swings { get; private set; }
         public static int Shots { get; private set; }
         public static int Hits { get; private set; }
+        public static int EnemyHits { get; private set; }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatics()
@@ -37,7 +41,8 @@ namespace Emberdelve.Net
             Replicas.Clear();
             HitsOnPlayer.Clear();
             BlockedOnPlayer.Clear();
-            Swings = Shots = Hits = 0;
+            BloodEvents.Clear();
+            Swings = Shots = Hits = EnemyHits = 0;
         }
 
         /// <summary>Server-reported hits on a player (by server player id) this client has seen.</summary>
@@ -45,6 +50,8 @@ namespace Emberdelve.Net
 
         /// <summary>Server-reported BLOCKED hits on a player this client has seen.</summary>
         public static int BlockedOn(int playerId) { BlockedOnPlayer.TryGetValue(playerId, out int n); return n; }
+
+        public static void ClearBloodHistory() { BloodEvents.Clear(); }
 
         public static void OnSwing(NetPlayerRig carrier, in CombatSwingWire swing)
         {
@@ -90,7 +97,43 @@ namespace Emberdelve.Net
 
         public static void OnHit(NetPlayerRig carrier, in CombatHitWire hit)
         {
+            if (BloodEvents.Accept(hit.EventId, hit.TargetIsEnemy, hit.Amount, hit.PointX, hit.PointY, hit.PointZ))
+            {
+                GameObject prefab = Resources.Load<GameObject>(BloodPrefabPath);
+                if (prefab != null)
+                {
+                    GameObject effect = Object.Instantiate(prefab, new Vector3(hit.PointX, hit.PointY, hit.PointZ), Quaternion.identity);
+                    ParticleSystem particles = effect.GetComponentInChildren<ParticleSystem>();
+                    if (particles != null)
+                    {
+                        particles.Play(); particles.Emit(18);
+                        Debug.Log(NetTuning.LogPrefix + "[client] blood-event accepted id=" + hit.EventId + " target=" + hit.Target + " point=" + F(hit.PointX) + "," + F(hit.PointY) + "," + F(hit.PointZ));
+                    }
+                    Object.Destroy(effect, 2f);
+                }
+            }
             Hits++;
+            // Client-only owner health is updated from replicated vitals and does not raise DamageInfo.Damaged.
+            // Use this server-originated hit report for the owner's block animation, guarded by the resolved target id.
+            if (hit.Blocked && !hit.TargetIsEnemy)
+            {
+                IReadOnlyList<NetPlayerRig> rigs = NetPlayerRig.Spawned;
+                for (int i = 0; i < rigs.Count; i++)
+                {
+                    NetPlayerRig targetRig = rigs[i];
+                    if (targetRig == null || targetRig.Role != NetPlayerRole.Owner || targetRig.ServerPlayerId.Value != hit.Target) continue;
+                    if (targetRig.Rig != null && targetRig.Rig.Loadout != null)
+                    {
+                        bool shieldBlock = targetRig.Rig.Defense.HasShield;
+                        FirstPersonArmsDriver arms = targetRig.Rig.Loadout.Arms;
+                        if (arms != null) arms.PlayConfirmedBlockImpact(shieldBlock);
+                        else if (!shieldBlock) targetRig.Rig.Loadout.Visual?.PlayBlockImpact();
+                    }
+                    break;
+                }
+            }
+
+            if (hit.TargetIsEnemy) EnemyHits++;
             if (!hit.TargetIsEnemy)
             {
                 HitsOnPlayer.TryGetValue(hit.Target, out int n);

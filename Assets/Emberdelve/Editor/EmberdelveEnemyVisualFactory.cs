@@ -61,12 +61,12 @@ namespace Emberdelve.EditorTools
         public static readonly Variant[] Variants =
         {
             new Variant { Name = "Minion", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyBlade", MainHandSource = "antique_estoc", MainHandLength = 0.85f,
-                Idle = "Zombie_Idle_Loop", Walk = "Zombie_Walk_Fwd_Loop", Run = "Zombie_Walk_Fwd_Loop", RunPlayback = 1.7f, Attack = "Sword_Attack", Hit = "Hit_Chest", Death = "Death01" },
+                Idle = "Sword_Idle", Walk = "Zombie_Walk_Fwd_Loop", Run = "Zombie_Walk_Fwd_Loop", RunPlayback = 1.7f, Attack = "Sword_Regular_A", Hit = "Hit_Chest", Death = "Death01" },
             new Variant { Name = "Rogue", Body = FemaleBody, MeshName = "Undead_Mannequin_F", MainHand = "Weapon_RustyDagger", MainHandSource = "ornate_medieval_dagger", MainHandLength = 0.38f,
-                Idle = "Idle_Loop", Walk = "Walk_Loop", Run = "Jog_Fwd_Loop", Attack = "Sword_Regular_C", Hit = "Hit_Head", Death = "Death01" },
+                Idle = "Sword_Idle", Walk = "Walk_Loop", Run = "Jog_Fwd_Loop", Attack = "Sword_Regular_A", Hit = "Hit_Head", Death = "Death01" },
             new Variant { Name = "Warrior", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyAxe", MainHandSource = "hatchet", MainHandLength = 0.4f,
                 OffHand = "Weapon_RustyShield", OffHandSource = "kite_shield", OffHandSize = 0.7f, Pauldrons = true,
-                Idle = "Idle_Shield_Loop", Walk = "Walk_Formal_Loop", Run = "Jog_Fwd_Loop", Attack = "Sword_Attack", Hit = "Hit_Chest", Death = "Death01" },
+                Idle = "Idle_Shield_Loop", Walk = "Walk_Formal_Loop", Run = "Jog_Fwd_Loop", Attack = "Sword_Regular_A", Hit = "Hit_Chest", Death = "Death01" },
             new Variant { Name = "Mage", Body = MaleBody, MeshName = "Undead_Mannequin_M", GlowingEyes = true,
                 Idle = "Spell_Simple_Idle_Loop", Walk = "Walk_Formal_Loop", Run = "Jog_Fwd_Loop", Attack = "Spell_Simple_Shoot", Hit = "Hit_Chest", Death = "Death01" },
         };
@@ -117,6 +117,7 @@ namespace Emberdelve.EditorTools
 
             EmberdelveWeaponModels.EnsureAll(false);
             EmberdelveUndeadMaterials.EnsureAll();
+            if (!EmberdelveSkeletonAssets.EnsureConfigured()) return false;
             EmberdelveVisualSetup.EnsureFolder(Folder);
 
             bool ok = true;
@@ -139,9 +140,10 @@ namespace Emberdelve.EditorTools
 
         private static bool Build(Variant variant)
         {
-            GameObject fbx = AssetDatabase.LoadAssetAtPath<GameObject>(variant.Body);
-            Mesh mesh = EmberdelveUndeadMaterials.EnsureMesh(variant.Body, variant.MeshName);
-            Material bodyMaterial = EmberdelveUndeadMaterials.Load(EmberdelveUndeadMaterials.BodyMaterialPath(variant.Name));
+            GameObject fbx = AssetDatabase.LoadAssetAtPath<GameObject>(EmberdelveSkeletonAssets.ModelPath);
+            SkinnedMeshRenderer source = fbx != null ? fbx.GetComponentInChildren<SkinnedMeshRenderer>(true) : null;
+            Mesh mesh = source != null ? source.sharedMesh : null;
+            Material bodyMaterial = EmberdelveSkeletonAssets.MaterialFor(variant.Name);
             if (fbx == null || mesh == null || bodyMaterial == null)
             {
                 Debug.LogWarning("[Emberdelve][EnemyVisual] variant " + variant.Name + " skipped: model, derived mesh or material missing.");
@@ -151,7 +153,7 @@ namespace Emberdelve.EditorTools
             AnimatorController controller = BuildController(variant);
             if (controller == null) return false;
 
-            Avatar avatar = FindAvatar(variant.Body);
+            Avatar avatar = FindAvatar(EmberdelveSkeletonAssets.ModelPath);
             GameObject root = new GameObject("EnemyVisual_" + variant.Name);
             try
             {
@@ -163,7 +165,7 @@ namespace Emberdelve.EditorTools
                 if (!string.IsNullOrEmpty(variant.MainHand)) AttachMainHand(variant, fbx, mesh, bodyMaterial, avatar, animator);
                 if (!string.IsNullOrEmpty(variant.OffHand)) AttachOffHand(variant, fbx, mesh, bodyMaterial, avatar, animator);
                 if (variant.Pauldrons) AddPauldrons(animator, rust);
-                if (variant.GlowingEyes) AddEyes(animator);
+                if (variant.GlowingEyes) AddEyesFromLivePose(fbx, mesh, bodyMaterial, avatar, animator, variant.Idle);
 
                 // Built facing +Z (bind pose turned), shipped with identity yaw: the live pose faces +Z by itself.
                 model.transform.localRotation = Quaternion.identity;
@@ -173,9 +175,11 @@ namespace Emberdelve.EditorTools
                 for (int i = 0; i < colliders.Length; i++) Object.DestroyImmediate(colliders[i]);
 
                 EnemyVisualDriver driver = root.AddComponent<EnemyVisualDriver>();
+                ParticleSystem blood = EmberdelveBloodEffect.Create(root.transform);
                 SerializedObject serialized = new SerializedObject(driver);
                 SerializedProperty animatorProperty = serialized.FindProperty("animator");
                 if (animatorProperty != null) animatorProperty.objectReferenceValue = animator;
+                serialized.FindProperty("bloodEffect").objectReferenceValue = blood;
                 serialized.ApplyModifiedPropertiesWithoutUndo();
 
                 PrefabUtility.SaveAsPrefabAsset(root, PrefabPath(variant.Name));
@@ -353,7 +357,7 @@ namespace Emberdelve.EditorTools
                 Vector3 tip = (up + forward * 0.45f).normalized;
                 Vector3 flat = Vector3.ProjectOnPlane(right, tip).normalized;
                 Quaternion world = Quaternion.LookRotation(flat, tip);
-                Vector3 grip = knuckle != null ? Vector3.Lerp(hand.position, knuckle.position, 0.75f) : hand.position;
+                Vector3 grip = knuckle != null ? Vector3.Lerp(hand.position, knuckle.position, 0.75f) : HandSurfaceCentre(posedAnimator, hand);
 
                 weapon.transform.SetParent(finalHand, false);
                 weapon.transform.localPosition = hand.InverseTransformPoint(grip);
@@ -383,7 +387,7 @@ namespace Emberdelve.EditorTools
                 // Face forward (slightly outward), upright; centred a little in front of the hand.
                 Vector3 facing = (Vector3.forward - Vector3.right * 0.3f).normalized;
                 Quaternion world = Quaternion.LookRotation(facing, Vector3.up);
-                Vector3 centre = hand.position + facing * 0.09f * scale / 0.98f;
+                Vector3 centre = HandSurfaceCentre(posedAnimator, hand) + facing * 0.09f * scale / 0.98f;
 
                 shield.transform.SetParent(finalHand, false);
                 shield.transform.localPosition = hand.InverseTransformPoint(centre);
@@ -394,6 +398,38 @@ namespace Emberdelve.EditorTools
             {
                 Object.DestroyImmediate(posed);
             }
+        }
+
+        // Some humanoid rigs have no finger bones. Estimate the palm from vertices weighted to the hand
+        // in the actual grip pose instead of attaching a weapon at the wrist.
+        private static Vector3 HandSurfaceCentre(Animator animator, Transform hand)
+        {
+            var renderer = animator.GetComponentInChildren<SkinnedMeshRenderer>();
+            if (renderer == null || renderer.sharedMesh == null || !renderer.sharedMesh.isReadable) return hand.position;
+            int boneIndex = System.Array.IndexOf(renderer.bones, hand);
+            if (boneIndex < 0) return hand.position;
+            var weights = renderer.sharedMesh.boneWeights;
+            var baked = new Mesh();
+            try
+            {
+                renderer.BakeMesh(baked);
+                var vertices = baked.vertices;
+                Vector3 sum = Vector3.zero;
+                int count = 0;
+                for (int i = 0; i < weights.Length && i < vertices.Length; i++)
+                {
+                    BoneWeight w = weights[i];
+                    float weight = (w.boneIndex0 == boneIndex ? w.weight0 : 0f) +
+                        (w.boneIndex1 == boneIndex ? w.weight1 : 0f) +
+                        (w.boneIndex2 == boneIndex ? w.weight2 : 0f) +
+                        (w.boneIndex3 == boneIndex ? w.weight3 : 0f);
+                    if (weight < 0.5f) continue;
+                    sum += renderer.transform.TransformPoint(vertices[i]);
+                    count++;
+                }
+                return count > 0 ? sum / count : hand.position;
+            }
+            finally { Object.DestroyImmediate(baked); }
         }
 
         /// <summary>Wanted world scale / the bone's lossy scale, per axis (so the accessory has the intended size under a scaled skeleton).</summary>
@@ -425,6 +461,26 @@ namespace Emberdelve.EditorTools
                 dome.transform.SetParent(pauldron.transform, false);
                 dome.transform.localScale = DivideScale(new Vector3(0.12f, 0.06f, 0.13f) * scale, pauldron.transform.lossyScale, 1f);
             }
+        }
+
+        private static void AddEyesFromLivePose(GameObject fbx, Mesh mesh, Material material, Avatar avatar, Animator animator, string pose)
+        {
+            GameObject posed = PosedCopy(fbx, mesh, material, avatar, animator.transform.localScale.x, pose);
+            try
+            {
+                Animator sampled = posed.GetComponent<Animator>();
+                AddEyes(sampled);
+                Transform sourceHead = sampled.GetBoneTransform(HumanBodyBones.Head);
+                Transform targetHead = animator.GetBoneTransform(HumanBodyBones.Head);
+                if (sourceHead == null || targetHead == null) return;
+                foreach (string eyeName in new[] { EyeNameLeft, EyeNameRight })
+                {
+                    Transform eye = sourceHead.Find(eyeName);
+                    if (eye == null) continue;
+                    eye.SetParent(targetHead, false);
+                }
+            }
+            finally { Object.DestroyImmediate(posed); }
         }
 
         private static void AddEyes(Animator animator)
@@ -596,7 +652,9 @@ namespace Emberdelve.EditorTools
             settings.loopTime = false;
             settings.loopBlendOrientation = true;
             settings.loopBlendPositionY = true;
-            settings.loopBlendPositionXZ = true;
+            // Extract horizontal travel instead of baking a lunge into the skeleton.
+            // Root motion is disabled: authority owns movement and collider placement.
+            settings.loopBlendPositionXZ = false;
             AnimationUtility.SetAnimationClipSettings(copy, settings);
             AssetDatabase.CreateAsset(copy, path);
             return copy;

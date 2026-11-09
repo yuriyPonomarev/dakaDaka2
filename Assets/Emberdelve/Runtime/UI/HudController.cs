@@ -38,6 +38,8 @@ namespace Emberdelve.UI
         private Text _classLabel;
         private Text _weaponLabel;
         private Text _objectiveLabel;
+        private Text _raidCountdownLabel;
+        private Image _raidCountdownBack;
         private Text _statusLabel;
         private Text _healthLabel;
         private Image _healthFill;
@@ -206,6 +208,7 @@ namespace Emberdelve.UI
 
             UpdateInventoryScreen();
             UpdateComboPips();
+            UpdateRaidCountdown();
         }
 
         /// <summary>
@@ -329,6 +332,16 @@ namespace Emberdelve.UI
             UiFactory.SetRect(_objectiveLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(520f, 60f), new Vector2(24f, -58f), new Vector2(0f, 1f));
 
+            _raidCountdownBack = UiFactory.CreateImage(_root, "RaidCountdownBack", new Color(0.07f, 0.06f, 0.05f, 0.88f),
+                new Vector2(236f, 48f), new Vector2(-24f, -24f), Vector2.one, Vector2.one);
+            _raidCountdownBack.rectTransform.pivot = Vector2.one;
+            _raidCountdownLabel = UiFactory.CreateText(_root, "RaidCountdownLabel", "RAID  10:00", 20, ink,
+                TextAnchor.MiddleCenter, FontStyle.Bold);
+            UiFactory.SetRect(_raidCountdownLabel.rectTransform, Vector2.one, Vector2.one,
+                new Vector2(220f, 40f), new Vector2(-32f, -28f), Vector2.one);
+            _raidCountdownBack.gameObject.SetActive(false);
+            _raidCountdownLabel.gameObject.SetActive(false);
+
             _statusLabel = UiFactory.CreateText(_root, "StatusLabel", "", 16, dim, TextAnchor.UpperLeft);
             UiFactory.SetRect(_statusLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(520f, 26f), new Vector2(24f, -118f), new Vector2(0f, 1f));
@@ -406,6 +419,36 @@ namespace Emberdelve.UI
                 new Vector2(2400f, 1400f), Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
 
             BuildInventoryScreen();
+        }
+
+        private void UpdateRaidCountdown()
+        {
+            if (_director == null) GameServices.TryGet<RunDirector>(out _director);
+            bool visible = _director != null && _director.RaidCountdownEnabled;
+            if (_raidCountdownBack != null && _raidCountdownBack.gameObject.activeSelf != visible)
+                _raidCountdownBack.gameObject.SetActive(visible);
+            if (_raidCountdownLabel != null && _raidCountdownLabel.gameObject.activeSelf != visible)
+                _raidCountdownLabel.gameObject.SetActive(visible);
+            if (!visible || _raidCountdownLabel == null || _raidCountdownBack == null) return;
+
+            float remaining = _director.RaidSecondsRemaining;
+            bool expired = _director.RaidExpired;
+            bool urgent = expired || remaining <= 10f;
+            bool warning = remaining <= 60f;
+            _raidCountdownLabel.text = expired ? "RAID EXPIRED" :
+                urgent ? "FINAL SECONDS  " + FormatRaidClock(remaining) :
+                warning ? "EXTRACT SOON  " + FormatRaidClock(remaining) :
+                "RAID  " + FormatRaidClock(remaining);
+            _raidCountdownLabel.color = urgent ? new Color(1f, 0.72f, 0.58f, 1f) :
+                warning ? new Color(1f, 0.87f, 0.56f, 1f) : new Color(0.92f, 0.88f, 0.8f, 1f);
+            _raidCountdownBack.color = urgent ? new Color(0.28f, 0.06f, 0.04f, 0.94f) :
+                warning ? new Color(0.25f, 0.18f, 0.05f, 0.92f) : new Color(0.07f, 0.06f, 0.05f, 0.88f);
+        }
+
+        private static string FormatRaidClock(float seconds)
+        {
+            int total = Mathf.Max(0, Mathf.CeilToInt(seconds));
+            return (total / 60).ToString("00") + ":" + (total % 60).ToString("00");
         }
 
         /// <summary>

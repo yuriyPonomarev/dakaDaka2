@@ -208,6 +208,7 @@ namespace Emberdelve.EditorTools
         /// <summary>Poses an arms instance (edit mode): idle base pose, then the solver on the pattern pose at <paramref name="time"/> (negative: the rest pose).</summary>
         public static void PoseArms(GameObject arms, Emberdelve.Player.FirstPersonArmsDriver driver, Camera camera, Emberdelve.Data.SwingPatternData pattern, float time, float guard, Emberdelve.Data.SwingTiming? timing = null)
         {
+            driver.SetBlock(guard > 0.5f);
             AnimationClip idle = AssetDatabase.LoadAssetAtPath<AnimationClip>(EmberdelveFirstPersonArms.ClipPath(Emberdelve.Player.FirstPersonArmsDriver.IdleState));
             EmberdelveFirstPersonArms.PoseInstance(arms, idle, 0.3f);
             if (guard > 0.5f && time < 0f)
