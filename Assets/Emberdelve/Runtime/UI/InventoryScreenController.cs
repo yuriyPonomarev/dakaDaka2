@@ -40,7 +40,7 @@ namespace Emberdelve.UI
         // Shared paper-doll geometry keeps own and looted equipment in identical places.
         private const float PanelWidth = LootPanelStyle.Width;
         private const float PanelHeight = LootPanelStyle.Height;
-        private const float PanelCenterX = 0f;
+        private const float PanelCenterX = 190f;
         private const float PanelCenterY = 0f;
         private const float PanelInset = 16f;
         private const float ColumnGap = 10f;
@@ -108,6 +108,7 @@ namespace Emberdelve.UI
         private RectTransform _statsGroup;
         private Image _statsPane;
         private CharacterStatsView _statsView;
+        private CharacterSidebar _sidebar;
         private Text _tooltipLabel;
         private Button _bagTab;
         private Button _characterTab;
@@ -146,7 +147,7 @@ namespace Emberdelve.UI
         public bool IsLootCompanion { get; private set; }
         private void LateUpdate()
         {
-            if (_root != null && IsOpen) _root.localScale = Vector3.one * Mathf.Min(1f, Screen.width / (IsLootCompanion ? 1100f : 560f), Screen.height / 700f);
+            if (_root != null && IsOpen) _root.localScale = Vector3.one * Mathf.Min(1f, Screen.width / (IsLootCompanion ? 1480f : 940f), Screen.height / 700f);
         }
 
         private bool RunEnded => _director != null && (_director.State == RunState.Dead || _director.State == RunState.Extracted
@@ -213,7 +214,7 @@ namespace Emberdelve.UI
         {
             IsLootCompanion = enabled;
             if (_panel == null) Build();
-            _panel.anchoredPosition = new Vector2(enabled ? -270f : 0f, 0f);
+            _panel.anchoredPosition = new Vector2(enabled ? -80f : 190f, 0f);
             if (_backdrop != null) _backdrop.gameObject.SetActive(!enabled);
             if (_director != null && _rig != null && _rig.IsAlive && !_rig.IsExtracted && _director.State == RunState.Running)
                 _director.SetInventoryOpen(enabled);
@@ -1150,6 +1151,9 @@ namespace Emberdelve.UI
             _panel.anchoredPosition = new Vector2(PanelCenterX, PanelCenterY);
             LootPanelStyle.Panel(_panel.GetComponent<Image>());
 
+            var sideRoot = UiFactory.CreateGroup(_root, "CharacterSidebar");
+            _sidebar = sideRoot.gameObject.AddComponent<CharacterSidebar>();
+            _sidebar.Build();
             _gridGroup = UiFactory.CreateGroup(_root, "GridGroup");
             _equipGroup = UiFactory.CreateGroup(_root, "EquipGroup");
 
@@ -1430,6 +1434,7 @@ namespace Emberdelve.UI
 
             // Equipment mirrors the looted player paper doll.
             Vector2 equipCenter = PanelToRoot(Vector2.zero);
+            if (_sidebar != null) { ((RectTransform)_sidebar.transform).anchoredPosition = equipCenter + new Vector2(-450,0); _sidebar.Bind(_rig); }
             _equipGroup.anchoredPosition = equipCenter;
             _equipColumnLeftRoot = 0f;
 

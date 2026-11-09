@@ -19,7 +19,7 @@ namespace Emberdelve.Net
     ///   [client] skill-result seq=N slot=S outcome=Cast|Refused reason=CODE skill=ID mana=.. maxMana=.. cd0=.. cd1=.. dur0=.. dur1=..
     ///   [client] skill-view mana=.. maxMana=.. cd0=.. cd1=..      (the replicated variable; at most every half second)
     /// </summary>
-    public sealed class NetOwnerSkillView : MonoBehaviour
+    public sealed class NetOwnerSkillView : MonoBehaviour, Emberdelve.UI.ICharacterManaView
     {
         private const float ViewLogSeconds = 0.5f;
 
@@ -63,6 +63,9 @@ namespace Emberdelve.Net
         }
 
         public SkillViewModel Model => _model;
+        public bool HasCharacterMana => _model.HasState;
+        public float CharacterMana => _model.Mana;
+        public float CharacterMaxMana => _model.MaxMana;
         public int ResultsReceived { get; private set; }
         public int CastResults { get; private set; }
         public int RefusedResults { get; private set; }

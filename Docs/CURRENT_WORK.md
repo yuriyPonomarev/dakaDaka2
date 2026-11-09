@@ -3,11 +3,11 @@
 Updated 9 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest accepted slice: LOOT-01 inventory reference layout
+## Latest accepted slice: character sidebar from full reference
 
-Follow-up requested by user: taller paired weapon slots, central large torso/legs, smaller jewelry, empty-slot etchings, metallic corners/dividers and less text over items. Own and fallen-player panels share geometry.
+User clarified full reference: character preview, stats and selected active/passive skills belong left of own inventory, with loot on the right. Implementation adds a read-only sidebar and a static 3D mannequin preview from existing Quaternius assets; no wearable-armour avatar is available yet.
 
-Evidence: Tasks/INVENTORY_ART_20261109.md; final build PASS, real host/client chest transfer, corpse worn-slot transfer, own unequip and Escape closure. Cosmetic-only: no repeated network suites.
+Host/client data and chest transfer/reopen verified in build-v3. Build-v4 PASS and final three-panel player-corpse view accepted after portrait orientation correction. Evidence: Tasks/CHARACTER_SIDEBAR_20261109.md. Prior inventory refinement accepted at57557aad.
 
 ## Accepted milestone: LOOT-01 paired inventory and loot
 

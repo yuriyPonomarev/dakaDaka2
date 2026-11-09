@@ -69,3 +69,7 @@ Two CC0 models for the arming sword and the two-handed sword (Poly Haven has no 
 ## Network client enemy visual reuse (7 Nov 2026)
 
 `Resources/Emberdelve/NetEnemyVisual.prefab` is a runtime-loadable copy of the existing `Prefabs/Visual/EnemyVisual_Minion.prefab`; it introduces no new third-party files. Mesh, materials, rig and Quaternius animation controller retain their original asset GUID references. Source assets and their CC0-1.0 licenses are listed under V3b above. The client proxy removes the prefab's server-side visual driver and blood particle child after instantiation.
+
+## Inventory character preview (9 Nov 2026)
+
+Resources/Emberdelve/UI/CharacterPreview.prefab reuses the existing Quaternius UAL2 Mannequin_F mesh and skeleton (CC0, Art/ThirdParty/Quaternius/UAL2/License.txt). EmberdelveCharacterPreview samples Idle_FoldArms_Loop from the already imported UAL2_Standard animation, then removes the Animator for a static portrait pose. No new external assets. The runtime uses a class-tinted material and isolated portrait camera; this is a mannequin preview, not a wearable-armour avatar.

@@ -189,7 +189,7 @@ namespace Emberdelve.Net
                 return;
             }
 
-            _root.localScale = Vector3.one * Mathf.Min(1f, Screen.width / 1100f, Screen.height / 700f);
+            _root.localScale = Vector3.one * Mathf.Min(1f, Screen.width / 1480f, Screen.height / 700f);
             if (Keyboard.current != null && (Keyboard.current.escapeKey.wasPressedThisFrame || Keyboard.current.iKey.wasPressedThisFrame)) { Close(); return; }
             _inventoryScreen?.HandlePointer();
             HandleLootPointer();
@@ -275,7 +275,7 @@ namespace Emberdelve.Net
             UiFactory.CreateImage(_root,"LootBackdrop",new Color(0,0,0,.62f),new Vector2(6000,4000),Vector2.zero,new Vector2(.5f,.5f),new Vector2(.5f,.5f));
             _panel = UiFactory.CreateGroup(_root, "CorpsePanel");
             _panel.sizeDelta = new Vector2(LootPanelStyle.Width, LootPanelStyle.Height);
-            _panel.anchoredPosition = new Vector2(270, 0);
+            _panel.anchoredPosition = new Vector2(460, 0);
             var background = _panel.gameObject.AddComponent<UnityEngine.UI.Image>();
             LootPanelStyle.Panel(background);
             _header = Label(_panel, "Header", "LOOT", 22, new Vector2(0, 297), new Vector2(440, 32));
