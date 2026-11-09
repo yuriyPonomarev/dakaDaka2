@@ -143,6 +143,8 @@ namespace Emberdelve.Data
         public float projectileSpeed = 36f;
         public float projectileRadius = 0.07f;
         public float projectileLength = 0.9f;
+        [Tooltip("One spent round returned after an ammunition-paid flight ends.")]
+        public ItemData recoveredAmmo;
         [Range(0.1f, 3f)] public float drawTime = 0.8f;
         [Range(0f, 1f)] public float minChargeToFire = 0.18f;
         [Range(0.1f, 1f)] public float minChargeDamageScale = 0.45f;

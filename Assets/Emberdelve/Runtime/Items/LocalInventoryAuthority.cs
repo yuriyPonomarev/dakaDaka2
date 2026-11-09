@@ -432,7 +432,7 @@ namespace Emberdelve.Items
             RangedCombat ranged = _rig.GetComponent<RangedCombat>();
             bool canHeal = item != null && item.healAmount > 0 && health != null && !health.IsDead &&
                            health.CurrentHealth < health.MaxHealth;
-            bool canGrantAmmo = item != null && item.ammoGrant > 0 && CanGrantAmmo(ranged, item.ammoGrant);
+            bool canGrantAmmo = item != null && item.ammoGrant > 0 && item.MatchesAmmo(ranged != null ? ranged.Weapon : null) && CanGrantAmmo(ranged, item.ammoGrant);
             if (!canHeal && !canGrantAmmo)
             {
                 reason = item == null ? "the requested stack has no item definition" :
@@ -497,7 +497,7 @@ namespace Emberdelve.Items
             {
                 AttemptNotification(() => ranged.AddAmmo(consumed.ammoGrant));
                 AttemptNotification(() => GameEvents.RaiseToast(_rig.PlayerId,
-                    $"Used {consumed.displayName} (+{consumed.ammoGrant} arrows)"));
+                    $"Used {consumed.displayName} (+{consumed.ammoGrant} ammo)"));
             }
 
             AttemptNotification(_inventory.NotifyAuthorityMutation);

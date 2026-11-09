@@ -3,21 +3,21 @@
 Updated 9 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest accepted slice: human-proportioned grim class models
+## Latest accepted slice: ballistic and recoverable ammunition
 
-Warrior/Archer now share the existing CC0 human rig with distinct original fitted outfits. Warrior: closed helmet, steel armour, faded red tabard. Archer: hood/mask, leather, quiver. Chibi proportions removed; muted materials and readable inventory lighting. Models remain low-poly, not photoreal. Same class prefab drives inventory and network world presentation.
+Bow and crossbow use shared9.81m/s2 gravity with42/54m/s launch speeds; faster bolts have a flatter trajectory. Paid player shots produce one recoverable arrow/bolt on the floor near terminal impact. Server-owned pickup puts it in the bag; right-click with the matching ranged weapon selected adds one reserve round, then R reloads. Wrong weapon/full reserve preserves the item. Protocol9 requires matching builds.
 
-PlayerAvatar supports Humanoid animations; weapon presentation maps the human hand/arm bones. No combat rules, colliders, root motion or protocol changes (still8). Existing class-art build entry delegates to the new builder.
-
-Evidence: Tasks/GRIM_PLAYERS_20261109.md. Build-v3 PASS and two-window review (seed11/protocol8): both inventories, remote bodies, movement, sword chain/overhead/shield guard, client rapier thrust. Sessions closed client12/host14. Hands92/0 and Visual207/0 PASS (run20261109-141624-941). Scoped source/assets match mirror; no test players remain. Playable: Builds/Playable/20261109-grim-models/EmberdelveNet.exe. Main Editor untouched.
+Evidence: Tasks/RECOVERABLE_AMMO_20261109.md. RecoveredAmmoTests3/3; ProjectileSim109/0, ProjectileBlock51/0, NetCombat312/0, NetSkill127/0, NetInventory148/0 PASS. Two-window seed11 review confirmed client arrow and host bolt pickup/use; repeated pickup did not duplicate the bolt. Playable: Builds/Playable/20261109-143435-327/EmberdelveNet.exe. Review windows closed. Main Editor untouched.
 
 ## Next steps and limits
 
-1. User review of the new silhouettes/materials. Refine concrete visual findings without reopening unrelated systems.
-2. Outfits are fixed by class. Equipment-driven apparel, cloth simulation and facial animation remain separate work.
-3. Ranged weapon blockouts/draw/reload remain unchanged. No broad test reruns or infrastructure work without a related change.
+1. User play review of trajectory and ammo loop. Floor recovery is not embedding in bodies/walls; void shots are lost. Recovery stops at224 live pickups to preserve snapshot headroom.
+2. Existing impact effect briefly appears magenta on client; repair its material in a focused presentation pass. Ranged weapon blockouts/draw/reload appearance remains unchanged.
+3. Class apparel remains fixed, low-poly and human-proportioned. Equipment-driven apparel/cloth/facial animation are separate work. Avoid unrelated test reruns.
 
 ## Previous accepted work
+
+- Grim class models b9eb52ed: human rig, distinct fitted warrior/archer outfits; Tasks/GRIM_PLAYERS_20261109.md.
 
 - Remote weapons017c0553: held equipment and accepted server swing/guard presentation; Tasks/REMOTE_WEAPONS_20261109.md.
 - Original class models/icons0d2f78ef: warrior Knight and archer Rogue, eight original skill icons, shared inventory/world model. Tasks/CLASS_VISUALS_20261109.md.

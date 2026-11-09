@@ -13,6 +13,8 @@ MonoBehaviour:
   m_Name: EmberdelveItemCatalog
   m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Items.ItemCatalog
   items:
+  - {fileID: 11400000, guid: bdaefd2c952e45e1a8478a4fdfb09b57, type: 2}
+  - {fileID: 11400000, guid: 186aae3048b949b589180ae5c174f61c, type: 2}
   - {fileID: 11400000, guid: e16de89f38fbe8546a1d39593d2ffc65, type: 2}
   - {fileID: 11400000, guid: d8388f34120eab247b8c3af01f264b41, type: 2}
   - {fileID: 11400000, guid: f277a1ecc7a083d4a9a2766fe3a4ec50, type: 2}

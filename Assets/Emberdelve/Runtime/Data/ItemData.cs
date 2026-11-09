@@ -124,6 +124,11 @@ namespace Emberdelve.Data
         public int healAmount = 0;
         [Tooltip("Ammo granted when used (0 = none).")]
         public int ammoGrant = 0;
+        [Tooltip("Empty accepts the legacy ammo supply; otherwise only this weapon can use it.")]
+        public string ammoWeaponId = "";
+        public bool IsRecoveredAmmo => ammoGrant == 1 && !string.IsNullOrEmpty(ammoWeaponId);
+        public bool MatchesAmmo(WeaponData weapon) => weapon != null && weapon.IsRanged &&
+            (string.IsNullOrEmpty(ammoWeaponId) || ammoWeaponId == weapon.weaponId);
 
         [Header("Move penalty and timed use (D3c)")]
         [Tooltip("Move-speed penalty of WEARING this item, in reference points on a 300 base (30 = -10 percent of the final ground speed), " +

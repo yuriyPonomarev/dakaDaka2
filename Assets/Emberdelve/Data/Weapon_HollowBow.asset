@@ -56,7 +56,7 @@ MonoBehaviour:
   falloffStartRange: 18
   falloffEndRange: 46
   falloffMinScale: 0.45
-  projectileGravity: 6
+  projectileGravity: 9.81
   projectileMaxFlightTime: 1.6
   projectileFalloff:
   - time: 0
@@ -74,3 +74,4 @@ MonoBehaviour:
   shaftMaterial: {fileID: 2100000, guid: 72acac9e04034ef5bb5e876c91c947d0, type: 2}
   edgeMaterial: {fileID: 2100000, guid: f4115d57bd8d322489a672ab46a79b43, type: 2}
   gripMaterial: {fileID: 2100000, guid: dbbcb94c1c991e3418d36e4675a2dfda, type: 2}
+  recoveredAmmo: {fileID: 11400000, guid: 186aae3048b949b589180ae5c174f61c, type: 2}

@@ -129,6 +129,8 @@ namespace Emberdelve.Combat
             public bool Piercing;
             public readonly HashSet<int> HitTargets = new HashSet<int>();
             public ProjectileVisual Visual;
+            public bool PaidAmmo;
+            public bool RecoveryIssued;
         }
         /// <summary>Validates and owns one ordinary ranged arrow/bolt flight.</summary>
         public bool LaunchProjectile(AttackIntent intent)
@@ -170,6 +172,7 @@ namespace Emberdelve.Combat
                 return false;
             }
 
+            flight.PaidAmmo = ammo.HasAmmoModel && EntityKinds.IsPlayer(instigator.Kind);
             _lastAttackTime[instigator.CombatId] = Now;
             _projectiles.Add(flight);
             flight.Visual = ProjectileVisual.SpawnArrow(origin, origin + direction * range, weapon, true);
@@ -371,8 +374,10 @@ namespace Emberdelve.Combat
             };
             InitFlightBallistics(flight, weapon, activation.Skill);
             _projectiles.Add(flight);
+            flight.PaidAmmo = activation.Skill.consumesAmmoPerProjectile && instigator is IAmmoSource && EntityKinds.IsPlayer(instigator.Kind);
             group.LaunchedSlots.Add(projectileIndex);
             group.PendingFlights++;
+            ReportLaunch(flight);
             flight.Visual = ProjectileVisual.SpawnArrow(origin, origin + direction * range, weapon, true);
             AcceptedCount++;
             return true;
@@ -604,6 +609,12 @@ namespace Emberdelve.Combat
                 flight.Origin, flight.Position, flight.ImpactPoint, flight.Steps,
                 flight.Steps * ProjectileBallistics.StepSeconds, flight.Traveled));
             ReportFlightEnd(flight, targetId);
+            if (!flight.RecoveryIssued && flight.PaidAmmo && flight.Weapon != null && flight.Weapon.recoveredAmmo != null)
+            {
+                flight.RecoveryIssued = true;
+                Emberdelve.Items.ProjectileRecovery.TrySpawn(flight.Weapon.recoveredAmmo,
+                    flight.Position - flight.Direction * .12f, config != null ? config.levelMask.value : Physics.DefaultRaycastLayers);
+            }
         }
 
         private bool TryFindProjectileContact(ProjectileFlight flight, Vector3 start, Vector3 end,

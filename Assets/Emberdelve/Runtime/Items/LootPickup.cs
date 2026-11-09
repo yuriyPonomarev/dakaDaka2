@@ -254,6 +254,7 @@ namespace Emberdelve.Items
             amount = Mathf.Max(1, newAmount);
             lootHost = newHost;
             _host = newHost as ILootHost;
+            ProjectileRecovery.DressPickup(gameObject,Item);
         }
 
         /// <summary>Server-only registry hook; zero means this is still an offline-only pickup.</summary>
@@ -295,6 +296,7 @@ namespace Emberdelve.Items
             amount = 1;
             lootHost = newHost;
             _host = newHost as ILootHost;
+            ProjectileRecovery.DressPickup(gameObject,Item);
         }
 
         /// <summary>Clears an unpublished staged UID before its inactive pickup is destroyed.</summary>
@@ -440,6 +442,7 @@ namespace Emberdelve.Items
 
         private void Update()
         {
+            if (Item != null && Item.IsRecoveredAmmo) return;
             _phase += Time.deltaTime * bobSpeed;
             Vector3 bob = _home + Vector3.up * (Mathf.Sin(_phase) * bobAmplitude);
             Vector3 delta = bob - transform.position;

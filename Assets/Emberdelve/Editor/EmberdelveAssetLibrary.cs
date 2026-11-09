@@ -1994,7 +1994,8 @@ namespace Emberdelve.EditorTools
         {
             if (Bow != null)
             {
-                Bow.projectileGravity = 6f;
+                Bow.projectileGravity = 9.81f;
+                Bow.recoveredAmmo = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_RecoveredArrow.asset");
                 Bow.projectileMaxFlightTime = 1.6f;
                 Bow.projectileFalloff = new[]
                 {
@@ -2006,7 +2007,8 @@ namespace Emberdelve.EditorTools
 
             if (Crossbow != null)
             {
-                Crossbow.projectileGravity = 3f;
+                Crossbow.projectileGravity = 9.81f;
+                Crossbow.recoveredAmmo = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_RecoveredBolt.asset");
                 Crossbow.projectileMaxFlightTime = 1.2f;
                 Crossbow.projectileFalloff = new[]
                 {

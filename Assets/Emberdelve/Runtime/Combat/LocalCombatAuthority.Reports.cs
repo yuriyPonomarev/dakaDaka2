@@ -162,7 +162,7 @@ namespace Emberdelve.Combat
         private void ReportFlightEnd(ProjectileFlight flight, int targetId)
         {
             Action<CombatFlightEnd> listeners = FlightEnded;
-            if (listeners == null || flight == null || flight.SkillGroup != null) return;
+            if (listeners == null || flight == null) return;
             listeners(new CombatFlightEnd(flight.Serial, flight.InstigatorId, targetId, flight.Position, flight.Steps * Emberdelve.Ballistics.ProjectileBallistics.StepSeconds));
         }
     }
