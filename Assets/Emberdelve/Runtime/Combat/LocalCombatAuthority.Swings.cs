@@ -409,7 +409,7 @@ namespace Emberdelve.Combat
             status = new MeleeSwingStatus(r.Id, r.InstigatorId, r.Phase, r.EndReason, elapsed,
                 Mathf.Min(r.NextSample, r.SampleCount + 1), r.SampleCount, r.WallSample, r.HitsView,
                 r.ComboStep, r.StepMultiplier, r.Timing, r.TurnClamped, r.WallPoint, r.WallNormal, r.HasWallPoint, r.RepeatInterval, r.ActionSpeedFactor,
-                r.Warning, r.CommitAim, r.RiposteStrike);
+                r.Warning, r.CommitAim, r.RiposteStrike, new SwingFrame(r.LastEye, r.LastYaw, r.LastPitch));
             return true;
         }
 

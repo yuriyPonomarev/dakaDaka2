@@ -3,37 +3,23 @@
 Updated 9 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest accepted slice: class models and ability icons
+## Latest accepted slice: remote weapons and readable melee
 
-User requested icons matching the full inventory reference and different player models per class. Eight original engraved-style icons now appear with selected actives/passives. Warrior uses an armoured Knight; Archer a hooded Rogue. The same class asset drives animated inventory previews and cosmetic world avatars. Local world body is hidden from the first-person camera; remote bodies follow replicated rigs. Fixed class costumes, not a wearable-item appearance system.
+Other players now show their actual main/off-hand weapons and effective guard. Sword LR/RL/overhead and rapier thrust follow the same accepted pattern, timing and aim frame as server hit resolution. Cosmetic shoulder/elbow posing restores the base animation each frame. Swapping to a two-handed weapon hides the off-hand. Existing block/parry rules are unchanged; shields never parry. Protocol8: matching builds required.
 
-Build-v5 PASS; seed11/protocol7, real host/client graphical review of both models, all eight icons, remote visibility both ways and movement. Evidence: Tasks/CLASS_VISUALS_20261109.md. Previous sidebar milestone72fb6de9 and inventory refinement57557aad remain accepted.
+Evidence: Tasks/REMOTE_WEAPONS_20261109.md. New wire tests4/4; focused run20261109-134646-984 all6 gates PASS (NetCombat, SweptMelee, ProjectileBlock, Riposte, Hands, Visual). Playable build PASS at Builds/Playable/20261109-134646-984/EmberdelveNet.exe. Seed11/protocol8 two-window review: weapon swaps, guard, three-hit sword chain, client rapier thrust and recovered idle pose. Sessions closed client12/host14; process cleanup verified. Main Editor untouched.
 
-## Accepted milestone: LOOT-01 paired inventory and loot
+## Current art limitation and next steps
 
-Task/evidence: Tasks/LOOT_UI_20261109.md. User authorized own inventory left, container right, dead player loadout in the same layout as own.
+1. User explicitly deferred replacing the cartoon-like class models to the next step. Keep this as a separate art milestone: human proportions, class silhouettes, grip/arm reach, then first/third-person review.
+2. Current body proportions still make raised guard/reach poses stylized. Existing ranged blockout assets remain; no new draw/reload animation system was added. Do not describe this functional presentation slice as finished character art.
+3. Continue only concrete requested work. No repeated green suites, broad refactors or persistent stash work without scope.
 
-- Paper-doll equipment above the bag, original cached silhouette icons, rarity borders, readable tooltips/value/free space. Existing selection, equip/use/drop/hotbar commands retained.
-- Chest opening rolls once and opens server-owned contents rather than collecting immediately. Enemy death drop route publishes one loot container; registry refusal preserves pickups as a fallback. Player corpses preserve bag coordinates and worn slots.
-- One existing server transfer path keeps revision/UID/range/LOS/capacity checks. Sealed-chest admission is also rechecked for state/transfers. Protocol7 / container wire schema2.
-- Click takes a stack; Shift+click takes one. Own inventory remains usable. I/Escape closes both panes; empty contents stay visible. Tooltip above both panes; client HUD compact while open.
+## Previous accepted work
 
-## Verification
+- Class models/icons0d2f78ef: warrior Knight and archer Rogue, eight original skill icons, shared inventory/world model. Tasks/CLASS_VISUALS_20261109.md.
+- Character sidebar72fb6de9; inventory layout57557aad.
+- LOOT-01 inventory/chest/mob/player corpse449c1522: server-owned transfers, paper-doll layouts, paired inventory/loot panes. Tasks/LOOT_UI_20261109.md. Deposits/drag-to-container, persistent stash and rendered item thumbnails remain deferred.
+- Crypt modules facf8243: Tasks/CRYPT_CONTENT_20261109.md. Raid baseline7f203c9c: Tasks/RAID_UI_ACCEPTANCE_20261108.md.
 
-- Focused EditMode21/21: corpse model, corpse wire, hands rules. New checks cover original layout retention and exact single transfer/stack splitting. Initial failed fixture setup and its correction are recorded honestly in the task report.
-- Run20261109-114747-273: NetInventory148/0, NetExtraction136/0. Contest now verifies two simultaneous chest inspections followed by one winner for the exact UID. Proof build reused between gates.
-- Final build-v8 PASS; seed11/protocol7. Two real graphical windows: remote chest click, host mob-loot transfers, empty state, tooltip affixes, real player-death capture and worn-slot transfer, I/Escape closure and resumed movement. Screenshots/logs: Logs/acceptance/20261109-loot-ui.
-- Main user Editor untouched. Final review sessions closed at host16/client7; process cleanup verified before commit. Scoped source/assets match mirror. Six inherited local-only paths remain outside the milestone: two Stone materials, Assets/Logs.meta, connection-check screenshot/meta, Pipeline EditorPipelineConfig.json.
-
-## Previous accepted work and limits
-
-MAP-01 facf8243: ten crypt modules and two-layout traversal; Tasks/CRYPT_CONTENT_20261109.md.
-Raid baseline7f203c9c: network inventory/corpse/extraction/result/retry, hands/guard/enemy phases and timer; Tasks/RAID_UI_ACCEPTANCE_20261108.md.
-
-This milestone targets the network/host playable raid; legacy offline rule-fixture collection fallback remains. No persistent stash, deposits/drag-to-container or rendered3D item thumbnails. Mob graphical review invokes production DropEnemyLoot; it is not a new combat-encounter acceptance claim. Default9 players/parser64 are not measured capacity.
-
-## Next steps
-
-1. User playtest inventory and looting in the packaged raid; address concrete findings as one slice.
-2. Continue encounter/loot placement in the accepted crypt modules if requested.
-3. Keep stash, larger load/loss coverage and broader art production separate; do not repeat green suites without a related change.
+Six inherited local-only paths remain outside commits: Stone_Ceiling/Stone_Floor materials; Assets/Logs.meta; pipeline-connection-check screenshot/meta; Pipeline EditorPipelineConfig.json. Default9 players/parser64 is not a measured capacity claim. Localhost review does not certify internet loss/latency or load.

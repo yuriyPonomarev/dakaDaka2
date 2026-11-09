@@ -106,6 +106,19 @@ namespace Emberdelve.Net
         public readonly NetworkVariable<bool> GuardRaised = new NetworkVariable<bool>(
             false, NetworkVariableReadPermission.Owner, NetworkVariableWritePermission.Server);
 
+        public readonly NetworkVariable<AvatarCombatWire> AvatarCombat = new NetworkVariable<AvatarCombatWire>(
+            default, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+        private void LateUpdate()
+        {
+            if (!IsSpawned || Rig == null) return;
+            var view = Rig.GetComponent<Emberdelve.Player.PlayerAvatar>();
+            var pose = AvatarCombat.Value;
+            if (view != null && pose.IsValid)
+                view.PresentCombat(pose.Main.ToString(),pose.Off.ToString(),pose.Pattern.ToString(),pose.Guard,pose.Swing,
+                    pose.PresentationElapsed(NetworkManager.ServerTime.Time),new Emberdelve.Data.SwingTiming(pose.Windup,pose.Active,pose.Recovery,0),
+                    new Emberdelve.Combat.SwingFrame(Rig.transform.position+pose.EyeOffset,pose.Aim));
+        }
+
         private static readonly List<NetPlayerRig> SpawnedRigs = new List<NetPlayerRig>();
 
         /// <summary>Every spawned player object this process knows (the server: all admitted; a client: all views, owned or not).</summary>

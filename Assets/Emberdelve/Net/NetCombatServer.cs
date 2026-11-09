@@ -51,7 +51,7 @@ namespace Emberdelve.Net
     /// </summary>
     internal sealed class NetCombatServer
     {
-        private const float PublishSeconds = 0.1f;
+        private const float PublishSeconds = 0.05f;
         private const float EnemyPoseSeconds = 0.2f;
 
         private sealed class Conn
@@ -369,6 +369,7 @@ namespace Emberdelve.Net
                  " committed=" + (aimCommitted ? 1 : 0) + " riposte=" + riposteStrike);
 
             if (conn.NetRig == null || !conn.NetRig.IsSpawned) return;
+            PublishAvatar(conn);
             try
             {
                 CombatSwingWire wire = new CombatSwingWire
@@ -509,11 +510,37 @@ namespace Emberdelve.Net
             }
         }
 
+        private void PublishAvatar(Conn conn)
+        {
+            if (conn.NetRig == null || !conn.NetRig.IsSpawned) return;
+            var rig=conn.Rig;
+            var pose=new AvatarCombatWire {
+                Main=rig.ActiveWeapon!=null ? rig.ActiveWeapon.weaponId : "",
+                Off=rig.OffhandWeapon!=null && (rig.ActiveWeapon==null || !rig.ActiveWeapon.twoHanded) ? rig.OffhandWeapon.weaponId : "",
+                Guard=rig.IsGuarding,
+                EyeOffset=rig.AimOrigin-rig.transform.position,
+                Aim=Quaternion.LookRotation(rig.AimDirection,Vector3.up)
+            };
+            var melee=conn.Melee;
+            if (melee!=null && melee.IsSwinging && melee.ActivePattern!=null && !rig.IsDead
+                && GameServices.TryGet<ICombatAuthority>(out var authority)
+                && authority.TryGetMeleeSwingStatus(melee.LastSwingId,out var status)
+                && !status.Finished && !status.WallStopped && !melee.RecoilStarted && status.EndReason==SwingEndReason.None)
+            {
+                pose.Swing=true; pose.SwingId=status.SwingId; pose.Pattern=melee.ActivePattern.patternId;
+                pose.Elapsed=status.Elapsed; pose.Windup=status.Timing.Windup; pose.Active=status.Timing.Active; pose.Recovery=status.Timing.Recovery;
+                pose.EyeOffset=status.PresentationFrame.Eye-rig.transform.position; pose.Aim=status.PresentationFrame.Rotation;
+                pose.SampleTime=conn.NetRig.NetworkManager.ServerTime.Time;
+            }
+            if (!pose.Equals(conn.NetRig.AvatarCombat.Value)) conn.NetRig.AvatarCombat.Value=pose;
+        }
+
         private void PublishVitals(Conn conn)
         {
             NetPlayerRig netRig = conn.NetRig;
             if (netRig == null || !netRig.IsSpawned) return;
 
+            PublishAvatar(conn);
             // Guard can change without any health change (release, stagger recovery, equipment swap).
             netRig.GuardRaised.Value = conn.Rig.IsGuarding;
             CombatVitalsData vitals = new CombatVitalsData(conn.Rig.CurrentHealth, conn.Rig.MaxHealth, conn.Rig.IsDead).Quantized();
