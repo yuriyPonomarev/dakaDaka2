@@ -14,7 +14,7 @@ namespace Emberdelve.EditorTools
         private const string CatalogFolder = "Assets/Emberdelve/Resources/Emberdelve";
         private const float Half = 12f; // 12 cells * existing 2-unit DungeonLayoutData cell size.
         private const float DoorHalf = 2f;
-        private const float WallHeight = 4f;
+        private const float WallHeight = 6f;
 
         private sealed class Spec
         {
@@ -40,6 +40,13 @@ namespace Emberdelve.EditorTools
             // Appended to preserve all existing module indexes in the network catalog contract.
             new Spec("crypt_skybridge_01", "Crypt_Skybridge", DungeonModuleKind.Bridge, 0)
         };
+
+        [MenuItem("Emberdelve/Build Crypt Rooms and Playable")]
+        public static void BuildPlayable()
+        {
+            BuildCatalog();
+            EmberdelveWindowsBuild.BuildNetPlayable();
+        }
 
         [MenuItem("Emberdelve/Build Dungeon Module Catalog (10 Prefabs)")]
         public static void BuildCatalog()
@@ -109,8 +116,7 @@ namespace Emberdelve.EditorTools
             so.ApplyModifiedPropertiesWithoutUndo();
 
             Box(root.transform, "Floor", new Vector3(0,-0.3f,0), new Vector3(Half*2,0.6f,Half*2), floor);
-            if (spec.Kind != DungeonModuleKind.Bridge)
-                Box(root.transform, "Roof", new Vector3(0,WallHeight+0.3f,0), new Vector3(Half*2,0.6f,Half*2), ceiling);
+            Box(root.transform, "Roof", new Vector3(0,WallHeight+0.3f,0), new Vector3(Half*2,0.6f,Half*2), ceiling);
             BuildSide(root.transform, true, false, wall);  // north
             BuildSide(root.transform, true, true, wall);   // south
             BuildSide(root.transform, false, false, wall); // east
@@ -145,50 +151,7 @@ namespace Emberdelve.EditorTools
 
         private static void AddRoomFeature(Transform root, Spec spec, Material stone, Material floor)
         {
-            switch (spec.Kind)
-            {
-                case DungeonModuleKind.Entry:
-                    Box(root,"Entry_Sarcophagus",new Vector3(0,.8f,3.5f),new Vector3(3.5f,1.6f,6f),stone);
-                    break;
-                case DungeonModuleKind.Ossuary:
-                    for(int side=-1;side<=1;side+=2)
-                    {
-                        Box(root,"Ossuary_Niche_"+side,new Vector3(side*7f,1.5f,0),new Vector3(2f,3f,5.2f),stone);
-                        for(int n=-1;n<=1;n++) Box(root,"Ossuary_Bone_"+side+"_"+n,new Vector3(side*7f,1.55f,n*1.25f),new Vector3(1.7f,.24f,.34f),floor);
-                    }
-                    Box(root,"Ossuary_Altar",new Vector3(0,.65f,0),new Vector3(2.2f,1.3f,2.2f),stone);
-                    break;
-                case DungeonModuleKind.Shrine:
-                    Box(root,"Shrine_Dais",new Vector3(0,.35f,0),new Vector3(5f,.7f,5f),stone);
-                    Box(root,"Shrine_Stela",new Vector3(0,2.1f,0),new Vector3(1.3f,3.5f,.55f),stone);
-                    break;
-                case DungeonModuleKind.Vault:
-                    Box(root,"Vault_Plinth",new Vector3(0,.5f,0),new Vector3(4f,1f,4f),stone);
-                    Box(root,"Vault_Seal",new Vector3(0,1.5f,0),new Vector3(2f,1.4f,2f),floor);
-                    break;
-                case DungeonModuleKind.Extraction:
-                    Box(root,"Extraction_PortalBase",new Vector3(0,.3f,0),new Vector3(7f,.6f,7f),stone);
-                    Box(root,"Extraction_EmberAltar",new Vector3(0,1.2f,0),new Vector3(2.5f,1.8f,2.5f),stone);
-                    break;
-                case DungeonModuleKind.Bridge:
-                    // The room has a continuous safe floor for the legacy grid mask. This broad bridge
-                    // spans it at grade, so every planned doorway has a physical, collider-backed path.
-                    Box(root,"Skybridge_Deck",new Vector3(0,.12f,0),new Vector3(8f,.24f,23f),stone);
-                    for (int side=-1;side<=1;side+=2)
-                    {
-                        Box(root,"Skybridge_Parapet_"+side,new Vector3(side*4f,.75f,0),new Vector3(.35f,1.25f,21f),stone);
-                        for (int post=-1;post<=1;post++)
-                            Box(root,"Skybridge_Pier_"+side+"_"+post,new Vector3(side*4f,1.5f,post*7f),new Vector3(.8f,3f,.8f),stone);
-                    }
-                    Box(root,"Skybridge_Crown",new Vector3(0,.38f,0),new Vector3(2f,.18f,21f),floor);
-                    break;
-                default:
-                    // Hall variants change the central landmark and side reliquary for a visibly different room silhouette.
-                    if (spec.Variant == 0) Box(root,"Hall_CentralPillar",new Vector3(0,2f,0),new Vector3(1.5f,4f,1.5f),stone);
-                    if (spec.Variant == 1) Box(root,"Hall_BrokenTomb",new Vector3(0,.7f,1.5f),new Vector3(5f,1.4f,2f),stone);
-                    if (spec.Variant == 2) { Box(root,"Hall_Obelisk",new Vector3(-3,2f,1),new Vector3(1.2f,4f,1.2f),stone); Box(root,"Hall_Reliquary",new Vector3(3,.8f,-1),new Vector3(2.8f,1.6f,2.8f),stone); }
-                    break;
-            }
+            CryptRoomArchitecture.Build(root, spec.Kind, spec.Variant, stone, floor);
         }
 
         private static GameObject Box(Transform parent, string name, Vector3 position, Vector3 size, Material material)

@@ -109,9 +109,23 @@ namespace Emberdelve.Level
             Vector3 bottom = start + Vector3.up * (ControllerRadius + Lift);
             Vector3 top = start + Vector3.up * (height - ControllerRadius);
             float nearest = maxDistance + 1f;
+            RaycastHit obstacle = default;
             foreach (RaycastHit hit in Physics.CapsuleCastAll(bottom, top, ControllerRadius, direction, maxDistance,
                          Physics.AllLayers, QueryTriggerInteraction.Ignore))
-                if (IsObstacle(hit.collider)) nearest = Mathf.Min(nearest, hit.distance);
+                if (IsObstacle(hit.collider) && hit.distance < nearest) { nearest = hit.distance; obstacle = hit; }
+            if (obstacle.collider == null) return nearest;
+            // This proof needs an unstepable, head-on wall across the controller's width.
+            // A capsule sweep alone also hits low tomb footings and glancing column edges,
+            // which a real controller can legitimately step over or slide around.
+            Vector3 lateral = Vector3.Cross(Vector3.up, direction) * ControllerRadius;
+            for (int side = -1; side <= 1; side++)
+            {
+                Vector3 rayStart = start + Vector3.up * (height * .5f) + lateral * side;
+                if (!obstacle.collider.Raycast(new Ray(rayStart, direction), out RaycastHit face, maxDistance + ControllerRadius) ||
+                    Vector3.Dot(face.normal, -direction) < .98f ||
+                    Mathf.Abs(face.distance - (nearest + ControllerRadius)) > .05f)
+                    return maxDistance + 1f;
+            }
             return nearest;
         }
 

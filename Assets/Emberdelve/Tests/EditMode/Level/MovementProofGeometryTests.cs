@@ -7,6 +7,39 @@ namespace Emberdelve.Tests.Level
 {
     public sealed class MovementProofGeometryTests
     {
+        [TestCase(false)]
+        [TestCase(true)]
+        public void LaneFinder_DoesNotUseSteppableFootingsOrRoundColumnsAsWalls(bool roundColumn)
+        {
+            Vector3 origin = new Vector3(13000f, 0f, 13000f);
+            DungeonLayoutData layout = ScriptableObject.CreateInstance<DungeonLayoutData>();
+            GameObject floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            GameObject decoration = GameObject.CreatePrimitive(roundColumn ? PrimitiveType.Cylinder : PrimitiveType.Cube);
+            try
+            {
+                layout.origin = origin;
+                layout.cellSize = 2;
+                layout.gridWidth = layout.gridHeight = 15;
+                layout.rooms.Add(new RoomSpec { minCell = Vector2Int.zero, maxCell = new Vector2Int(14, 14) });
+                floor.transform.position = origin + new Vector3(15f, -.5f, 15f);
+                floor.transform.localScale = new Vector3(30f, 1f, 30f);
+                decoration.transform.position = origin + new Vector3(15f, roundColumn ? 1f : .16f, 26f);
+                decoration.transform.localScale = roundColumn ? new Vector3(2f, 1f, 2f) : new Vector3(30f, .32f, .5f);
+                Physics.SyncTransforms();
+                Assert.That(MovementProofGeometry.TryFindWalkLane(layout, null, 1.8f, 19.4f, out _), Is.True);
+                Assert.That(MovementProofGeometry.TryFindLanes(layout, null, 1.8f, 19.4f, 15f, 15f,
+                    out _, out _, out _), Is.False,
+                    "decorative collisions are not guaranteed stopping walls for a CharacterController");
+            }
+            finally
+            {
+                Object.DestroyImmediate(decoration);
+                Object.DestroyImmediate(floor);
+                Object.DestroyImmediate(layout);
+                Physics.SyncTransforms();
+            }
+        }
+
         [Test]
         public void LaneFinder_FindsSeparateSupportedWalkAndWallLanes()
         {

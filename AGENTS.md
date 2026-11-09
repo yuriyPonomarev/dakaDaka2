@@ -23,7 +23,7 @@ One executor by default. Delegate only independent, bounded work when useful; se
 
 ## Finish existing features first (user priority)
 
-Finish the existing raid before introducing new systems: two-client inventory/reconnect and raid outcomes, then hands/block/enemy attack timing, then HUD/timer. Stash, additional content and new infrastructure are deferred.
+The existing raid was accepted in milestone7f203c9c. On9 November the user authorized a crypt architecture/content pass inspired by Dark and Darker; follow its bounded scope in CURRENT_WORK. Persistent stash, new gameplay systems and unrelated infrastructure remain deferred.
 For each slice choose one concrete acceptance scenario. Prefer an existing focused fixture plus the directly affected runtime scenario; use the full EditMode suite only when changes cross fixture boundaries or isolation is uncertain. Inspect a broad planner result and explicitly justify a narrower selection using the verification matrix instead of automatically running every selected gate.
 Do not add tests for cosmetic/documentation changes or duplicate existing proof. Do add a focused regression for item loss, duplication, authority violations and other critical defects. Passing checks are repeated only after relevant changes or new failures. Summarize results and keep raw logs out of conversation. No extra tooling/refactors unless they unblock the current feature.
 
