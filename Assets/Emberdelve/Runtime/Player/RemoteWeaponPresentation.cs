@@ -36,6 +36,14 @@ namespace Emberdelve.Player
         {
             _rig=rig; _models=WeaponViewModelSet.Load();
             _right=_left=_rightElbow=_leftElbow=_rightShoulder=_leftShoulder=null;
+            var animator=model.GetComponentInChildren<Animator>();
+            if(animator!=null && animator.isHuman)
+            {
+                _right=animator.GetBoneTransform(HumanBodyBones.RightHand); _left=animator.GetBoneTransform(HumanBodyBones.LeftHand);
+                _rightElbow=animator.GetBoneTransform(HumanBodyBones.RightLowerArm); _leftElbow=animator.GetBoneTransform(HumanBodyBones.LeftLowerArm);
+                _rightShoulder=animator.GetBoneTransform(HumanBodyBones.RightUpperArm); _leftShoulder=animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+                return;
+            }
             foreach(var bone in model.GetComponentsInChildren<Transform>())
             {
                 if(bone.name=="wrist.r") _right=bone;

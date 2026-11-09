@@ -10,6 +10,7 @@ namespace Emberdelve.Player
         private CharacterClassData _class;
         private GameObject _model;
         private Animation _animation;
+        private Animator _animator;
         private Renderer[] _renderers;
         private Vector3 _lastPosition;
         private string _state;
@@ -32,6 +33,7 @@ namespace Emberdelve.Player
             if(_class==null || _class.characterVisual==null) return;
             _model=Instantiate(_class.characterVisual,transform); _model.name="ClassAvatar";
             _model.transform.localPosition=Vector3.zero; _model.transform.localRotation=Quaternion.identity;
+            _animator=_model.GetComponentInChildren<Animator>();
             _animation=_model.GetComponentInChildren<Animation>(); _renderers=_model.GetComponentsInChildren<Renderer>();
             if(_weapons==null) _weapons=gameObject.AddComponent<RemoteWeaponPresentation>();
             _weapons.Bind(_rig,_model);
@@ -45,7 +47,12 @@ namespace Emberdelve.Player
             Vector3 delta=transform.position-_lastPosition; _lastPosition=transform.position; delta.y=0;
             float speed=Time.deltaTime>0 ? delta.magnitude/Time.deltaTime : 0;
             string next=_rig.IsDead ? "Death" : (_remoteGuard || _rig.IsGuarding) ? "Block" : _remoteSwing ? "Idle" : speed>3.8f ? "Run" : speed>.15f ? "Walk" : "Idle";
-            if(_animation!=null && next!=_state) { _state=next; _animation.CrossFade(next,.15f); }
+            if(next!=_state)
+            {
+                _state=next;
+                if(_animator!=null) _animator.CrossFadeInFixedTime(next,.15f);
+                else if(_animation!=null) _animation.CrossFade(next,.15f);
+            }
         }
     }
 }

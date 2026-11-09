@@ -145,7 +145,11 @@ namespace Emberdelve.UI
             _texture=new RenderTexture(352,400,24); _texture.name="InventoryPortrait"; camera.targetTexture=_texture; image.texture=_texture;
             var lamp=new GameObject("PortraitLight",typeof(Light)); lamp.transform.SetParent(_stage.transform,false);
             lamp.transform.localPosition=new Vector3(1,3,2); lamp.transform.LookAt(bounds.center);
-            var light=lamp.GetComponent<Light>(); light.type=LightType.Spot; light.range=8; light.spotAngle=85; light.intensity=5; light.cullingMask=1<<31;
+            var light=lamp.GetComponent<Light>(); light.type=LightType.Spot; light.range=8; light.spotAngle=85; light.intensity=16; light.cullingMask=1<<31;
+            var fill=new GameObject("PortraitFill",typeof(Light)); fill.transform.SetParent(_stage.transform,false);
+            fill.transform.localPosition=new Vector3(-1,1.8f,1.5f);
+            var fillLight=fill.GetComponent<Light>(); fillLight.type=LightType.Point; fillLight.range=5;
+            fillLight.intensity=4; fillLight.color=new Color(.68f,.76f,1f); fillLight.cullingMask=1<<31;
             _stage.SetActive(gameObject.activeInHierarchy);
         }
         private void OnDestroy()
