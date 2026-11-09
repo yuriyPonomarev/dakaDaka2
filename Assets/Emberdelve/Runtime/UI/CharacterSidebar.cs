@@ -26,6 +26,9 @@ namespace Emberdelve.UI
         private RenderTexture _texture;
         private Material _material;
         private PlayerRig _rig;
+        private CharacterClassData _previewClass;
+        private UnityEngine.UI.RawImage _portrait;
+        private readonly UnityEngine.UI.Image[] _icons = new UnityEngine.UI.Image[4];
         private float _refreshAt;
         private readonly StatsComponent _displayAttributes = new StatsComponent();
         private CharacterClassData _displayClass;
@@ -42,6 +45,7 @@ namespace Emberdelve.UI
             portrait.rectTransform.sizeDelta=new Vector2(220,250);
             portrait.rectTransform.anchoredPosition=new Vector2(0,153);
             portrait.raycastTarget=false;
+            _portrait=portrait;
             BuildPreview(portrait);
             Label("ActiveHeading","ACTIVE",12,new Vector2(0,12),new Vector2(320,20));
             Label("PassiveHeading","PASSIVE",12,new Vector2(0,-77),new Vector2(320,20));
@@ -50,7 +54,9 @@ namespace Emberdelve.UI
                 float x=i%2==0 ? -84 : 84, y=i<2 ? -31 : -120;
                 var card=UiFactory.CreateImage(transform,"SelectedSkill"+i,new Color(.11f,.105f,.085f),new Vector2(160,60),new Vector2(x,y),Vector2.one*.5f,Vector2.one*.5f);
                 card.raycastTarget=false; LootPanelStyle.Frame(card,new Color(.27f,.25f,.19f));
-                _skills[i]=Label("Skill"+i,"—",13,new Vector2(x,y),new Vector2(150,56));
+                _icons[i]=UiFactory.CreateImage(transform,"SkillIcon"+i,Color.white,new Vector2(48,48),new Vector2(x-53,y),Vector2.one*.5f,Vector2.one*.5f);
+                _icons[i].raycastTarget=false;
+                _skills[i]=Label("Skill"+i,"",11,new Vector2(x+26,y),new Vector2(99,56));
             }
             _stats=Label("LiveAttributes","",15,new Vector2(0,-233),new Vector2(324,158));
             _stats.alignment=TextAnchor.UpperLeft;
@@ -71,7 +77,13 @@ namespace Emberdelve.UI
         {
             if(_title==null) return;
             _title.text=_rig!=null && _rig.Class!=null ? _rig.Class.displayName : "CHARACTER";
-            if(_material!=null && _rig!=null && _rig.Class!=null) _material.color=Color.Lerp(_rig.Class.accentColor,new Color(.65f,.6f,.5f),.65f);
+            if(_rig!=null && _rig.Class!=_previewClass && _rig.Class!=null && _rig.Class.characterVisual!=null)
+            {
+                _previewClass=_rig.Class;
+                if(_stage!=null) Destroy(_stage);
+                if(_texture!=null) { _texture.Release(); Destroy(_texture); }
+                BuildPreview(_portrait);
+            }
             IReadOnlyList<SkillData> active=_rig!=null && _rig.Skills!=null ? _rig.Skills.ActiveSkills : null;
             IReadOnlyList<SkillData> passive=_rig!=null && _rig.Skills!=null ? _rig.Skills.PassiveSkills : null;
             if (NetRole.IsClientOnly && _rig!=null && _rig.Class!=null)
@@ -83,6 +95,8 @@ namespace Emberdelve.UI
             {
                 var list=i<2 ? active : passive; int index=i%2;
                 SkillData skill=list!=null && index<list.Count ? list[index] : null;
+                _icons[i].sprite=skill!=null ? SkillIconAtlas.Get(skill.skillId) : null;
+                _icons[i].enabled=_icons[i].sprite!=null;
                 _skills[i].text=skill==null ? "Empty slot" : skill.displayName+"\n"+(i<2 ? skill.EffectiveManaCost+" MP  /  "+skill.EffectiveCooldown.ToString("0.#")+"s" : skill.ShortSummary);
             }
             _text.Clear();
@@ -99,14 +113,14 @@ namespace Emberdelve.UI
                     attributes=_displayAttributes.Snapshot; ready=_displayAttributes.IsReady;
                 }
                 for(int i=0;i<AttributeRules.AttributeCount;i++)
-                    _text.Append(AttributeNames[i]).Append("    ").Append(ready ? attributes.Effective.Get((SixAttribute)i).ToString() : "—").Append('\n');
+                    _text.Append(AttributeNames[i]).Append("    ").Append(ready ? attributes.Effective.Get((SixAttribute)i).ToString() : "-").Append('\n');
                 _text.Append("Health   ").Append(_rig.CurrentHealth.ToString("0")).Append(" / ").Append(_rig.MaxHealth.ToString("0"));
                 var remoteSkills=NetRole.IsClientOnly ? _rig.GetComponent<ICharacterManaView>() : null;
                 if(remoteSkills!=null && remoteSkills.HasCharacterMana)
                     _text.Append("     Mana   ").Append(remoteSkills.CharacterMana.ToString("0")).Append(" / ").Append(remoteSkills.CharacterMaxMana.ToString("0"));
                 else if(!NetRole.IsClientOnly && _rig.Mana!=null)
                     _text.Append("     Mana   ").Append(_rig.Mana.CurrentMana.ToString("0")).Append(" / ").Append(_rig.Mana.MaxMana);
-                else _text.Append("     Mana   �");
+                else _text.Append("-");
                 _text.Append("\nArmour   ").Append(_rig.GetArmorRating().ToString("0.#"));
             }
             _stats.text=_text.ToString();
@@ -114,15 +128,15 @@ namespace Emberdelve.UI
 
         private void BuildPreview(UnityEngine.UI.RawImage image)
         {
-            var prefab=Resources.Load<GameObject>("Emberdelve/UI/CharacterPreview");
+            var prefab=_previewClass!=null ? _previewClass.characterVisual : Resources.Load<GameObject>("Emberdelve/UI/CharacterPreview");
             if(prefab==null) { Label("PreviewUnavailable","Preview unavailable",14,new Vector2(0,160),new Vector2(300,40)); return; }
             _stage=new GameObject("InventoryPreviewStage"); _stage.transform.position=new Vector3(0,-10000,0);
             var model=Instantiate(prefab,_stage.transform); model.transform.localPosition=Vector3.zero; model.transform.localRotation=Quaternion.Euler(0,15,0);
             foreach(var child in model.GetComponentsInChildren<Transform>(true)) child.gameObject.layer=31;
-            _material=new Material(Shader.Find("Universal Render Pipeline/Lit"));
+
             var renderers=model.GetComponentsInChildren<Renderer>();
-            Bounds bounds=new Bounds(model.transform.position,Vector3.zero);
-            foreach(var renderer in renderers) { renderer.sharedMaterial=_material; bounds.Encapsulate(renderer.bounds); }
+            Bounds bounds=new Bounds(model.transform.position+Vector3.up*.9f,new Vector3(1,1.8f,1));
+
             var cameraObject=new GameObject("PortraitCamera",typeof(Camera)); cameraObject.transform.SetParent(_stage.transform,false);
             var camera=cameraObject.GetComponent<Camera>(); camera.cullingMask=1<<31; camera.clearFlags=CameraClearFlags.SolidColor;
             camera.backgroundColor=new Color(.035f,.036f,.033f,1); camera.orthographic=true;

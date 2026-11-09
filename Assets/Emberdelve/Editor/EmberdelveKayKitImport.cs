@@ -56,6 +56,15 @@ namespace Emberdelve.EditorTools
             if (importer.generateSecondaryUV) { importer.generateSecondaryUV = false; changed = true; }
             if (importer.meshCompression != ModelImporterMeshCompression.Off) { importer.meshCompression = ModelImporterMeshCompression.Off; changed = true; }
 
+            // Player models retain exported animation takes; named clips are authored by the class builder.
+            if (path.StartsWith(Root + "Adventurers/"))
+            {
+                if (importer.animationType != ModelImporterAnimationType.Legacy) { importer.animationType = ModelImporterAnimationType.Legacy; changed = true; }
+                if (!importer.importAnimation) { importer.importAnimation = true; changed = true; }
+                if (importer.optimizeGameObjects) { importer.optimizeGameObjects = false; changed = true; }
+                return changed;
+            }
+
             if (character)
             {
                 if (importer.animationType != ModelImporterAnimationType.Generic) { importer.animationType = ModelImporterAnimationType.Generic; changed = true; }

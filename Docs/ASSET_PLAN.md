@@ -73,3 +73,9 @@ Two CC0 models for the arming sword and the two-handed sword (Poly Haven has no 
 ## Inventory character preview (9 Nov 2026)
 
 Resources/Emberdelve/UI/CharacterPreview.prefab reuses the existing Quaternius UAL2 Mannequin_F mesh and skeleton (CC0, Art/ThirdParty/Quaternius/UAL2/License.txt). EmberdelveCharacterPreview samples Idle_FoldArms_Loop from the already imported UAL2_Standard animation, then removes the Animator for a static portrait pose. No new external assets. The runtime uses a class-tinted material and isolated portrait camera; this is a mannequin preview, not a wearable-armour avatar.
+
+## Class models and ability icons (9 Nov 2026)
+
+- Warrior uses Knight, Archer uses Rogue_Hooded from KayKit Character Pack: Adventurers1.0, Kay Lousberg, CC0-1.0. Official source: https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0 . Original selected GLBs, atlases, LICENSE.txt and SHA256 manifest are in Art/ThirdParty/KayKit/Adventurers. No assets from the unavailable third-party FBX mirror were imported.
+- Tools/Convert-ClassModels.py converts the originals with Blender4.2.9 to FBX, retaining body/cape/helmet and required clips; optional simultaneous weapon variants are excluded. EmberdelveClassVisuals creates materials, named clips and class-prefab references in Resources/Emberdelve/PlayerVisuals. Existing skeleton/prop import rules remain unchanged; Adventurers has a dedicated import branch.
+- Resources/Emberdelve/SkillIcons/Abilities.png is an original generated4x2 atlas, created for this project from a text brief inspired by engraved silver fantasy symbols. No image from the reference game is copied into the asset. Top row: Dash, Battle Cry, Ashen Might, Bulwark Training. Bottom: Multi-shot, Piercing Shot, Farshot, Fleet Footing. SkillIconAtlas caches sprites by stable skill ID.

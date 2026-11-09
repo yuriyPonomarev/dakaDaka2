@@ -1,0 +1,19 @@
+{
+  "source": "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0",
+  "license": "CC0-1.0",
+  "author": "Kay Lousberg / KayKit",
+  "models": {
+    "Warrior": "Knight",
+    "Archer": "Rogue_Hooded"
+  },
+  "conversion": "Tools/Convert-ClassModels.py, Blender 4.2.9; body/cape/helmet only, five runtime animation states; original GLB preserved",
+  "sha256": {
+    "Knight.fbx": "6a1b4db35a4ae493becd6e3b21fb9f09ee9403639583087bc47e9b7053a41f22",
+    "Knight.glb": "60428e3abc09ba83e595d256e3af8c5c976b46cdae599f0802fc82b4a3445168",
+    "knight_texture.png": "5d250ccc5da020e6126bfa3839f83bd9a465a951ed223e4d13c08b1925e154d4",
+    "LICENSE.txt": "ae322141814056dda0deea7540d74c41d87aee1da319977cd1bd84ee5a923629",
+    "Rogue_Hooded.fbx": "500311732fe8a118fcff879bb57b74bbe734c3c4c2159082092ac3101463b013",
+    "Rogue_Hooded.glb": "93e6e25213009952276d9cf34f5d96a243767334c66f280db0433ddfabb91545",
+    "rogue_texture.png": "a4032e877c3b91939f5cdbb630349c1998fdbc3211bbd587c111125500fe4cc5"
+  }
+}

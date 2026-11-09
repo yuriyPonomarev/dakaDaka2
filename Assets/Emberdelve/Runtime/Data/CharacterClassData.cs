@@ -16,6 +16,7 @@ namespace Emberdelve.Data
         public string displayName = "Class";
         [TextArea(3, 6)] public string description = "";
         public Color accentColor = Color.white;
+        public GameObject characterVisual;
 
         [Header("Attributes (Docs/Design/ATTRIBUTES.md)")]
         [Tooltip("Ability score, legal band 1..30. Modifier = floor((score - 10) / 2.0). Base values only: " +

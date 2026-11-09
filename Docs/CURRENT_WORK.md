@@ -3,11 +3,11 @@
 Updated 9 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest accepted slice: character sidebar from full reference
+## Latest accepted slice: class models and ability icons
 
-User clarified full reference: character preview, stats and selected active/passive skills belong left of own inventory, with loot on the right. Implementation adds a read-only sidebar and a static 3D mannequin preview from existing Quaternius assets; no wearable-armour avatar is available yet.
+User requested icons matching the full inventory reference and different player models per class. Eight original engraved-style icons now appear with selected actives/passives. Warrior uses an armoured Knight; Archer a hooded Rogue. The same class asset drives animated inventory previews and cosmetic world avatars. Local world body is hidden from the first-person camera; remote bodies follow replicated rigs. Fixed class costumes, not a wearable-item appearance system.
 
-Host/client data and chest transfer/reopen verified in build-v3. Build-v4 PASS and final three-panel player-corpse view accepted after portrait orientation correction. Evidence: Tasks/CHARACTER_SIDEBAR_20261109.md. Prior inventory refinement accepted at57557aad.
+Build-v5 PASS; seed11/protocol7, real host/client graphical review of both models, all eight icons, remote visibility both ways and movement. Evidence: Tasks/CLASS_VISUALS_20261109.md. Previous sidebar milestone72fb6de9 and inventory refinement57557aad remain accepted.
 
 ## Accepted milestone: LOOT-01 paired inventory and loot
 

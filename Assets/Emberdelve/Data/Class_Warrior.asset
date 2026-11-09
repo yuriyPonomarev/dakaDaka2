@@ -17,6 +17,7 @@ MonoBehaviour:
   description: Slow, heavy, hard to kill. Holds a shield-line of steel and walks
     out with what he carried in.
   accentColor: {r: 0.85, g: 0.42, b: 0.22, a: 1}
+  characterVisual: {fileID: 3628978846480869331, guid: c148745f40fe4834dade2a2c81dee4aa, type: 3}
   strength: 16
   dexterity: 10
   constitution: 14

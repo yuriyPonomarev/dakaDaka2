@@ -641,6 +641,7 @@ namespace Emberdelve.Player
             _offhand = null;
             equipment.Initialize(this);
             if (loadout != null) loadout.InitializeReplicatedClass(data, config, this);
+            PlayerAvatar.Bind(this);
         }
 
         public void ApplyClass(CharacterClassData data, GameConfig config)
@@ -680,6 +681,7 @@ namespace Emberdelve.Player
 
             // R1c2: a class apply is a run start; the authority rebuilds and refills its record from the finished rig.
             SeedKit(KitSeedReason.ClassApply);
+            PlayerAvatar.Bind(this);
         }
 
         /// <summary>

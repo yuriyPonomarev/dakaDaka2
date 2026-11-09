@@ -17,6 +17,7 @@ MonoBehaviour:
   description: Quick and fragile. Wins by distance, and by leaving before the thing
     reaches you.
   accentColor: {r: 0.35, g: 0.72, b: 0.62, a: 1}
+  characterVisual: {fileID: 6525311975237652020, guid: 46ab097b071e21d4f94fe3665be39217, type: 3}
   strength: 10
   dexterity: 16
   constitution: 12
