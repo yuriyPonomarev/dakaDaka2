@@ -10,7 +10,7 @@ using Emberdelve.Player;
 namespace Emberdelve.EditorTools
 {
     /// <summary>
-    /// V3c: the first-person arms of the local player. The CC0 Quaternius mannequin (Humanoid rig of the Universal Animation Library 1)
+    /// First-person arms of the local player. The same CC0 MakeHuman-derived body as the world character
     /// is reused, but only its ARMS are kept: a derived skinned mesh (<see cref="MeshPath"/>) made of the triangles whose strongest bone
     /// weight is an upper arm, forearm, hand or finger bone, so head, neck, torso, hips and legs do not exist in the mesh at all (nothing
     /// to hide, nothing that can show through when the rig bends). Two submeshes: sleeves (dark quilted gambeson, upper arm and forearm)
@@ -37,7 +37,7 @@ namespace Emberdelve.EditorTools
         public const string SleeveTexturePath = MaterialFolder + "/FP_Sleeve.png";
         public const string SkinMaterialPath = MaterialFolder + "/FP_Skin.mat";
         public const string SkinTexturePath = MaterialFolder + "/FP_Skin.png";
-        public const string BodySource = EmberdelveQuaterniusImport.Ual1Path;
+        public const string BodySource = EmberdelveUnifiedHuman.ModelPath;
         public const string ModelName = "Model";
         public const string GripRightName = "Grip_R";
         public const string GripLeftName = "Grip_L";
@@ -119,8 +119,8 @@ namespace Emberdelve.EditorTools
         private static int GroupOf(string boneName)
         {
             string n = boneName.ToLowerInvariant();
-            if (n.Contains("upper_arm") || n.Contains("forearm")) return 1;
-            if (n.Contains("hand") || n.Contains("f_index") || n.Contains("f_middle") || n.Contains("f_ring") || n.Contains("f_pinky") || n.Contains("thumb")) return 2;
+            if (n.Contains("upper_arm") || n.Contains("forearm") || n.Contains("upperarm") || n.Contains("lowerarm")) return 1;
+            if (n.Contains("hand") || n.Contains("wrist") || n.Contains("metacarpal") || n.Contains("finger") || n.Contains("f_index") || n.Contains("f_middle") || n.Contains("f_ring") || n.Contains("f_pinky") || n.Contains("thumb")) return 2;
             return 0;
         }
 
@@ -128,7 +128,7 @@ namespace Emberdelve.EditorTools
         public static Mesh BuildArmsMesh()
         {
             GameObject fbx = AssetDatabase.LoadAssetAtPath<GameObject>(BodySource);
-            Mesh source = EmberdelveUndeadMaterials.EnsureMesh(BodySource, "Undead_Mannequin_M");
+            Mesh source = fbx != null ? fbx.GetComponentInChildren<SkinnedMeshRenderer>(true).sharedMesh : null;
             if (fbx == null || source == null) return null;
 
             GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(fbx);
@@ -169,8 +169,8 @@ namespace Emberdelve.EditorTools
                     for (int i = 0; i < bones.Length; i++)
                     {
                         if (bones[i] == null || !bones[i].name.EndsWith(suffix)) continue;
-                        if (bones[i].name.Contains("upper_arm")) from = smr.transform.InverseTransformPoint(bones[i].position);
-                        if (bones[i].name.Contains("DEF-hand")) to = smr.transform.InverseTransformPoint(bones[i].position);
+                        if ((bones[i].name.Contains("upper_arm") || bones[i].name.Contains("upperarm01"))) from = smr.transform.InverseTransformPoint(bones[i].position);
+                        if ((bones[i].name.Contains("DEF-hand") || bones[i].name.Contains("wrist"))) to = smr.transform.InverseTransformPoint(bones[i].position);
                     }
 
                     axisOrigin[side] = from;

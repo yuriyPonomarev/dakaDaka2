@@ -17,6 +17,11 @@ namespace Emberdelve.EditorTools
         static Material steel, leather, cloth, dark, trim, tabard;
         public static void BuildAndPackage()
         {
+            BuildVisuals();
+            EmberdelveWindowsBuild.BuildNetPlayable();
+        }
+        public static void BuildVisuals()
+        {
             EmberdelveVisualSetup.EnsureFolder(Art);
             steel=Material("WornSteel",new Color(.29f,.31f,.33f),.72f,.38f);
             leather=Material("WeatheredLeather",new Color(.24f,.17f,.105f),0,.20f);
@@ -25,7 +30,6 @@ namespace Emberdelve.EditorTools
             trim=Material("OldBrass",new Color(.30f,.22f,.11f),.65f,.25f);
             tabard=Material("FadedOxblood",new Color(.16f,.055f,.04f),0,.08f);
             Build("Warrior"); Build("Archer"); AssetDatabase.SaveAssets();
-            EmberdelveWindowsBuild.BuildNetPlayable();
         }
         static Material Material(string name,Color color,float metal,float smooth)
         {
@@ -50,7 +54,7 @@ namespace Emberdelve.EditorTools
         static void Build(string className)
         {
             current=className;
-            string source=EmberdelveQuaterniusImport.Ual1Path;
+            string source=EmberdelveUnifiedHuman.ModelPath;
             var root=new GameObject(className+"Avatar");
             try
             {
@@ -61,18 +65,22 @@ namespace Emberdelve.EditorTools
                 animator.runtimeAnimatorController=Controller(className);
                 animator.Rebind(); animator.Play("Idle",0,0); animator.Update(0);
                 var body=model.GetComponentInChildren<SkinnedMeshRenderer>();
+                body.updateWhenOffscreen=true;
                 var mesh=Object.Instantiate(body.sharedMesh);mesh.name=className+"ClothedBody";
                 var verts=mesh.vertices;var uv=new Vector2[verts.Length];
                 for(int i=0;i<verts.Length;i++)uv[i]=new Vector2(verts[i].x*3,verts[i].z*3);
                 mesh.uv=uv;
-                var groups=new[]{new List<int>(),new List<int>()};var triangles=mesh.triangles;var weights=mesh.boneWeights;
+                var groups=new[]{new List<int>(),new List<int>(),new List<int>()};var triangles=mesh.triangles;var weights=mesh.boneWeights;
                 for(int i=0;i<triangles.Length;i+=3)
                 {
-                    int vi=triangles[i];string bone=body.bones[weights[vi].boneIndex0].name.ToLowerInvariant();
-                    int group=bone.Contains("hand")||bone.Contains("finger")||bone.Contains("thumb")||bone.Contains("head")||bone.Contains("foot")||bone.Contains("toe")?1:0;
+                    int vi=triangles[i];var weightedBone=body.bones[EmberdelveFirstPersonArms.DominantBone(weights[vi])];string bone=weightedBone.name.ToLowerInvariant();
+                    if(bone.Contains("foot")||bone.Contains("toe")) continue;
+                    bool faceSkin=body.transform.TransformPoint(verts[vi]).y>1.49f;
+                    int group=faceSkin||bone.Contains("hand")||bone.Contains("wrist")||bone.Contains("metacarpal")||bone.Contains("finger")||bone.Contains("thumb")||bone.Contains("head")?1:(bone.Contains("foot")||bone.Contains("toe")?2:0);
+                    if(bone.StartsWith("eye.")) group=2;
                     groups[group].AddRange(new[]{triangles[i],triangles[i+1],triangles[i+2]});
                 }
-                mesh.subMeshCount=2;for(int i=0;i<2;i++)mesh.SetTriangles(groups[i],i);body.sharedMesh=SaveMesh(mesh,"Body");body.sharedMaterials=new[]{cloth,dark};
+                mesh.subMeshCount=3;for(int i=0;i<3;i++)mesh.SetTriangles(groups[i],i);body.sharedMesh=SaveMesh(mesh,"Body");body.sharedMaterials=new[]{AssetDatabase.LoadAssetAtPath<Material>(EmberdelveFirstPersonArms.SleeveMaterialPath),AssetDatabase.LoadAssetAtPath<Material>(EmberdelveFirstPersonArms.SkinMaterialPath),dark};
                 // All garment measurements derive from the unposed, human skeleton in metres.
                 Transform hips=animator.GetBoneTransform(HumanBodyBones.Hips),chest=animator.GetBoneTransform(HumanBodyBones.Chest),head=animator.GetBoneTransform(HumanBodyBones.Head);
                 Debug.Log("[GrimPlayers] "+className+" body="+body.bounds+" hips="+hips.position+" chest="+chest.position+" head="+head.position);
@@ -98,9 +106,10 @@ namespace Emberdelve.EditorTools
                     Shell("Bracer"+side,elbow,elbow.position+axis*.07f,Quaternion.FromToRotation(Vector3.up,axis),new[]{0f,.11f,.19f},new[]{.063f,.060f,.048f},new[]{.06f,.06f,.045f},warrior?steel:leather,12);
                     axis=(foot.position-knee.position).normalized;
                     Shell("Greave"+side,knee,knee.position+axis*.04f,Quaternion.FromToRotation(Vector3.up,axis),new[]{0f,.12f,.29f},new[]{.085f,.088f,.060f},new[]{.085f,.095f,.07f},warrior?steel:dark,12);
+                    Shell("Boot"+side,foot,foot.position+new Vector3(0,-.065f,.055f),Quaternion.identity,new[]{0f,.06f,.14f,.25f},new[]{.065f,.07f,.058f,.06f},new[]{.145f,.15f,.075f,.07f},dark,16);
                     Plate("BeltPouch"+side,hips,new Vector3(left?-.17f:.17f,waist-.10f,.12f),new Vector3(.10f,.13f,.075f),leather);
                 }
-                Vector3 h=head.position;
+                Vector3 h=head.position-new Vector3(0,.09f,0);
                 if(warrior)
                 {
                     Plate("TabardChest",chest,new Vector3(0,waist+.22f,.155f),new Vector3(.13f,.30f,.012f),tabard);
@@ -117,7 +126,7 @@ namespace Emberdelve.EditorTools
                     // Open-front cowl: front panels stop beside the face; no cartoon eyes.
                     Shell("Hood",head,h+new Vector3(0,-.08f,-.025f),Quaternion.identity,new[]{0f,.12f,.25f,.33f,.36f},new[]{.17f,.15f,.135f,.08f,.015f},new[]{.15f,.16f,.155f,.10f,.025f},cloth,20,true);
                     Shell("Cowl",chest,new Vector3(0,top-.07f,0),Quaternion.identity,new[]{0f,.09f,.14f},new[]{.23f,.14f,.10f},new[]{.145f,.115f,.09f},cloth,20);
-                    Plate("FaceWrap",head,h+new Vector3(0,.035f,.105f),new Vector3(.17f,.085f,.045f),cloth);
+                    Plate("FaceWrap",head,h+new Vector3(0,.035f,.14f),new Vector3(.17f,.085f,.045f),cloth);
                     // Tall leather quiver and separate arrow shafts identify the archer from behind.
                     Shell("Quiver",chest,new Vector3(.13f,waist+.06f,-.19f),Quaternion.Euler(0,0,-12),new[]{0f,.40f,.44f},new[]{.065f,.075f,.08f},new[]{.06f,.07f,.075f},leather,12);
                     for(int i=0;i<5;i++)
@@ -157,7 +166,7 @@ namespace Emberdelve.EditorTools
         {
             string path=Art+"/"+current+"_"+name+".asset";var old=AssetDatabase.LoadAssetAtPath<Mesh>(path);
             if(old==null){AssetDatabase.CreateAsset(mesh,path);return mesh;}
-            EditorUtility.CopySerialized(mesh,old);Object.DestroyImmediate(mesh);return old;
+            EditorUtility.CopySerialized(mesh,old);old.UploadMeshData(false);EditorUtility.SetDirty(old);Object.DestroyImmediate(mesh);return old;
         }
         static void Plate(string name,Transform bone,Vector3 centre,Vector3 size,Material material)
         {

@@ -3,16 +3,16 @@
 Updated 9 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest completed slice: bow/sword hand grip correction
+## Latest completed slice: one whole character source for body and hands
 
-User rejected the previous bow left-hand and sword wrist pose. Calibrated weapon grips from actual finger bones, removed the sword rotation from upright bow grips, and rolled the sword palm so the forearm enters from the side. Shield attachment remains separate; weapon swaps recalibrate the grip.
+Replaced player anatomy with the CC0 Innerscene/MakeHuman full weighted body. Both Warrior and Archer use it; first-person hands derive from this exact same skin and finger skeleton. Existing class armour retained and fitted, headwear lowered, closed boots added. Inventory portraits use the same class prefabs. No separate FPS-arm asset imported.
 
-Evidence: Tasks/GRIP_FIX_20261109.md. Hands92/0 and Visual207/0 passed before final cosmetic palm-roll/center tuning; final build and actual two-window input review cover that tuning. Bow draw/shot, sword guard/attack and Q swap return checked, seed11/protocol9. Build: Builds/Playable/20261109-164037-226/EmberdelveNet.exe. Windows closed; main Editor untouched.
+Evidence: Tasks/UNIFIED_HUMAN_20261109.md. WeaponViewModelTests34/0; Hands92/0; Visual207/0; build PASS. Live host/client input and observer review: bow draw/shot, sword block/attack, weapon swap return, remote movement/attack and inventory portrait, seed11/protocol9. Build: Builds/Playable/20261109-170031-385/EmberdelveNet.exe. Both windows closed; main Editor untouched.
 
 ## Next steps and limits
 
-1. Trial a more anatomical CC0 arm mesh, author fingers for bow/string and sword, then align full-body anatomy and class outfits. Candidates: Design/CHARACTER_ASSET_CANDIDATES_20261109.md. Research only; no replacement imported. Existing low-poly fingers, bow-rest hand overlap and torch overexposure remain quality limits.
-2. Previous bow/input slice c8e04229 remains: F/G prepares, LMB fires; ordinary arrows hold/release. Tasks/BOW_DRAW_20261109.md. Third-person draw-state replication and crossbow model/reload presentation remain separate.
+1. Visual polish on the new shared anatomy: clean sleeve cuffs, skin response near torches, authored finger hook for bow/string; current armour and procedural materials remain simple. This is a completed source/rig replacement, not final photoreal art. Source/license in ASSET_PLAN.md. Unity emits an in-between metacarpal warning but avatar/fingers are valid and reviewed.
+2. Previous grip fix915a38a5 and bow/input c8e04229 remain: F/G prepares, LMB fires; ordinary arrows hold/release. Third-person bow draw-state replication and crossbow model/reload presentation remain separate.
 3. Existing brief magenta client impact effect needs a focused material fix. No unrelated full test reruns.
 
 ## Previous accepted work

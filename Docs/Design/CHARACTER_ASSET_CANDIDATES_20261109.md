@@ -1,3 +1,5 @@
+Update after user decision: use one complete character source, not an independent FPS-arms pack. Innerscene's CC0 MakeHuman-derived weighted male body was selected and integrated; see Tasks/UNIFIED_HUMAN_20261109.md and ASSET_PLAN.md. The list below records the earlier search, not the current selection.
+
 # Character and first-person arm candidates
 
 Reviewed9 November2026 after user rejected the current wrist/grip presentation. These are researched candidates, not imported or certified in Unity. Current repo policy is free/CC0 assets. Fixing hand orientation remains necessary even after a mesh replacement.
