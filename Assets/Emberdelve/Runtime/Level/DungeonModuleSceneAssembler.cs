@@ -357,6 +357,7 @@ namespace Emberdelve.Level
             _runtimeNav.cellSize = _runtimeLayout.CellSize;
             _runtimeNav.origin = _runtimeLayout.origin;
             _runtimeNav.mask = _runtimeLayout.BuildNavMask();
+            NavGridSurface.Bake(_runtimeNav, generatedRoot, LayerMask.GetMask(GameConfig.LevelLayerName));
             if (!ValidateNavConnectivity(_runtimeLayout, out reason)) return false;
 
             RunDirector director = FindFirstObjectByType<RunDirector>(FindObjectsInactive.Include);

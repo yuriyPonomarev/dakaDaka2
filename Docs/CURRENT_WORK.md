@@ -3,7 +3,15 @@
 Updated 9 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest completed slice: one whole character source for body and hands
+## Latest completed: MAP-02 moonlit open ruins
+
+Mostly open sky (Vault retains roof), moon/stars and cool directional light; saved room terraces at1.8/3.6m with broad stairs; tombs/arches/columns/props and breakable barrels. Undead lies fallen until aggro, rises before attacking. Height-aware navigation follows stairs and prevents attacks from directly below a terrace. Barrel destruction is server-owned and replicated to late joiners. Protocol10.
+
+Evidence: Tasks/MOONLIT_RUINS_20261109.md. All18 terrace paths pass;63 focused tests plus final height fixture3/0. Network run20261109-172904-542: NetMovement190/0, NetFinal172/0, NetDoor37/0, NetInventory148/0, NetCombat313/0; build PASS. Live seeds11 and2043687868: stairs up/down, moon, sword barrel break/client/latejoin; separate ordinary host approach verifies fallen-to-awake enemy. Review windows closed; main Editor untouched.
+
+Build: Builds/Playable/20261109-172904-542/EmberdelveNet.exe. Limits: solid terraces, existing materials/simple flame visuals, reverse-collapse rise, no barrel loot drops. Inherited materials/logs/Pipeline config excluded from milestone.
+
+## Previous completed: one whole character source for body and hands
 
 Replaced player anatomy with the CC0 Innerscene/MakeHuman full weighted body. Both Warrior and Archer use it; first-person hands derive from this exact same skin and finger skeleton. Existing class armour retained and fitted, headwear lowered, closed boots added. Inventory portraits use the same class prefabs. No separate FPS-arm asset imported.
 

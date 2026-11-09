@@ -6,7 +6,7 @@ using Emberdelve.Data;
 
 namespace Emberdelve.AI
 {
-    public enum EnemyState { Patrol, Investigate, Chase, Attack, Stunned, Dead }
+    public enum EnemyState { Patrol, Investigate, Chase, Attack, Stunned, Dead, Dormant, Waking }
 
     /// <summary>What the brain decided. EnemyAgent turns it into movement and an attack intent.</summary>
     public readonly struct BrainOrder
@@ -40,7 +40,10 @@ namespace Emberdelve.AI
         private readonly Vector3 _home;
         private readonly List<Vector3> _patrolPoints = new List<Vector3>(6);
 
+        public const float WakeSeconds = 1.25f;
         private EnemyState _state = EnemyState.Patrol;
+        private float _wakeElapsed;
+        private bool _wakePendingAfterStun;
         private Vector3 _lastKnownPosition;
         private float _lastSeenAt = float.NegativeInfinity;
         private float _investigateUntil;
@@ -54,17 +57,21 @@ namespace Emberdelve.AI
         private int _lastHeardTargetId;
         private float _lastHeardAt = float.NegativeInfinity;
 
-        public EnemyBrain(EnemyData data, INavigationProvider nav, Vector3 home, LayerMask levelMask)
+        public EnemyBrain(EnemyData data, INavigationProvider nav, Vector3 home, LayerMask levelMask, bool startsDormant = false)
         {
             _data = data;
             _nav = nav;
             _home = home;
             _levelMask = levelMask;
             _lastKnownPosition = home;
+            _state = startsDormant ? EnemyState.Dormant : EnemyState.Patrol;
             BuildPatrolPoints();
         }
 
         public EnemyState State => _state;
+        public bool IsDormant => _state == EnemyState.Dormant || (_state == EnemyState.Stunned && _wakePendingAfterStun);
+        public bool IsWaking => _state == EnemyState.Waking;
+        public float WakeElapsed => _wakeElapsed;
         public bool IsWindingUp => _windingUp;
         public bool IsStunned => _state == EnemyState.Stunned;
         public float WindupProgress => _windingUp ? 1f - Mathf.Clamp01(_windupLeft / Mathf.Max(0.05f, _data.attackWindup)) : 0f;
@@ -101,12 +108,21 @@ namespace Emberdelve.AI
             _lastKnownPosition = damage.SourcePosition;
             _lastSeenAt = Time.time;
 
-            if (_state == EnemyState.Patrol || _state == EnemyState.Investigate) _state = EnemyState.Chase;
+            if (_state == EnemyState.Dormant) BeginWake();
+            else if (_state == EnemyState.Patrol || _state == EnemyState.Investigate) _state = EnemyState.Chase;
         }
 
         public BrainOrder Tick(float dt, float now, Vector3 self, Vector3 facing, ICombatEntity target)
         {
             if (_state == EnemyState.Dead) return BrainOrder.Hold(self);
+
+            if (_state == EnemyState.Waking)
+            {
+                _wakeElapsed = Mathf.Min(WakeSeconds, _wakeElapsed + Mathf.Max(0f, dt));
+                if (_wakeElapsed >= WakeSeconds) _state = EnemyState.Chase;
+                // Even the completion tick cannot move or deal an immediate attack.
+                return BrainOrder.Hold(self);
+            }
 
             _attackCooldownLeft = Mathf.Max(0f, _attackCooldownLeft - dt);
 
@@ -136,6 +152,12 @@ namespace Emberdelve.AI
                 // Hearing supplies one last-known search point even when a closed door blocks sight. Do not
                 // refresh it every frame: that would reveal and track an occluded player's exact position indefinitely.
                 _lastKnownPosition = targetCenter;
+            }
+
+            if (_state == EnemyState.Dormant)
+            {
+                if (targetAlive && (visible || heardWithinMemory)) BeginWake();
+                return BrainOrder.Hold(self);
             }
 
             if (targetAlive && (visible || heardWithinMemory) && _state != EnemyState.Chase && _state != EnemyState.Attack)
@@ -168,6 +190,14 @@ namespace Emberdelve.AI
             return BrainOrder.Hold(self);
         }
 
+        private void BeginWake()
+        {
+            _state = EnemyState.Waking;
+            _wakeElapsed = 0f;
+            _windingUp = false;
+            _windupLeft = 0f;
+        }
+
         private BrainOrder TickPatrol(Vector3 self, float dt)
         {
             if (DistanceXZ(self, _patrolTarget) < 1.1f) _patrolTarget = PickPatrolPoint();
@@ -185,7 +215,7 @@ namespace Emberdelve.AI
 
             float distance = DistanceXZ(self, targetCenter);
 
-            if (distance <= _data.attackRange && visible)
+            if (distance <= _data.attackRange && visible && WithinMeleeHeight(self, targetCenter))
             {
                 _state = EnemyState.Attack;
                 _windingUp = false;
@@ -203,7 +233,7 @@ namespace Emberdelve.AI
             Vector3 destination = visible ? targetCenter : _lastKnownPosition;
             float stopDistance = _data.attackRange * 0.75f;
 
-            if (distance <= stopDistance)
+            if (distance <= stopDistance && WithinMeleeHeight(self, targetCenter))
             {
                 return new BrainOrder(self, 0f, false, targetCenter);
             }
@@ -222,7 +252,7 @@ namespace Emberdelve.AI
 
             float distance = DistanceXZ(self, targetCenter);
 
-            if (!visible || distance > _data.attackRange * 1.35f)
+            if (!visible || distance > _data.attackRange * 1.35f || !WithinMeleeHeight(self, targetCenter))
             {
                 _state = EnemyState.Chase;
                 _windingUp = false;
@@ -294,13 +324,15 @@ namespace Emberdelve.AI
 
             if (stunned)
             {
+                _wakePendingAfterStun |= IsDormant || IsWaking;
                 _state = EnemyState.Stunned;
                 _windingUp = false;
                 _windupLeft = 0f;
             }
             else if (_state == EnemyState.Stunned)
             {
-                _state = EnemyState.Chase;
+                if (_wakePendingAfterStun) { _wakePendingAfterStun = false; BeginWake(); }
+                else _state = EnemyState.Chase;
             }
         }
 
@@ -329,6 +361,11 @@ namespace Emberdelve.AI
 
             return HitScanner.HasLineOfSight(eye, targetCenter, _levelMask, 0.3f);
         }
+
+        // Compare chest heights, not the target chest against our feet. Normal ground/crouch
+        // combat keeps its existing horizontal ranges; a terrace target must be pursued upstairs.
+        private static bool WithinMeleeHeight(Vector3 self, Vector3 targetCenter) =>
+            Mathf.Abs(targetCenter.y - (self.y + 1.15f)) <= 1.1f;
 
         private static float DistanceXZ(Vector3 a, Vector3 b)
         {

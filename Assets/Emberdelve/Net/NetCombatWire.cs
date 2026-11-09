@@ -277,10 +277,12 @@ namespace Emberdelve.Net
     /// <summary>Versioned server-authored enemy presentation state. Gameplay decisions and health stay exclusively on the server.</summary>
     public struct EnemyPresentationWire : INetworkSerializable
     {
-        public const byte CurrentVersion = 3;
+        public const byte CurrentVersion = 4;
         public const byte WindingUpFlag = 1;
         public const byte DeadFlag = 2;
-        public const byte KnownFlags = WindingUpFlag | DeadFlag;
+        public const byte DormantFlag = 4;
+        public const byte WakingFlag = 8;
+        public const byte KnownFlags = WindingUpFlag | DeadFlag | DormantFlag | WakingFlag;
 
         public byte Version;
         public int Enemy;
@@ -295,11 +297,16 @@ namespace Emberdelve.Net
         public float PhaseDuration;
         public float RecoilStart;
         public double SampleTime;
+        public float WakeElapsed;
 
         public bool IsWindingUp => (Flags & WindingUpFlag) != 0;
+        public bool IsDormant => (Flags & DormantFlag) != 0;
+        public bool IsWaking => (Flags & WakingFlag) != 0;
         public bool IsDead => (Flags & DeadFlag) != 0;
         public string VisualKindName => VisualKind <= 3 ? new[] { "Minion", "Rogue", "Warrior", "Mage" }[VisualKind] : "Unknown";
         public bool IsValid => Version == CurrentVersion && Enemy > 0 && VisualKind <= 3 && (Flags & ~KnownFlags) == 0 &&
+                               !((IsDormant || IsWaking) && (IsDead || IsWindingUp || AttackPhase != 0)) && !(IsDormant && IsWaking) &&
+                               float.IsFinite(WakeElapsed) && WakeElapsed >= 0f && WakeElapsed <= 5f &&
                                !float.IsNaN(WindupSeconds) && !float.IsInfinity(WindupSeconds) && WindupSeconds >= 0f && WindupSeconds <= 10f &&
                                float.IsFinite(SwingSeconds) && SwingSeconds >= 0f && SwingSeconds <= 30f && AttackPhase <= 4 &&
                                float.IsFinite(PhaseElapsed) && PhaseElapsed >= 0f &&
@@ -323,6 +330,7 @@ namespace Emberdelve.Net
             serializer.SerializeValue(ref PhaseDuration);
             serializer.SerializeValue(ref RecoilStart);
             serializer.SerializeValue(ref SampleTime);
+            serializer.SerializeValue(ref WakeElapsed);
         }
     }
 }

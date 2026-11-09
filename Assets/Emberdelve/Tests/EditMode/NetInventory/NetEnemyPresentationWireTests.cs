@@ -193,6 +193,30 @@ namespace Emberdelve.Tests.NetInventory
             Assert.That(phase.NormalizedTime(100f), Is.Zero);
         }
 
+        [Test]
+        public void DormancyAndWakeClockRoundTripWithoutImplyingDeath()
+        {
+            var state = Valid(); state.Flags=EnemyPresentationWire.WakingFlag; state.WakeElapsed=.625f;
+            using(var writer=new FastBufferWriter(256, Allocator.Temp))
+            {
+                writer.WriteValueSafe(state);
+                using(var reader=new FastBufferReader(writer, Allocator.Temp))
+                {
+                    reader.ReadValueSafe(out EnemyPresentationWire copy);
+                    Assert.That(copy.IsValid,Is.True); Assert.That(copy.IsDead,Is.False);
+                    Assert.That(copy.IsWaking,Is.True); Assert.That(copy.WakeElapsed,Is.EqualTo(.625f));
+                }
+            }
+            state.Flags=EnemyPresentationWire.DormantFlag;
+            Assert.That(state.IsValid,Is.True); Assert.That(state.IsDormant,Is.True);
+            state.Flags|=EnemyPresentationWire.WakingFlag;
+            Assert.That(state.IsValid,Is.False,"Cannot be dormant and rising simultaneously.");
+            state.Flags=EnemyPresentationWire.DormantFlag|EnemyPresentationWire.DeadFlag;
+            Assert.That(state.IsValid,Is.False,"A fake corpse is not a dead combat entity.");
+            state.Flags=EnemyPresentationWire.WakingFlag; state.WakeElapsed=float.NaN;
+            Assert.That(state.IsValid,Is.False);
+        }
+
         private static EnemyPresentationWire Valid()
         {
             return new EnemyPresentationWire

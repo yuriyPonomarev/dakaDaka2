@@ -213,6 +213,8 @@ namespace Emberdelve.Net
         private double _phaseSampleTime;
         private float _phaseReceivedAt;
         private bool _phaseDriven;
+        private bool _restDriven, _dormant, _waking;
+        private float _wakeElapsed;
         private int _enemyId;
         private byte _visualKind;
         private int _lastAnimatorStateHash;
@@ -276,7 +278,12 @@ namespace Emberdelve.Net
             _phaseSampleTime = state.SampleTime;
             _phaseReceivedAt = Time.unscaledTime;
             _wasWindingUp = state.IsWindingUp;
+            _dormant = state.IsDormant;
+            _waking = state.IsWaking;
+            _wakeElapsed = state.WakeElapsed;
             if (state.IsDead) { SetDead(); return; }
+            if (_dormant || _waking) { LogAction(_dormant ? "Dormant" : "Wake"); ApplyRestClock(); return; }
+            ApplyRestClock();
             if (starting) LogAction("Attack");
             ApplyAttackClock();
             TryPlayPendingHit(_wasWindingUp, starting);
@@ -284,15 +291,24 @@ namespace Emberdelve.Net
 
         private void TryPlayPendingHit(bool winding, bool swingJustStarted)
         {
+            if (_dormant || _waking) return;
             if (!HasParameter(HitHash, AnimatorControllerParameterType.Trigger)) return;
             if (!_pendingHits.TryConsume(_dead, winding, swingJustStarted, _attackPhase.Phase != 0)) return;
             _animator.SetTrigger(HitHash);
             LogAction("Hit");
         }
 
+        private bool ApplyRestClock()
+        {
+            float age = NetworkManager.Singleton != null
+                ? (float)System.Math.Max(0d, NetworkManager.Singleton.ServerTime.Time - _phaseSampleTime)
+                : Time.unscaledTime - _phaseReceivedAt;
+            return EnemyDormantPose.Apply(_animator, _dormant, _waking, _wakeElapsed + age, ref _restDriven);
+        }
+
         private void ApplyAttackClock()
         {
-            if (_animator == null || _dead) return;
+            if (_animator == null || _dead || _dormant || _waking) return;
             if (_attackPhase.Phase != 0)
             {
                 float age = NetworkManager.Singleton != null
@@ -317,6 +333,8 @@ namespace Emberdelve.Net
         {
             if (_dead) return;
             _dead = true;
+            EnemyDormantPose.FinishDead(_animator, ref _restDriven);
+            _dormant = _waking = false;
             _pendingHits.Discard();
             _deathAt = Time.unscaledTime;
             if (_animator != null)
@@ -391,6 +409,7 @@ namespace Emberdelve.Net
                 if (Time.unscaledTime - _deathAt >= _deathDuration + 0.25f) Object.Destroy(gameObject);
                 return;
             }
+            if (ApplyRestClock()) return;
             if (_animator != null)
             {
                 float requestedSpeed = Time.unscaledTime - _previousSnapshotTime <= StaleSnapshotSeconds ? _snapshotSpeed : 0f;

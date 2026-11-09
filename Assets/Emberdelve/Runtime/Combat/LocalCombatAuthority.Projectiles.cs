@@ -536,7 +536,7 @@ namespace Emberdelve.Combat
                 Vector3 segmentEnd = consumed <= 0f ? stepEnd : segmentStart + flight.Direction * remaining;
                 float segmentLength = remaining;
                 if (!TryFindProjectileContact(flight, segmentStart, segmentEnd, out ICombatEntity target,
-                        out Vector3 point, out float distance, out bool bladeContact, out bool wall))
+                        out Vector3 point, out float distance, out bool bladeContact, out bool wall, out Collider worldCollider))
                 {
                     consumed += remaining;
                     flight.Traveled += remaining;
@@ -552,6 +552,8 @@ namespace Emberdelve.Combat
                 if (wall || target == null)
                 {
                     flight.ImpactPoint = point;
+                    var barrel = worldCollider != null ? worldCollider.GetComponentInParent<Emberdelve.Interaction.BreakableBarrel>() : null;
+                    if (barrel != null) barrel.ApplyWeaponDamage(flight.Weapon.BoostedBaseDamage(flight.FlatDamageBonus) * flight.DamageMultiplier);
                     EndProjectile(flight, ProjectileEndReason.Wall, -1);
                     return true;
                 }
@@ -618,8 +620,9 @@ namespace Emberdelve.Combat
         }
 
         private bool TryFindProjectileContact(ProjectileFlight flight, Vector3 start, Vector3 end,
-            out ICombatEntity target, out Vector3 point, out float distance, out bool bladeContact, out bool wall)
+            out ICombatEntity target, out Vector3 point, out float distance, out bool bladeContact, out bool wall, out Collider worldCollider)
         {
+            worldCollider = null;
             target = null;
             point = end;
             distance = Vector3.Distance(start, end);
@@ -674,6 +677,7 @@ namespace Emberdelve.Combat
                 point = hit.point;
                 distance = hit.distance;
                 wall = entity == null;
+                worldCollider = wall ? hit.collider : null;
                 break;
             }
 

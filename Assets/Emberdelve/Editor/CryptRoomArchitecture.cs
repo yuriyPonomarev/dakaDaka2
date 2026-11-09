@@ -14,124 +14,54 @@ namespace Emberdelve.EditorTools
         internal static void Build(Transform root, DungeonModuleKind kind, int variant, Material stone, Material floor)
         {
             Mesh arch = ArchMesh();
-            Arch(root, arch, new Vector3(0, 2.7f, 0), 10.5f, 2.8f, 23.2f, 0, stone);
-            Transform fill = Group(root, "Vault_Reflected_Light", new Vector3(0, 4.4f, 0), 0);
-            Light ambient = fill.gameObject.AddComponent<Light>();
-            ambient.type = LightType.Point; ambient.range = 24f; ambient.intensity = 24f;
-            ambient.cullingMask = LayerMask.GetMask(GameConfig.LevelLayerName);
-            ambient.color = new Color(.57f, .66f, .8f); ambient.shadows = LightShadows.None;
+            if (kind == DungeonModuleKind.Vault)
+                Arch(root, arch, new Vector3(0, 2.7f, 0), 10.5f, 2.8f, 23.2f, 0, stone);
             Material wood = AssetDatabase.LoadAssetAtPath<Material>("Assets/Emberdelve/Art/Materials/Bow_Wood.mat");
             Material metal = AssetDatabase.LoadAssetAtPath<Material>("Assets/Emberdelve/Art/Materials/Blade_Metal.mat");
-            for (int side = -1; side <= 1; side += 2)
+            // Four doorway axes stay on ground level. Elevated corners have broad diagonal stairs.
+            bool high = kind == DungeonModuleKind.Shrine || kind == DungeonModuleKind.Bridge;
+            Terrace(root, new Vector3(3,0,3), 45, high ? 3.6f : 1.8f, stone, floor);
+            if(kind != DungeonModuleKind.Entry && kind != DungeonModuleKind.Extraction)
+                Terrace(root, new Vector3(-3,0,-3), 225, 1.8f, stone, floor);
+            Tomb(root,new Vector3(-7,0,7), variant%2==0?15:75,stone,floor);
+            Tomb(root,new Vector3(7,0,-7),-20,stone,floor);
+            for(int side=-1;side<=1;side+=2)
             {
-                for (int end = -1; end <= 1; end += 2)
-                {
-                    Part(root, "Corner_Buttress", new Vector3(side * 10.1f, 3f, end * 10.1f), new Vector3(5f, 6f, .85f), stone, side * end * 45f);
-                    Column(root, new Vector3(side * 8.5f, 0, end * 7f), 3.1f, stone);
-                }
-                Arch(root, arch, new Vector3(0, 3.1f, side * 7f), 8.5f, 2.4f, .6f, 0, stone);
-                // Side-wall burial bays make the outer silhouette readable without obstructing door landings.
-                for (int bay = -1; bay <= 1; bay += 2)
-                {
-                    Transform niche = Group(root, "Burial_Alcove", new Vector3(side * 10.8f, 0, bay * 5.5f), side * 90f);
-                    Part(niche, "Recess_Shadow", new Vector3(0, 1.3f, .2f), new Vector3(3.4f, 2.6f, .25f), floor);
-                    Arch(niche, arch, new Vector3(0, 1.8f, -.3f), 1.6f, 1.15f, .5f, 0, stone);
-                    for (int edge = -1; edge <= 1; edge += 2)
-                        Part(niche, "Niche_Jamb", new Vector3(edge * 1.65f, .9f, -.3f), new Vector3(.35f, 1.8f, .55f), stone);
-                    Tomb(niche, new Vector3(0, 0, -.65f), 90f, stone, floor);
-                }
-                Brazier(root, new Vector3(side * 7.5f, 0, -7.5f), stone, metal, kind == DungeonModuleKind.Extraction);
+                Column(root,new Vector3(side*10.5f,0,-side*9.5f),4.5f,stone);
+                Column(root,new Vector3(side*9f,0,-side*10.5f),2.1f,stone);
+                Arch(root,arch,new Vector3(side*7f,2.6f,-side*7f),2f,1.7f,.55f,side*20,stone);
+                Brazier(root,new Vector3(side*4.8f,0,-side*4.8f),stone,metal,false);
+                Urn(root,new Vector3(side*8.5f,0,-side*5.5f),floor);
             }
-            // Curved lintels cover the square opening tops; the existing door and closure contract remains intact.
-            for (int side = 0; side < 4; side++)
+            if(kind == DungeonModuleKind.Shrine)
             {
-                Quaternion turn = Quaternion.Euler(0, side * 90f, 0);
-                Arch(root, arch, turn * new Vector3(0, 2.5f, 11.65f), 2f, 1.5f, .85f, side * 90f, stone);
+                Transform altar=Group(root,"Ruined_Altar",new Vector3(-7,0,7),0);
+                Part(altar,"Altar_Table",new Vector3(0,1.1f,0),new Vector3(3,.35f,1.4f),stone);
             }
+            if(kind == DungeonModuleKind.Extraction)
+                Arch(root,arch,new Vector3(0,3.2f,4.5f),3.2f,2.2f,.9f,0,stone);
+            MoonlitRuinsContent.Dress(root, kind, variant, wood, stone);
+        }
 
-            switch (kind)
+        private static void Terrace(Transform root, Vector3 start, float yaw, float height, Material stone, Material floor)
+        {
+            Transform terrace=Group(root,"Terrace_"+yaw,start,yaw);
+            int steps=Mathf.RoundToInt(height/.15f);
+            const float run=.30f, width=3.6f;
+            for(int i=0;i<steps;i++)
             {
-                case DungeonModuleKind.Entry:
-                    for (int side = -1; side <= 1; side += 2)
-                    {
-                        Tomb(root, new Vector3(side * 5f, 0, 2.5f), 0, stone, floor);
-                        Column(root, new Vector3(side * 5f, 0, -5f), 3.2f, stone);
-                    }
-                    break;
-                case DungeonModuleKind.Hall:
-                    if (variant == 0)
-                    {
-                        for (int z = -6; z <= 6; z += 6)
-                        {
-                            Column(root, new Vector3(-4.5f, 0, z), 3.2f, stone);
-                            Column(root, new Vector3(4.5f, 0, z), 3.2f, stone);
-                            Arch(root, arch, new Vector3(0, 3.2f, z), 4.5f, 2.1f, .65f, 0, stone);
-                        }
-                    }
-                    else if (variant == 1) BurialRows(root, stone, floor, false);
-                    else
-                    {
-                        for (int side = -1; side <= 1; side += 2)
-                            for (int z = -6; z <= 6; z += 12)
-                            {
-                                Transform shelf = Group(root, "Reliquary_Shelves", new Vector3(side * 6.5f, 0, z), 0);
-                                for (int tier = 0; tier < 3; tier++)
-                                {
-                                    Part(shelf, "Shelf", new Vector3(0, .4f + tier * .85f, 0), new Vector3(3f, .16f, .85f), wood);
-                                    for (int jar = -1; jar <= 1; jar++) Urn(shelf, new Vector3(jar * .85f, .5f + tier * .85f, 0), floor);
-                                }
-                                for (int edge = -1; edge <= 1; edge += 2)
-                                    Part(shelf, "Upright", new Vector3(edge * 1.45f, 1.2f, 0), new Vector3(.18f, 2.4f, .85f), wood);
-                            }
-                    }
-                    break;
-                case DungeonModuleKind.Ossuary:
-                    BurialRows(root, stone, floor, variant == 1);
-                    break;
-                case DungeonModuleKind.Shrine:
-                    for (int z = -5; z <= 3; z += 4)
-                        for (int side = -1; side <= 1; side += 2)
-                        {
-                            Part(root, "Chapel_Pew_Seat", new Vector3(side * 4.8f, .55f, z), new Vector3(4f, .22f, .8f), wood);
-                            Part(root, "Chapel_Pew_Back", new Vector3(side * 4.8f, 1f, z - .38f), new Vector3(4f, .9f, .16f), wood);
-                            for (int leg = -1; leg <= 1; leg += 2)
-                                Part(root, "Pew_Foot", new Vector3(side * 4.8f + leg * 1.5f, .25f, z), new Vector3(.22f, .5f, .7f), wood);
-                        }
-                    Tomb(root, new Vector3(4.5f, 0, 7.5f), 90f, stone, floor);
-                    Arch(root, arch, new Vector3(0, 3.1f, 7f), 4f, 2.5f, .8f, 0, stone);
-                    break;
-                case DungeonModuleKind.Vault:
-                    for (int x = -1; x <= 1; x += 2)
-                        for (int z = -1; z <= 1; z += 2)
-                        {
-                            Column(root, new Vector3(x * 4.5f, 0, z * 4.5f), 4.6f, stone);
-                            Tomb(root, new Vector3(x * 6.5f, 0, z * 6.5f), x * z * 45f, stone, floor);
-                        }
-                    // Low central seal is crossed normally; columns offer four genuine flanking routes.
-                    Cylinder(root, "Vault_Seal", new Vector3(0, .12f, 0), new Vector3(5f, .12f, 5f), floor);
-                    break;
-                case DungeonModuleKind.Bridge:
-                    Part(root, "Skybridge_Deck", new Vector3(0, .12f, 0), new Vector3(8f, .24f, 23f), stone);
-                    Part(root, "Skybridge_Crown", new Vector3(0, .38f, 0), new Vector3(2f, .18f, 21f), floor);
-                    for (int side = -1; side <= 1; side += 2)
-                    {
-                        Part(root, "Skybridge_Parapet", new Vector3(side * 4f, .75f, 0), new Vector3(.35f, 1.25f, 21f), stone);
-                        for (int z = -7; z <= 7; z += 7)
-                        {
-                            Column(root, new Vector3(side * 4f, 0, z), 3.2f, stone);
-                            if (side == 1) Arch(root, arch, new Vector3(0, 3.2f, z), 4f, 2.2f, .7f, 0, stone);
-                        }
-                    }
-                    break;
-                case DungeonModuleKind.Extraction:
-                    for (int side = -1; side <= 1; side += 2)
-                    {
-                        Column(root, new Vector3(side * 3.2f, 0, 4.5f), 3.2f, stone);
-                        Tomb(root, new Vector3(side * 6f, 0, 4f), 0, stone, floor);
-                    }
-                    Arch(root, arch, new Vector3(0, 3.2f, 4.5f), 3.2f, 2.2f, .9f, 0, stone);
-                    break;
+                float rise=(i+1)*.15f;
+                Part(terrace,"Stair_"+i,new Vector3(0,rise*.5f,(i+.5f)*run),new Vector3(width,rise,run+.01f),stone);
             }
+            float length=steps*run;
+            float depth=height>2?3f:4f;
+            Part(terrace,"Upper_Deck",new Vector3(0,height*.5f,length+depth*.5f),new Vector3(4,height,depth),floor);
+            for(int side=-1;side<=1;side+=2)
+            {
+                Part(terrace,"Parapet",new Vector3(side*1.95f,height+.5f,length+depth*.5f),new Vector3(.22f,1,depth),stone);
+                Column(terrace,new Vector3(side*1.8f,height,length+depth-.3f),1.45f,stone);
+            }
+            Part(terrace,"Rear_Parapet",new Vector3(0,height+.5f,length+depth-.12f),new Vector3(4,1,.24f),stone);
         }
 
         private static void BurialRows(Transform root, Material stone, Material floor, bool divided)

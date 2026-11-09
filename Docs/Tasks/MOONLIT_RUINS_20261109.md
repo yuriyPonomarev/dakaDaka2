@@ -1,0 +1,27 @@
+# MAP-02: moonlit open ruins, terraces, dormant undead and barrels
+
+User scope: mostly open sky, multiple elevations linked by stairs, denser room content, moonlight, enemies that appear dead until aggro, breakable barrels. This continues the existing raid; no unrelated economy or new progression.
+
+Play loop: read the room, choose a ground or elevated approach, wake/fight or avoid undead, break a supply obstruction, loot and decide whether to continue or extract. Height changes create exposed vantage positions; stairs are predictable approach routes; dark sheltered crypt contrasts with moonlit open courtyards. Feedback: visible stairs/collision, readable rise before attack, intact barrel becomes nonblocking staves for every player. Ground doorway axes and extraction stay accessible. No procedural chaos added: existing10 authored module IDs/order, shared layout plan retained.
+
+Implementation scope:
+- Most module roofs/vaults removed; enclosed Vault remains. Common geometry authored in saved prefabs, open corner terraces1.8m and high Shrine/Bridge terrace3.6m. Broad diagonal stairs with0.15m rises,0.30m treads,3.6m width. Four ground doorway axes preserved. Existing props, tombs, braziers, roots, rubble and barrels populate corners.
+- Entry module owns moonlit sky, directional moonlight and cool ambient/fog; warm braziers give local landmarks. Original procedural sky shader, no downloaded image.
+- Optional sampled nav heights/links traverse actual stair support and reject cliff jumps. Flat-grid assets retain old behavior. Enemy movement follows physical ground, never assigns global y0. Ground spawns remain unchanged.
+- Production undead starts Dormant, detects through existing sight/hearing/damage, rises for1.25s before normal actions. Shared host/client Death-pose reverse sampler; dormant hit shapes follow posed bones. Wire presentation4, admission protocol10.
+- Server weapon contacts damage barrels; no client destruction endpoint. Broken stable IDs replicate with seed/layout hash, periodic snapshot covers latejoin. Broken barrels remove collision and reveal saved staves. No new loot drops.
+
+Checkpoint Logs/harness/before-moonlit-ruins.json. Required acceptance: saved terrace path validation, focused level/AI/barrel/wire tests; relevant network movement/final/door/inventory/combat; real host/client stair traversal on two seeds, dormant wake, barrel destruction replication and latejoin; visual night/sky inspection. Tests not duplicated absent relevant failure/change. Acceptance completed below; commit only this milestone and preserve inherited changes.
+
+
+## Acceptance completed 9 November 2026
+
+- Catalog import and authored nav: Logs/moonlit-ruins-import.log; all18 terraces reachable, endpoints1.8/3.6m. Preview in mirror Logs/moonlit-ruins/courtyard.png.
+- Focused EditMode: Logs/runs/moonlit-focused/results.xml,63 passed/0 failed. Subsequent height-separated attack regression: Logs/runs/moonlit-height-final,3 passed/0 failed. Only affected fixture repeated after its change.
+- Final network/build: Logs/runs/20261109-172904-542. NetMovement190/0, NetFinal172/0, NetDoor37/0, NetInventory148/0, NetCombat313/0. Build PASS, protocol10. Playable Builds/Playable/20261109-172904-542/EmberdelveNet.exe. Cache reused proof players within run. Broad70-gate planner selection was narrowed to these5 affected scenarios plus focused rules; no unrelated full suite.
+- Live seed11: Logs/acceptance/20261109-moonlit-11. Ordinary host ascent/descent on entry terrace; moon.png shows moon/stars. Sword broke barrel5074957445671380637; host/client logs agree. Third late client receives same broken ID without another strike. broken-barrel.png records debris. Idle client was killed by ordinary enemies while host inspected entry; this was not a scripted combat fixture.
+- Live second seed2043687868: Logs/acceptance/20261109-moonlit-2043687868. Enemies disabled only for traversal. Client normal W input ascends low terrace (server y1.830), crosses ground, ascends high terrace (y3.608), descends to y0.030; no teleport. Screenshots terrace-overlook.png, high-terrace.png, high-overlook.png. Server movement log is authority evidence; review bridge generic rig telemetry can select the remote player and was not used as owner movement evidence.
+- Ordinary dormant scenario: Logs/acceptance/20261109-moonlit-dormant, seed11, host only, no enemy proof/stun fixture. open.png/dormant.png show fallen skeleton behind opened door; it stays down until approach. wake-mid.png then awake.png capture fallen-to-standing transition and pursuit; host health120 before contact. Network enemy presentation separately validated by wire tests and NetCombat; no claim of a synchronized two-camera wake recording.
+- All review players closed normally; user Editor untouched. Existing Stone_Ceiling/Stone_Floor material drift, Assets/Logs and Pipeline config excluded.
+
+Limits: this is the bounded open-ruins gameplay/content milestone, not final environment art. Reuses current stone/props; flame visuals remain simple. Terraces are solid raised platforms, not overlapping walkable floors. Enemies still originate at ground-level room spawns. Barrel debris is nonblocking; barrel loot drops and physical flying debris are not added. Dormant rise currently reverses the authored collapse animation. More room-specific silhouettes, richer flames and bespoke rising animation can follow without reopening this accepted gameplay slice.

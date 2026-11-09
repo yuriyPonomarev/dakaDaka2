@@ -226,6 +226,7 @@ namespace Emberdelve.Net
                 ConnectionData = NetConnectPayload.Encode(protocol, _args.Slot, RequestedClass())
             };
             _nm.NetworkConfig = config;
+            gameObject.AddComponent<NetBreakableWorld>().Configure(_nm);
             GameObject playerPrefab = RegisterPrefabs();
 
             if (_args.DisconnectTimeoutMs > 0)

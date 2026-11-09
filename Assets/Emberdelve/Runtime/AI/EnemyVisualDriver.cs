@@ -33,6 +33,7 @@ namespace Emberdelve.AI
         private Vector3 _lastPosition;
         private float _speed;
         private bool _phaseDriven;
+        private bool _restDriven;
         private float _attackPlayedAt = -10f;
         private float _attackPlaybackDuration;
         private float _attackClipLength = 1f;
@@ -104,6 +105,7 @@ namespace Emberdelve.AI
 
             if (_agent.IsDead)
             {
+                EnemyDormantPose.FinishDead(animator, ref _restDriven);
                 if (!_dead)
                 {
                     _dead = true;
@@ -115,6 +117,16 @@ namespace Emberdelve.AI
                 animator.SetFloat(_speedHash, 0f);
                 return;
             }
+
+            if (EnemyDormantPose.Apply(animator, _agent.IsDormant, _agent.IsWaking,
+                _agent.Brain != null ? _agent.Brain.WakeElapsed : 0f, ref _restDriven))
+            {
+                _speed = 0f;
+                _lastPosition = _agent.transform.position;
+                _agent.RefreshDormantHitPose(animator);
+                return;
+            }
+            _agent.RefreshDormantHitPose(animator);
 
             // Locomotion: the agent moves the root transform, so the animator speed is the measured ground speed.
             Vector3 position = _agent.transform.position;
@@ -182,7 +194,7 @@ namespace Emberdelve.AI
             if (animator == null || !_hasParameters || _agent == null || _agent.IsDead) return;
 
             // A flinch must never hide the telegraph: no Hit clip while the windup is running or a swing was just played.
-            if (_agent.AttackPresentation.Phase != 0 || Time.time - _attackPlayedAt < _attackPlaybackDuration) return;
+            if (_agent.IsDormant || _agent.IsWaking || _agent.AttackPresentation.Phase != 0 || Time.time - _attackPlayedAt < _attackPlaybackDuration) return;
             animator.SetTrigger(_hitHash);
         }
 

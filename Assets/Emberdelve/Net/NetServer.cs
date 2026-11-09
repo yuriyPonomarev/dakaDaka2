@@ -372,6 +372,16 @@ namespace Emberdelve.Net
                 return;
             }
 
+            // This fixture verifies standing Hit/Attack/Death presentation, not the separate dormant encounter.
+            // Exercise the normal wake state and complete its delay before holding the target; otherwise the
+            // first scripted waist-height swing would aim above a sleeping body and its Hit reaction is suppressed.
+            if (target.Brain != null && (target.IsDormant || target.IsWaking))
+            {
+                target.Brain.NotifyDamaged(new DamageInfo(0f, target.CombatCenter, Vector3.up,
+                    owner.Rig.transform.position, 0, EntityKind.Neutral, DamageType.Physical, false, false, 0f));
+                target.Brain.Tick(EnemyBrain.WakeSeconds, Time.time, target.transform.position, target.transform.forward, null);
+            }
+
             // Keep the live target from killing the scripted attacker while the proof client exercises the normal
             // AttackPress, movement replication, swing geometry and server hit resolution paths. This is a dev-only
             // fixture; the target remains alive and damageable so the player's hit still resolves through production combat.

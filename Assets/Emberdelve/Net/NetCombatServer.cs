@@ -627,8 +627,9 @@ namespace Emberdelve.Net
                         if (full || _enemyPresentationChanges.Contains(id)) carrier.EnemyPresentationRpc(presentation);
 
                         if (v.Dead) continue;
-                        Vector3 pos = entity.CombatCenter;
                         Component comp = entity as Component;
+                        // Proxy positions use the stable root frame, not the lowered resting combat centre.
+                        Vector3 pos = comp != null ? comp.transform.position + Vector3.up * 1.15f : entity.CombatCenter;
                         float yaw = comp != null ? comp.transform.eulerAngles.y : 0f;
                         carrier.EnemyPoseRpc(new EnemyPoseWire { Enemy = id, X = pos.x, Y = pos.y, Z = pos.z, Yaw = yaw });
                     }
@@ -647,6 +648,8 @@ namespace Emberdelve.Net
             byte flags = 0;
             if (agent != null && agent.IsWindingUp) flags |= EnemyPresentationWire.WindingUpFlag;
             if (entity.IsDead) flags |= EnemyPresentationWire.DeadFlag;
+            else if (agent != null && agent.IsDormant) flags |= EnemyPresentationWire.DormantFlag;
+            else if (agent != null && agent.IsWaking) flags |= EnemyPresentationWire.WakingFlag;
             return new EnemyPresentationWire
             {
                 Version = EnemyPresentationWire.CurrentVersion,
@@ -661,6 +664,7 @@ namespace Emberdelve.Net
                 PhaseElapsed = phase.Elapsed,
                 PhaseDuration = phase.Duration,
                 RecoilStart = phase.RecoilStart,
+                WakeElapsed = agent != null && agent.Brain != null ? agent.Brain.WakeElapsed : 0f,
                 SampleTime = NetworkManager.Singleton != null ? NetworkManager.Singleton.ServerTime.Time : 0d
             };
         }

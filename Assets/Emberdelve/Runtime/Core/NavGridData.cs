@@ -18,6 +18,22 @@ namespace Emberdelve.Core
         public float navPlaneHeight = 0f;
         [Tooltip("One character per cell. '.' walkable, '#' blocked. Rows are concatenated.")]
         public string mask = string.Empty;
+        // Optional runtime surface bake. Empty arrays preserve legacy flat-grid behavior.
+        public float[] surfaceHeights;
+        public byte[] surfaceLinks;
+        public bool HasSurfaceHeights => surfaceHeights != null && surfaceHeights.Length == width * height;
+        public bool HasSurfaceLinks => surfaceLinks != null && surfaceLinks.Length == width * height;
+
+        public bool CanTraverse(int x, int y, int nextX, int nextY)
+        {
+            if (!IsWalkable(x, y) || !IsWalkable(nextX, nextY)) return false;
+            int dx = nextX - x, dy = nextY - y;
+            if (Mathf.Abs(dx) > 1 || Mathf.Abs(dy) > 1 || (dx == 0 && dy == 0)) return false;
+            if (!HasSurfaceLinks) return true;
+            int direction = dx == 1 ? (dy == 0 ? 0 : dy == 1 ? 4 : 5) :
+                dx == -1 ? (dy == 0 ? 1 : dy == 1 ? 6 : 7) : dy == 1 ? 2 : 3;
+            return (surfaceLinks[y * width + x] & (1 << direction)) != 0;
+        }
 
         public bool IsInside(int x, int y) => x >= 0 && y >= 0 && x < width && y < height;
 
@@ -30,7 +46,7 @@ namespace Emberdelve.Core
         }
 
         public Vector3 CellCenter(int x, int y) =>
-            origin + new Vector3((x + 0.5f) * cellSize, navPlaneHeight, (y + 0.5f) * cellSize);
+            origin + new Vector3((x + 0.5f) * cellSize, HasSurfaceHeights && IsInside(x, y) ? surfaceHeights[y * width + x] : navPlaneHeight, (y + 0.5f) * cellSize);
 
         public VectorInt CellFromWorld(Vector3 world) => new VectorInt(
             Mathf.FloorToInt((world.x - origin.x) / cellSize),

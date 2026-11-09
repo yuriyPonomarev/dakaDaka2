@@ -768,6 +768,7 @@ namespace Emberdelve.Combat
             bool wall = false;
             Vector3 wallPoint = default;
             Vector3 wallNormal = default;
+            Collider breakableContact = null;
             LayerMask mask = SwingBlockerMask;
             if (mask.value != 0)
             {
@@ -792,6 +793,7 @@ namespace Emberdelve.Combat
                     wall = MovesIntoSurface(rec, sample, frame, clip, wallHit.normal);
                     wallPoint = wallHit.point;
                     wallNormal = wallHit.normal;
+                    breakableContact = wallHit.collider;
                 }
             }
 
@@ -890,6 +892,11 @@ namespace Emberdelve.Combat
             if (wall)
             {
                 ResolveAllPending(rec, sampleTime, sample, frame.Eye);
+                if (breakableContact != null)
+                {
+                    var barrel = breakableContact.GetComponentInParent<Emberdelve.Interaction.BreakableBarrel>();
+                    if (barrel != null) barrel.ApplyWeaponDamage(rec.Weapon.baseDamage * rec.StepMultiplier);
+                }
                 rec.Stopped = true;
                 rec.StopTs = sampleTime;
                 // A wall stop only cuts the swing short with a recoil: the combo survives, and its window restarts when the recoil ends.

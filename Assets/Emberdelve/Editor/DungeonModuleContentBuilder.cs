@@ -116,7 +116,8 @@ namespace Emberdelve.EditorTools
             so.ApplyModifiedPropertiesWithoutUndo();
 
             Box(root.transform, "Floor", new Vector3(0,-0.3f,0), new Vector3(Half*2,0.6f,Half*2), floor);
-            Box(root.transform, "Roof", new Vector3(0,WallHeight+0.3f,0), new Vector3(Half*2,0.6f,Half*2), ceiling);
+            if (spec.Kind == DungeonModuleKind.Vault)
+                Box(root.transform, "Roof", new Vector3(0,WallHeight+0.3f,0), new Vector3(Half*2,0.6f,Half*2), ceiling);
             BuildSide(root.transform, true, false, wall);  // north
             BuildSide(root.transform, true, true, wall);   // south
             BuildSide(root.transform, false, false, wall); // east
@@ -134,6 +135,7 @@ namespace Emberdelve.EditorTools
                 Box(root.transform, "Arch_Lintel_"+names[i], positions[i]+Vector3.up*4f, horizontal ? new Vector3(4.6f,.55f,.8f) : new Vector3(.8f,.55f,4.6f), wall);
             }
             AddRoomFeature(root.transform, spec, wall, floor);
+            if (spec.Kind == DungeonModuleKind.Entry) MoonlitRuinsContent.AddEnvironment(root.transform);
             return root;
         }
 

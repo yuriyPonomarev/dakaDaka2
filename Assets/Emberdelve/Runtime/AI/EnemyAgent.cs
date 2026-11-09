@@ -41,6 +41,13 @@ namespace Emberdelve.AI
         private HealthComponent _health;
         private NavGridPathfinder _nav;
         private EnemyBrain _brain;
+        private Animator _restAnimator;
+        private Collider[] _standingColliders;
+        private bool[] _standingColliderEnabled;
+        private readonly List<HitShape> _restShapes = new List<HitShape>(8);
+        private CapsuleCollider[] _restColliders;
+        private Collider _restHead;
+        private bool _restHitPose;
         private readonly List<Vector3> _path = new List<Vector3>(64);
         private readonly RaycastHit[] _doorMoveHits = new RaycastHit[16];
         private readonly Collider[] _doorOverlapHits = new Collider[8];
@@ -77,8 +84,11 @@ namespace Emberdelve.AI
         public EntityKind Kind => EntityKind.Enemy;
         public int CombatId => _combatId;
         public int TeamId => CombatTeams.MonsterTeam;
-        public Vector3 CombatCenter => transform.position + Vector3.up * 1.15f;
-        public Collider HeadCollider => headCollider;
+        public Vector3 CombatCenter => _restHitPose && _restShapes.Count > 1
+            ? (_restShapes[1].A + _restShapes[1].B) * .5f : transform.position + Vector3.up * 1.15f;
+        public Collider HeadCollider => _restHitPose ? _restHead : headCollider;
+        public bool IsDormant => _brain != null && _brain.IsDormant;
+        public bool IsWaking => _brain != null && _brain.IsWaking;
 
         private HitVolume[] _hitVolumes;
 
@@ -90,14 +100,75 @@ namespace Emberdelve.AI
         public void CollectHitShapes(List<HitShape> shapes)
         {
             if (_hitVolumes == null) _hitVolumes = HitVolumeLayout.EnsureHumanoid(gameObject, data != null && data.isElite ? 1.25f : 1f);
+            if (_restHitPose) { shapes.AddRange(_restShapes); return; }
             HitVolumeLayout.Collect(_hitVolumes, shapes);
+        }
+
+        // The visual is lying on the floor, so both ranged colliders and swept hit shapes must follow it.
+        // Normal upright collision stays untouched and is restored after the rise.
+        public void RefreshDormantHitPose(Animator posedAnimator)
+        {
+            bool resting = (IsDormant || IsWaking) && !IsDead;
+            if (!resting)
+            {
+                if (!_restHitPose) return;
+                for (int i = 0; i < _standingColliders.Length; i++)
+                    if (_standingColliders[i] != null) _standingColliders[i].enabled = _standingColliderEnabled[i];
+                foreach (var collider in _restColliders) collider.enabled = false;
+                _restHitPose = false;
+                return;
+            }
+            if (posedAnimator == null || !posedAnimator.isHuman) return;
+            _restAnimator = posedAnimator;
+            _restShapes.Clear();
+            float scale = data != null && data.isElite ? 1.25f : 1f;
+            AddRestShape(HitLocation.Head, HumanBodyBones.Head, HumanBodyBones.Head, .20f * scale);
+            AddRestShape(HitLocation.Body, HumanBodyBones.Hips, HumanBodyBones.Chest, .25f * scale);
+            AddRestShape(HitLocation.Arms, HumanBodyBones.LeftUpperArm, HumanBodyBones.LeftHand, .11f * scale);
+            AddRestShape(HitLocation.Arms, HumanBodyBones.RightUpperArm, HumanBodyBones.RightHand, .11f * scale);
+            AddRestShape(HitLocation.Legs, HumanBodyBones.LeftUpperLeg, HumanBodyBones.LeftFoot, .14f * scale);
+            AddRestShape(HitLocation.Legs, HumanBodyBones.RightUpperLeg, HumanBodyBones.RightFoot, .14f * scale);
+            if (_restShapes.Count != 6) return;
+            if (_restColliders == null)
+            {
+                _standingColliders = GetComponentsInChildren<Collider>();
+                _standingColliderEnabled = new bool[_standingColliders.Length];
+                for (int i=0;i<_standingColliders.Length;i++) _standingColliderEnabled[i]=_standingColliders[i].enabled;
+                _restColliders = new CapsuleCollider[6];
+                for (int i=0;i<6;i++)
+                {
+                    var go = new GameObject("RestingHit_"+i);
+                    go.layer = headCollider != null ? headCollider.gameObject.layer : gameObject.layer;
+                    go.transform.SetParent(transform, false);
+                    _restColliders[i]=go.AddComponent<CapsuleCollider>();
+                }
+                _restHead=_restColliders[0];
+            }
+            foreach (var collider in _standingColliders) if(collider!=null) collider.enabled=false;
+            for(int i=0;i<6;i++)
+            {
+                var shape=_restShapes[i]; var collider=_restColliders[i];
+                collider.transform.position=(shape.A+shape.B)*.5f;
+                var axis=shape.B-shape.A;
+                collider.transform.rotation=axis.sqrMagnitude>.0001f ? Quaternion.FromToRotation(Vector3.up,axis.normalized) : Quaternion.identity;
+                collider.radius=shape.Radius;
+                collider.height=axis.magnitude+shape.Radius*2f;
+                collider.enabled=true;
+            }
+            _restHitPose=true;
+        }
+
+        private void AddRestShape(HitLocation location, HumanBodyBones from, HumanBodyBones to, float radius)
+        {
+            Transform a=_restAnimator.GetBoneTransform(from), b=_restAnimator.GetBoneTransform(to);
+            if(a!=null && b!=null) _restShapes.Add(new HitShape(location,a.position,b.position,radius));
         }
 
         /// <summary>
         /// An enemy attacks with its authored attack weapon and nothing else. While stunned it holds no weapon, which is how
         /// the authority learns that a stun cut a running swing short (it ends a swing whose weapon is no longer in hand).
         /// </summary>
-        public WeaponData ActiveWeapon => data != null && !IsStunned ? data.attackWeapon : null;
+        public WeaponData ActiveWeapon => data != null && !IsStunned && !IsDormant && !IsWaking ? data.attackWeapon : null;
 
         /// <summary>True while the brain is stunned (see <see cref="EnemyBrain.SetStunned"/>).</summary>
         public bool IsStunned => _brain != null && _brain.IsStunned;
@@ -268,7 +339,7 @@ namespace Emberdelve.AI
             _health.Damaged += HandleDamaged;
 
             _nav = new NavGridPathfinder(navGrid);
-            _brain = new EnemyBrain(data, _nav, transform.position, config != null ? config.levelMask : Physics.DefaultRaycastLayers);
+            _brain = new EnemyBrain(data, _nav, transform.position, config != null ? config.levelMask : Physics.DefaultRaycastLayers, startsDormant: true);
             _lookRotation = transform.rotation;
 
             // D1c4: the telegraph is the ground projection of the swing pattern (its yaw range at its effective reach). A weapon
@@ -336,6 +407,7 @@ namespace Emberdelve.AI
         private void HandleDeath()
         {
             _brain?.MarkDead();
+            if (_restColliders != null) foreach (var collider in _restColliders) collider.enabled=false;
             _swingId = 0;
             _swingLatched = false;
             _status?.ClearStatuses();
@@ -457,6 +529,8 @@ namespace Emberdelve.AI
             Vector3 destination = order.MoveTo;
 
             if (ShouldRepath(destination)) RequestPath(destination);
+            // A blocked terrace path is not permission to beeline up its vertical edge.
+            if (_nav != null && _nav.HasSurfaceHeights && _path.Count == 0) return;
 
             Vector3 steer = ChooseSteerPoint(destination);
             Vector3 flat = new Vector3(steer.x - transform.position.x, 0f, steer.z - transform.position.z);
@@ -480,7 +554,11 @@ namespace Emberdelve.AI
             if (movement.sqrMagnitude <= 0.000001f) return;
 
             Vector3 next = transform.position + movement;
-            next.y = groundHeight;
+            if (_nav != null && _nav.HasSurfaceHeights)
+            {
+                if (!NavGridSurface.TryStep(transform.position, next, levelMask, out next)) return;
+            }
+            else next.y = groundHeight;
             transform.position = next;
 
             // Colliders are only moved with transforms on the next physics step. Combat queries run in

@@ -35,6 +35,7 @@ namespace Emberdelve.AI
         }
 
         public bool HasGrid => _grid != null;
+        public bool HasSurfaceHeights => _grid != null && _grid.HasSurfaceHeights;
 
         public bool IsWalkableWorld(Vector3 world)
         {
@@ -81,12 +82,14 @@ namespace Emberdelve.AI
                 for (int i = 0; i < Steps.Length; i++)
                 {
                     VectorInt next = new VectorInt(current.x + Steps[i].x, current.y + Steps[i].y);
-                    if (!_grid.IsWalkable(next.x, next.y)) continue;
+                    if (!_grid.CanTraverse(current.x, current.y, next.x, next.y)) continue;
 
                     if (Steps[i].x != 0 && Steps[i].y != 0)
                     {
-                        if (!_grid.IsWalkable(current.x + Steps[i].x, current.y)) continue;
-                        if (!_grid.IsWalkable(current.x, current.y + Steps[i].y)) continue;
+                        if (!_grid.CanTraverse(current.x, current.y, current.x + Steps[i].x, current.y)) continue;
+                        if (!_grid.CanTraverse(current.x, current.y, current.x, current.y + Steps[i].y)) continue;
+                        if (!_grid.CanTraverse(current.x + Steps[i].x, current.y, next.x, next.y)) continue;
+                        if (!_grid.CanTraverse(current.x, current.y + Steps[i].y, next.x, next.y)) continue;
                     }
 
                     if (_cameFrom.ContainsKey(next)) continue;
