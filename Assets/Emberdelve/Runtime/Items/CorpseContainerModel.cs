@@ -12,14 +12,18 @@ namespace Emberdelve.Items
         private readonly ItemSnapshot _item;
 
         public ulong EntryId { get; }
+        public string Slot { get; }
+        public int X { get; }
+        public int Y { get; }
         public string ItemId => _item != null ? _item.itemId : string.Empty;
         public int Quantity => _item != null ? _item.quantity : 0;
         public bool IsGear => _item != null && !string.IsNullOrEmpty(_item.uid);
         public string Uid => _item != null ? _item.uid : string.Empty;
 
-        internal CorpseItemView(ulong entryId, ItemSnapshot item)
+        internal CorpseItemView(ulong entryId, ItemSnapshot item, string slot, int x, int y)
         {
             EntryId = entryId;
+            Slot = slot; X = x; Y = y;
             _item = item;
         }
 
@@ -37,6 +41,8 @@ namespace Emberdelve.Items
         {
             public ulong Id;
             public ItemSnapshot Item;
+            public string Slot;
+            public int X, Y;
         }
 
         private readonly List<Entry> _entries = new List<Entry>();
@@ -44,6 +50,10 @@ namespace Emberdelve.Items
         private bool _busy;
 
         public int SourcePlayerId { get; }
+        public string Kind { get; private set; } = "player";
+        public string Title { get; private set; } = "FALLEN ADVENTURER";
+        public int Width { get; private set; } = 10;
+        public int Height { get; private set; } = 4;
         public Vector3 WorldPosition { get; }
         public ulong Revision { get; private set; }
         public int EntryCount => _entries.Count;
@@ -54,10 +64,12 @@ namespace Emberdelve.Items
             WorldPosition = worldPosition;
         }
 
+        private static CorpseItemView View(Entry e) => new CorpseItemView(e.Id, e.Item, e.Slot, e.X, e.Y);
+
         public CorpseItemView[] CopyEntries()
         {
             var result = new CorpseItemView[_entries.Count];
-            for (int i = 0; i < _entries.Count; i++) result[i] = new CorpseItemView(_entries[i].Id, _entries[i].Item);
+            for (int i = 0; i < _entries.Count; i++) result[i] = View(_entries[i]);
             return result;
         }
 
@@ -69,7 +81,7 @@ namespace Emberdelve.Items
                 item = default;
                 return false;
             }
-            item = new CorpseItemView(_entries[index].Id, _entries[index].Item);
+            item = View(_entries[index]);
             return true;
         }
 
@@ -91,10 +103,53 @@ namespace Emberdelve.Items
                 return false;
             }
 
-            var created = new CorpseContainerModel(manifest.SourcePlayerId, manifest.WorldPosition);
+            var created = new CorpseContainerModel(manifest.SourcePlayerId, manifest.WorldPosition)
+            { Width = loadout.bag.width, Height = loadout.bag.height };
             if (!AppendEntries(created, loadout.bag.entries, out reason) ||
                 !AppendEntries(created, loadout.equipment.entries, out reason)) return false;
 
+            model = created;
+            reason = null;
+            return true;
+        }
+
+        /// <summary>Copies a trusted server roll; the caller releases its source only after registry admission.</summary>
+        public static bool TryCreateLoot(string kind, string title, Vector3 position,
+            IReadOnlyList<LootDrop> drops, ItemCatalog catalog, out CorpseContainerModel model, out string reason)
+        {
+            model = null;
+            reason = "Invalid loot container";
+            if ((kind != "chest" && kind != "enemy") || drops == null || catalog == null ||
+                drops.Count > ContainerSnapshot.MaxEntries || !float.IsFinite(position.x) ||
+                !float.IsFinite(position.y) || !float.IsFinite(position.z)) return false;
+            var created = new CorpseContainerModel(0, position) { Kind = kind, Title = title ?? "LOOT", Height = 4 };
+            var packed = new ContainerSnapshot { width = 10, height = 64, entries = Array.Empty<ContainerEntry>() };
+            var rows = new List<ContainerEntry>();
+            var uids = new HashSet<string>();
+            for (int i = 0; i < drops.Count; i++)
+            {
+                LootDrop drop = drops[i];
+                if (drop.Item == null || drop.Amount <= 0) return false;
+                ItemSnapshot item = drop.Instance != null ? drop.Instance.ToSnapshot() : new ItemSnapshot
+                { uid = "", itemId = drop.Item.itemId, quantity = drop.Amount, rarity = 0, affixes = Array.Empty<AffixSnapshot>() };
+                if (drop.Instance != null && (drop.Amount != 1 || !uids.Add(item.uid))) return false;
+                if (!catalog.TryResolveItem(item.itemId, out ItemData definition, out reason)) return false;
+                if (drop.Instance != null && !ItemInstance.TryRestore(item, catalog.Authority, out _, out reason)) return false;
+                if (drop.Instance == null && definition.IsEquippable) return false;
+                int remaining = item.quantity;
+                while (remaining > 0)
+                {
+                    if (rows.Count >= ContainerSnapshot.MaxEntries) return false;
+                    if (!TryFindFreeOrigin(packed, catalog, definition, out Vector2Int origin, out reason)) return false;
+                    ItemSnapshot part = item.Clone();
+                    part.quantity = Mathf.Min(remaining, definition.StackLimitForFootprint);
+                    remaining -= part.quantity;
+                    rows.Add(new ContainerEntry { x = origin.x, y = origin.y, item = part });
+                    packed.entries = rows.ToArray();
+                    created.Height = Mathf.Max(created.Height, origin.y + definition.EffectiveFootprint.y);
+                }
+            }
+            if (!AppendEntries(created, rows.ToArray(), out reason)) return false;
             model = created;
             reason = null;
             return true;
@@ -268,7 +323,7 @@ namespace Emberdelve.Items
                     reason = "corpse loadout contains an invalid item row";
                     return false;
                 }
-                model._entries.Add(new Entry { Id = model._nextEntryId++, Item = entry.item.Clone() });
+                model._entries.Add(new Entry { Id = model._nextEntryId++, Item = entry.item.Clone(), Slot = entry.slot, X = entry.x, Y = entry.y });
             }
             reason = null;
             return true;

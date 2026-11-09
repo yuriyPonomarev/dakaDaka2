@@ -20,7 +20,7 @@ namespace Emberdelve.Net
     /// life state and all mutations. Only requests passing identity and admission receive a response.
     /// One instance belongs to one server session; OnClosed must be called on every disconnect.
     /// </summary>
-    public sealed class NetInventoryServer : ICorpseDeathCustodian, IDoorAiAuthority
+    public sealed class NetInventoryServer : ICorpseDeathCustodian, IDoorAiAuthority, IWorldLootContainerHost
     {
         public static NetInventoryServer Current { get; private set; }
         public int RegisteredCorpseCount => _corpseContainers.Count;
@@ -90,11 +90,12 @@ namespace Emberdelve.Net
             Current = this;
             GameEvents.InventoryChanged += OnInventoryChanged;
             GameServices.Register<ICorpseDeathCustodian>(this);
+            GameServices.Register<IWorldLootContainerHost>(this);
             GameServices.Register<IDoorAiAuthority>(this);
         }
 
         public void OnClosed(ulong clientId) { _gates.Remove(clientId); _lastSnapshotRequest.Remove(clientId); _lastChestIntent.Remove(clientId); _lastDoorIntent.Remove(clientId); _lastDoorSnapshotRequest.Remove(clientId); _lastChestHoldSequence.Remove(clientId); _lastChestHeartbeatRefusalSequence.Remove(clientId); _lastChestHoldStart.Remove(clientId); _corpseSequences.Remove(clientId); _corpseStateRates.Remove(clientId); _corpseTransferRates.Remove(clientId); _floorLootGates.Remove(clientId); RemoveChestHold(clientId); }
-        public void Dispose() { GameServices.Unregister<ICorpseDeathCustodian>(this); GameServices.Unregister<IDoorAiAuthority>(this); GameEvents.InventoryChanged -= OnInventoryChanged; _gates.Clear(); _lastSnapshotRequest.Clear(); _lastChestIntent.Clear(); _lastDoorIntent.Clear(); _lastDoorSnapshotRequest.Clear(); _lastChestHoldSequence.Clear(); _lastChestHeartbeatRefusalSequence.Clear(); _lastChestHoldStart.Clear(); _corpseContainers.Clear(); _committedDeathPlayers.Clear(); _committingDeathPlayers.Clear(); _corpseSequences.Clear(); _corpseStateRates.Clear(); _corpseTransferRates.Clear(); _floorLootGates.Clear(); _floorLoot.Clear(); _floorLootObjectIds.Clear(); _chestHoldScratch.Clear(); foreach (ulong sender in new List<ulong>(_chestHolds.Keys)) RemoveChestHold(sender); if (ReferenceEquals(Current, this)) Current = null; }
+        public void Dispose() { GameServices.Unregister<IWorldLootContainerHost>(this); GameServices.Unregister<ICorpseDeathCustodian>(this); GameServices.Unregister<IDoorAiAuthority>(this); GameEvents.InventoryChanged -= OnInventoryChanged; _gates.Clear(); _lastSnapshotRequest.Clear(); _lastChestIntent.Clear(); _lastDoorIntent.Clear(); _lastDoorSnapshotRequest.Clear(); _lastChestHoldSequence.Clear(); _lastChestHeartbeatRefusalSequence.Clear(); _lastChestHoldStart.Clear(); _corpseContainers.Clear(); _committedDeathPlayers.Clear(); _committingDeathPlayers.Clear(); _corpseSequences.Clear(); _corpseStateRates.Clear(); _corpseTransferRates.Clear(); _floorLootGates.Clear(); _floorLoot.Clear(); _floorLootObjectIds.Clear(); _chestHoldScratch.Clear(); foreach (ulong sender in new List<ulong>(_chestHolds.Keys)) RemoveChestHold(sender); if (ReferenceEquals(Current, this)) Current = null; }
 
         /// <summary>
         /// Atomically moves a real server actor's loadout into the network corpse table. All fallible capture,
@@ -179,6 +180,14 @@ namespace Emberdelve.Net
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
         public void SetDeathCustodyRefusalForProof(bool refused) => _proofRejectDeathCustody = refused;
 
+        internal bool OpenNewestLootForReview(IInteractionActor actor, string kind)
+        {
+            ulong newest = 0;
+            foreach (var pair in _corpseContainers) if (pair.Value.Kind == kind && pair.Key > newest) newest = pair.Key;
+            if (newest == 0) return false;
+            OpenLoot(actor, newest); return true;
+        }
+
         public bool TryFindCorpseUidForProof(string uidText, out ulong corpseId)
         {
             return TryFindCorpseUidForProof(-1, uidText, out corpseId);
@@ -227,6 +236,20 @@ namespace Emberdelve.Net
             reason = null;
             _log?.Invoke("corpse registered id=" + corpseId + " source=" + model.SourcePlayerId + " entries=" + model.EntryCount);
             return true;
+        }
+
+        public bool TryPublishLoot(CorpseContainerModel model, out ulong id, out string reason) => RegisterCorpse(model, out id, out reason);
+
+        public void OpenLoot(IInteractionActor actor, ulong id)
+        {
+            if (actor == null || !_corpseContainers.TryGetValue(id, out CorpseContainerModel model)) return;
+            foreach (NetIdentity row in _identities.All)
+            {
+                if (row?.Rig == null || !ReferenceEquals(row.Rig, actor) || !ValidateCorpseActor(row, model, out _)) continue;
+                if (IsHostOwner(row)) row.Object.GetComponent<CorpseLootWorldPresenter>()?.OpenContainer(id);
+                else row.Object.GetComponent<NetPlayerRig>()?.OpenLootContainerRpc(id);
+                return;
+            }
         }
 
         private bool HasCorpseUidOverlap(CorpseContainerModel candidate)
@@ -356,6 +379,9 @@ namespace Emberdelve.Net
                 return;
             }
             SendCorpseResult(row, corpseId, sequence, true, model.Revision, CurrentBagRevision(row), string.Empty);
+                if (model.Kind == "chest")
+                    foreach (ChestInteractable chest in Object.FindObjectsByType<ChestInteractable>(FindObjectsSortMode.None))
+                        if (ReferenceEquals(chest.LootContainer, model)) { chest.NotifyLootChanged(); BroadcastChestState(chest); }
         }
 
         public void RequestCorpseTransfer(ulong sender, NetworkObject target, ulong corpseId, ulong entryId,
@@ -400,6 +426,9 @@ namespace Emberdelve.Net
             if (accepted)
             {
                 SendCorpseResult(row, corpseId, sequence, true, model.Revision, CurrentBagRevision(row), string.Empty);
+                if (model.Kind == "chest")
+                    foreach (ChestInteractable chest in Object.FindObjectsByType<ChestInteractable>(FindObjectsSortMode.None))
+                        if (ReferenceEquals(chest.LootContainer, model)) { chest.NotifyLootChanged(); BroadcastChestState(chest); }
                 BroadcastCorpsePresence(corpseId, model, model.EntryCount == 0);
                 if (model.EntryCount == 0)
                 {
@@ -984,6 +1013,14 @@ namespace Emberdelve.Net
                 return false;
             }
 
+            if (model.Kind == "chest")
+            {
+                ChestInteractable source = null;
+                foreach (ChestInteractable chest in Object.FindObjectsByType<ChestInteractable>(FindObjectsSortMode.None))
+                    if (ReferenceEquals(chest.LootContainer, model)) { source = chest; break; }
+                if (source == null) { reason = "Chest is unavailable"; return false; }
+                if (!source.CanInteract(row.Rig, out reason)) return false;
+            }
             Vector3 origin = row.Rig.InteractionOrigin;
             Vector3 point = model.WorldPosition;
             if (!IsFinite(origin) || !IsFinite(point))
@@ -1124,6 +1161,7 @@ namespace Emberdelve.Net
 
         private static void SendCorpsePresence(NetIdentity row, ulong corpseId, CorpseContainerModel model, bool removed)
         {
+            if (model.Kind == "chest" && !removed) return;
             if (row?.Object == null || !row.Object.IsSpawned || model == null) return;
             if (IsHostOwner(row))
             {

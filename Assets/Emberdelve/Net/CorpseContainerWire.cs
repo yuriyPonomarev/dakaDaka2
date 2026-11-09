@@ -9,7 +9,11 @@ namespace Emberdelve.Net
     [Serializable]
     public sealed class CorpseContainerDocument
     {
-        public int schemaVersion = 1;
+        public int schemaVersion = 2;
+        public string kind = "player";
+        public string title;
+        public int width = 10;
+        public int height = 4;
         public ulong corpseId;
         public ulong revision;
         public int sourcePlayerId;
@@ -21,6 +25,9 @@ namespace Emberdelve.Net
     public sealed class CorpseContainerEntryDocument
     {
         public ulong entryId;
+        public string slot;
+        public int x;
+        public int y;
         public ItemSnapshot item;
     }
 
@@ -44,6 +51,7 @@ namespace Emberdelve.Net
             var document = new CorpseContainerDocument
             {
                 corpseId = corpseId,
+                kind = model.Kind, title = model.Title, width = model.Width, height = model.Height,
                 revision = model.Revision,
                 sourcePlayerId = model.SourcePlayerId,
                 worldPosition = model.WorldPosition,
@@ -54,6 +62,7 @@ namespace Emberdelve.Net
                 document.entries[i] = new CorpseContainerEntryDocument
                 {
                     entryId = items[i].EntryId,
+                    slot = items[i].Slot, x = items[i].X, y = items[i].Y,
                     item = items[i].CopySnapshot()
                 };
             }
@@ -86,8 +95,9 @@ namespace Emberdelve.Net
                 reason = "corpse wire snapshot could not be parsed: " + e.Message;
                 return false;
             }
-            if (document == null || document.schemaVersion != 1 || document.corpseId == 0 ||
-                document.sourcePlayerId < 0 || document.entries == null ||
+            if (document == null || document.schemaVersion != 2 || document.corpseId == 0 ||
+                document.sourcePlayerId < 0 || document.width < 1 || document.width > 64 || document.height < 1 || document.height > 64 ||
+                (document.kind != "player" && document.kind != "enemy" && document.kind != "chest") || document.entries == null ||
                 document.entries.Length > ContainerSnapshot.MaxEntries * 2)
             {
                 document = null;

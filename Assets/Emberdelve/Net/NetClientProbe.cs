@@ -55,6 +55,9 @@ namespace Emberdelve.Net
         private NetInventoryClient _contestClient;
         private bool _contestRequestSent;
         private bool _contestResultReceived;
+        private CorpseContainerDocument _contestLoot;
+        private bool _contestTakeSent;
+        private uint _contestTakeSequence;
         private float _nextContestStateLog;
         private float _nextContestWaitLog;
         private float _nextContestCandidateLog;
@@ -564,9 +567,19 @@ namespace Emberdelve.Net
             }
             if (_contestClient != client)
             {
-                if (_contestClient != null) _contestClient.ChestResultReceived -= OnContestChestResult;
+                if (_contestClient != null) {
+                    _contestClient.ChestResultReceived -= OnContestChestResult;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                    _contestClient.LootOpenedForProof -= OnContestLootOpen;
+#endif
+                    _contestClient.CorpseContainerReceived -= OnContestLootState;
+                    _contestClient.CorpseTransferResultReceived -= OnContestLootResult;
+                }
                 _contestClient = client;
                 _contestClient.ChestResultReceived += OnContestChestResult;
+                _contestClient.LootOpenedForProof += OnContestLootOpen;
+                _contestClient.CorpseContainerReceived += OnContestLootState;
+                _contestClient.CorpseTransferResultReceived += OnContestLootResult;
             }
 
             if (_inventoryContestChestId.Length == 0)
@@ -629,6 +642,19 @@ namespace Emberdelve.Net
                                   " queued=" + queued + " localReach=True via=inventory-client-authority");
                         break;
                     }
+                }
+            }
+
+            if (!_contestTakeSent && _contestLoot != null && ReadStartCommand() == "take")
+            {
+                foreach (var entry in _contestLoot.entries)
+                {
+                    if (entry.item.uid != _inventoryContestUid) continue;
+                    _contestTakeSent = true;
+                    client.RequestCorpseTransfer(_contestLoot.corpseId, entry.entryId, 1, _contestLoot.revision,
+                        ownedRig.Rig.Inventory.Revision, sequence => { _contestTakeSequence = sequence; return true; }, out _);
+                    Debug.Log(NetTuning.LogPrefix + "[client] chest-loot-take role=" + _inventoryContestRole);
+                    break;
                 }
             }
 
@@ -807,6 +833,19 @@ namespace Emberdelve.Net
         private void OnCorpseProofPresence(ulong corpseId, Vector3 position, ulong revision, bool removed)
         {
             if (corpseId == _corpseProofId && removed) _corpseProofPresenceRemoved = true;
+        }
+
+        private void OnContestLootOpen(ulong id) => _contestClient?.RequestCorpseState(id);
+        private void OnContestLootState(CorpseContainerDocument doc)
+        {
+            if (doc.kind != "chest") return;
+            _contestLoot = doc;
+            Debug.Log(NetTuning.LogPrefix + "[client] chest-loot-ready role=" + _inventoryContestRole + " container=" + doc.corpseId + " revision=" + doc.revision + " entries=" + doc.entries.Length);
+        }
+        private void OnContestLootResult(ulong id, uint sequence, bool accepted, ulong revision, ulong bagRevision, string reason)
+        {
+            if (sequence != _contestTakeSequence || sequence == 0) return;
+            Debug.Log(NetTuning.LogPrefix + "[client] chest-loot-result role=" + _inventoryContestRole + " accepted=" + accepted + " reason=" + (string.IsNullOrEmpty(reason) ? "none" : reason.Replace(' ', '_')));
         }
 
         private void OnContestChestResult(bool accepted, string chestId, uint sequence, string reason)
@@ -1113,7 +1152,14 @@ namespace Emberdelve.Net
         private void OnDestroy()
         {
             if (_inventoryObservedRig != null) _inventoryObservedRig.InventoryResultReceived -= OnInventoryResult;
-            if (_contestClient != null) _contestClient.ChestResultReceived -= OnContestChestResult;
+            if (_contestClient != null) {
+                    _contestClient.ChestResultReceived -= OnContestChestResult;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                    _contestClient.LootOpenedForProof -= OnContestLootOpen;
+#endif
+                    _contestClient.CorpseContainerReceived -= OnContestLootState;
+                    _contestClient.CorpseTransferResultReceived -= OnContestLootResult;
+                }
             if (_corpseProofClient != null)
             {
                 _corpseProofClient.CorpseContainerReceived -= OnCorpseProofState;

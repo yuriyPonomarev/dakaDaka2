@@ -72,6 +72,40 @@ namespace Emberdelve.Combat.Tests
             Assert.That(_profile.TryReplaceOwner(Equipment.SnapshotContainerId, Array.Empty<Guid>(), out reason), Is.True, reason);
         }
 
+        [Test]
+        public void LootRollSplitsStacksAndTransfersExactGearOnce()
+        {
+            int quantity = _stackable.StackLimitForFootprint + 2;
+            var drops = new[] { new LootDrop(_stackable, quantity), new LootDrop(_gear.Definition, 1, _gear) };
+            Assert.That(CorpseContainerModel.TryCreateLoot("enemy", "Skeleton", Vector3.zero, drops, _catalog, out var loot, out string reason), Is.True, reason);
+            Assert.That(loot.Kind, Is.EqualTo("enemy"));
+            Assert.That(loot.CopyEntries().Where(e => !e.IsGear).Sum(e => e.Quantity), Is.EqualTo(quantity));
+            var gear = loot.CopyEntries().Single(e => e.IsGear);
+            Assert.That(loot.TryTransferToBag(gear.EntryId, 1, loot.Revision, _targetBag, _targetBag.Revision, _profile, out reason), Is.True, reason);
+            Assert.That(loot.TryTransferToBag(gear.EntryId, 1, loot.Revision, _targetBag, _targetBag.Revision, _profile, out _), Is.False);
+            Assert.That(_targetBag.Slots.Single(e => e.Instance != null).Instance.ToSnapshot().ToJson(), Is.EqualTo(_gear.ToSnapshot().ToJson()));
+        }
+
+        [Test]
+        public void PlayerCorpseRetainsEquipmentSlotsAndBagOriginsAfterTransfer()
+        {
+            var equipped = LoadoutSnapshot.Capture(_sourceBag, _sourceEquipment);
+            var gearEntry = equipped.bag.entries.Single(e => e.item.uid == _gear.Uid.ToString("N"));
+            equipped.bag.entries = equipped.bag.entries.Where(e => e != gearEntry).ToArray();
+            gearEntry.slot = _gear.Definition.equipSlot.ToString(); gearEntry.x = 0; gearEntry.y = 0;
+            equipped.equipment.entries = new[] { gearEntry }; equipped.Seal();
+            Assert.That(LoadoutSnapshot.TryRestore(equipped, _sourceBag, _sourceEquipment, null, out string reason), Is.True, reason);
+            Assert.That(CorpseLootManifest.TryCapture(37, Vector3.zero, _sourceBag, _sourceEquipment, out var manifest, out reason), Is.True, reason);
+            Assert.That(CorpseContainerModel.TryCreate(manifest, out var corpse, out reason), Is.True, reason);
+            Assert.That(corpse.Width, Is.EqualTo(10)); Assert.That(corpse.Height, Is.EqualTo(6));
+            var worn = corpse.CopyEntries().Single(e => e.IsGear);
+            Assert.That(worn.Slot, Is.EqualTo(_gear.Definition.equipSlot.ToString()));
+            var stack = corpse.CopyEntries().Single(e => !e.IsGear);
+            Assert.That(corpse.TryTransferToBag(stack.EntryId, 1, corpse.Revision, _targetBag, _targetBag.Revision, _profile, out reason), Is.True, reason);
+            Assert.That(corpse.TryGetEntry(worn.EntryId, out var after), Is.True);
+            Assert.That(after.Slot, Is.EqualTo(worn.Slot)); Assert.That(after.Uid, Is.EqualTo(worn.Uid));
+        }
+
         [TearDown]
         public void TearDown()
         {

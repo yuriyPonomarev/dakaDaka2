@@ -181,12 +181,12 @@ namespace Emberdelve.Net
             {
                 if (_corpsePresenter != null && _corpsePresenter.IsContainerUiOpen)
                 {
-                    if (_rig.Input.InventoryPressed) _corpsePresenter.CloseContainerUi();
+                    // The paired loot screen owns I/Escape and both panels while open.
                 }
                 else if (_screen != null)
                 {
                     var combat = GetComponent<NetCombatSender>();
-                    if (_rig.Input.InventoryPressed && (IsOpen || combat == null || combat.CanOpenInventory))
+                    if (_rig.Input.InventoryPressed && InventoryScreenController.LastCloseFrame != Time.frameCount && (IsOpen || combat == null || combat.CanOpenInventory))
                     {
                         _screen.Toggle();
                         if (IsOpen) GetComponent<NetInputSender>()?.ClearPendingMovement();
@@ -288,6 +288,17 @@ namespace Emberdelve.Net
                 !ChestInteractable.IsValidNetworkChestId(chestId)) return false;
             _owner.ChestOpenIntentRpc(new FixedString128Bytes(chestId));
             return true;
+        }
+
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        internal event Action<ulong> LootOpenedForProof;
+#endif
+        public void OnLootOpened(ulong id)
+        {
+            _corpsePresenter?.OpenContainer(id);
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            LootOpenedForProof?.Invoke(id);
+#endif
         }
 
         public void CloseSatchelForCorpse()

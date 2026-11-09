@@ -897,7 +897,11 @@ namespace Emberdelve.Flow
             EmberdelveInput input = rig.Input;
             if (input == null) return;
 
-            if (input.PausePressed) TogglePause();
+            if (input.PausePressed)
+            {
+                if (InventoryInputFocus.OwnsEscape) return;
+                TogglePause();
+            }
         }
 
         /// <summary>
@@ -1371,6 +1375,13 @@ namespace Emberdelve.Flow
             {
                 Debug.LogError($"[Emberdelve][EnemyDrop] {enemy.name} '{dropKey}': drop table refused, nothing dropped - {reason}", this);
                 return;
+            }
+
+            if (drops.Count > 0 && GameServices.TryGet<IWorldLootContainerHost>(out var containers))
+            {
+                if (CorpseContainerModel.TryCreateLoot("enemy", enemy.displayName, position + Vector3.up * 0.35f,
+                        drops, catalog, out var container, out reason) && containers.TryPublishLoot(container, out _, out reason)) return;
+                Debug.LogWarning("[Emberdelve][EnemyDrop] Container unavailable; preserving loot as pickups: " + reason);
             }
 
             DeterministicRng scatter = Session.ScatterRng(dropKey);

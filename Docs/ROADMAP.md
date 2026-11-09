@@ -12,6 +12,7 @@ A passing historical test is evidence for that version, not acceptance of the cu
 | 3 — accepted | Hands, block, enemy attacks | Host/client grip and guard accepted; client attack phases agree with actual12 damage. Baked forward travel removed. Contact-based wall recoil accepted v21, wire/admission21/0; current full NetCombat also passed | Correct grips; readable guard and impact; visual windup/contact/recovery aligned with server damage on both clients |
 | 4 — accepted | Complete one readable raid | Normal600s timer enabled and readable on host/client; short timeout/result verified. Bridge and both doorway seams traversed on original regression seed and seed11 (v22/v23) | Lobby -> raid -> death or extraction -> result -> next raid works; legible timer enabled only after HUD review |
 | MAP-01 — accepted | Crypt architecture and room content | Ten saved modules rebuilt with vaults, arches, tomb alcoves, colonnades, pews, reliquaries and local lighting. Two layouts traversed live;29 level tests +5 wall-fixture tests; NetMovement190/0, NetFinal172/0, NetDoor37/0, NetInventory146/0 | Readable first-person spaces, intact door/bridge routes on two layouts, clear spawns and network agreement; Tasks/CRYPT_CONTENT_20261109.md |
+| LOOT-01 — accepted | Paired inventory and server-owned loot | Own equipment/bag left; chest/enemy grid or dead-player paper doll right. Exact server transfers, retained corpse layout, tooltips and modal input;21 focused tests, NetInventory148/0, NetExtraction136/0, two-window visual acceptance | Tasks/LOOT_UI_20261109.md |
 | 5 | Persistent server stash (U4C) | Not implemented | Atomic versioned save, exact UID/affix restore after restart, rejected corrupt data, no item loss/duplication |
 | 6 | Content, sound, balance and release (U7/U6) | Deferred | Licensed assets, measured performance, repeatable packaged two-client release acceptance |
 
@@ -25,5 +26,5 @@ Do not rebuild these systems from scratch. Consult linked task reports only for 
 ## Scope control
 
 One active implementation slice. Keep at most three next actions in CURRENT_WORK.
-Stages1–4 are accepted as one coherent raid milestone. The user authorized MAP-01 on9 November. Other new systems require a separate milestone; load/loss coverage and a broader art/content campaign remain explicit future work.
+Stages1–4 are accepted as one coherent raid milestone. The user authorized MAP-01 and LOOT-01 on9 November. Other new systems require a separate milestone; load/loss coverage and a broader art/content campaign remain explicit future work.
 Detailed earlier milestone definitions remain in Archive/ROADMAP_before_process_reset_20261108.md.

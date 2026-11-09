@@ -1085,6 +1085,39 @@ namespace Emberdelve.Net
             return false;
         }
 
+        // Bounded extension of the existing opt-in corpse fixture for graphical acceptance.
+        // It stages sources via production chest/death/drop paths; clicks still use the review input bridge.
+        private void ApplyLootUiReview(string action)
+        {
+            PlayerRig actor = _corpseProofPlayerA?.Rig;
+            PlayerRig other = _corpseProofPlayerB?.Rig;
+            if (actor == null || other == null || _inventory == null) return;
+            actor.GetComponent<CorpseLootWorldPresenter>()?.CloseContainerUi();
+            if (action == "loot-ui-chest" || action == "loot-ui-chest-client")
+            {
+                foreach (var chest in UnityEngine.Object.FindObjectsByType<ChestInteractable>(FindObjectsSortMode.None))
+                    if (chest.Variant == ChestVariant.Supply && !chest.IsEmpty && TryPlaceContestPlayers(chest,actor,other,out _,out _))
+                    { _log("loot-ui chest opened=" + chest.Open(action == "loot-ui-chest-client" ? other : actor)); return; }
+            }
+            else if (action == "loot-ui-enemy")
+            {
+                foreach (EnemyData enemy in Resources.FindObjectsOfTypeAll<EnemyData>())
+                    if (enemy.dropTable != null)
+                    {
+                        _director.DropEnemyLoot(enemy, "loot-ui-review-enemy", actor.transform.position + Vector3.forward * .7f);
+                        _log("loot-ui enemy opened=" + _inventory.OpenNewestLootForReview(actor,"enemy")); return;
+                    }
+            }
+            else if (action == "loot-ui-player")
+            {
+                other.Movement.TeleportTo(actor.transform.position + Vector3.forward * .7f);
+                Physics.SyncTransforms();
+                other.ApplyDamage(new DamageInfo(other.Health.CurrentHealth + 1000,other.CombatCenter,Vector3.forward,
+                    actor.transform.position,actor.CombatId,EntityKind.RemotePlayer,DamageType.Physical,false,false,0));
+                _log("loot-ui player dead=" + other.IsDead + " opened=" + _inventory.OpenNewestLootForReview(actor,"player"));
+            }
+        }
+
         private void ApplyCorpseProofAction()
         {
             string path = _args.CorpseProofActionFile;
@@ -1092,6 +1125,13 @@ namespace Emberdelve.Net
             string action;
             try { action = ReadSharedText(path).Trim().ToLowerInvariant(); }
             catch (IOException) { return; }
+            if (action.StartsWith("loot-ui-", StringComparison.Ordinal))
+            {
+                if (action == _corpseProofLastAction) return;
+                _corpseProofLastAction = action;
+                ApplyLootUiReview(action);
+                return;
+            }
             if (action.StartsWith("host-", StringComparison.Ordinal))
             {
                 if (_corpseProofPlayerA?.ClientId != NetworkManager.ServerClientId)

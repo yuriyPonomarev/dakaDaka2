@@ -1,3 +1,4 @@
+using System.Linq;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -357,33 +358,23 @@ namespace Emberdelve.EditorTools
             MatchCollection intents = Regex.Matches(ReadShared(serverLog), intentPattern);
             Check(intents.Count == 2, "server processed exactly two contested chest RPCs through production validation");
             if (intents.Count < 2) return 1;
-            int acceptedCount = 0, refusedCount = 0;
-            string winningClient = "", winningPlayer = "";
-            Match refusal = null;
-            foreach (Match intent in intents)
-            {
-                if (intent.Groups["accepted"].Value == "True")
-                {
-                    acceptedCount++;
-                    winningClient = intent.Groups["sender"].Value;
-                    winningPlayer = intent.Groups["player"].Value;
-                }
-                else { refusedCount++; refusal = intent; }
-            }
-            Check(acceptedCount == 1 && refusedCount == 1, "exactly one server request won and the competing request was refused");
-            if (acceptedCount != 1 || refusedCount != 1) return 1;
-            string refusalReason = refusal.Groups["tail"].Value.Trim();
-            Check(refusalReason == "reason=This chest is empty",
-                "losing request was refused specifically because the earlier accepted open exhausted the chest; arbitrary range/LOS refusals do not count");
-            if (refusalReason != "reason=This chest is empty") return 1;
-
-            Match resultA = WaitForRegex(aLog, @"\[client\] chest-contest-result role=a chest=" + chestPattern + @" seq=0 accepted=(?<accepted>True|False) reason=(?<reason>[^\s]+)", TimeoutSeconds, a);
-            Match resultB = WaitForRegex(bLog, @"\[client\] chest-contest-result role=b chest=" + chestPattern + @" seq=0 accepted=(?<accepted>True|False) reason=(?<reason>[^\s]+)", TimeoutSeconds, b);
-            Check(resultA != null && resultB != null, "both owners received their correlated result, including the refusal");
+            Check(intents.Cast<Match>().All(m => m.Groups["accepted"].Value == "True"), "both players may inspect the same chest without claiming its items");
+            Match readyLootA = WaitForRegex(aLog, @"chest-loot-ready role=a container=(?<id>\d+) revision=0 entries=1", TimeoutSeconds, a);
+            Match readyLootB = WaitForRegex(bLog, @"chest-loot-ready role=b container=(?<id>\d+) revision=0 entries=1", TimeoutSeconds, b);
+            Check(readyLootA != null && readyLootB != null, "both owners received unopened contents with the exact original item still present");
+            if (readyLootA == null || readyLootB == null) return 1;
+            Check(readyLootA.Groups["id"].Value == readyLootB.Groups["id"].Value, "reopening shares one container rather than rolling a second copy");
+            WriteAtomic(goBoth, "take");
+            Match resultA = WaitForRegex(aLog, @"chest-loot-result role=a accepted=(?<accepted>True|False) reason=(?<reason>[^\s]+)", TimeoutSeconds, a);
+            Match resultB = WaitForRegex(bLog, @"chest-loot-result role=b accepted=(?<accepted>True|False) reason=(?<reason>[^\s]+)", TimeoutSeconds, b);
+            Check(resultA != null && resultB != null, "both competing transfers receive a result");
             if (resultA == null || resultB == null) return 1;
-            Check((winningClient == clientA && resultA.Groups["accepted"].Value == "True" && resultB.Groups["accepted"].Value == "False") ||
-                  (winningClient == clientB && resultB.Groups["accepted"].Value == "True" && resultA.Groups["accepted"].Value == "False"),
-                "winner and loser received the correct owner-only result");
+            bool wonA = resultA.Groups["accepted"].Value == "True";
+            bool wonB = resultB.Groups["accepted"].Value == "True";
+            Check(wonA != wonB, "exactly one item transfer wins the contested UID");
+            Match refused = wonA ? resultB : resultA;
+            Check(refused.Groups["reason"].Value == "Corpse_is_unavailable" || refused.Groups["reason"].Value.Contains("changed"), "loser is refused because the item was taken, not because of arbitrary distance or LOS");
+            string winningPlayer = wonA ? playerA : playerB;
 
             string stateA = @"\[client\] chest-contest-state role=a chest=" + chestPattern + @" uid=" + uid +
                             @" held=(?<held>True|False) rolled=True opened=True remaining=0 result=True";

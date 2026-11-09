@@ -68,6 +68,9 @@ namespace Emberdelve.Interaction
 
         private readonly List<LootDrop> _remaining = new List<LootDrop>();
         private ILootHost _host;
+        public CorpseContainerModel LootContainer { get; private set; }
+        private ulong _containerId;
+        public void NotifyLootChanged() => AdvanceStateRevision();
         private bool _rolled;
         private bool _opened;
         private bool _opening;
@@ -111,6 +114,7 @@ namespace Emberdelve.Interaction
             {
                 if (Emberdelve.Core.NetRole.IsClientOnly && _replicatedStateKnown) return _replicatedRemainingUnits;
                 int units = 0;
+                if (LootContainer != null) { foreach (CorpseItemView entry in LootContainer.CopyEntries()) units += entry.Quantity; return units; }
                 for (int i = 0; i < _remaining.Count; i++) units += Mathf.Max(0, _remaining[i].Amount);
                 return units;
             }
@@ -241,7 +245,7 @@ namespace Emberdelve.Interaction
                 return false;
             }
 
-            if (!Emberdelve.Core.NetRole.IsClientOnly && _rolled && _remaining.Count == 0)
+            if (!Emberdelve.Core.NetRole.IsClientOnly && _rolled && RemainingUnits == 0)
             {
                 blockedReason = "This chest is empty";
                 return false;
@@ -383,6 +387,12 @@ namespace Emberdelve.Interaction
                 return false;
             }
 
+            if (LootContainer != null && GameServices.TryGet<IWorldLootContainerHost>(out var existingHost))
+            {
+                existingHost.OpenLoot(actor, _containerId);
+                return true;
+            }
+
             if (!_rolled)
             {
                 // R3: gear is rolled against the run's one item catalog, which the host's bag carries.
@@ -415,6 +425,23 @@ namespace Emberdelve.Interaction
             {
                 GameEvents.RaiseToast(owner, "No inventory available");
                 return false;
+            }
+
+            if (GameServices.TryGet<IWorldLootContainerHost>(out var containers))
+            {
+                if (!CorpseContainerModel.TryCreateLoot("chest", variant.ToString().ToUpperInvariant() + " CHEST",
+                        transform.position + Vector3.up * 0.5f, _remaining, actor.Inventory.Catalog, out var model, out reason) ||
+                    !containers.TryPublishLoot(model, out _containerId, out reason))
+                {
+                    GameEvents.RaiseToast(owner, reason ?? "Cannot open loot");
+                    return false;
+                }
+                LootContainer = model;
+                _remaining.Clear(); // Registry now owns the exact roll, never roll or grant it a second time.
+                _opened = true;
+                AdvanceStateRevision();
+                containers.OpenLoot(actor, _containerId);
+                return true;
             }
 
             int takenUnits = 0;
@@ -491,7 +518,7 @@ namespace Emberdelve.Interaction
         /// <summary>True once the chest has been rolled and has nothing left to give.</summary>
         public bool IsEmpty => Emberdelve.Core.NetRole.IsClientOnly && _replicatedStateKnown
             ? _replicatedRolled && _replicatedRemainingUnits == 0
-            : _rolled && _remaining.Count == 0;
+            : _rolled && RemainingUnits == 0;
 
         private void AdvanceStateRevision() { unchecked { _stateRevision++; } }
 

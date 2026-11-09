@@ -297,7 +297,7 @@ namespace Emberdelve.UI
 
         private void UpdateInventoryScreen()
         {
-            if (_inventoryScreen == null) return;
+            if (_inventoryScreen == null || _inventoryScreen.IsLootCompanion) return;
 
             if (_director == null) GameServices.TryGet<RunDirector>(out _director);
 
@@ -305,7 +305,7 @@ namespace Emberdelve.UI
             EmberdelveInput input = rig != null ? rig.Input : null;
             bool running = _director == null || (_director.State == RunState.Running && _director.LocalPlayerState == RunState.Running);
 
-            if (input != null && running && input.InventoryPressed)
+            if (input != null && running && input.InventoryPressed && InventoryScreenController.LastCloseFrame != Time.frameCount)
             {
                 _inventoryScreen.Toggle();
 

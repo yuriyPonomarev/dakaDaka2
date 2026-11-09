@@ -530,6 +530,13 @@ namespace Emberdelve.Net
         }
 
         [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
+        public void OpenLootContainerRpc(ulong containerId)
+        {
+            if (!NetRole.IsClientOnly || !IsOwner) return;
+            GetComponent<NetInventoryClient>()?.OnLootOpened(containerId);
+        }
+
+        [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
         public void CorpseContainerStateRpc(CorpseContainerWire state)
         {
             if (!NetRole.IsClientOnly || !IsOwner) return;

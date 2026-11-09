@@ -149,6 +149,13 @@ namespace Emberdelve.Net
             var rig = _owner.Rig;
             var inventory = GetComponent<NetInventoryClient>();
             bool menuOpen = inventory != null && inventory.IsOpen;
+            if (menuOpen)
+            {
+                float remaining = _hasRaidClock ? Mathf.Max(0f, _raidClock.RemainingSeconds - (float)(Time.unscaledTimeAsDouble - _raidClockReceivedAt)) : 0f;
+                string health = rig?.Health != null ? Mathf.CeilToInt(rig.Health.CurrentHealth) + " / " + Mathf.CeilToInt(rig.Health.MaxHealth) : "—";
+                GUI.Box(new Rect(110f, 4f, 1060f, 24f), "Health  " + health + "     •     Mana  " + Mathf.CeilToInt(_model.State.Mana) + "     •     Raid  " + FormatClock(remaining));
+                return;
+            }
             if (!menuOpen && rig != null && !rig.IsDead)
             {
                 GUI.Label(new Rect(632f, 350f, 20f, 22f), "+");

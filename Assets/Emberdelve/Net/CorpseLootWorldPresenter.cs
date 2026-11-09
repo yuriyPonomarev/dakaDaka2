@@ -166,8 +166,7 @@ namespace Emberdelve.Net
                 RemoveView(corpseId);
                 if (IsContainerUiOpenFor(corpseId))
                 {
-                    CloseContainerUi();
-                    if (_rig != null) GameEvents.RaiseToast(_rig.PlayerId, "This corpse is no longer available");
+                    _containerUi.OnEmptied(state.Revision);
                 }
                 return;
             }

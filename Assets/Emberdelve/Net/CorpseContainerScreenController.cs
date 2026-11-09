@@ -6,6 +6,7 @@ using Emberdelve.Items;
 using Emberdelve.Player;
 using Emberdelve.UI;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace Emberdelve.Net
 {
@@ -13,14 +14,17 @@ namespace Emberdelve.Net
     [DisallowMultipleComponent]
     public sealed class CorpseContainerScreenController : MonoBehaviour
     {
-        private const int RowsPerPage = 6;
         private const double StateTimeoutSeconds = 6.0;
         private const double TransferTimeoutSeconds = 8.0;
         private static readonly Color PanelColor = new Color(0.055f, 0.05f, 0.045f, 0.98f);
         private static readonly Color TextColor = new Color(0.91f, 0.87f, 0.79f, 1f);
 
         private readonly Rules.CorpseContainerUiSession _session = new Rules.CorpseContainerUiSession();
-        private readonly List<Row> _rows = new List<Row>(RowsPerPage);
+        private readonly List<Row> _rows = new List<Row>();
+        private RectTransform _contents;
+        private InventoryScreenController _inventoryScreen;
+        private UnityEngine.UI.Image _tip;
+        private UnityEngine.UI.Text _tipText;
         private CorpseLootWorldPresenter _presenter;
         private NetInventoryClient _client;
         private NetPlayerRig _hostOwner;
@@ -43,9 +47,10 @@ namespace Emberdelve.Net
 
         private sealed class Row
         {
-            public UnityEngine.UI.Text Label;
-            public UnityEngine.UI.Button TakeOne;
-            public UnityEngine.UI.Button TakeAll;
+            public RectTransform Rect;
+            public int Index;
+            public ItemData Item;
+            public ItemInstance Instance;
         }
 
         public bool IsOpen => _session.IsOpen;
@@ -77,10 +82,6 @@ namespace Emberdelve.Net
             if (corpseId == 0 || _presenter == null || _rig == null || !_rig.IsAlive || _rig.IsExtracted ||
                 (_client != null && !_client.IsOwnerReady) ||
                 (_hostOwner != null && (!_hostOwner.IsServer || !_hostOwner.IsOwner || !_hostOwner.IsSpawned))) return false;
-            if (_client != null && _client.IsOpen && !_presenter.IsContainerUiOpen)
-                GetComponent<NetInventoryClient>()?.CloseSatchelForCorpse();
-            else if (_rig.GetComponent<InventoryScreenController>() is InventoryScreenController satchel && satchel.IsOpen)
-                satchel.Close();
             if (!_session.Open(corpseId)) return false;
             _lastFailure = null;
 
@@ -93,6 +94,9 @@ namespace Emberdelve.Net
             _page = 0;
             _refreshAt = 0.0;
             _root.gameObject.SetActive(true);
+            foreach (var screen in Object.FindObjectsByType<InventoryScreenController>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                if (screen.BoundRig == _rig) { _inventoryScreen = screen; break; }
+            _inventoryScreen?.SetLootCompanion(true);
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
             GetComponent<NetInputSender>()?.ClearPendingMovement();
@@ -119,6 +123,18 @@ namespace Emberdelve.Net
             Render();
         }
 
+        public void OnEmptied(ulong revision)
+        {
+            if (!IsOpen || _session.Document == null) return;
+            var doc = _session.Document;
+            doc.revision = revision;
+            doc.entries = System.Array.Empty<CorpseContainerEntryDocument>();
+            _session.ApplyState(doc);
+            _stateStartedAt = _transferStartedAt = _refreshAt = 0;
+            _lastFailure = null;
+            Render();
+        }
+
         public void OnInvalidState(string reason)
         {
             if (!IsOpen) return;
@@ -142,12 +158,14 @@ namespace Emberdelve.Net
         {
             if (!IsOpen) return;
             _session.Close();
+            if (_inventoryScreen != null) { _inventoryScreen.Close(false); _inventoryScreen.SetLootCompanion(false); }
             _lastFailure = null;
             _page = 0;
             _stateStartedAt = 0.0;
             _transferStartedAt = 0.0;
             _refreshAt = 0.0;
             if (_root != null) _root.gameObject.SetActive(false);
+            if (_tip != null) _tip.gameObject.SetActive(false);
             if (_hostInputPaused)
             {
                 _hostInputPaused = false;
@@ -171,6 +189,10 @@ namespace Emberdelve.Net
                 return;
             }
 
+            _root.localScale = Vector3.one * Mathf.Min(1f, Screen.width / 1100f, Screen.height / 700f);
+            if (Keyboard.current != null && (Keyboard.current.escapeKey.wasPressedThisFrame || Keyboard.current.iKey.wasPressedThisFrame)) { Close(); return; }
+            _inventoryScreen?.HandlePointer();
+            HandleLootPointer();
             double now = Time.realtimeSinceStartupAsDouble;
             if (_session.StateRequestSequence != 0 && now - _stateStartedAt >= StateTimeoutSeconds)
             {
@@ -218,7 +240,7 @@ namespace Emberdelve.Net
         private void Take(int rowIndex, bool all)
         {
             if (!IsOpen || _bag == null || _presenter == null || _session.Document == null || _session.IsTransferPending) return;
-            int entryIndex = _page * RowsPerPage + rowIndex;
+            int entryIndex = rowIndex;
             if (entryIndex < 0 || entryIndex >= _session.Document.entries.Length) return;
             CorpseContainerEntryDocument entry = _session.Document.entries[entryIndex];
             if (entry == null || entry.item == null) return;
@@ -249,145 +271,137 @@ namespace Emberdelve.Net
             if (_root != null) return;
             Canvas canvas = UiFactory.EnsureCanvas("Emberdelve_Hud", 10);
             _root = UiFactory.CreateGroup(canvas.transform, "CorpseContainerRoot");
-            UiFactory.Stretch(_root);
             _root.gameObject.SetActive(false);
-            UiFactory.CreateImage(_root, "Backdrop", new Color(0.015f, 0.012f, 0.01f, 0.72f),
-                new Vector2(2400f, 1400f), Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
-
+            UiFactory.CreateImage(_root,"LootBackdrop",new Color(0,0,0,.62f),new Vector2(6000,4000),Vector2.zero,new Vector2(.5f,.5f),new Vector2(.5f,.5f));
             _panel = UiFactory.CreateGroup(_root, "CorpsePanel");
-            UiFactory.SetRect(_panel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                new Vector2(760f, 550f), Vector2.zero);
-            UnityEngine.UI.Image panelImage = _panel.gameObject.AddComponent<UnityEngine.UI.Image>();
-            panelImage.color = PanelColor;
+            _panel.sizeDelta = new Vector2(LootPanelStyle.Width, LootPanelStyle.Height);
+            _panel.anchoredPosition = new Vector2(270, 0);
+            var background = _panel.gameObject.AddComponent<UnityEngine.UI.Image>();
+            background.color = PanelColor; LootPanelStyle.Frame(background, LootPanelStyle.Gold);
+            _header = Label(_panel, "Header", "LOOT", 22, new Vector2(0, 297), new Vector2(440, 32));
+            _header.color = new Color(.89f, .77f, .51f);
+            _status = Label(_panel, "Status", "", 14, new Vector2(0, -233), new Vector2(475, 58));
+            _status.horizontalOverflow = UnityEngine.HorizontalWrapMode.Wrap;
+            Label(_panel, "Instructions", "Click: take stack   •   Shift + click: take one", 13, new Vector2(0, -278), new Vector2(475, 26));
+            _pageLabel = Label(_panel, "Page", "", 13, new Vector2(0, -185), new Vector2(180, 26));
+            _previous = Button("PreviousPage", "<", () => ChangePage(-1), new Vector2(-110,-185), new Vector2(40,26));
+            _next = Button("NextPage", ">", () => ChangePage(1), new Vector2(110,-185), new Vector2(40,26));
+            Button("Refresh", "Refresh", Refresh, new Vector2(-66,-308), new Vector2(110,26));
+            Button("Close", "Close [I / Esc]", () => Close(), new Vector2(66,-308), new Vector2(130,26));
+            _tip = UiFactory.CreateImage(canvas.transform, "LootTooltip", LootPanelStyle.Ink, new Vector2(290,200), Vector2.zero, new Vector2(.5f,.5f),new Vector2(.5f,.5f));
+            _tip.raycastTarget = false; LootPanelStyle.Frame(_tip, LootPanelStyle.Gold);
+            // A canvas-level popup avoids being occluded by the companion inventory root.
+            _tipText = Label(_tip.rectTransform,"TooltipText","",14,Vector2.zero,new Vector2(264,180));
+            _tipText.alignment = TextAnchor.UpperLeft; _tipText.supportRichText = true;
+            _tipText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _tip.gameObject.SetActive(false);
+        }
 
-            _header = UiFactory.CreateText(_panel, "Header", "CORPSE", 25,
-                new Color(0.95f, 0.78f, 0.4f, 1f), TextAnchor.MiddleCenter);
-            UiFactory.SetRect(_header.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                new Vector2(680f, 38f), new Vector2(0f, -32f));
-            _status = UiFactory.CreateText(_panel, "Status", "", 16, TextColor, TextAnchor.MiddleCenter);
-            UiFactory.SetRect(_status.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                new Vector2(680f, 28f), new Vector2(0f, -72f));
+        private static UnityEngine.UI.Text Label(Transform parent, string name, string text, int font, Vector2 at, Vector2 size)
+        {
+            var label = UiFactory.CreateText(parent, name, text, font, TextColor, TextAnchor.MiddleCenter);
+            label.rectTransform.anchoredPosition = at; label.rectTransform.sizeDelta = size; label.raycastTarget = false;
+            return label;
+        }
 
-            for (int i = 0; i < RowsPerPage; i++)
+        private UnityEngine.UI.Button Button(string name, string text, UnityEngine.Events.UnityAction action, Vector2 at, Vector2 size)
+        {
+            var button = UiFactory.CreateButton(_panel, name, text, action, size, new Color(.18f,.16f,.12f), TextColor, 13);
+            ((RectTransform)button.transform).anchoredPosition = at;
+            return button;
+        }
+
+        private void HandleLootPointer()
+        {
+            if (Mouse.current == null || _tip == null) return;
+            Vector2 pointer = Mouse.current.position.ReadValue();
+            _tip.gameObject.SetActive(false);
+            foreach (Row row in _rows)
             {
-                int rowIndex = i;
-                RectTransform row = UiFactory.CreateGroup(_panel, "ItemRow_" + i);
-                UiFactory.SetRect(row, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                    new Vector2(700f, 54f), new Vector2(0f, 123f - i * 61f));
-                UnityEngine.UI.Image rowImage = row.gameObject.AddComponent<UnityEngine.UI.Image>();
-                rowImage.color = new Color(0.11f, 0.095f, 0.08f, 1f);
-                var widget = new Row
+                if (!RectTransformUtility.RectangleContainsScreenPoint(row.Rect, pointer)) continue;
+                ItemTooltipModel tooltip = row.Instance != null ? ItemTooltip.ForInstance(row.Instance) : ItemTooltip.ForDefinition(row.Item);
+                if (tooltip != null)
                 {
-                    Label = UiFactory.CreateText(row, "ItemLabel", "", 17, TextColor, TextAnchor.MiddleLeft),
-                    TakeOne = UiFactory.CreateButton(row, "TakeOne", "Take 1", () => Take(rowIndex, false),
-                        new Vector2(94f, 40f), new Color(0.22f, 0.18f, 0.12f, 1f), TextColor, 15),
-                    TakeAll = UiFactory.CreateButton(row, "TakeAll", "Take all", () => Take(rowIndex, true),
-                        new Vector2(104f, 40f), new Color(0.31f, 0.22f, 0.1f, 1f), TextColor, 15)
-                };
-                UiFactory.SetRect(widget.Label.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                    new Vector2(435f, 42f), new Vector2(14f, 0f), new Vector2(0f, 0.5f));
-                UiFactory.SetRect(((UnityEngine.UI.Image)widget.TakeOne.targetGraphic).rectTransform,
-                    new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(94f, 40f), new Vector2(-160f, 0f));
-                UiFactory.SetRect(((UnityEngine.UI.Image)widget.TakeAll.targetGraphic).rectTransform,
-                    new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(104f, 40f), new Vector2(-54f, 0f));
-                _rows.Add(widget);
+                    string text = "<b><color=#" + ColorUtility.ToHtmlStringRGB(tooltip.RarityColor) + ">" + tooltip.Title + "</color></b>\n";
+                    if (tooltip.HasRarity) text += tooltip.RarityName + " • " + tooltip.SlotName + "\n";
+                    text += "\n" + string.Join("\n", tooltip.FixedLines);
+                    if (tooltip.RolledDisplayLines.Count > 0) text += "\n\n<color=#74B9E8>" + string.Join("\n", tooltip.RolledDisplayLines) + "</color>";
+                    _tipText.text = text;
+                    float height = Mathf.Min(590f, Mathf.Max(100, _tipText.preferredHeight + 28));
+                    _tip.rectTransform.sizeDelta = new Vector2(290,height);
+                    _tipText.rectTransform.sizeDelta = new Vector2(264,height-28);
+                    RectTransformUtility.ScreenPointToLocalPointInRectangle(_root, pointer, null, out Vector2 at);
+                    _tip.rectTransform.localScale = _root.localScale;
+                    _tip.rectTransform.anchoredPosition = new Vector2(Mathf.Clamp(at.x-160,-380,380), Mathf.Clamp(at.y-height*.5f,-325+height*.5f,325-height*.5f)) * _root.localScale.x;
+                    _tip.gameObject.SetActive(true);
+                    _tip.transform.SetAsLastSibling();
+                }
+                if (Mouse.current.leftButton.wasPressedThisFrame || Mouse.current.rightButton.wasPressedThisFrame)
+                    Take(row.Index, !(Keyboard.current != null && Keyboard.current.shiftKey.isPressed));
+                return;
             }
-
-            _previous = UiFactory.CreateButton(_panel, "PreviousPage", "Previous", () => ChangePage(-1),
-                new Vector2(120f, 38f), new Color(0.13f, 0.12f, 0.11f, 1f), TextColor, 15);
-            UiFactory.SetRect(((UnityEngine.UI.Image)_previous.targetGraphic).rectTransform,
-                new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(120f, 38f), new Vector2(-235f, 24f));
-            _next = UiFactory.CreateButton(_panel, "NextPage", "Next", () => ChangePage(1),
-                new Vector2(120f, 38f), new Color(0.13f, 0.12f, 0.11f, 1f), TextColor, 15);
-            UiFactory.SetRect(((UnityEngine.UI.Image)_next.targetGraphic).rectTransform,
-                new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(120f, 38f), new Vector2(235f, 24f));
-            _pageLabel = UiFactory.CreateText(_panel, "Page", "", 15, TextColor, TextAnchor.MiddleCenter);
-            UiFactory.SetRect(_pageLabel.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-                new Vector2(130f, 36f), new Vector2(0f, 24f));
-            UnityEngine.UI.Button refresh = UiFactory.CreateButton(_panel, "Refresh", "Refresh", Refresh,
-                new Vector2(115f, 38f), new Color(0.15f, 0.19f, 0.19f, 1f), TextColor, 15);
-            UiFactory.SetRect(((UnityEngine.UI.Image)refresh.targetGraphic).rectTransform,
-                new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(115f, 38f), new Vector2(-95f, -25f));
-            UnityEngine.UI.Button close = UiFactory.CreateButton(_panel, "Close", "Close", () => Close(),
-                new Vector2(115f, 38f), new Color(0.22f, 0.12f, 0.1f, 1f), TextColor, 15);
-            UiFactory.SetRect(((UnityEngine.UI.Image)close.targetGraphic).rectTransform,
-                new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(115f, 38f), new Vector2(95f, -25f));
         }
 
         private void Refresh()
         {
-            if (!IsOpen || _session.IsTransferPending || _session.StateRequestSequence != 0) return;
+            if (!IsOpen || _session.IsTransferPending || _session.StateRequestSequence != 0 || _session.Document?.entries.Length == 0) return;
             _lastFailure = null;
             RequestState();
         }
 
-        private void ChangePage(int delta)
-        {
-            int count = _session.Document != null ? _session.Document.entries.Length : 0;
-            int pages = Mathf.Max(1, Mathf.CeilToInt(count / (float)RowsPerPage));
-            _page = Mathf.Clamp(_page + delta, 0, pages - 1);
-            Render();
-        }
-
-        private void ClampPage()
-        {
-            int count = _session.Document != null ? _session.Document.entries.Length : 0;
-            int pages = Mathf.Max(1, Mathf.CeilToInt(count / (float)RowsPerPage));
-            _page = Mathf.Clamp(_page, 0, pages - 1);
-        }
-
+        private int Pages => Mathf.Max(1, Mathf.CeilToInt((_session.Document?.height ?? 4) / 4f));
+        private void ChangePage(int delta) { _page = Mathf.Clamp(_page + delta, 0, Pages - 1); Render(); }
+        private void ClampPage() { _page = Mathf.Clamp(_page, 0, Pages - 1); }
         private void Render()
         {
-            if (_header != null) _header.text = "CORPSE " + _session.ActiveCorpseId;
-            if (_status != null) _status.text = !string.IsNullOrEmpty(_lastFailure) ? _lastFailure : (_session.Status ?? string.Empty);
+            if (_header != null) _header.text = _session.Document?.title ?? "SEARCHING…";
             RenderRows();
         }
 
         private void RenderRows()
         {
-            if (_rows.Count == 0) return;
-            CorpseContainerDocument document = _session.Document;
-            int count = document != null && document.entries != null ? document.entries.Length : 0;
-            int pages = Mathf.Max(1, Mathf.CeilToInt(count / (float)RowsPerPage));
-            bool bagReady = _client == null || _client.IsReady;
-            for (int i = 0; i < _rows.Count; i++)
-            {
-                int index = _page * RowsPerPage + i;
-                bool visible = index < count;
-                Row row = _rows[i];
-                row.Label.text = visible ? BuildItemLabel(document.entries[index]) : string.Empty;
-                row.Label.transform.parent.gameObject.SetActive(visible);
-                int quantity = visible && document.entries[index]?.item != null ? document.entries[index].item.quantity : 0;
-                bool canTransfer = visible && bagReady && !_session.IsTransferPending && _session.StateRequestSequence == 0;
-                row.TakeOne.gameObject.SetActive(visible && quantity > 0);
-                row.TakeOne.interactable = canTransfer;
-                row.TakeAll.gameObject.SetActive(visible && quantity > 1);
-                row.TakeAll.interactable = canTransfer;
-            }
-            if (_pageLabel != null) _pageLabel.text = "Page " + (_page + 1) + " / " + pages;
-            if (_previous != null) _previous.interactable = _page > 0;
-            if (_next != null) _next.interactable = _page + 1 < pages;
-            if (_status != null) _status.text = !string.IsNullOrEmpty(_lastFailure) ? _lastFailure :
-                (!bagReady && count > 0 ? "Syncing your bag…" : (_session.Status ?? string.Empty));
-        }
-
-        private string BuildItemLabel(CorpseContainerEntryDocument entry)
-        {
-            if (entry?.item == null) return "Invalid item";
-            string label = entry.item.itemId ?? "Unknown item";
-            if (_bag != null && _bag.Catalog != null)
-            {
-                IReadOnlyList<ItemData> items = _bag.Catalog.Items;
-                for (int i = 0; i < items.Count; i++)
+            if (_panel == null) return;
+            if (_contents != null) { _contents.gameObject.SetActive(false); Destroy(_contents.gameObject); }
+            _contents = UiFactory.CreateGroup(_panel, "Contents");
+            _rows.Clear();
+            CorpseContainerDocument doc = _session.Document;
+            bool player = doc != null && doc.kind == "player";
+            int width = doc?.width ?? 10;
+            float step = Mathf.Min(LootPanelStyle.Step, 480f / width), cell = step - 2f;
+            float top = player ? 8f : 238f;
+            if (player)
+                for (int i = 1; i < Equipment.SlotCount; i++)
                 {
-                    if (items[i] == null || items[i].itemId != entry.item.itemId) continue;
-                    label = items[i].displayName;
-                    break;
+                    var slot = (EquipmentSlot)i;
+                    var frame = UiFactory.CreateImage(_contents, "Equip_"+slot, LootPanelStyle.Ink, LootPanelStyle.SlotSize(slot), LootPanelStyle.SlotPosition(slot),new Vector2(.5f,.5f),new Vector2(.5f,.5f));
+                    LootPanelStyle.Decorate(frame,null);
+                    Label(_contents,"EquipLabel_"+slot,ItemTooltip.SlotLabel(slot),10,LootPanelStyle.SlotPosition(slot)+new Vector2(0,-LootPanelStyle.SlotSize(slot).y*.5f-9),new Vector2(86,16));
                 }
-            }
-            if (!string.IsNullOrEmpty(entry.item.uid)) label += "  • gear";
-            else if (entry.item.quantity > 1) label += "  × " + entry.item.quantity;
-            return label;
+            for (int y = 0; y < 4; y++) for (int x = 0; x < width; x++)
+                UiFactory.CreateImage(_contents,"Cell_"+x+"_"+y,new Color(.13f,.12f,.11f),new Vector2(cell,cell),new Vector2(-width*step*.5f+x*step+cell*.5f,top-y*step-cell*.5f),new Vector2(.5f,.5f),new Vector2(.5f,.5f));
+            if (doc != null && _bag?.Catalog != null)
+                for (int i = 0; i < doc.entries.Length; i++)
+                {
+                    var entry = doc.entries[i];
+                    if (!_bag.Catalog.TryResolveItem(entry.item.itemId,out ItemData item,out _)) continue;
+                    bool equipped = !string.IsNullOrEmpty(entry.slot) && System.Enum.TryParse(entry.slot,out EquipmentSlot _);
+                    if (!equipped && (entry.y / 4 != _page)) continue;
+                    ItemInstance instance = null;
+                    if (!string.IsNullOrEmpty(entry.item.uid)) ItemInstance.TryRestore(entry.item,_bag.Catalog.Authority,out instance,out _);
+                    Vector2 size, at;
+                    if (equipped) { var slot = (EquipmentSlot)System.Enum.Parse(typeof(EquipmentSlot), entry.slot); size = LootPanelStyle.SlotSize(slot); at = LootPanelStyle.SlotPosition(slot); }
+                    else { Vector2Int shape = item.EffectiveFootprint; size = new Vector2(shape.x*step-2,shape.y*step-2); at = new Vector2(-width*step*.5f+entry.x*step+size.x*.5f,top-(entry.y%4)*step-size.y*.5f); }
+                    var image = UiFactory.CreateImage(_contents,"Loot_"+entry.entryId,LootPanelStyle.Ink,size,at,new Vector2(.5f,.5f),new Vector2(.5f,.5f));
+                    LootPanelStyle.Decorate(image,item,instance,!equipped);
+                    if(entry.item.quantity > 1) Label(image.transform,"Count",entry.item.quantity.ToString(),13,new Vector2(size.x*.5f-12,size.y*.5f-10),new Vector2(24,18));
+                    _rows.Add(new Row { Rect=image.rectTransform, Index=i, Item=item, Instance=instance });
+                }
+            _previous.gameObject.SetActive(Pages>1); _next.gameObject.SetActive(Pages>1);
+            _previous.interactable = _page>0; _next.interactable = _page+1<Pages;
+            _pageLabel.text = Pages>1 ? (_page+1)+" / "+Pages : "";
+            _status.text = !string.IsNullOrEmpty(_lastFailure) ? _lastFailure : (_session.Status ?? "");
+            if (doc != null && doc.entries.Length == 0) _status.text = "Empty";
+            _tip?.gameObject.SetActive(false);
         }
 
         private void OnPlayerRunState(int playerId, RunState state)
@@ -412,6 +426,7 @@ namespace Emberdelve.Net
                 _client.CorpseTransferResultReceived -= OnClientResult;
             }
             if (_root != null) Destroy(_root.gameObject);
+            if (_tip != null) Destroy(_tip.gameObject);
         }
     }
 }

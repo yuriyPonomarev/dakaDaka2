@@ -37,34 +37,17 @@ namespace Emberdelve.UI
     {
         private const float CellSize = 46f;
         private const float CellGap = 2f;
-        // U2B11: six worn slots (Back joined the original five). 6 x (54 + 6) - 6 = 354 px, inside the panel's
-        // 398 px inner height (the five-slot column was 5 x (64 + 8) - 8 = 352), so the column stays contained
-        // at 720p and 1080p without growing the panel.
-        private const float EquipSlotSize = 54f;
-        private const float EquipSlotGap = 6f;
-        // D3b: eleven worn slots do not fit at 54 px. Past six slots the column tightens to a smaller gap and a slot size
-        // derived from the room the panel has (MaxEquipColumnHeight), so the paper doll still lies inside the panel.
-        private const float EquipSlotGapTight = 4f;
-        private const float MaxEquipColumnHeight = 392f;
-
-        // The satchel is laid out from the panel's own inner bounds rather than from a handful of offsets
-        // that happened to look right at one window size. Everything below is measured from the panel, so the
-        // grid, the six worn slots, their labels and the instructions all land inside the panel that is
-        // already inside the window.
-        private const float PanelWidth = 760f;
-        private const float PanelHeight = 430f;
-        private const float PanelCenterX = -40f;
-        // 66 (was 20): lifts the panel so its bottom edge (y 509 from the top at 720p) clears the bottom-right skill cards
-        // (top edge y 514) instead of hiding the Dash card under its corner.
-        private const float PanelCenterY = 66f;
+        // Shared paper-doll geometry keeps own and looted equipment in identical places.
+        private const float PanelWidth = LootPanelStyle.Width;
+        private const float PanelHeight = LootPanelStyle.Height;
+        private const float PanelCenterX = 0f;
+        private const float PanelCenterY = 0f;
         private const float PanelInset = 16f;
         private const float ColumnGap = 10f;
-        private const float EquipLabelGap = 10f;
-        private const float EquipLabelWidth = 118f;
         private const float HeaderHeight = 26f;
-        private const float DetailHeight = 56f;
+        private const float DetailHeight = 44f;
         // The instruction band needs three 13pt lines (the selected-item hint); the detail line only ever wraps to two.
-        private const float CarryHeight = 74f;
+        private const float CarryHeight = 62f;
 
         // The satchel screen has two tabs in the header band: the bag, which is everything above, and the
         // character pane, which reuses the bag's own column (grid + detail + instructions) as its drawing
@@ -76,11 +59,11 @@ namespace Emberdelve.UI
         private const float TooltipPointerOffset = 14f;
         private const float TooltipEdgeMargin = 4f;
 
-        private const float TabButtonWidth = 94f;
+        private const float TabButtonWidth = 92f;
         private const float TabButtonHeight = 26f;
         private const float TabGap = 10f;
         private const float TabHeaderGap = 10f;
-        private const float HeaderTextWidth = 271f;
+        private const float HeaderTextWidth = 260f;
 
         // The instruction band is split rather than lengthened: the tooltip line takes the top of the band
         // the instructions already own, so the column height - and with it the grid - does not move.
@@ -112,6 +95,7 @@ namespace Emberdelve.UI
         private Canvas _canvas;
         private RectTransform _root;
         private RectTransform _panel;
+        private Image _backdrop;
         private RectTransform _gridGroup;
         private RectTransform _equipGroup;
         private Text _headerLabel;
@@ -157,6 +141,13 @@ namespace Emberdelve.UI
         private readonly List<EquipmentSlot> _equipSlots = new List<EquipmentSlot>(6);
 
         public bool IsOpen { get; private set; }
+        public static int LastCloseFrame => InventoryInputFocus.LastCloseFrame;
+        public PlayerRig BoundRig { get { EnsureLiveRig(); return _rig; } }
+        public bool IsLootCompanion { get; private set; }
+        private void LateUpdate()
+        {
+            if (_root != null && IsOpen) _root.localScale = Vector3.one * Mathf.Min(1f, Screen.width / (IsLootCompanion ? 1100f : 560f), Screen.height / 700f);
+        }
 
         private bool RunEnded => _director != null && (_director.State == RunState.Dead || _director.State == RunState.Extracted
             || _director.LocalPlayerState == RunState.Dead || _director.LocalPlayerState == RunState.Extracted);
@@ -181,8 +172,6 @@ namespace Emberdelve.UI
         public int CarriedAmount => SelectedAmount;
 
         private Vector2 _gridOrigin;
-        private Vector2 _equipOrigin;
-        private Vector2 _panelCenter;
 
         public void Configure(RunDirector director, PlayerRig rig)
         {
@@ -203,6 +192,7 @@ namespace Emberdelve.UI
 
         private void OnDisable()
         {
+            Close(false);
             GameEvents.InventoryChanged -= OnInventoryChanged;
             GameEvents.EquipmentChanged -= OnEquipmentChanged;
             GameEvents.RunStateChanged -= OnRunState;
@@ -215,13 +205,27 @@ namespace Emberdelve.UI
 
         private void OnDestroy()
         {
+            InventoryInputFocus.Close(this);
             if (_root != null) Destroy(_root.gameObject);
+        }
+
+        public void SetLootCompanion(bool enabled)
+        {
+            IsLootCompanion = enabled;
+            if (_panel == null) Build();
+            _panel.anchoredPosition = new Vector2(enabled ? -270f : 0f, 0f);
+            if (_backdrop != null) _backdrop.gameObject.SetActive(!enabled);
+            if (_director != null && _rig != null && _rig.IsAlive && !_rig.IsExtracted && _director.State == RunState.Running)
+                _director.SetInventoryOpen(enabled);
+            if (enabled) { _root.SetAsLastSibling(); SelectBagTab(); Open(); }
+            Rebuild();
         }
 
         public void Open()
         {
             if (IsOpen || RunEnded) return;
             IsOpen = true;
+            InventoryInputFocus.Open(this);
 
             if (_root != null) _root.gameObject.SetActive(true);
             Cursor.lockState = CursorLockMode.None;
@@ -243,6 +247,7 @@ namespace Emberdelve.UI
         {
             if (!IsOpen) return;
             IsOpen = false;
+            InventoryInputFocus.Close(this);
 
             // Closing drops the selection, not an item: the selected stack never left the bag, so there is
             // nothing to return, nothing to spawn at the player's feet and nothing to credit as loot.
@@ -324,6 +329,12 @@ namespace Emberdelve.UI
         public void HandlePointer()
         {
             if (!IsOpen) return;
+            if (!IsLootCompanion && Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
+            {
+                Close();
+                _director?.SetInventoryOpen(false);
+                return;
+            }
 
             // Belt and braces for the run-state event: a satchel still open after the run ended closes here.
             if (RunEnded) { Close(false); return; }
@@ -784,6 +795,7 @@ namespace Emberdelve.UI
         private void ApplyTabVisibility()
         {
             if (_gridGroup != null) _gridGroup.gameObject.SetActive(!_showCharacter);
+            if (_equipGroup != null) _equipGroup.gameObject.SetActive(!_showCharacter);
             if (_statsGroup != null) _statsGroup.gameObject.SetActive(_showCharacter);
 
             if (_detailLabel != null) _detailLabel.gameObject.SetActive(!_showCharacter);
@@ -909,7 +921,7 @@ namespace Emberdelve.UI
 
             if (_tooltipLabel != null)
             {
-                _tooltipLabel.text = model != null ? model.Headline : string.Empty;
+                _tooltipLabel.text = model == null ? string.Empty : (model.HasRarity ? model.RarityName + "  " : "") + model.Title;
                 _tooltipLabel.color = model != null && model.HasRarity ? model.RarityColor : TextColor;
             }
 
@@ -959,13 +971,6 @@ namespace Emberdelve.UI
                 }
             }
 
-            if (model.UidShort.Length > 0)
-            {
-                builder.Append("<color=#").Append(ColorUtility.ToHtmlStringRGB(DimColor)).Append(">uid ")
-                       .Append(model.UidShort).Append("</color>");
-                lines++;
-            }
-
             _tipBody.text = builder.ToString().TrimEnd('\n');
             _tipPanel.rectTransform.sizeDelta = new Vector2(TooltipPanelWidth, lines * TooltipLineHeight + 2f * TooltipPadding);
             PositionTooltipPanel();
@@ -980,8 +985,8 @@ namespace Emberdelve.UI
             if (_tipPanel == null || !_tipPanel.gameObject.activeSelf) return;
 
             Vector2 size = _tipPanel.rectTransform.sizeDelta;
-            float left = PanelCenterX - PanelWidth * 0.5f + TooltipEdgeMargin;
-            float right = PanelCenterX + PanelWidth * 0.5f - TooltipEdgeMargin;
+            float left = _panel.anchoredPosition.x - PanelWidth * 0.5f + TooltipEdgeMargin;
+            float right = _panel.anchoredPosition.x + PanelWidth * 0.5f - TooltipEdgeMargin;
             float top = PanelCenterY + PanelHeight * 0.5f - TooltipEdgeMargin;
             float bottom = PanelCenterY - PanelHeight * 0.5f + TooltipEdgeMargin;
 
@@ -1139,9 +1144,11 @@ namespace Emberdelve.UI
             _root = UiFactory.CreateGroup(canvas.transform, "InventoryRoot");
             _root.gameObject.SetActive(false);
 
+            _backdrop = UiFactory.CreateImage(_root,"InventoryBackdrop",new Color(0,0,0,.62f),new Vector2(6000,4000),Vector2.zero,new Vector2(.5f,.5f),new Vector2(.5f,.5f));
             _panel = UiFactory.CreatePanel(_root, "SatchelPanel", PanelColor);
             _panel.sizeDelta = new Vector2(PanelWidth, PanelHeight);
             _panel.anchoredPosition = new Vector2(PanelCenterX, PanelCenterY);
+            LootPanelStyle.Frame(_panel.GetComponent<Image>(), LootPanelStyle.Gold);
 
             _gridGroup = UiFactory.CreateGroup(_root, "GridGroup");
             _equipGroup = UiFactory.CreateGroup(_root, "EquipGroup");
@@ -1151,7 +1158,7 @@ namespace Emberdelve.UI
             // offsets below into the widget's top-left corner inside the panel, which is what a left-aligned
             // label needs. The previous centre pivot put the label's centre at the panel inset and half of
             // the label outside the panel.
-            _headerLabel = UiFactory.CreateText(_root, "Header", "SATCHEL", 22, TextColor, TextAnchor.UpperLeft);
+            _headerLabel = UiFactory.CreateText(_root, "Header", "INVENTORY", 16, TextColor, TextAnchor.UpperLeft);
             _headerLabel.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
             _headerLabel.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
             _headerLabel.rectTransform.pivot = new Vector2(0f, 1f);
@@ -1264,10 +1271,7 @@ namespace Emberdelve.UI
         /// </summary>
         private static float MeasureLeftColumnWidth()
         {
-            float innerLeft = -PanelWidth * 0.5f + PanelInset;
-            float innerRight = PanelWidth * 0.5f - PanelInset;
-            float equipColumnWidth = EquipSlotSize + EquipLabelGap + EquipLabelWidth;
-            return innerRight - equipColumnWidth - ColumnGap - innerLeft;
+            return PanelWidth - 2f * PanelInset;
         }
 
         /// <summary>
@@ -1327,31 +1331,12 @@ namespace Emberdelve.UI
             float innerTop = PanelHeight * 0.5f - PanelInset;
 
             EquipmentSlot[] order = SlotOrder();
-            float equipGap = order.Length > 6 ? EquipSlotGapTight : EquipSlotGap;
-            float equipSlotSize = Mathf.Min(EquipSlotSize,
-                Mathf.Floor((MaxEquipColumnHeight + equipGap) / Mathf.Max(1, order.Length) - equipGap));
-            float equipStep = equipSlotSize + equipGap;
-            float equipColumnWidth = EquipSlotSize + EquipLabelGap + EquipLabelWidth;
-            float equipColumnHeight = order.Length * equipStep - equipGap;
-
-            // The worn-kit column is measured by its slots plus the label extents that sit beside them, so a
-            // slot label is never allowed to hang past the panel edge. The bag grid keeps its full width and
-            // whatever is left between the two columns is the gutter.
-            float equipColumnLeft = innerRight - equipColumnWidth;
-            float leftColumnWidth = equipColumnLeft - ColumnGap - innerLeft;
-
-            float leftColumnHeight = HeaderHeight + ColumnGap + gridHeight + ColumnGap + DetailHeight +
-                                     ColumnGap + CarryHeight;
-            // Keep the background behind the whole centered bag column when the grid is tall.
-            // Its centre and all existing child positions stay fixed; smaller grids restore the base size.
-            if (_panel != null)
-                _panel.sizeDelta = new Vector2(PanelWidth, Mathf.Max(PanelHeight, leftColumnHeight + 2f * PanelInset));
-            float leftColumnTop = innerTop - (PanelHeight - 2f * PanelInset - leftColumnHeight) * 0.5f;
-
-            float headerTop = leftColumnTop;
-            float gridTop = headerTop - HeaderHeight - ColumnGap;
+            float leftColumnWidth = PanelWidth - PanelInset * 2f;
+            float headerTop = innerTop;
+            float gridTop = 8f;
             float detailTop = gridTop - gridHeight - ColumnGap;
             float carryTop = detailTop - DetailHeight - ColumnGap;
+            if (_panel != null) _panel.sizeDelta = new Vector2(PanelWidth, Mathf.Max(PanelHeight, 2f * (gridHeight + 110f)));
 
             Vector2 gridCentrePanel = new Vector2(innerLeft + gridWidth * 0.5f, gridTop - gridHeight * 0.5f);
             Vector2 gridCenter = PanelToRoot(gridCentrePanel);
@@ -1429,11 +1414,12 @@ namespace Emberdelve.UI
                     blockSize, center - gridCenter, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
                 block.raycastTarget = false;
 
+                LootPanelStyle.Decorate(block, slot.Item, slot.Instance);
                 _itemImages.Add(block);
 
                 if (slot.Count > 1)
                 {
-                    Text count = UiFactory.CreateText(block.transform, "Count", slot.Count.ToString(), 15, Color.black,
+                    Text count = UiFactory.CreateText(block.transform, "Count", slot.Count.ToString(), 13, Color.white,
                         TextAnchor.LowerRight, FontStyle.Bold);
                     count.rectTransform.anchorMin = Vector2.zero;
                     count.rectTransform.anchorMax = Vector2.one;
@@ -1442,19 +1428,15 @@ namespace Emberdelve.UI
                 }
             }
 
-            // Equipment column. The origin is the top-left corner of the column, and each row descends from
-            // it once: the previous origin was already a full half-column below the centre and the loop then
-            // descended again, which pushed the last two slots below the window.
-            Vector2 equipCentrePanel = new Vector2(equipColumnLeft + equipSlotSize * 0.5f, 0f);
-            Vector2 equipCenter = PanelToRoot(equipCentrePanel);
-            _equipOrigin = equipCenter + new Vector2(-equipSlotSize * 0.5f, equipColumnHeight * 0.5f);
+            // Equipment mirrors the looted player paper doll.
+            Vector2 equipCenter = PanelToRoot(Vector2.zero);
             _equipGroup.anchoredPosition = equipCenter;
-            _equipColumnLeftRoot = _equipOrigin.x;
+            _equipColumnLeftRoot = 0f;
 
             for (int i = 0; i < order.Length; i++)
             {
                 EquipmentSlot kind = order[i];
-                Vector2 center = _equipOrigin + new Vector2(equipSlotSize * 0.5f, -(i * equipStep) - equipSlotSize * 0.5f);
+                Vector2 center = equipCenter + LootPanelStyle.SlotPosition(kind);
 
                 ItemData worn = _equipment != null ? _equipment.Equipped(kind) : null;
 
@@ -1462,43 +1444,19 @@ namespace Emberdelve.UI
                 color.a = worn != null ? 1f : 1f;
 
                 Image slotImage = UiFactory.CreateImage(_equipGroup.transform, "Equip_" + kind, color,
-                    new Vector2(equipSlotSize, equipSlotSize), center - equipCenter,
+                    LootPanelStyle.SlotSize(kind), center - equipCenter,
                     new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
 
+                LootPanelStyle.Decorate(slotImage, worn, _equipment != null ? _equipment.EquippedInstance(kind) : null, false);
                 _equipImages.Add(slotImage);
                 _equipRects.Add(slotImage.rectTransform);
                 _equipSlots.Add(kind);
 
-                // The worn-item label sits beside the slot on the dark SatchelPanel, not inside the coloured
-                // slot block, so its foreground cannot follow the item icon colour (Footpad Boots' near-black
-                // icon colour rendered the name invisible). Use the panel's readable light text colour; empty
-                // slots keep DimColor.
-                // P4c: the slot name is always shown (so a worn Back item cannot hide which slot it is); the
-                // worn item is a second line under it, in its rarity colour.
-                // Two lines must fit the compact 26px rows used by the expanded equipment list.
-                int labelFontSize = equipSlotSize < 30f ? 11 : 13;
-                int slotFontSize = equipSlotSize < 30f ? 9 : 11;
-                string slotName = ItemTooltip.SlotLabel(kind);
-                string labelText = slotName;
-                if (worn != null)
-                {
-                    ItemInstance wornInstance = _equipment.EquippedInstance(kind);
-                    Color nameColor = wornInstance != null ? ItemTooltip.RarityColor(wornInstance.Rarity) : TextColor;
-                    labelText = "<color=#" + ColorUtility.ToHtmlStringRGB(DimColor) + "><size=" + slotFontSize + ">" + slotName + "</size></color>\n" +
-                                "<color=#" + ColorUtility.ToHtmlStringRGB(nameColor) + ">" + worn.displayName + "</color>";
-                }
                 Text label = UiFactory.CreateText(_equipGroup.transform, "EquipLabel_" + kind,
-                    labelText, labelFontSize, worn != null ? TextColor : DimColor, TextAnchor.MiddleLeft, FontStyle.Bold);
-                label.horizontalOverflow = HorizontalWrapMode.Wrap;
-                label.verticalOverflow = VerticalWrapMode.Truncate;
-                label.supportRichText = true;
+                    ItemTooltip.SlotLabel(kind), 10, DimColor, TextAnchor.MiddleCenter);
                 label.raycastTarget = false;
-                label.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
-                label.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
-                label.rectTransform.pivot = new Vector2(0f, 0.5f);
-                label.rectTransform.sizeDelta = new Vector2(EquipLabelWidth, equipSlotSize);
-                label.rectTransform.anchoredPosition = center - equipCenter +
-                    new Vector2(equipSlotSize * 0.5f + EquipLabelGap, 0f);
+                label.rectTransform.sizeDelta = new Vector2(86f, 16f);
+                label.rectTransform.anchoredPosition = center - equipCenter + new Vector2(0f, -LootPanelStyle.SlotSize(kind).y * .5f - 9f);
 
                 _equipLabels.Add(label);
             }
@@ -1508,7 +1466,7 @@ namespace Emberdelve.UI
                 int worn = _equipment != null ? _equipment.FilledCount : 0;
                 _headerLabel.text = _showCharacter
                     ? "CHARACTER"
-                    : $"SATCHEL  {_inventory.UsedCells}/{_inventory.Capacity}  worn {worn}";
+                    : $"INVENTORY   {_inventory.UsedCells}/{_inventory.Capacity}";
                 _headerLabel.rectTransform.sizeDelta = new Vector2(HeaderTextWidth, HeaderHeight);
                 _headerLabel.rectTransform.anchoredPosition = PanelToRoot(new Vector2(innerLeft + TabButtonWidth * 2f + TabGap + TabHeaderGap, headerTop));
             }
@@ -1560,7 +1518,7 @@ namespace Emberdelve.UI
             // The character pane covers exactly the bag column below the header: the grid, the detail line,
             // the tooltip line and the instructions. Those widgets stay where they are and are simply drawn
             // under the pane while the character tab is up, so switching back puts them back untouched.
-            float paneTop = gridTop;
+            float paneTop = innerTop - 40f;
             // Sized from the content as well as from the column: the rows start at the group origin and need
             // PreferredHeight; the extra padding keeps the last row's bottom inside the pane background (U2B11 review M1).
             float paneHeight = Mathf.Max(paneTop - (carryTop - CarryHeight), CharacterStatsView.PreferredHeight + PanePadding);
@@ -1626,21 +1584,7 @@ namespace Emberdelve.UI
         private string BuildDetailText()
         {
             if (_inventory == null) return string.Empty;
-
-            System.Text.StringBuilder builder = new System.Text.StringBuilder();
-            builder.Append("grid ").Append(_inventory.GridWidth).Append('x').Append(_inventory.GridHeight)
-                   .Append("   free ").Append(_inventory.FreeCells).Append(" cells")
-                   .Append("   value ").Append(_inventory.CarriedValue);
-
-            if (_equipment != null && _equipment.FilledCount > 0)
-            {
-                builder.Append("   worn: ").Append(_equipment.Describe());
-            }
-
-            // The six scores and the derived numbers are no longer dumped onto this line: the character tab
-            // shows them as a readable pane, and a raw "strength=16(+3) ... hp=120" run-in here was the
-            // thing the pane was asked to replace.
-            return builder.ToString();
+            return $"Carried value  {_inventory.CarriedValue}     •     Free space  {_inventory.FreeCells}/{_inventory.Capacity}";
         }
     }
 }

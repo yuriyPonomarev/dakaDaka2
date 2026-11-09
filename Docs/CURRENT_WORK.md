@@ -3,32 +3,31 @@
 Updated 9 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest accepted milestone: MAP-01 crypt architecture
+## Latest accepted milestone: LOOT-01 paired inventory and loot
 
-Task/evidence: Tasks/CRYPT_CONTENT_20261109.md. User authorized map content inspired by Dark and Darker after the accepted raid baseline7f203c9c.
+Task/evidence: Tasks/LOOT_UI_20261109.md. User authorized own inventory left, container right, dead player loadout in the same layout as own.
 
-- All10 saved room modules rebuilt with curved vaults/arches, colonnades, tomb alcoves/sarcophagi, chapel pew aisles, reliquary shelves/urns, cover and differentiated interiors. Existing10 IDs/order and four sockets preserved.
-- Readable cold reflected light and warm braziers; blue extraction-room accent. Geometry lighting excludes hands. Existing materials reused; original generated arch mesh and flame materials, no external asset import or global render-setting change.
-- Ordinary client movement/E crossed bridge and both doorway seams on seed11/hashCC18B0DC and seed2043687868/hash00B81D9C; final room screenshots reviewed. No teleport or combat acceptance claim from these no-enemy geometry sessions.
-- Protocol6 prevents old geometry clients joining this version. Existing inventory/combat rules and loot/enemy systems unchanged. Build Crypt Rooms and Playable combines catalog+build in one Editor launch.
+- Paper-doll equipment above the bag, original cached silhouette icons, rarity borders, readable tooltips/value/free space. Existing selection, equip/use/drop/hotbar commands retained.
+- Chest opening rolls once and opens server-owned contents rather than collecting immediately. Enemy death drop route publishes one loot container; registry refusal preserves pickups as a fallback. Player corpses preserve bag coordinates and worn slots.
+- One existing server transfer path keeps revision/UID/range/LOS/capacity checks. Sealed-chest admission is also rechecked for state/transfers. Protocol7 / container wire schema2.
+- Click takes a stack; Shift+click takes one. Own inventory remains usable. I/Escape closes both panes; empty contents stay visible. Tooltip above both panes; client HUD compact while open.
 
 ## Verification
 
-- Level assembly29/29. Initial focused run20261109-110347-338 passed NetFinal172/0, NetDoor37/0, NetInventory146/0; NetMovement found a test-lane selection defect.
-- Development-only movement proof mistook low footings/glancing columns for a stopping wall. Added chest-height, full-width head-on face validation without changing movement thresholds or gameplay collision. Focused fixture5/5.
-- Corrected NetMovement190/0 in20261109-111129-372 on exact failure seed-986579934/hash620D25CB. Original failed run remains recorded; combined evidence accepts this milestone. Do not repeat passing tests just for a green aggregate.
-- Scoped source/assets equal verified mirror; code/doc whitespace check passed. Commit uses26 explicit paths. Six inherited local-only paths remain outside it: two Stone materials, Assets/Logs.meta, connection-check screenshot/meta, Pipeline EditorPipelineConfig.json.
+- Focused EditMode21/21: corpse model, corpse wire, hands rules. New checks cover original layout retention and exact single transfer/stack splitting. Initial failed fixture setup and its correction are recorded honestly in the task report.
+- Run20261109-114747-273: NetInventory148/0, NetExtraction136/0. Contest now verifies two simultaneous chest inspections followed by one winner for the exact UID. Proof build reused between gates.
+- Final build-v8 PASS; seed11/protocol7. Two real graphical windows: remote chest click, host mob-loot transfers, empty state, tooltip affixes, real player-death capture and worn-slot transfer, I/Escape closure and resumed movement. Screenshots/logs: Logs/acceptance/20261109-loot-ui.
+- Main user Editor untouched. Final review sessions closed at host16/client7; process cleanup verified before commit. Scoped source/assets match mirror. Six inherited local-only paths remain outside the milestone: two Stone materials, Assets/Logs.meta, connection-check screenshot/meta, Pipeline EditorPipelineConfig.json.
 
-## Existing raid baseline and limits
+## Previous accepted work and limits
 
-Baseline7f203c9c accepted network raid, inventory/corpse/extraction/result/retry, hands/guard/enemy phases, HUD/countdown. Historical detail: Tasks/RAID_UI_ACCEPTANCE_20261108.md. Infrastructure and atomic equip were separate earlier commits.
+MAP-01 facf8243: ten crypt modules and two-layout traversal; Tasks/CRYPT_CONTENT_20261109.md.
+Raid baseline7f203c9c: network inventory/corpse/extraction/result/retry, hands/guard/enemy phases and timer; Tasks/RAID_UI_ACCEPTANCE_20261108.md.
 
-Main user Editor untouched; builds/tests only ../DakaDaka_ci. Final graphical sessions closed v3 B12/A2 and v4 B12/A1. No test/build/player intentionally left running.
-
-This is a first architecture/content pass, not new traps, secret routes or a complete art campaign. Persistent stash remains deferred; corpse loot is session-only. Default9 players/parser64 are not measured capacity; four-client proof exists, loss/latency and nine-client load remain future release coverage.
+This milestone targets the network/host playable raid; legacy offline rule-fixture collection fallback remains. No persistent stash, deposits/drag-to-container or rendered3D item thumbnails. Mob graphical review invokes production DropEnemyLoot; it is not a new combat-encounter acceptance claim. Default9 players/parser64 are not measured capacity.
 
 ## Next steps
 
-1. User playtest the new room scale, cover and visibility; address concrete findings as one slice.
-2. If continuing map content, design encounter/loot placement and further room-specific routes as the next bounded milestone.
-3. Keep stash/new systems and broader load/loss acceptance separate; do not restart the completed raid cleanup.
+1. User playtest inventory and looting in the packaged raid; address concrete findings as one slice.
+2. Continue encounter/loot placement in the accepted crypt modules if requested.
+3. Keep stash, larger load/loss coverage and broader art production separate; do not repeat green suites without a related change.
