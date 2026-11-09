@@ -3,19 +3,17 @@
 Updated 9 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest accepted slice: bow, first-person hands and prepared archer shots
+## Latest completed slice: bow/sword hand grip correction
 
-Curved recurve limbs, leather grip, anchored V-shaped string and nocked arrow replace the bow blockout. Existing human arms now hold the bow with the left hand and pull the string with the right; limbs flex and the string returns on release.
+User rejected the previous bow left-hand and sword wrist pose. Calibrated weapon grips from actual finger bones, removed the sword rotation from upright bow grips, and rolled the sword palm so the forearm enters from the side. Shield attachment remains separate; weapon swaps recalibrate the grip.
 
-F/G selects Multi-shot/Piercing Shot, then left mouse press fires. Selection spends nothing; server applies costs/cooldown on fire. Repeat the selected key to cancel, choose the other to replace; inventory, death and weapon swap cancel. Ordinary arrows keep hold/release. Shared input suppression prevents an extra ordinary arrow during a skill click/hold. Client first click uses replicated weapon type instead of probing the server with WrongWeapon.
-
-Evidence: Tasks/BOW_DRAW_20261109.md. Hands92/0, Visual207/0, NetSkill127/0, NetCombat312/0 passed before the documented input/presentation refinements; final refinements compiled and were verified through actual input in two windows. Zero requests before skill click, exact3/1 projectile counts, held-click suppression, first ordinary shot and inventory/swap cancellation confirmed. Seed11/protocol9. Final build: Builds/Playable/20261109-162234-464/EmberdelveNet.exe. Windows closed; main Editor untouched.
+Evidence: Tasks/GRIP_FIX_20261109.md. Hands92/0 and Visual207/0 passed before final cosmetic palm-roll/center tuning; final build and actual two-window input review cover that tuning. Bow draw/shot, sword guard/attack and Q swap return checked, seed11/protocol9. Build: Builds/Playable/20261109-164037-226/EmberdelveNet.exe. Windows closed; main Editor untouched.
 
 ## Next steps and limits
 
-1. User review of bow/hand silhouette and controls. This slice animates first-person draw and shares the new bow mesh; third-person draw-state replication is separate work.
-2. Existing brief magenta client impact effect needs a focused material fix. Crossbow model/reload appearance unchanged.
-3. Recovered ammunition remains server-owned floor loot: E to bag, right-click with matching weapon to replenish reserve, R reload. Class apparel remains fixed and low-poly; no unrelated full test reruns.
+1. Trial a more anatomical CC0 arm mesh, author fingers for bow/string and sword, then align full-body anatomy and class outfits. Candidates: Design/CHARACTER_ASSET_CANDIDATES_20261109.md. Research only; no replacement imported. Existing low-poly fingers, bow-rest hand overlap and torch overexposure remain quality limits.
+2. Previous bow/input slice c8e04229 remains: F/G prepares, LMB fires; ordinary arrows hold/release. Tasks/BOW_DRAW_20261109.md. Third-person draw-state replication and crossbow model/reload presentation remain separate.
+3. Existing brief magenta client impact effect needs a focused material fix. No unrelated full test reruns.
 
 ## Previous accepted work
 

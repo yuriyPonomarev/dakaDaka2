@@ -1,0 +1,14 @@
+# Character and first-person arm candidates
+
+Reviewed9 November2026 after user rejected the current wrist/grip presentation. These are researched candidates, not imported or certified in Unity. Current repo policy is free/CC0 assets. Fixing hand orientation remains necessary even after a mesh replacement.
+
+| Candidate | Verified source facts | Project assessment |
+|---|---|---|
+| [FPS arms (rigged only), para](https://opengameart.org/content/fps-arms-rigged-only) | CC0; about8k triangles,1k texture; FBX/Blend, IK controls and finger curl constraints; based on MakeHuman. Author calls sample animation crude. | Best immediate arm candidate for a trial import. More anatomical mesh than the current low-poly mannequin; still needs medieval sleeves, Unity rig mapping and authored bow/sword finger poses. Not a finished animation pack. |
+| [Blender Studio Human Base Meshes](https://www.blender.org/download/demo-files/) | Official demo bundle lists Human Base Meshes v1.4.1 as CC0. | Preferred geometry starting point for a coherent, less stylized whole-body/first-person model. A base mesh is not a ready dressed game character: rig, materials, LODs and class clothing must be prepared and verified. |
+| [MakeHuman / MPFB](https://www.makehumancommunity.org/about/license.html) | Official license: all core graphical assets CC0. [Export FAQ](https://download.makehumancommunity.org/makehuman/faq/can_i_sell_models_created_with_makehuman.html) confirms exports may be modified and used commercially. | Practical alternative for creating consistent realistic proportions for both classes. Use core assets; community clothing may have separate licenses. Needs outfit creation, optimization and animation retargeting. |
+| [Universal Base Characters](https://quaternius.com/packs/universalbasecharacters) + [Fantasy Outfits](https://quaternius.com/packs/modularcharacteroutfitsfantasy.html) | CC0, Humanoid, compatible with existing Universal Animation Library; base models average13k triangles; outfit kit12 outfits/62parts. Standard download is partial; Source is paid. | Lowest integration effort, but still stylized. Do not select automatically when the user specifically wants a less cartoon-like look. |
+
+Recommendation: test para's arms against bow draw/sword guard before importing broadly; for the full characters use one realistic human base and matching hands, then distinct warrior/archer clothing. This avoids mismatched anatomy between first and third person. A downloaded model is not accepted until skinning, grip, extremes of wrist rotation and texture response under the raid lights are reviewed.
+
+Excluded from immediate import: Hayq medieval man is now sold for15USD despite its historical free filename; the inspected Fab knight listing did not expose a definite license/price in its readable page. No purchases, account operations or asset replacements made by this search.

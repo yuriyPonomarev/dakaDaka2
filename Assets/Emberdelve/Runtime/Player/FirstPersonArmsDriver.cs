@@ -200,6 +200,7 @@ namespace Emberdelve.Player
             DestroyHeld(ref _offHand);
             DestroyHeld(ref _guardDirectionMarker);
             _hasWeaponModel = false;
+            _weaponGripsCalibrated = false;
             _hasPresentedPose = false;
             _guardChangedAt = float.NegativeInfinity;
             _mainData = main;
@@ -421,6 +422,8 @@ namespace Emberdelve.Player
         }
 
         private float _bowDraw;
+        private Transform _leftWeaponGrip;
+        private bool _weaponGripsCalibrated;
 
 
         private void LateUpdate()
@@ -502,13 +505,12 @@ namespace Emberdelve.Player
                 _bowDraw = Mathf.MoveTowards(_bowDraw, draw ? 1f : 0f, Time.deltaTime * (draw ? 1f / Mathf.Max(.1f, _mainData.drawTime) : 16f));
                 if (bow != null)
                 {
-                    bow.SetDraw(_bowDraw);
-
-                    SolveArm(_upperL, _lowerL, _handL, gripLeft, bow.transform.position, frame.rotation * GripFromRig, frame.rotation * LeftPole);
-                    SolveArm(_upperR, _lowerR, _handR, gripRight, bow.transform.TransformPoint(bow.Nock), frame.rotation * GripFromRig, frame.rotation * RightPole);
+                    PoseBow(frame, bow, _bowDraw);
                 }
                 return;
             }
+
+            EnsureWeaponGrips();
 
             // Right hand: the rig's pose, the base brought to arm's reach and into the frustum.
             Vector3 handLocal = ClampToView(camera, ViewHand(localBase) + offsetRight);
@@ -537,6 +539,56 @@ namespace Emberdelve.Player
                 // handle throughout the swing instead of preserving the idle wrist rotation.
                 SolveArm(_upperL, _lowerL, _handL, gripLeft, second, gripRight.rotation, frame.rotation * LeftPole);
             }
+        }
+
+        // Handle axis is the knuckle row (little -> index), not an arbitrary world axis
+        // measured from a lantern/shield animation. +Z follows the fingers from the wrist.
+        public static bool CalibrateWeaponGrip(Animator animator, Transform grip, bool left)
+        {
+            if (animator == null || grip == null) return false;
+            var hand = animator.GetBoneTransform(left ? HumanBodyBones.LeftHand : HumanBodyBones.RightHand);
+            var index = animator.GetBoneTransform(left ? HumanBodyBones.LeftIndexProximal : HumanBodyBones.RightIndexProximal);
+            var little = animator.GetBoneTransform(left ? HumanBodyBones.LeftLittleProximal : HumanBodyBones.RightLittleProximal);
+            var middle = animator.GetBoneTransform(left ? HumanBodyBones.LeftMiddleProximal : HumanBodyBones.RightMiddleProximal);
+            var curl = animator.GetBoneTransform(left ? HumanBodyBones.LeftMiddleDistal : HumanBodyBones.RightMiddleDistal);
+            if (hand == null || index == null || little == null || middle == null || curl == null) return false;
+            Vector3 axis = (index.position - little.position).normalized;
+            Vector3 forward = Vector3.ProjectOnPlane(middle.position - hand.position, axis).normalized;
+            if (axis.sqrMagnitude < .5f || forward.sqrMagnitude < .5f) return false;
+            grip.position = Vector3.Lerp(middle.position, curl.position, .5f);
+            grip.rotation = Quaternion.LookRotation(forward, axis);
+            return true;
+        }
+
+        private void EnsureWeaponGrips()
+        {
+            if (_weaponGripsCalibrated || animator == null || _handL == null) return;
+            if (_leftWeaponGrip == null)
+            {
+                _leftWeaponGrip = new GameObject("WeaponGrip_L").transform;
+                _leftWeaponGrip.SetParent(_handL, false);
+                _leftWeaponGrip.localPosition = gripLeft.localPosition;
+                _leftWeaponGrip.localRotation = gripLeft.localRotation;
+            }
+            CalibrateWeaponGrip(animator, gripRight, false);
+            // Roll the palm around a forward sword handle so the forearm enters from the side,
+            // instead of forcing the wrist over the top of the hilt. Bow grips stay upright.
+            if (_mainData != null && !_mainData.IsRanged)
+                gripRight.localRotation *= Quaternion.AngleAxis(90f, Vector3.up);
+            CalibrateWeaponGrip(animator, _leftWeaponGrip, true);
+            _weaponGripsCalibrated = true;
+        }
+
+        public void PoseBow(Transform frame, BowPresentation bow, float draw)
+        {
+            if (!ResolveBones() || frame == null || bow == null) return;
+            EnsureWeaponGrips();
+            bow.SetDraw(draw);
+            // Bow handle and string are vertical; the sword's +90-degree mapping is wrong here.
+            SolveArm(_upperL, _lowerL, _handL, _leftWeaponGrip, bow.transform.position,
+                bow.transform.rotation, frame.rotation * LeftPole);
+            SolveArm(_upperR, _lowerR, _handR, gripRight, bow.transform.TransformPoint(bow.Nock),
+                bow.transform.rotation, frame.rotation * RightPole);
         }
 
         /// <summary>
