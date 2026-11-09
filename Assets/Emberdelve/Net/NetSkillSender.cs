@@ -101,8 +101,9 @@ namespace Emberdelve.Net
             if (!_useRealInput || _rig == null || _rig.Input == null) return;
             var inventory = GetComponent<NetInventoryClient>();
             if (inventory != null && inventory.IsOpen) return;
-            if (_rig.Input.Skill1Pressed) TryRequest(0);
-            if (_rig.Input.Skill2Pressed) TryRequest(1);
+            var skills = _rig.GetComponent<SkillCaster>();
+            int requested = skills != null ? skills.PollSkillInput() : -1;
+            if (requested >= 0) TryRequest(requested);
         }
 
         /// <summary>One key press: throttled on the client, then one reliable request with the next sequence number. False when it was not sent.</summary>

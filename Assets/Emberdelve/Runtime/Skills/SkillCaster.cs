@@ -192,6 +192,7 @@ namespace Emberdelve.Skills
                 }
             }
 
+            int requested = PollSkillInput();
             if (rig.IsDead) return;
 
             // U3B2: a client-only process sends its skill key presses to the server instead (NetSkillSender); it must not cast here too.
@@ -200,8 +201,62 @@ namespace Emberdelve.Skills
             EmberdelveInput input = rig.Input;
             if (input == null) return;
 
-            if (input.Skill1Pressed) TryCastSlot(0);
-            if (input.Skill2Pressed) TryCastSlot(1);
+            if (requested >= 0) TryCastSlot(requested);
+        }
+
+        private int _inputFrame = -1, _inputRequest = -1;
+        private int _preparedSlot = -1;
+        private bool _specialHeld;
+        private WeaponData _preparedWeapon;
+        public int PreparedSlot => _preparedSlot;
+        public bool SuppressPrimary { get; private set; }
+
+        // Shared once-per-frame decision: ordinary ranged input and skill input cannot both fire.
+        public int PollSkillInput()
+        {
+            if (_inputFrame == Time.frameCount) return _inputRequest;
+            _inputFrame = Time.frameCount;
+            _inputRequest = -1;
+            SuppressPrimary = false;
+            var input = rig != null ? rig.Input : null;
+            var weapon = rig != null ? rig.ActiveWeapon : null;
+            if (input == null || !input.GameplayInputEnabled || InventoryInputFocus.OwnsEscape || rig.IsDead || input.SwapPressed ||
+                (_preparedSlot >= 0 && weapon != _preparedWeapon))
+            { _preparedSlot = -1; _specialHeld = false; return -1; }
+            if (_specialHeld)
+            {
+                SuppressPrimary = true;
+                if (!input.PrimaryHeld) _specialHeld = false;
+                return -1;
+            }
+            int pressed = input.Skill1Pressed ? 0 : input.Skill2Pressed ? 1 : -1;
+            if (pressed >= 0)
+            {
+                var skill = ActiveSkill(pressed);
+                // Client replicas carry class presentation data, not an authoritative skill kit.
+                var classData = loadout != null ? loadout.AppliedClass : null;
+                if (skill == null && classData != null && classData.activeSkills != null && pressed < classData.activeSkills.Length)
+                    skill = classData.activeSkills[pressed];
+                if (skill == null) return -1;
+                if (skill != null && skill.IsProjectileSkill && weapon != null && weapon.IsRanged)
+                {
+                    // Finish the ordinary draw before changing its meaning; never orphan a server draw timer.
+                    if (input.PrimaryHeld || input.PrimaryReleased) return -1;
+                    _preparedSlot = _preparedSlot == pressed ? -1 : pressed;
+                    _preparedWeapon = weapon;
+                    rig.GetComponent<RangedCombat>()?.CancelDraw();
+                    GameEvents.RaiseToast(OwnerId, _preparedSlot >= 0 ? skill.displayName + " ready: left click to fire" : "Special shot cancelled");
+                }
+                else { _preparedSlot = -1; _inputRequest = pressed; }
+            }
+            SuppressPrimary = _preparedSlot >= 0;
+            if (_preparedSlot >= 0 && input.PrimaryPressed)
+            {
+                _specialHeld = true;
+                _inputRequest = _preparedSlot;
+                _preparedSlot = -1;
+            }
+            return _inputRequest;
         }
 
         public bool IsReady(int slot) => slot >= 0 && slot < ActiveSlotCapacity && _cooldownRemaining[slot] <= 0f;

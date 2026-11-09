@@ -730,7 +730,7 @@ namespace Emberdelve.Player
             _arms.gameObject.SetActive(dressed);
             if (dressed)
             {
-                if (_visual != null) _visual.HideBlockoutRenderers();
+                if (_visual != null && weapon.weaponId != "hollow_bow") _visual.HideBlockoutRenderers();
                 _arms.SetBlock(_rig != null && _rig.IsGuarding);
             }
         }

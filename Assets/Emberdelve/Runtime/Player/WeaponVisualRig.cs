@@ -322,6 +322,8 @@ namespace Emberdelve.Player
         {
             if (!_isRanged) return;
             float p = Mathf.Clamp01(progress);
+            var bow = GetComponentInChildren<BowPresentation>();
+            if (bow != null) bow.SetDraw(p);
 
             if (_arrow != null)
             {
@@ -354,7 +356,7 @@ namespace Emberdelve.Player
 
             GameObject root = new GameObject(ranged ? "Weapon_Bow_Blockout" : "Weapon_Sword_Blockout");
             root.transform.SetParent(parent, false);
-            root.transform.localPosition = ranged ? new Vector3(0.20f, -0.17f, 0.30f) : GuardBladePose.RootRestPosition;
+            root.transform.localPosition = ranged ? (weapon.weaponId == "hollow_bow" ? new Vector3(-.18f, -.13f, .75f) : new Vector3(.20f, -.17f, .30f)) : GuardBladePose.RootRestPosition;
             root.transform.localRotation = ranged ? Quaternion.Euler(0f, -8f, 0f) : GuardBladePose.RootRestRotation;
             if (ignoreLayer >= 0) root.layer = ignoreLayer;
 
@@ -379,14 +381,8 @@ namespace Emberdelve.Player
                 }
                 else
                 {
-                    BuildPart(root.transform, "Bow_Riser", new Vector3(0f, 0f, 0f), new Vector3(0.05f, 0.20f, 0.07f), Quaternion.identity, weapon.gripMaterial);
-                    BuildPart(root.transform, "Bow_Limb_Upper_Inner", new Vector3(0f, 0.13f, 0.04f), new Vector3(0.035f, 0.19f, 0.045f), Quaternion.Euler(12f, 0f, 0f), weapon.shaftMaterial);
-                    BuildPart(root.transform, "Bow_Limb_Upper_Tip", new Vector3(0f, 0.27f, 0.07f), new Vector3(0.022f, 0.15f, 0.035f), Quaternion.Euler(34f, 0f, 0f), weapon.shaftMaterial);
-                    BuildPart(root.transform, "Bow_Limb_Lower_Inner", new Vector3(0f, -0.13f, 0.04f), new Vector3(0.035f, 0.19f, 0.045f), Quaternion.Euler(-12f, 0f, 0f), weapon.shaftMaterial);
-                    BuildPart(root.transform, "Bow_Limb_Lower_Tip", new Vector3(0f, -0.27f, 0.07f), new Vector3(0.022f, 0.15f, 0.035f), Quaternion.Euler(-34f, 0f, 0f), weapon.shaftMaterial);
-                    bowString = BuildPart(root.transform, "Bow_String", new Vector3(0f, 0f, -0.02f), new Vector3(0.012f, 0.52f, 0.012f), Quaternion.identity, weapon.edgeMaterial);
-                    arrow = BuildPart(root.transform, "Bow_Arrow", new Vector3(0f, 0f, 0.12f), new Vector3(0.025f, 0.025f, 0.62f), Quaternion.identity, weapon.shaftMaterial);
-                    muzzle = BuildPart(root.transform, "Bow_Muzzle", new Vector3(0f, 0f, 0.30f), new Vector3(0.001f, 0.001f, 0.001f), Quaternion.identity, null);
+                    BowPresentation.Build(root.transform, weapon);
+                    muzzle = BuildPart(root.transform, "Bow_Muzzle", new Vector3(0f, 0f, .30f), Vector3.one * .001f, Quaternion.identity, null);
                 }
             }
             else

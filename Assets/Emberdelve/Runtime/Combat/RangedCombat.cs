@@ -145,6 +145,10 @@ namespace Emberdelve.Combat
                 return;
             }
 
+            var skills = rig.GetComponent<Emberdelve.Skills.SkillCaster>();
+            if (skills != null) skills.PollSkillInput();
+            if (skills != null && skills.SuppressPrimary) { CancelDraw(); return; }
+
             if (_drawing && _drawWeapon != _weapon) CancelDraw();
 
             float dt = Time.deltaTime;

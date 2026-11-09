@@ -229,7 +229,7 @@ namespace Emberdelve.Player
 
             UpdateGuardDirectionMarker();
             ApplyBlockClip(_offHand != null);
-            return _hasWeaponModel;
+            return _hasWeaponModel || (main != null && main.weaponId == "hollow_bow");
         }
 
         /// <summary>The length of the damage segment of the weapon's first melee pattern (what the Sweep_Edge bar used to show).</summary>
@@ -420,6 +420,9 @@ namespace Emberdelve.Player
             animator.SetFloat(WalkPlaybackParameter, Mathf.Clamp(_speed / WalkReferenceSpeed, 0.6f, 1.8f));
         }
 
+        private float _bowDraw;
+
+
         private void LateUpdate()
         {
             if (_camera == null) return;
@@ -488,6 +491,24 @@ namespace Emberdelve.Player
             model.localScale = Vector3.one * ModelScale;
             Vector3 mid = (_upperR.position + _upperL.position) * 0.5f;
             model.position += frame.TransformPoint(ShoulderCenter) - mid;
+
+            if (_mainData != null && _mainData.weaponId == "hollow_bow" && _visual != null)
+            {
+                var bow = _visual.GetComponentInChildren<BowPresentation>();
+                var skills = _rig != null ? _rig.GetComponent<Emberdelve.Skills.SkillCaster>() : null;
+                bool prepared = skills != null && skills.PreparedSlot >= 0;
+                bool held = _rig != null && _rig.Input != null && _rig.Input.PrimaryHeld && !(skills != null && skills.SuppressPrimary);
+                bool draw = !InventoryInputFocus.OwnsEscape && _rig != null && !_rig.IsDead && _rig.Input != null && _rig.Input.GameplayInputEnabled && (prepared || held);
+                _bowDraw = Mathf.MoveTowards(_bowDraw, draw ? 1f : 0f, Time.deltaTime * (draw ? 1f / Mathf.Max(.1f, _mainData.drawTime) : 16f));
+                if (bow != null)
+                {
+                    bow.SetDraw(_bowDraw);
+
+                    SolveArm(_upperL, _lowerL, _handL, gripLeft, bow.transform.position, frame.rotation * GripFromRig, frame.rotation * LeftPole);
+                    SolveArm(_upperR, _lowerR, _handR, gripRight, bow.transform.TransformPoint(bow.Nock), frame.rotation * GripFromRig, frame.rotation * RightPole);
+                }
+                return;
+            }
 
             // Right hand: the rig's pose, the base brought to arm's reach and into the frustum.
             Vector3 handLocal = ClampToView(camera, ViewHand(localBase) + offsetRight);

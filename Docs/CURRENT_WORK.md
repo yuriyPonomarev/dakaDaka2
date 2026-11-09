@@ -3,19 +3,23 @@
 Updated 9 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest accepted slice: ballistic and recoverable ammunition
+## Latest accepted slice: bow, first-person hands and prepared archer shots
 
-Bow and crossbow use shared9.81m/s2 gravity with42/54m/s launch speeds; faster bolts have a flatter trajectory. Paid player shots produce one recoverable arrow/bolt on the floor near terminal impact. Server-owned pickup puts it in the bag; right-click with the matching ranged weapon selected adds one reserve round, then R reloads. Wrong weapon/full reserve preserves the item. Protocol9 requires matching builds.
+Curved recurve limbs, leather grip, anchored V-shaped string and nocked arrow replace the bow blockout. Existing human arms now hold the bow with the left hand and pull the string with the right; limbs flex and the string returns on release.
 
-Evidence: Tasks/RECOVERABLE_AMMO_20261109.md. RecoveredAmmoTests3/3; ProjectileSim109/0, ProjectileBlock51/0, NetCombat312/0, NetSkill127/0, NetInventory148/0 PASS. Two-window seed11 review confirmed client arrow and host bolt pickup/use; repeated pickup did not duplicate the bolt. Playable: Builds/Playable/20261109-143435-327/EmberdelveNet.exe. Review windows closed. Main Editor untouched.
+F/G selects Multi-shot/Piercing Shot, then left mouse press fires. Selection spends nothing; server applies costs/cooldown on fire. Repeat the selected key to cancel, choose the other to replace; inventory, death and weapon swap cancel. Ordinary arrows keep hold/release. Shared input suppression prevents an extra ordinary arrow during a skill click/hold. Client first click uses replicated weapon type instead of probing the server with WrongWeapon.
+
+Evidence: Tasks/BOW_DRAW_20261109.md. Hands92/0, Visual207/0, NetSkill127/0, NetCombat312/0 passed before the documented input/presentation refinements; final refinements compiled and were verified through actual input in two windows. Zero requests before skill click, exact3/1 projectile counts, held-click suppression, first ordinary shot and inventory/swap cancellation confirmed. Seed11/protocol9. Final build: Builds/Playable/20261109-162234-464/EmberdelveNet.exe. Windows closed; main Editor untouched.
 
 ## Next steps and limits
 
-1. User play review of trajectory and ammo loop. Floor recovery is not embedding in bodies/walls; void shots are lost. Recovery stops at224 live pickups to preserve snapshot headroom.
-2. Existing impact effect briefly appears magenta on client; repair its material in a focused presentation pass. Ranged weapon blockouts/draw/reload appearance remains unchanged.
-3. Class apparel remains fixed, low-poly and human-proportioned. Equipment-driven apparel/cloth/facial animation are separate work. Avoid unrelated test reruns.
+1. User review of bow/hand silhouette and controls. This slice animates first-person draw and shares the new bow mesh; third-person draw-state replication is separate work.
+2. Existing brief magenta client impact effect needs a focused material fix. Crossbow model/reload appearance unchanged.
+3. Recovered ammunition remains server-owned floor loot: E to bag, right-click with matching weapon to replenish reserve, R reload. Class apparel remains fixed and low-poly; no unrelated full test reruns.
 
 ## Previous accepted work
+
+- Ballistics/recovery35cc8833: shared gravity, typed recoverable ammunition; Tasks/RECOVERABLE_AMMO_20261109.md.
 
 - Grim class models b9eb52ed: human rig, distinct fitted warrior/archer outfits; Tasks/GRIM_PLAYERS_20261109.md.
 
