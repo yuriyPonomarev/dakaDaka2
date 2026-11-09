@@ -3,7 +3,13 @@
 Updated 9 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest accepted milestone: LOOT-01 paired inventory and loot
+## Latest accepted slice: LOOT-01 inventory reference layout
+
+Follow-up requested by user: taller paired weapon slots, central large torso/legs, smaller jewelry, empty-slot etchings, metallic corners/dividers and less text over items. Own and fallen-player panels share geometry.
+
+Evidence: Tasks/INVENTORY_ART_20261109.md; final build PASS, real host/client chest transfer, corpse worn-slot transfer, own unequip and Escape closure. Cosmetic-only: no repeated network suites.
+
+## Accepted milestone: LOOT-01 paired inventory and loot
 
 Task/evidence: Tasks/LOOT_UI_20261109.md. User authorized own inventory left, container right, dead player loadout in the same layout as own.
 

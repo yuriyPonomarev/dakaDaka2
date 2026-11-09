@@ -1148,7 +1148,7 @@ namespace Emberdelve.UI
             _panel = UiFactory.CreatePanel(_root, "SatchelPanel", PanelColor);
             _panel.sizeDelta = new Vector2(PanelWidth, PanelHeight);
             _panel.anchoredPosition = new Vector2(PanelCenterX, PanelCenterY);
-            LootPanelStyle.Frame(_panel.GetComponent<Image>(), LootPanelStyle.Gold);
+            LootPanelStyle.Panel(_panel.GetComponent<Image>());
 
             _gridGroup = UiFactory.CreateGroup(_root, "GridGroup");
             _equipGroup = UiFactory.CreateGroup(_root, "EquipGroup");
@@ -1448,17 +1448,12 @@ namespace Emberdelve.UI
                     new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
 
                 LootPanelStyle.Decorate(slotImage, worn, _equipment != null ? _equipment.EquippedInstance(kind) : null, false);
+                if (worn == null) LootPanelStyle.EmptySlot(slotImage, kind);
                 _equipImages.Add(slotImage);
                 _equipRects.Add(slotImage.rectTransform);
                 _equipSlots.Add(kind);
 
-                Text label = UiFactory.CreateText(_equipGroup.transform, "EquipLabel_" + kind,
-                    ItemTooltip.SlotLabel(kind), 10, DimColor, TextAnchor.MiddleCenter);
-                label.raycastTarget = false;
-                label.rectTransform.sizeDelta = new Vector2(86f, 16f);
-                label.rectTransform.anchoredPosition = center - equipCenter + new Vector2(0f, -LootPanelStyle.SlotSize(kind).y * .5f - 9f);
 
-                _equipLabels.Add(label);
             }
 
             if (_headerLabel != null)

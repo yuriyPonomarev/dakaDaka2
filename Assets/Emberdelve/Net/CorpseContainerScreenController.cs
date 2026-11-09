@@ -277,7 +277,7 @@ namespace Emberdelve.Net
             _panel.sizeDelta = new Vector2(LootPanelStyle.Width, LootPanelStyle.Height);
             _panel.anchoredPosition = new Vector2(270, 0);
             var background = _panel.gameObject.AddComponent<UnityEngine.UI.Image>();
-            background.color = PanelColor; LootPanelStyle.Frame(background, LootPanelStyle.Gold);
+            LootPanelStyle.Panel(background);
             _header = Label(_panel, "Header", "LOOT", 22, new Vector2(0, 297), new Vector2(440, 32));
             _header.color = new Color(.89f, .77f, .51f);
             _status = Label(_panel, "Status", "", 14, new Vector2(0, -233), new Vector2(475, 58));
@@ -375,7 +375,7 @@ namespace Emberdelve.Net
                     var slot = (EquipmentSlot)i;
                     var frame = UiFactory.CreateImage(_contents, "Equip_"+slot, LootPanelStyle.Ink, LootPanelStyle.SlotSize(slot), LootPanelStyle.SlotPosition(slot),new Vector2(.5f,.5f),new Vector2(.5f,.5f));
                     LootPanelStyle.Decorate(frame,null);
-                    Label(_contents,"EquipLabel_"+slot,ItemTooltip.SlotLabel(slot),10,LootPanelStyle.SlotPosition(slot)+new Vector2(0,-LootPanelStyle.SlotSize(slot).y*.5f-9),new Vector2(86,16));
+                    LootPanelStyle.EmptySlot(frame,slot);
                 }
             for (int y = 0; y < 4; y++) for (int x = 0; x < width; x++)
                 UiFactory.CreateImage(_contents,"Cell_"+x+"_"+y,new Color(.13f,.12f,.11f),new Vector2(cell,cell),new Vector2(-width*step*.5f+x*step+cell*.5f,top-y*step-cell*.5f),new Vector2(.5f,.5f),new Vector2(.5f,.5f));

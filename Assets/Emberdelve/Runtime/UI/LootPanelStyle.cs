@@ -18,25 +18,71 @@ namespace Emberdelve.UI
         {
             switch (slot)
             {
-                case EquipmentSlot.Head: return new Vector2(0, 222);
-                case EquipmentSlot.Chest: return new Vector2(0, 144);
-                case EquipmentSlot.Legs: return new Vector2(0, 66);
-                case EquipmentSlot.Hands: return new Vector2(-83, 144);
-                case EquipmentSlot.Back: return new Vector2(83, 144);
-                case EquipmentSlot.Feet: return new Vector2(83, 66);
-                case EquipmentSlot.Necklace: return new Vector2(83, 222);
-                case EquipmentSlot.RingLeft: return new Vector2(-83, 222);
-                case EquipmentSlot.RingRight: return new Vector2(-83, 66);
-                case EquipmentSlot.Weapon: return new Vector2(-182, 205);
-                case EquipmentSlot.OffHand: return new Vector2(-182, 112);
-                case EquipmentSlot.AltWeapon: return new Vector2(182, 205);
-                default: return new Vector2(182, 112);
+                case EquipmentSlot.Head: return new Vector2(0, 237);
+                case EquipmentSlot.Chest: return new Vector2(0, 159);
+                case EquipmentSlot.Legs: return new Vector2(0, 67);
+                case EquipmentSlot.Hands: return new Vector2(-88, 126);
+                case EquipmentSlot.Back: return new Vector2(88, 126);
+                case EquipmentSlot.Feet: return new Vector2(88, 54);
+                case EquipmentSlot.Necklace: return new Vector2(79, 219);
+                case EquipmentSlot.RingLeft: return new Vector2(-88, 65);
+                case EquipmentSlot.RingRight: return new Vector2(88, 185);
+                case EquipmentSlot.Weapon: return new Vector2(-215, 206);
+                case EquipmentSlot.OffHand: return new Vector2(-161, 206);
+                case EquipmentSlot.AltWeapon: return new Vector2(161, 206);
+                default: return new Vector2(215, 206);
             }
         }
 
-        public static Vector2 SlotSize(EquipmentSlot slot) =>
-            slot == EquipmentSlot.Weapon || slot == EquipmentSlot.OffHand || slot == EquipmentSlot.AltWeapon || slot == EquipmentSlot.AltOffHand
-                ? new Vector2(62, 76) : new Vector2(60, 60);
+        public static Vector2 SlotSize(EquipmentSlot slot)
+        {
+            switch (slot)
+            {
+                case EquipmentSlot.Weapon: case EquipmentSlot.OffHand:
+                case EquipmentSlot.AltWeapon: case EquipmentSlot.AltOffHand: return new Vector2(50, 128);
+                case EquipmentSlot.Chest: return new Vector2(80, 92);
+                case EquipmentSlot.Legs: return new Vector2(72, 82);
+                case EquipmentSlot.Necklace: case EquipmentSlot.RingLeft: case EquipmentSlot.RingRight: return new Vector2(34, 34);
+                default: return new Vector2(60, 60);
+            }
+        }
+
+        // Fixed decorative children stay behind the interactive content. No extra canvases or input targets.
+        public static void Panel(Image panel)
+        {
+            panel.color = new Color(.065f, .066f, .063f);
+            Frame(panel, new Color(.48f, .47f, .42f));
+            for (int i = 0; i < 4; i++)
+            {
+                float y = i < 2 ? Height / 2 - 5 : -Height / 2 + 5;
+                float x = (i % 2 == 0 ? -1 : 1) * (Width / 2 - 5);
+                var corner = UiFactory.CreateImage(panel.transform, "SteelCorner", new Color(.55f,.54f,.49f),
+                    new Vector2(9,9), new Vector2(x,y), Vector2.one*.5f, Vector2.one*.5f);
+                corner.raycastTarget = false; corner.rectTransform.localRotation = Quaternion.Euler(0,0,45);
+            }
+            foreach (float y in new[] { 282f, 17f, -192f })
+            {
+                var line = UiFactory.CreateImage(panel.transform, "EngravedDivider", new Color(.26f,.25f,.21f),
+                    new Vector2(Width-30,1), new Vector2(0,y), Vector2.one*.5f, Vector2.one*.5f);
+                line.raycastTarget = false;
+            }
+            for (int i = -5; i <= 5; i++)
+            {
+                var line = UiFactory.CreateImage(panel.transform,"EtchedRays",new Color(.12f,.12f,.105f,.45f),
+                    new Vector2(1,230),new Vector2(i*19,150),Vector2.one*.5f,Vector2.one*.5f);
+                line.rectTransform.localRotation=Quaternion.Euler(0,0,i*-8);
+                line.raycastTarget=false;
+            }
+        }
+
+        public static void EmptySlot(Image image, EquipmentSlot slot)
+        {
+            image.color = new Color(.035f,.036f,.034f,.95f);
+            var ghost = UiFactory.CreateImage(image.transform,"SlotEtching",new Color(.25f,.25f,.22f,.4f),
+                SlotSize(slot)*.6f,Vector2.zero,Vector2.one*.5f,Vector2.one*.5f);
+            ghost.sprite = IconForKey(slot == EquipmentSlot.AltWeapon ? "Weapon" : slot == EquipmentSlot.AltOffHand ? "OffHand" : slot.ToString());
+            ghost.preserveAspect=true; ghost.raycastTarget=false;
+        }
 
         public static void Frame(Image image, Color color)
         {
@@ -53,15 +99,11 @@ namespace Emberdelve.UI
             Frame(image, Color.Lerp(Ink, rarity, .65f));
             Image icon = UiFactory.CreateImage(image.transform, "ItemIcon", Color.Lerp(item.iconColor, Color.white, .38f),
                 Vector2.zero, Vector2.zero, new Vector2(.5f, .5f), new Vector2(.5f, .5f));
-            icon.sprite = Icon(item); icon.preserveAspect = true; icon.raycastTarget = false;
+            icon.sprite = Icon(item); icon.preserveAspect = showName || image.rectTransform.sizeDelta.y < 100f; icon.raycastTarget = false;
             icon.rectTransform.anchorMin = Vector2.zero; icon.rectTransform.anchorMax = Vector2.one;
-            icon.rectTransform.offsetMin = new Vector2(7, 12); icon.rectTransform.offsetMax = new Vector2(-7, -5);
-            if (!showName) return;
-            Text name = UiFactory.CreateText(image.transform, "ItemName", item.displayName, 9, new Color(.88f,.85f,.77f), TextAnchor.LowerCenter);
-            name.raycastTarget = false;
-            name.rectTransform.anchorMin = Vector2.zero; name.rectTransform.anchorMax = Vector2.one;
-            name.rectTransform.offsetMin = new Vector2(2, 2); name.rectTransform.offsetMax = new Vector2(-2, -2);
-            name.horizontalOverflow = HorizontalWrapMode.Wrap; name.verticalOverflow = VerticalWrapMode.Truncate;
+            icon.rectTransform.offsetMin = new Vector2(5, 5); icon.rectTransform.offsetMax = new Vector2(-7, -5);
+            // Item names belong in the tooltip; tiny labels obscure small inventory footprints.
+
         }
 
         // Original small silhouette icons. Cached by equipment family; no per-frame textures or external artwork.
@@ -69,6 +111,11 @@ namespace Emberdelve.UI
         {
             string key = item.IsEquippable ? item.equipSlot.ToString() : item.kind.ToString();
             if (item.grantedWeapon != null && item.grantedWeapon.IsRanged) key = "Crossbow";
+            return IconForKey(key);
+        }
+
+        private static Sprite IconForKey(string key)
+        {
             if (Icons.TryGetValue(key, out Sprite cached) && cached != null) return cached;
             var texture = new Texture2D(64, 96, TextureFormat.RGBA32, false) { name = "LootIcon_" + key, filterMode = FilterMode.Bilinear };
             var pixels = new Color[64 * 96];
@@ -94,7 +141,13 @@ namespace Emberdelve.UI
                     case "AmmoPack": fill = (Mathf.Abs(u-.3f)<.055f || a<.055f || Mathf.Abs(u+.3f)<.055f) && v > -.75f && v < .7f; break;
                     default: fill = a + Mathf.Abs(v) < .85f; break;
                 }
-                if (fill) pixels[y*64+x] = new Color(.65f + .35f*(1f-a), .65f + .35f*(1f-a), .65f + .35f*(1f-a), 1);
+                if (fill)
+                {
+                    float grain = ((x*17+y*29)%13)/130f;
+                    float light = Mathf.Clamp01(.36f + .48f*(1f-a) + .16f*v + grain);
+                    if (key == "Weapon" || key == "Crossbow") light *= u < 0 ? .75f : 1.1f;
+                    pixels[y*64+x] = new Color(light, light*.97f, light*.88f, 1);
+                }
             }
             texture.SetPixels(pixels); texture.Apply(false, true);
             Sprite sprite = Sprite.Create(texture, new Rect(0,0,64,96), new Vector2(.5f,.5f), 100);
