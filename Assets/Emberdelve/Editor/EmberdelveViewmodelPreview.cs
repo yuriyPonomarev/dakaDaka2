@@ -219,6 +219,13 @@ namespace Emberdelve.EditorTools
                 return;
             }
 
+            if (time < 0f)
+            {
+                driver.Pose(camera.transform, camera, Emberdelve.Player.FirstPersonArmsDriver.PatternRest,
+                    Emberdelve.Player.WeaponVisualRig.ReadyRotation, guard, Vector3.zero, Vector3.zero);
+                return;
+            }
+
             Emberdelve.Data.SwingPose pose = pattern == null ? new Emberdelve.Data.SwingPose(Emberdelve.Player.FirstPersonArmsDriver.PatternRest, 12f, -8f, 14f)
                 : (time < 0f ? pattern.RestPose : pattern.Evaluate(time, timing ?? pattern.Timing));
             driver.Pose(camera.transform, camera, pose.Base, pose.LocalRotation, guard, Vector3.zero, Vector3.zero);

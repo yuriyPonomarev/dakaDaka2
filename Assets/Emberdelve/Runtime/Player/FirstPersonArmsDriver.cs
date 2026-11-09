@@ -454,7 +454,7 @@ namespace Emberdelve.Player
             // The right hand follows the weapon rig (its pose is the true swing / guard pose); the guard raises the shield.
             Transform frame = _frame != null ? _frame : view;
             Vector3 localBase = PatternRest;
-            Quaternion localRotation = Quaternion.Euler(-8f, 12f, 14f);
+            Quaternion localRotation = WeaponVisualRig.ReadyRotation;
             if (_visual != null)
             {
                 localBase = frame.InverseTransformPoint(_visual.transform.position);

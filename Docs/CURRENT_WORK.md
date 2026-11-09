@@ -3,7 +3,11 @@
 Updated 9 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest completed: MAP-02 moonlit open ruins
+## Latest completed: upright sword ready pose
+
+Sword idle grip now points upward,35 degrees from vertical toward screen centre (previously almost horizontal). Viewmodel rig, fallback hands and preview share ReadyRotation; authored guard collision and active swing paths unchanged. Hands92/0, Visual207/0 and build PASS in Logs/runs/20261109-174832-380; WeaponViewModelTests34/0 in Logs/runs/sword-ready-editmode. Live seed11/protocol10: ready pose, real LMB swing, RMB guard and upright return verified in Logs/acceptance/20261109-sword-ready. Windows closed. Build Builds/Playable/20261109-174832-380/EmberdelveNet.exe. Three source files only; broad planner70 gates narrowed to visual/hand checks because combat authority and map did not change.
+
+## Previous completed: MAP-02 moonlit open ruins
 
 Mostly open sky (Vault retains roof), moon/stars and cool directional light; saved room terraces at1.8/3.6m with broad stairs; tombs/arches/columns/props and breakable barrels. Undead lies fallen until aggro, rises before attacking. Height-aware navigation follows stairs and prevents attacks from directly below a terrace. Barrel destruction is server-owned and replicated to late joiners. Protocol10.
 

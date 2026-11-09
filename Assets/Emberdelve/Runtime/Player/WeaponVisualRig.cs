@@ -19,6 +19,9 @@ namespace Emberdelve.Player
     /// </summary>
     public sealed class WeaponVisualRig : MonoBehaviour
     {
+        // Upright relaxed grip: blade leans 35 degrees from vertical toward the view centre.
+        public static readonly Quaternion ReadyRotation = Quaternion.Euler(-55f, -60f, 0f);
+
         private Transform _muzzle;
         private Transform _arrow;
         private Transform _string;
@@ -164,7 +167,7 @@ namespace Emberdelve.Player
             }
 
             transform.localPosition = GuardBladePose.RootRestPosition;
-            transform.localRotation = GuardBladePose.RootRestRotation;
+            transform.localRotation = ReadyRotation;
             ApplyBlockImpactOffset();
         }
 
@@ -357,7 +360,7 @@ namespace Emberdelve.Player
             GameObject root = new GameObject(ranged ? "Weapon_Bow_Blockout" : "Weapon_Sword_Blockout");
             root.transform.SetParent(parent, false);
             root.transform.localPosition = ranged ? (weapon.weaponId == "hollow_bow" ? new Vector3(-.18f, -.13f, .75f) : new Vector3(.20f, -.17f, .30f)) : GuardBladePose.RootRestPosition;
-            root.transform.localRotation = ranged ? Quaternion.Euler(0f, -8f, 0f) : GuardBladePose.RootRestRotation;
+            root.transform.localRotation = ranged ? Quaternion.Euler(0f, -8f, 0f) : WeaponVisualRig.ReadyRotation;
             if (ignoreLayer >= 0) root.layer = ignoreLayer;
 
             Transform muzzle;
