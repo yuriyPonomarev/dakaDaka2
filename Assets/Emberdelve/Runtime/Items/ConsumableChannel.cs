@@ -120,6 +120,9 @@ namespace Emberdelve.Items
                 return false;
             }
 
+            if (Rig.Inventory == null || Rig.Inventory.HeldStackId != slot.StackId)
+            { reason = "take that item in hand before using it"; return false; }
+
             if (IsChanneling)
             {
                 reason = "already drinking " + _item.displayName;
@@ -228,7 +231,7 @@ namespace Emberdelve.Items
                 return;
             }
 
-            if (rig.Input != null && rig.Input.PrimaryPressed)
+            if (rig.Inventory == null || rig.Inventory.HeldStackId != _stackId)
             {
                 Cancel("attacking");
                 return;
@@ -259,7 +262,7 @@ namespace Emberdelve.Items
             PlayerRig rig = Rig;
             Inventory inventory = rig != null ? rig.Inventory : null;
             HealthComponent health = rig != null ? rig.Health : null;
-            if (inventory == null || health == null || health.IsDead) return;
+            if (inventory == null || health == null || health.IsDead || inventory.HeldStackId != stackId) return;
 
             if (health.CurrentHealth >= health.MaxHealth)
             {

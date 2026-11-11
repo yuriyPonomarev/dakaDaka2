@@ -32,6 +32,7 @@ namespace Emberdelve.Player
         private FirstPersonArmsDriver _arms;
         private WeaponViewModelSet _viewModels;
         private bool _armsPending;
+        private ItemData _shownUtility;
         private CharacterClassData _appliedClass;
         private PlayerRig _rig;
 
@@ -206,6 +207,8 @@ namespace Emberdelve.Player
 
         private void Update()
         {
+            var held = _rig != null && _rig.Inventory != null ? _rig.Inventory.HeldItem : null;
+            if (held != _shownUtility) SyncArms(ActiveWeapon);
             if (_armsPending && Application.isPlaying) SyncArms(ActiveWeapon);
             if (_rig == null || _rig.IsDead) return;
             if (Emberdelve.Core.NetRole.IsClientOnly) return; // U3B3: a network client asks the server to swap (NetCombatSender); it never swaps locally
@@ -726,8 +729,23 @@ namespace Emberdelve.Player
                 _armsPending = _arms == null && _viewModels != null && _viewModels.armsPrefab != null && weapon != null;
             }
 
-            if (_arms == null) return;
+            if (_arms == null)
+            {
+                _shownUtility = _rig != null && _rig.Inventory != null ? _rig.Inventory.HeldItem : null;
+                if (_visual != null) _visual.gameObject.SetActive(_shownUtility == null);
+                return;
+            }
             _armsPending = false;
+            _shownUtility = _rig != null && _rig.Inventory != null ? _rig.Inventory.HeldItem : null;
+            if (_visual != null) _visual.gameObject.SetActive(_shownUtility == null);
+            if (_shownUtility != null)
+            {
+                _arms.SetVisual(null);
+                _arms.SetUtility(_shownUtility);
+                _arms.SetBlock(false);
+                _arms.gameObject.SetActive(true);
+                return;
+            }
             bool dressed = weapon != null && (_arms.SetWeapons(weapon, _rig != null ? _rig.OffhandWeapon : null) || weapon.isUnarmed);
             _arms.SetVisual(_visual);
             _arms.gameObject.SetActive(dressed);

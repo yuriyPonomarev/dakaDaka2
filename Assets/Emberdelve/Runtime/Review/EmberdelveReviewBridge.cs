@@ -832,6 +832,13 @@ namespace Emberdelve.Review
                     : string.Empty;
             }
 
+            // Capture held keyboard UI (for example a radial wheel) before releasing.
+            if (!string.IsNullOrWhiteSpace(command.name))
+            {
+                yield return RunSnapshot(command, command.id);
+                yield break;
+            }
+
             bool released = QueueKeyboard(keys, false);
             yield return null; // let the ordinary input update consume the release before answering
             probe.FinishProbe(); // the position the ordinary frames actually left the player at

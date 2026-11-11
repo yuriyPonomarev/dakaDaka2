@@ -40,25 +40,44 @@ namespace Emberdelve.InputLayer
         private InputAction _pauseSystem;
         private readonly InputAction[] _slots = new InputAction[4];
         private bool _ownsActions;
+        private bool _quickWheelCaptured;
+        private int _quickWheelClosedFrame = -1;
+        public bool QuickWheelCaptured
+        {
+            get => _quickWheelCaptured || _quickWheelClosedFrame == Time.frameCount;
+            set { if (_quickWheelCaptured && !value) _quickWheelClosedFrame = Time.frameCount; _quickWheelCaptured = value; }
+        }
+        public Vector2 PointerPosition => Mouse.current != null ? Mouse.current.position.ReadValue() : new Vector2(Screen.width * .5f, Screen.height * .5f);
+        public bool QuickWheelHeld(int group)
+        {
+            var keyboard = Keyboard.current;
+            return keyboard != null && (group == 0 ? keyboard.digit3Key.isPressed : keyboard.digit4Key.isPressed);
+        }
+        public bool QuickWheelPressed(int group)
+        {
+            var keyboard = Keyboard.current;
+            return keyboard != null && (group == 0 ? keyboard.digit3Key.wasPressedThisFrame : keyboard.digit4Key.wasPressedThisFrame);
+        }
+
 
         /// <summary>Test seams (D1b, same idea as the primary overrides): replace the real move / sprint / guard readings while the player map is live. Never set in game code.</summary>
         internal Vector2? MoveOverride { get; set; }
         internal bool? SprintHeldOverride { get; set; }
         internal bool? SecondaryHeldOverride { get; set; }
 
-        public Vector2 Move => MoveOverride.HasValue ? (_playerMap != null && _playerMap.enabled ? MoveOverride.Value : Vector2.zero)
-            : _move != null ? _move.ReadValue<Vector2>() : Vector2.zero;
-        public Vector2 Look => _look != null ? _look.ReadValue<Vector2>() : Vector2.zero;
+        public Vector2 Move => QuickWheelCaptured ? Vector2.zero : (MoveOverride.HasValue ? (_playerMap != null && _playerMap.enabled ? MoveOverride.Value : Vector2.zero)
+            : _move != null ? _move.ReadValue<Vector2>() : Vector2.zero);
+        public Vector2 Look => QuickWheelCaptured ? Vector2.zero : (_look != null ? _look.ReadValue<Vector2>() : Vector2.zero);
         /// <summary>U3A2 test seams (same idea as the other overrides): replace the jump / crouch edge for the frame they are held. Never set in game code.</summary>
         internal bool? JumpPressedOverride { get; set; }
         internal bool? CrouchPressedOverride { get; set; }
 
-        public bool JumpPressed => JumpPressedOverride.HasValue ? JumpPressedOverride.Value && OverrideLive
-            : _jump != null && _jump.WasPressedThisFrame();
-        public bool SprintHeld => SprintHeldOverride.HasValue ? SprintHeldOverride.Value && _playerMap != null && _playerMap.enabled
-            : _sprint != null && _sprint.IsPressed();
-        public bool CrouchPressed => CrouchPressedOverride.HasValue ? CrouchPressedOverride.Value && OverrideLive
-            : _crouch != null && _crouch.WasPressedThisFrame();
+        public bool JumpPressed => !QuickWheelCaptured && (JumpPressedOverride.HasValue ? JumpPressedOverride.Value && OverrideLive
+            : _jump != null && _jump.WasPressedThisFrame());
+        public bool SprintHeld => !QuickWheelCaptured && (SprintHeldOverride.HasValue ? SprintHeldOverride.Value && _playerMap != null && _playerMap.enabled
+            : _sprint != null && _sprint.IsPressed());
+        public bool CrouchPressed => !QuickWheelCaptured && (CrouchPressedOverride.HasValue ? CrouchPressedOverride.Value && OverrideLive
+            : _crouch != null && _crouch.WasPressedThisFrame());
         /// <summary>
         /// Test seam for batch-mode harnesses that have no pointer device (the same idea as
         /// <see cref="InteractHeldOverride"/>): when set, each replaces the real primary-attack reading for the
@@ -76,35 +95,35 @@ namespace Emberdelve.InputLayer
 
         private bool OverrideLive => _playerMap != null && _playerMap.enabled;
 
-        public bool PrimaryPressed => PrimaryPressedOverride.HasValue
+        public bool PrimaryPressed => !QuickWheelCaptured && (PrimaryPressedOverride.HasValue
             ? PrimaryPressedOverride.Value && OverrideLive
-            : _primary != null && _primary.WasPressedThisFrame();
-        public bool PrimaryHeld => PrimaryHeldOverride.HasValue
+            : _primary != null && _primary.WasPressedThisFrame());
+        public bool PrimaryHeld => !QuickWheelCaptured && (PrimaryHeldOverride.HasValue
             ? PrimaryHeldOverride.Value && OverrideLive
-            : _primary != null && _primary.IsPressed();
-        public bool PrimaryReleased => PrimaryReleasedOverride.HasValue
+            : _primary != null && _primary.IsPressed());
+        public bool PrimaryReleased => !QuickWheelCaptured && (PrimaryReleasedOverride.HasValue
             ? PrimaryReleasedOverride.Value && OverrideLive
-            : _primary != null && _primary.WasReleasedThisFrame();
-        public bool SecondaryHeld => SecondaryHeldOverride.HasValue ? SecondaryHeldOverride.Value && _playerMap != null && _playerMap.enabled
-            : _secondary != null && _secondary.IsPressed();
-        public bool SecondaryPressed => _secondary != null && _secondary.WasPressedThisFrame();
-        public bool InteractPressed => _interact != null && _interact.WasPressedThisFrame();
+            : _primary != null && _primary.WasReleasedThisFrame());
+        public bool SecondaryHeld => !QuickWheelCaptured && (SecondaryHeldOverride.HasValue ? SecondaryHeldOverride.Value && _playerMap != null && _playerMap.enabled
+            : _secondary != null && _secondary.IsPressed());
+        public bool SecondaryPressed => !QuickWheelCaptured && (_secondary != null && _secondary.WasPressedThisFrame());
+        public bool InteractPressed => !QuickWheelCaptured && (_interact != null && _interact.WasPressedThisFrame());
         /// <summary>
         /// Test seam for batch-mode harnesses that have no input device: when set, it replaces the real
         /// interact-held reading, but still respects disabled gameplay input. Null (the default) means the real action is read. Never set in game code.
         /// </summary>
         internal bool? InteractHeldOverride { get; set; }
 
-        public bool InteractHeld => InteractHeldOverride.HasValue
+        public bool InteractHeld => !QuickWheelCaptured && (InteractHeldOverride.HasValue
             ? InteractHeldOverride.Value && _playerMap != null && _playerMap.enabled
-            : _interact != null && _interact.IsPressed();
+            : _interact != null && _interact.IsPressed());
         /// <summary>B1 test seams (same idea as the primary overrides): replace the real reload / swap edge for one frame. Never set in game code.</summary>
         internal bool? ReloadPressedOverride { get; set; }
         internal bool? SwapPressedOverride { get; set; }
-        public bool ReloadPressed => ReloadPressedOverride.HasValue ? ReloadPressedOverride.Value && OverrideLive : _reload != null && _reload.WasPressedThisFrame();
-        public bool SwapPressed => SwapPressedOverride.HasValue ? SwapPressedOverride.Value && OverrideLive : _swap != null && _swap.WasPressedThisFrame();
-        public bool Skill1Pressed => _skill1 != null && _skill1.WasPressedThisFrame();
-        public bool Skill2Pressed => _skill2 != null && _skill2.WasPressedThisFrame();
+        public bool ReloadPressed => !QuickWheelCaptured && (ReloadPressedOverride.HasValue ? ReloadPressedOverride.Value && OverrideLive : _reload != null && _reload.WasPressedThisFrame());
+        public bool SwapPressed => !QuickWheelCaptured && (SwapPressedOverride.HasValue ? SwapPressedOverride.Value && OverrideLive : _swap != null && _swap.WasPressedThisFrame());
+        public bool Skill1Pressed => !QuickWheelCaptured && (_skill1 != null && _skill1.WasPressedThisFrame());
+        public bool Skill2Pressed => !QuickWheelCaptured && (_skill2 != null && _skill2.WasPressedThisFrame());
 
         /// <summary>
         /// What the player actually has to press for a skill slot, read from the bindings themselves so the
@@ -113,10 +132,10 @@ namespace Emberdelve.InputLayer
         public string SkillKeyLabel(int slot)
         {
             InputAction action = slot == 0 ? _skill1 : slot == 1 ? _skill2 : null;
-            return KeyLabel(action, slot == 0 ? "F" : "G");
+            return KeyLabel(action, slot == 0 ? "Q" : "E");
         }
 
-        public string InteractKeyLabel => KeyLabel(_interact, "E");
+        public string InteractKeyLabel => KeyLabel(_interact, "F");
 
         private static string KeyLabel(InputAction action, string fallback)
         {
@@ -125,7 +144,7 @@ namespace Emberdelve.InputLayer
             for (int i = 0; i < action.bindings.Count; i++)
             {
                 InputBinding binding = action.bindings[i];
-                if (binding.groups != null && binding.groups.Contains("Keyboard")) return action.GetBindingDisplayString(i);
+                if (binding.path != null && binding.path.StartsWith("<Keyboard>/")) return binding.path.Substring(11).ToUpperInvariant();
             }
 
             return action.GetBindingDisplayString(0);

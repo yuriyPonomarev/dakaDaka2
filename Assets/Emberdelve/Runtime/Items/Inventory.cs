@@ -189,7 +189,7 @@ namespace Emberdelve.Items
             if (NetRole.IsClientOnly) _networkAuthority = authority;
         }
         /// <summary>
-        /// R6c2: the 1-4 hotbar assignments for this bag. Each slot names a runtime StackId, never a list index, so
+        /// R6c2: the six quick-wheel assignments for this bag. Each slot names a runtime StackId, never a list index, so
         /// compaction cannot retarget a key. Cleared by <see cref="Clear"/>, re-seeded by a loadout restore and by
         /// <see cref="GiveStartingItems"/>.
         /// </summary>
@@ -209,6 +209,41 @@ namespace Emberdelve.Items
         private bool _givingStartingKit;
 
         /// <summary>Monotonic revision for the shared bag/equipment loadout owned by this inventory.</summary>
+        private ulong _heldStackId;
+        // Held state is session-only; the stack stays in the bag, with its existing identity.
+        public ulong HeldStackId => _heldStackId != 0 && TryGetStack(_heldStackId, out var stack) &&
+            HotbarBindings.IsUsableDefinition(stack.Item) && (_rig == null || (!_rig.IsDead && _rig.IsInPlay)) ? _heldStackId : 0;
+        public ItemData HeldItem => HeldStackId != 0 && TryGetStack(_heldStackId, out var stack) ? stack.Item : null;
+
+        public bool RequestHoldStack(ulong stackId, out string reason)
+        {
+            reason = "that quick item is no longer in the bag";
+            if (!TryGetStack(stackId, out var slot) || !HotbarBindings.IsUsableDefinition(slot.Item)) return false;
+            var authority = CommandAuthority;
+            if (authority == null) { reason = "inventory authority is unavailable"; return false; }
+            if (!authority.TryCreateLocalCommand(InventoryCommandKind.HoldQuickItem, stackId, 0, Vector2Int.zero,
+                EquipmentSlot.None, slot.Instance != null ? slot.Instance.Uid : Guid.Empty, Guid.Empty, out var command, out reason)) return false;
+            var result = authority.Submit(_rig, command); reason = result.Reason; return result.Accepted;
+        }
+        public bool RequestWeaponSet(int set, out string reason)
+        {
+            var authority = CommandAuthority;
+            if (authority == null) { reason = "inventory authority is unavailable"; return false; }
+            if (!authority.TryCreateLocalCommand(InventoryCommandKind.SelectWeaponSet, 0, 0, new Vector2Int(set, 0),
+                EquipmentSlot.None, Guid.Empty, Guid.Empty, out var command, out reason)) return false;
+            var result = authority.Submit(_rig, command); reason = result.Reason; return result.Accepted;
+        }
+        internal void SetHeldStack(ulong stackId, bool commit = true)
+        {
+            if (_heldStackId == stackId) return;
+            _rig?.GetComponent<ConsumableChannel>()?.Cancel("changed held item");
+            _heldStackId = stackId;
+            if (stackId != 0) _rig?.SetGuardHeld(false);
+            if (commit) CommitRevision();
+            NotifyAuthorityMutation();
+        }
+        internal void ApplyNetworkHeldStack(ulong stackId) { _heldStackId = stackId; }
+
         public ulong Revision { get; private set; }
 
         /// <summary>Checks the shared revision boundary before a caller starts a transaction that may mutate state.</summary>
@@ -467,7 +502,7 @@ namespace Emberdelve.Items
             finally
             {
                 _givingStartingKit = false;
-                // R6c2: the raid loadout has just been (re)established; bind the first usable stacks to keys 1-4
+                // R6c2: the raid loadout has just been (re)established; bind the first usable stacks to the six quick-wheel slots
                 // before observers hear about the bag, so the HUD's refresh already sees the bindings.
                 Hotbar.SeedDefaults();
                 GameEvents.RaiseInventoryChanged(OwnerId);
@@ -1168,6 +1203,7 @@ namespace Emberdelve.Items
         /// </summary>
         internal void ApplyRestore(ValidatedContainer validated)
         {
+            _heldStackId = 0;
             // D3c: the belt is read as item identities while the old stacks still exist, and bound again to the restored stacks below.
             BeltIdentity[] belt = Hotbar.CaptureIdentities();
 
@@ -1201,12 +1237,18 @@ namespace Emberdelve.Items
             if (!Hotbar.RebindFromIdentities(belt)) Hotbar.SeedDefaults();
         }
 
+        internal bool HasNetworkRevision => _hasNetworkRevision;
+
         internal bool CanApplyNetworkRevision(ulong revision) => !_hasNetworkRevision || revision > Revision;
 
         /// <summary>Starts a fresh client connection; its server revision is unrelated to the preceding session.</summary>
         public void BeginNetworkSession()
         {
-            if (NetRole.IsClientOnly) _hasNetworkRevision = false;
+            if (NetRole.IsClientOnly)
+            {
+                _hasNetworkRevision = false;
+                _heldStackId = 0;
+            }
         }
 
         // Caller has validated an exact mapping for every restored stack before any mutation.

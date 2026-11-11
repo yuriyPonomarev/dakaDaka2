@@ -162,6 +162,27 @@ namespace Emberdelve.Tests.Combat
         }
 
         [Test]
+        public void HeldSnapshotPreservesClientQuickWheelAndRejectsMissingHeldIdentity()
+        {
+            var state = NetworkLoadoutState.Capture(_source, _sourceGear);
+            var usable = _source.Slots.First(s => HotbarBindings.IsUsableDefinition(s.Item));
+            NetRole.Set(NetRoleKind.Client);
+            Assert.IsTrue(state.TryApply(_target, _targetGear, out string reason), reason);
+            Assert.IsTrue(_target.Hotbar.TryAssign(5, usable.StackId, out reason), reason);
+            state.Revision++;
+            state.HeldStackId = usable.StackId;
+            Assert.IsTrue(state.TryApply(_target, _targetGear, out reason), reason);
+            Assert.AreEqual(usable.StackId, _target.HeldStackId);
+            Assert.AreSame(usable.Item, _target.HeldItem);
+            Assert.AreEqual(usable.StackId, _target.Hotbar.StackIdAt(5));
+            state.Revision++;
+            state.HeldStackId = ulong.MaxValue;
+            Assert.IsFalse(state.TryApply(_target, _targetGear, out _));
+            Assert.AreEqual(usable.StackId, _target.HeldStackId);
+            Assert.AreEqual(usable.StackId, _target.Hotbar.StackIdAt(5));
+        }
+
+        [Test]
         public void HotbarRebindsToServerStackId()
         {
             var usable = _source.Slots.First(s => HotbarBindings.IsUsableDefinition(s.Item));

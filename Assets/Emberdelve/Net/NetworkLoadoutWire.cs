@@ -8,12 +8,13 @@ namespace Emberdelve.Net
     public struct NetworkLoadoutWire : INetworkSerializable
     {
         public ulong Revision;
+        public ulong HeldStackId;
         public string LoadoutJson;
         public NetworkLoadoutState.StackIdentity[] Stacks;
 
         public static NetworkLoadoutWire FromState(NetworkLoadoutState state) => new NetworkLoadoutWire
         {
-            Revision = state.Revision, LoadoutJson = state.Loadout.ToJson(), Stacks = state.Stacks
+            Revision = state.Revision, HeldStackId = state.HeldStackId, LoadoutJson = state.Loadout.ToJson(), Stacks = state.Stacks
         };
 
         public bool TryToState(out NetworkLoadoutState state, out string reason)
@@ -22,7 +23,7 @@ namespace Emberdelve.Net
             if (Stacks == null || Stacks.Length > ContainerSnapshot.MaxEntries)
             { reason = "invalid stack identity count"; return false; }
             if (!LoadoutSnapshot.TryFromJson(LoadoutJson, out var loadout, out reason)) return false;
-            state = new NetworkLoadoutState { Loadout = loadout, Revision = Revision,
+            state = new NetworkLoadoutState { Loadout = loadout, Revision = Revision, HeldStackId = HeldStackId,
                 Stacks = (NetworkLoadoutState.StackIdentity[])Stacks.Clone() };
             return true;
         }
@@ -30,6 +31,7 @@ namespace Emberdelve.Net
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
             serializer.SerializeValue(ref Revision);
+            serializer.SerializeValue(ref HeldStackId);
             if (serializer.IsWriter && LoadoutJson == null) LoadoutJson = "";
             serializer.SerializeValue(ref LoadoutJson);
             int count = serializer.IsWriter ? (Stacks == null ? 0 : Stacks.Length) : 0;

@@ -175,6 +175,12 @@ namespace Emberdelve.Net
             if (_rig == null || _rig.Input == null) return;
             Emberdelve.InputLayer.EmberdelveInput input = _rig.Input;
 
+            if (_rig.WeaponInputSuppressed)
+            {
+                if (_guardHeld && Enqueue(CombatIntentKind.GuardUp)) _guardHeld = false;
+                _drawHeld = false;
+                return;
+            }
             if (input.SwapPressed) { Enqueue(CombatIntentKind.SwapWeapon); _drawHeld = false; return; }
             // Replicated equipment is already available; do not burn the first click probing WrongWeapon.
             if (_rig.ActiveWeapon != null) _rangedMode = _rig.ActiveWeapon.IsRanged;

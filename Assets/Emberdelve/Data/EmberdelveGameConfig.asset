@@ -15,7 +15,7 @@ MonoBehaviour:
   lobbySceneName: Lobby
   dungeonSceneName: Emberdelve_ModularCrypts
   levelTitle: The Ashen Halls
-  objectiveText: Recover at least one relic, then hold [E] at the Ember Gate.
+  objectiveText: Recover at least one relic, then hold [F] at the Ember Gate.
   requireLootToExtract: 1
   extractionHoldDuration: 3
   enableRaidCountdown: 1

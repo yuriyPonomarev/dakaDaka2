@@ -113,6 +113,7 @@ namespace Emberdelve.Net
             if (!IsSpawned || Rig == null) return;
             var view = Rig.GetComponent<Emberdelve.Player.PlayerAvatar>();
             var pose = AvatarCombat.Value;
+            if (view != null && pose.IsValid) view.PresentUtility(pose.Utility.ToString());
             if (view != null && pose.IsValid)
                 view.PresentCombat(pose.Main.ToString(),pose.Off.ToString(),pose.Pattern.ToString(),pose.Guard,pose.Swing,
                     pose.PresentationElapsed(NetworkManager.ServerTime.Time),new Emberdelve.Data.SwingTiming(pose.Windup,pose.Active,pose.Recovery,0),
@@ -806,7 +807,8 @@ namespace Emberdelve.Net
             DisableBehaviour<RangedCombat>();
             if (ShouldEnableOwnerInteractor(Role)) EnableBehaviour<Interactor>();
             else DisableBehaviour<Interactor>();
-            DisableBehaviour<HotbarController>();
+            if (Role == NetPlayerRole.Owner) EnableBehaviour<HotbarController>();
+            else DisableBehaviour<HotbarController>();
 
             if (Role == NetPlayerRole.Observer) StripPresentation();
             // Owner: camera and listener stay. Input and prediction arrive with the movement stream (U3A4).

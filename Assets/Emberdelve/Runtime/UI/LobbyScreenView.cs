@@ -111,7 +111,7 @@ namespace Emberdelve.UI
 
             Text controls = UiFactory.CreateText(root, "Controls",
                 "WASD move  |  Mouse look  |  Shift sprint  |  Ctrl crouch  |  Space jump\n" +
-                "Left mouse attack / draw  |  Right mouse block (Warrior)  |  E interact (hold for the gate)  |  R reload  |  1-4 use item  |  Esc pause",
+                "Left mouse attack / draw  |  Right mouse block (Warrior)  |  F interact  |  Q/E abilities  |  1/2 weapons  |  Hold 3/4 quick wheels  |  LMB use held item  |  Esc pause",
                 15, new Color(0.62f, 0.6f, 0.55f, 1f), TextAnchor.MiddleCenter);
             UiFactory.SetRect(controls.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
                 new Vector2(1400f, 60f), new Vector2(0f, 34f));

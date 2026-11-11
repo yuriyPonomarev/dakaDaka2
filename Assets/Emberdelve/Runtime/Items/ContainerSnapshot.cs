@@ -79,7 +79,7 @@ namespace Emberdelve.Items
     /// </summary>
     public sealed class ContainerSnapshot
     {
-        public const int CurrentSchemaVersion = 4;
+        public const int CurrentSchemaVersion = 5;
         public const int MinSupportedSchemaVersion = 1;
         /// <summary>Largest number of entries a snapshot may carry (a 12x12 bag cannot exceed 144; this is a hard sanity cap).</summary>
         public const int MaxEntries = 512;
@@ -505,6 +505,7 @@ namespace Emberdelve.Items
             steps[1] = new MigrationStep { VerifyIntegrity = VerifyVersion1Integrity, Upgrade = UpgradeVersion1To2 };
             steps[2] = new MigrationStep { VerifyIntegrity = VerifyVersion2Integrity, Upgrade = UpgradeVersion2To3 };
             steps[3] = new MigrationStep { VerifyIntegrity = VerifyVersion3Integrity, Upgrade = UpgradeVersion3To4 };
+            steps[4] = new MigrationStep { VerifyIntegrity = root => VerifyLegacyIntegrity(root, 4), Upgrade = UpgradeVersion4To5 };
             return steps;
         }
 
@@ -665,7 +666,7 @@ namespace Emberdelve.Items
                     return "a version 3 loadout cannot carry weaponSet or belt: they were added in version 4";
 
                 JsonNode belt = new JsonNode { Type = JsonNode.Kind.Array, Items = new List<JsonNode>() };
-                for (int i = 0; i < LoadoutSnapshot.BeltSlotCount; i++) belt.Items.Add(new JsonNode { Type = JsonNode.Kind.String, Text = "" });
+                for (int i = 0; i < 4; i++) belt.Items.Add(new JsonNode { Type = JsonNode.Kind.String, Text = "" });
                 root.Members.Add(new KeyValuePair<string, JsonNode>("weaponSet", new JsonNode { Type = JsonNode.Kind.Number, Text = "0" }));
                 root.Members.Add(new KeyValuePair<string, JsonNode>("belt", belt));
             }
@@ -673,6 +674,21 @@ namespace Emberdelve.Items
             JsonNode version = Member(root, "schemaVersion");
             if (version == null) return "no schemaVersion to upgrade";
             version.Text = "4";
+            return null;
+        }
+
+        // Schema 5 expands four saved bindings into two wheels of three, preserving old identities.
+        private static string UpgradeVersion4To5(JsonNode root)
+        {
+            JsonNode belt = Member(root, "belt");
+            if (Member(root, "bag") != null || Member(root, "equipment") != null)
+            {
+                if (belt == null || belt.Type != JsonNode.Kind.Array || belt.Items.Count != 4)
+                    return "a version 4 loadout must carry exactly four belt entries";
+                belt.Items.Add(new JsonNode { Type = JsonNode.Kind.String, Text = "" });
+                belt.Items.Add(new JsonNode { Type = JsonNode.Kind.String, Text = "" });
+            }
+            Member(root, "schemaVersion").Text = "5";
             return null;
         }
 

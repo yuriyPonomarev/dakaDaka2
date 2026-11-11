@@ -110,6 +110,7 @@ namespace Emberdelve.EditorTools
     {
         private int _checks, _failures;
         private Keyboard _keyboard, _previousKeyboard;
+        private Mouse _mouse;
         private InputSettings _originalSettings, _temporarySettings;
         private void Check(bool ok, string message)
         {
@@ -175,11 +176,14 @@ namespace Emberdelve.EditorTools
             _keyboard = InputSystem.AddDevice<Keyboard>();
             InputSystem.EnableDevice(_keyboard);
             _keyboard.MakeCurrent();
+            _mouse = InputSystem.AddDevice<Mouse>();
+            InputSystem.EnableDevice(_mouse);
+            _mouse.MakeCurrent();
             Check(_keyboard.enabled, "the owned real-keyboard fixture stays enabled without window focus");
             for (int i = 0; i < 6; i++) yield return null;
             Interactor interactor = rig.GetComponent<Interactor>();
             Check(interactor != null && ReferenceEquals(interactor.CurrentTarget, cache), "ordinary interactor ray resolves the reachable chest");
-            InputSystem.QueueStateEvent(_keyboard, new KeyboardState(Key.E));
+            InputSystem.QueueStateEvent(_keyboard, new KeyboardState(Key.F));
             yield return null; yield return null;
             InputSystem.QueueStateEvent(_keyboard, new KeyboardState());
             yield return null; yield return null;
@@ -200,7 +204,7 @@ namespace Emberdelve.EditorTools
             }
             Check(identities.Count == 3, "all three gear drops have individual identities");
             int units = bag.TotalUnits;
-            InputSystem.QueueStateEvent(_keyboard, new KeyboardState(Key.E));
+            InputSystem.QueueStateEvent(_keyboard, new KeyboardState(Key.F));
             yield return null; yield return null;
             InputSystem.QueueStateEvent(_keyboard, new KeyboardState());
             yield return null;
@@ -218,17 +222,18 @@ namespace Emberdelve.EditorTools
             Check(Mathf.Abs(rig.Movement.ResolveGroundSpeed(false, false) - speed * (flowFactor - 0.01f) / flowFactor) < 0.0001f && rig.CurrentHealth == hp, "the authored 1% base penalty affects actual walking without free healing");
             int tonicIndex = bag.IndexOfItem(tonic);
             ulong tonicStack = bag.Slots[tonicIndex].StackId;
-            Check(bag.Hotbar.TryAssign(0, tonicStack, out reason), "the looted tonic is assigned to belt key 1: " + reason);
+            Check(bag.Hotbar.TryAssign(0, tonicStack, out reason), "the looted tonic is assigned to first quick-wheel slot: " + reason);
             rig.Health.Configure((int)rig.MaxHealth, 0f, 6f);
             rig.Health.SetHealth(rig.MaxHealth - 60f);
+            Check(bag.RequestHoldStack(tonicStack, out reason), "the tonic is taken in hand before drinking: " + reason);
             float low = rig.CurrentHealth;
             ulong revision = bag.Revision;
-            InputSystem.QueueStateEvent(_keyboard, new KeyboardState(Key.Digit1));
+            InputSystem.QueueStateEvent(_mouse, new MouseState { buttons = 1 });
             yield return null; yield return null;
-            InputSystem.QueueStateEvent(_keyboard, new KeyboardState());
+            InputSystem.QueueStateEvent(_mouse, new MouseState());
             yield return null;
             ConsumableChannel channel = rig.GetComponent<ConsumableChannel>();
-            Check(channel != null && channel.IsChanneling && Count(bag, tonic) == 2 && rig.CurrentHealth == low && bag.Revision == revision, "real belt-key input starts drinking without consuming or healing early");
+            Check(channel != null && channel.IsChanneling && Count(bag, tonic) == 2 && rig.CurrentHealth == low && bag.Revision == revision, "real LMB input starts drinking without consuming or healing early");
             Vector3 beforeMove = rig.transform.position;
             InputSystem.QueueStateEvent(_keyboard, new KeyboardState(Key.W));
             float moveDeadline = Time.time + 1f, moveWatchdog = Time.realtimeSinceStartup + 10f;
@@ -239,11 +244,11 @@ namespace Emberdelve.EditorTools
             Check(Vector3.ProjectOnPlane(rig.transform.position - beforeMove, Vector3.up).magnitude > 0.01f, "the real movement key displaces the live character controller horizontally");
             Check(channel != null && !channel.IsChanneling && channel.LastCancelReason == "moving" && Count(bag, tonic) == 2 && rig.CurrentHealth == low && bag.Revision == revision,
                 "real movement input interrupts drinking and preserves both potions and health; cancel=" + channel?.LastCancelReason + " count=" + Count(bag, tonic) + " hp=" + rig.CurrentHealth + " revision=" + bag.Revision);
-            InputSystem.QueueStateEvent(_keyboard, new KeyboardState(Key.Digit1));
+            InputSystem.QueueStateEvent(_mouse, new MouseState { buttons = 1 });
             yield return null; yield return null;
-            InputSystem.QueueStateEvent(_keyboard, new KeyboardState());
+            InputSystem.QueueStateEvent(_mouse, new MouseState());
             yield return null;
-            Check(channel != null && channel.IsChanneling, "the same normal belt key starts a fresh drink after cancellation");
+            Check(channel != null && channel.IsChanneling, "the same normal LMB input starts a fresh drink after cancellation");
             float started = Time.time;
             float deadline = Time.realtimeSinceStartup + 20f;
             while (Time.time < started + 0.7f && Time.realtimeSinceStartup < deadline) yield return null;
@@ -264,6 +269,8 @@ namespace Emberdelve.EditorTools
         }
         private void Cleanup()
         {
+            if (_mouse != null && _mouse.added) InputSystem.RemoveDevice(_mouse);
+            _mouse = null;
             if (_keyboard != null && _keyboard.added) InputSystem.RemoveDevice(_keyboard);
             if (_previousKeyboard != null && _previousKeyboard.added) _previousKeyboard.MakeCurrent();
             _keyboard = _previousKeyboard = null;

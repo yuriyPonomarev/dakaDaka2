@@ -16,6 +16,7 @@ namespace Emberdelve.Player
         private string _state;
         private RemoteWeaponPresentation _weapons;
         private bool _remoteGuard,_remoteSwing;
+        public void PresentUtility(string itemId) { if (_weapons != null) _weapons.PresentUtility(itemId); }
         public void PresentCombat(string main,string off,string pattern,bool guard,bool swing,float elapsed,SwingTiming timing,SwingFrame frame)
         {
             _remoteGuard=guard; _remoteSwing=swing;

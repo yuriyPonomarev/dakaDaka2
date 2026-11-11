@@ -10,13 +10,13 @@ using Emberdelve.Player;
 namespace Emberdelve.Items
 {
     /// <summary>
-    /// R6c2: the four hotbar assignments of one bag. A slot holds a runtime StackId (0 = empty), never a list
+    /// R6c2: the six quick-wheel assignments of one bag. A slot holds a runtime StackId (0 = empty), never a list
     /// index and never a definition, so list compaction, a partial use, or a lookalike stack cannot retarget a key.
     ///
     /// Rules:
     ///  - Default assignment: when a raid loadout is (re)established (<see cref="Inventory.GiveStartingItems"/>, a
-    ///    bag restore) the first four USABLE stacks in bag order are bound to keys 1-4 (<see cref="SeedDefaults"/>).
-    ///    "Usable" mirrors what the Use authority applies: a definition that heals or grants ammo.
+    ///    bag restore) the first six holdable stacks in bag order are bound to the two wheels (<see cref="SeedDefaults"/>).
+    ///    Holdable utility definitions include healing items, ammo packs and torches.
     ///  - No auto-refill: nothing is bound mid-raid except by <see cref="TryAssign"/>. A stack that appears later
     ///    (a pickup, an unequip, a split) never takes an empty slot on its own, because it is a different identity
     ///    from the one the player last saw on that key. The one exception is a one-shot first-frame seed in
@@ -30,7 +30,7 @@ namespace Emberdelve.Items
     /// stacks exist each slot is bound again to the stack that carries that identity - by identity, never by list index or old
     /// StackId, so reordering the bag cannot move a key. An identity that no longer resolves leaves its key empty; nothing is
     /// auto-filled. A restore of a belt that held nothing keeps the old behaviour (the first usable stacks are bound by default).
-    /// The belt also travels in the v4 loadout snapshot (<see cref="LoadoutSnapshot"/>).
+    /// The belt also travels in the v5 loadout snapshot (<see cref="LoadoutSnapshot"/>).
     ///
     /// Reads validate against the live bag, so a retired binding is empty even before it is pruned. Changes made
     /// by <see cref="TryAssign"/> raise <see cref="GameEvents.HotbarChanged"/>; seeding and retiring always accompany an
@@ -63,7 +63,7 @@ namespace Emberdelve.Items
 
     public sealed class HotbarBindings
     {
-        public const int SlotCount = 4;
+        public const int SlotCount = 6;
 
         private readonly Inventory _inventory;
         private readonly ulong[] _ids = new ulong[SlotCount];
@@ -80,7 +80,7 @@ namespace Emberdelve.Items
         /// <summary>Whether a definition can be put on the hotbar: the same test the Use authority applies to the item (heals or grants ammo).</summary>
         public static bool IsUsableDefinition(ItemData item)
         {
-            return item != null && (item.healAmount > 0 || item.ammoGrant > 0);
+            return item != null && (item.healAmount > 0 || item.ammoGrant > 0 || (item.grantedWeapon != null && item.grantedWeapon.weaponId == HandheldTorchVisual.WeaponId));
         }
 
         /// <summary>The live StackId bound to a slot, or 0 when the slot is empty or its stack has retired.</summary>
@@ -103,7 +103,7 @@ namespace Emberdelve.Items
             return true;
         }
 
-        /// <summary>The hotbar slot (0-3) a live stack is bound to, or -1.</summary>
+        /// <summary>The hotbar slot (0-5) a live stack is bound to, or -1.</summary>
         public int SlotOf(ulong stackId)
         {
             if (stackId == 0) return -1;
@@ -176,7 +176,7 @@ namespace Emberdelve.Items
             return new BeltIdentity(stack.Item, stack.Instance != null ? stack.Instance.Uid : Guid.Empty);
         }
 
-        /// <summary>D3c: the four identities as they are right now (a retired or empty binding reads as empty). Read-only.</summary>
+        /// <summary>D3c: the six identities as they are right now (a retired or empty binding reads as empty). Read-only.</summary>
         public BeltIdentity[] CaptureIdentities()
         {
             BeltIdentity[] identities = new BeltIdentity[SlotCount];
@@ -231,7 +231,7 @@ namespace Emberdelve.Items
             _seeded = true;
         }
 
-        /// <summary>Retires every binding, then binds the first usable stacks in bag order to slots 0..3. Raises no event.</summary>
+        /// <summary>Retires every binding, then binds the first usable stacks in bag order to slots 0..5. Raises no event.</summary>
         internal void SeedDefaults()
         {
             RetireAll();
@@ -254,41 +254,104 @@ namespace Emberdelve.Items
     }
 
     /// <summary>
-    /// Turns the 1-4 keys into "use the stack bound to hotbar slot N" (see <see cref="HotbarBindings"/>). Kept
+    /// Routes weapon keys 1/2, quick wheels 3/4 and held-item primary use (see <see cref="HotbarBindings"/>). Kept
     /// separate from Inventory so the bag has no dependency on devices, and separate from the world Interactor so
     /// picking up and using never mix.
     /// </summary>
+    [DefaultExecutionOrder(-90)]
     [DisallowMultipleComponent]
     public sealed class HotbarController : MonoBehaviour
     {
         [SerializeField] private PlayerRig rig;
         [SerializeField] private Inventory inventory;
-
+        public static HotbarController Local { get; private set; }
+        public bool WheelOpen { get; private set; }
+        public int WheelGroup { get; private set; }
+        public int WheelSelection { get; private set; }
+        public bool Assigning => _assignmentTarget != 0;
+        public Inventory Bag => inventory;
+        private ulong _assignmentTarget;
+        private readonly int[] _lastSelection = new int[2];
+        private CursorLockMode _oldLock;
+        private bool _oldVisible;
+        private int _closedFrame = -1;
         private void Awake()
         {
             if (rig == null) rig = GetComponent<PlayerRig>();
             if (inventory == null) inventory = GetComponent<Inventory>();
         }
-
+        private void OnDisable() { CloseWheel(false); if (Local == this) Local = null; }
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetLocal() { Local = null; }
+        public bool OpenAssignmentWheel(int group, ulong stack)
+        {
+            if (rig == null || !rig.IsLocallyControlled || inventory == null || group < 0 || group > 1 ||
+                !inventory.TryGetStack(stack, out var item) || !HotbarBindings.IsUsableDefinition(item.Item)) return false;
+            OpenWheel(group, stack); return true;
+        }
+        private void OpenWheel(int group, ulong assignment)
+        {
+            if (WheelOpen) return;
+            WheelGroup = group; _assignmentTarget = assignment;
+            WheelSelection = _lastSelection[group];
+            _oldLock = Cursor.lockState; _oldVisible = Cursor.visible;
+            WheelOpen = true; rig.Input.QuickWheelCaptured = true;
+            InventoryInputFocus.Open(this);
+            Cursor.lockState = CursorLockMode.None; Cursor.visible = true;
+            UnityEngine.InputSystem.Mouse.current?.WarpCursorPosition(new Vector2(Screen.width * .5f, Screen.height * .5f));
+        }
+        private void CloseWheel(bool select)
+        {
+            if (!WheelOpen) return;
+            int slot = WheelGroup * 3 + WheelSelection;
+            _lastSelection[WheelGroup] = WheelSelection;
+            WheelOpen = false; _closedFrame = Time.frameCount;
+            if (rig != null && rig.Input != null) rig.Input.QuickWheelCaptured = false;
+            InventoryInputFocus.Close(this);
+            Cursor.lockState = _oldLock; Cursor.visible = _oldVisible;
+            if (select && inventory != null)
+            {
+                rig?.SuppressWeaponInputForFrame();
+                string reason;
+                bool accepted = _assignmentTarget != 0
+                    ? inventory.Hotbar.TryAssign(slot, _assignmentTarget, out reason)
+                    : inventory.RequestHoldStack(inventory.Hotbar.StackIdAt(slot), out reason);
+                if (!accepted && rig != null) GameEvents.RaiseToast(rig.PlayerId, reason);
+            }
+            _assignmentTarget = 0;
+        }
+        public static int SectorAt(Vector2 direction)
+        {
+            // Clockwise, starting at the top. Dead centre keeps the last selected sector.
+            float angle = Mathf.Repeat(Mathf.Atan2(direction.x, direction.y) * Mathf.Rad2Deg + 60f, 360f);
+            return Mathf.Clamp((int)(angle / 120f), 0, 2);
+        }
         private void Update()
         {
-            if (rig == null || inventory == null) return;
-
-            // Safety net for a bag whose loadout hook never ran: seed once, at the first frame. Every later
-            // change is an explicit assignment; there is no mid-raid auto-refill.
+            if (rig == null || inventory == null || !rig.IsLocallyControlled) return;
+            Local = this;
+            var input = rig.Input;
+            if (input == null) return;
             if (!inventory.Hotbar.HasSeeded) inventory.Hotbar.SeedDefaults();
-
-            EmberdelveInput input = rig.Input;
-            if (input == null || rig.IsDead) return;
-
-            // The satchel screen takes 1-4 to assign the item under the pointer. The run layer already switches
-            // the player action map off while it is open, so SlotPressed is false; this makes the intent explicit.
-            if (GameServices.TryGet<RunDirector>(out RunDirector director) && director.InventoryOpen &&
-                ReferenceEquals(director.Player, rig)) return;
-
-            for (int i = 0; i < HotbarBindings.SlotCount; i++)
+            if (rig.IsDead || rig.IsExtracted) { CloseWheel(false); return; }
+            if (WheelOpen)
             {
-                if (input.SlotPressed(i)) inventory.Hotbar.TryUse(i, out _);
+                if (input.PausePressed || input.InventoryPressed) { CloseWheel(false); return; }
+                Vector2 direction = input.PointerPosition - new Vector2(Screen.width * .5f, Screen.height * .5f);
+                if (direction.sqrMagnitude > 24f * 24f) WheelSelection = SectorAt(direction);
+                if (!input.QuickWheelHeld(WheelGroup)) CloseWheel(true);
+                return;
+            }
+            if (_closedFrame == Time.frameCount || InventoryInputFocus.OwnsEscape || !input.GameplayInputEnabled) return;
+            for (int group = 0; group < 2; group++)
+                if (input.QuickWheelPressed(group)) { OpenWheel(group, 0); return; }
+            for (int set = 0; set < 2; set++)
+                if (input.SlotPressed(set)) { if (!inventory.RequestWeaponSet(set, out string reason)) GameEvents.RaiseToast(rig.PlayerId, reason); return; }
+            if (input.PrimaryPressed && inventory.HeldItem != null &&
+                (inventory.HeldItem.healAmount > 0 || inventory.HeldItem.ammoGrant > 0))
+            {
+                rig.SuppressWeaponInputForFrame();
+                inventory.TryUseStack(inventory.HeldStackId);
             }
         }
     }

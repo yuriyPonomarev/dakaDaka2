@@ -337,6 +337,7 @@ namespace Emberdelve.EditorTools
             health.SetHealth(health.MaxHealth);
             Check(_bag.TryAdd(draught, 1, out string reason), "add draught for full-health refusal: " + reason);
             InventorySlot fullDraught = Find(draught);
+            Check(_bag.RequestHoldStack(fullDraught.StackId, out string holdReason), "hold consumable: " + holdReason);
             string bagBefore = _bag.ToContainerSnapshot().ToJson();
             ulong fullRevision = _bag.Revision;
             InventoryCommand fullUse = Create(InventoryCommandKind.Use, fullDraught.StackId, 0,
@@ -351,6 +352,7 @@ namespace Emberdelve.EditorTools
             Check(_bag.TryAdd(draught, 2, out reason), "add two heal charges: " + reason);
             Check(_bag.TryAdd(coin, 1, out reason), "add a reentrant-command target: " + reason);
             InventorySlot healStack = Find(draught);
+            Check(_bag.RequestHoldStack(healStack.StackId, out string healHoldReason), "hold consumable: " + healHoldReason);
             InventorySlot moveStack = Find(coin);
             InventoryCommand reentrant = Create(InventoryCommandKind.Move, moveStack.StackId, 0,
                 new Vector2Int(7, 0), EquipmentSlot.None, GearUid(moveStack), Guid.Empty);
@@ -397,6 +399,7 @@ namespace Emberdelve.EditorTools
             Check(_bag.TryGetStack(targetId, out shifted) && shifted.Index < targetOldIndex,
                 "use target moved to a lower index while retaining its stack identity");
             health.SetHealth(Mathf.Max(1f, health.MaxHealth - 20f));
+            Check(_bag.RequestHoldStack(targetId, out string shiftedHoldReason), "hold shifted consumable: " + shiftedHoldReason);
             InventoryCommand shiftedUse = Create(InventoryCommandKind.Use, targetId, 0,
                 Vector2Int.zero, EquipmentSlot.None, GearUid(shifted), Guid.Empty);
             InventoryCommandResult shiftedResult = _authority.Submit(_rig, shiftedUse);
@@ -409,6 +412,7 @@ namespace Emberdelve.EditorTools
             _bag.Clear();
             health.SetHealth(Mathf.Max(1f, health.MaxHealth - 20f));
             Check(_bag.TryAdd(draught, 2, out reason), "add legacy adapter heal charges: " + reason);
+            Check(_bag.RequestHoldStack(Find(draught).StackId, out string adapterHoldReason), "hold adapter consumable: " + adapterHoldReason);
             int beforeAdapterUnits = _bag.TotalUnits;
             ulong beforeAdapterRevision = _bag.Revision;
             Check(_bag.TryUseSlot(Find(draught).Index) && _bag.TotalUnits == beforeAdapterUnits - 1 &&
@@ -429,6 +433,7 @@ namespace Emberdelve.EditorTools
             Check(_bag.TryAdd(draught, 1, out string reason), "add draught for throwing-observer check: " + reason);
             Check(_bag.TryAdd(coin, 1, out reason), "add follow-up stack for throwing-observer check: " + reason);
             InventorySlot healStack = Find(draught);
+            Check(_bag.RequestHoldStack(healStack.StackId, out string healHoldReason), "hold consumable: " + healHoldReason);
             float healthBefore = health.CurrentHealth;
             int unitsBefore = _bag.TotalUnits;
             ulong revisionBefore = _bag.Revision;
@@ -484,6 +489,7 @@ namespace Emberdelve.EditorTools
             _bag.Clear();
             Check(_bag.TryAdd(arrows, 1, out string reason), "add arrow bundle for full-ammo refusal: " + reason);
             InventorySlot bundle = Find(arrows);
+            Check(_bag.RequestHoldStack(bundle.StackId, out string holdReason), "hold consumable: " + holdReason);
             string bagBefore = _bag.ToContainerSnapshot().ToJson();
             ulong before = _bag.Revision;
             InventoryCommand full = Create(InventoryCommandKind.Use, bundle.StackId, 0,
@@ -498,6 +504,11 @@ namespace Emberdelve.EditorTools
             _bag.Clear();
             Check(_bag.TryAdd(arrows, 2, out reason), "add two arrow bundles for a successful grant: " + reason);
             bundle = Find(arrows);
+            Check(_bag.RequestHoldStack(bundle.StackId, out holdReason), "hold consumable: " + holdReason);
+            _rig.SeedKit(KitSeedReason.Revision);
+            Check(_rig.TryGetAuthorityKit(out KitView heldKit) && heldKit.HasActiveAmmo &&
+                  heldKit.ActiveWeaponId == weapon.weaponId && heldKit.Reserve == ranged.Reserve && _rig.ActiveWeapon == null,
+                "held ammunition hides the weapon but preserves its authoritative ammo pool through a kit revision");
             before = _bag.Revision;
             int unitsBefore = _bag.TotalUnits;
             int bundleCountBefore = bundle.Count;
@@ -530,6 +541,15 @@ namespace Emberdelve.EditorTools
             Check(ammoCallbackSawCommittedBag,
                 "ammo callback sees revision/quantity committed before InventoryChanged: " +
                 $"callbackRevision={_bag.Revision}, expectedRevision={before + 1}, callbackCount={(ammoCallbackStackPresent ? ammoCallbackStackCount.ToString() : "missing")}, expectedCount={bundleCountBefore - 1}, total={_bag.TotalUnits}, expectedTotal={unitsBefore - 1}");
+            int grantedReserve = Mathf.Min(state.maxReserve, reserveBefore + arrows.ammoGrant);
+            Check(_bag.HeldStackId == bundle.StackId && _rig.TryGetAuthorityKit(out KitView grantedKit) &&
+                  grantedKit.HasActiveAmmo && grantedKit.Reserve == grantedReserve,
+                "using held ammunition updates the server pool while the remaining bundle stays in hand");
+            Check(_bag.RequestWeaponSet(_equipment.ActiveWeaponSet, out reason), "return to the selected weapon: " + reason);
+            _rig.SeedKit(KitSeedReason.Revision);
+            Check(_bag.HeldStackId == 0 && _rig.ActiveWeapon == weapon && ranged.Reserve == grantedReserve &&
+                  _rig.TryGetAuthorityKit(out KitView returnedKit) && returnedKit.HasActiveAmmo && returnedKit.Reserve == grantedReserve,
+                "returning to the weapon preserves exactly the granted reserve in both authority and presentation");
         }
 
         private void CheckDeadAndExtractedOwnerRules()

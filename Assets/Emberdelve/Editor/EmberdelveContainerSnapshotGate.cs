@@ -372,7 +372,7 @@ namespace Emberdelve.EditorTools
             // D3c: the version 4 members. The fixture states them explicitly (weapon set 1 in hand, an empty belt) so every older
             // document, which migrates to exactly these defaults, can be compared byte for byte with the current one.
             loadout0.weaponSet = 0;
-            loadout0.belt = new[] { "", "", "", "" };
+            loadout0.belt = new[] { "", "", "", "", "", "" };
             loadout0.Seal();
             bagSnap0 = loadout0.bag.Clone();
             gearSnap0 = loadout0.equipment.Clone();
@@ -723,7 +723,7 @@ namespace Emberdelve.EditorTools
             RefuseGear("the same uid worn in two slots", s, "duplicate uid");
             s = GearClone(); SlotEntry(s, "Back").item.quantity = 0; RefuseGear("edited quantity, stale checksum", s, "does not match");
             s = GearClone(); Array.Reverse(s.entries); s.checksum = s.ComputeChecksum(); RefuseGear("equipment entries out of canonical order", s, "canonical order");
-            s = GearClone(); s.schemaVersion = 5; s.Seal(); RefuseGear("equipment from a newer schema", s, "newer");
+            s = GearClone(); s.schemaVersion = 6; s.Seal(); RefuseGear("equipment from a newer schema", s, "newer");
 
             Check(State() == baseline, "after every equipment refusal the bag and equipment equal the baseline");
 
@@ -809,10 +809,10 @@ namespace Emberdelve.EditorTools
             string baseline = State();
             int cur = ContainerSnapshot.CurrentSchemaVersion;
             // D3a bumped the schema to 2 (rarity ladder), D3b to 3 (slots), D3c to 4 (weapon sets, belt); 1, 2 and 3 stay readable through the production migrations.
-            Check(cur == 4 && ContainerSnapshot.MinSupportedSchemaVersion == 1, "schema version is 4 since D3c, 1, 2 and 3 are still migrated");
+            Check(cur == 5 && ContainerSnapshot.MinSupportedSchemaVersion == 1, "schema version is 5; versions 1 through 4 are still migrated");
             string j = bagJson0;
             string sv = "\"schemaVersion\":" + cur;
-            foreach (string v in new[] { "0", "5", "99", "-1", "2147483647" })
+            foreach (string v in new[] { "0", "6", "99", "-1", "2147483647" })
             {
                 string doc = Rep(j, sv, "\"schemaVersion\":" + v, "version " + v);
                 int num = int.Parse(v, CultureInfo.InvariantCulture);
@@ -825,13 +825,13 @@ namespace Emberdelve.EditorTools
             RefuseJson("missing schemaVersion", Rep(j, sv + ",", "", "no version"), "no schemaVersion");
 
             ContainerSnapshot s;
-            foreach (int v in new[] { 0, 1, 2, 3, 5, 7, -3 })
+            foreach (int v in new[] { 0, 1, 2, 3, 4, 6, 7, -3 })
             {
                 s = BagClone(); s.schemaVersion = v; s.Seal();
                 RefuseBag("in-memory schemaVersion " + v, s, v > cur ? "newer" : "older");
             }
-            LoadoutSnapshot l = loadout0.Clone(); l.schemaVersion = 5; l.Seal();
-            RefuseLoadout("loadout schemaVersion 5 in memory", l, "newer");
+            LoadoutSnapshot l = loadout0.Clone(); l.schemaVersion = 6; l.Seal();
+            RefuseLoadout("loadout schemaVersion 6 in memory", l, "newer");
             l = loadout0.Clone(); l.schemaVersion = 2; l.Seal();
             RefuseLoadout("loadout schemaVersion 2 in memory (an old version must be migrated while parsing)", l, "older");
             l = loadout0.Clone(); l.schemaVersion = 1; l.Seal();
@@ -861,8 +861,8 @@ namespace Emberdelve.EditorTools
             Check(v1Bag.StartsWith("{\"schemaVersion\":1,", StringComparison.Ordinal) && v1Bag != bagJson0, "a version 1 bag document is built");
 
             Check(ContainerSnapshot.TryFromJson(v1Bag, out ContainerSnapshot migrated, out string reason), "an intact version 1 bag migrates: " + reason);
-            Check(migrated != null && migrated.schemaVersion == 4 && migrated.ChecksumMatches() && migrated.ToJson() == bagJson0,
-                "the migrated bag (1 to 2 to 3 to 4) is a normal version 4 snapshot with the same content (same bytes as writing it at version 2)");
+            Check(migrated != null && migrated.schemaVersion == 5 && migrated.ChecksumMatches() && migrated.ToJson() == bagJson0,
+                "the migrated bag (1 to 2 to 3 to 4) is a normal version 5 snapshot with the same content (same bytes as writing it at version 2)");
             Inventory twin = NewBag(cat, 10, 6, out Equipment twinGear);
             Check(migrated != null && twin.TryRestore(migrated, out reason) && twin.ToContainerSnapshot().ToJson() == bagJson0, "and it restores with every uid, rarity and roll as saved: " + reason);
             Destroy(twin.gameObject);
@@ -896,8 +896,8 @@ namespace Emberdelve.EditorTools
             SlotEntry(oldLoadout.equipment, "Feet").slot = "Legs"; // what version 1 really wrote: the boots were worn in Legs
             oldLoadout.Seal();
             string v1Loadout = oldLoadout.ToJson();
-            Check(LoadoutSnapshot.TryFromJson(v1Loadout, out LoadoutSnapshot lo, out reason) && lo.schemaVersion == 4 && lo.ToJson() == loadoutJson0,
-                "an intact version 1 loadout (boots in Legs) migrates to the version 4 bytes (boots in Feet, weaponSet 0, empty belt): " + reason);
+            Check(LoadoutSnapshot.TryFromJson(v1Loadout, out LoadoutSnapshot lo, out reason) && lo.schemaVersion == 5 && lo.ToJson() == loadoutJson0,
+                "an intact version 1 loadout (boots in Legs) migrates to the version 5 bytes (boots in Feet, weaponSet 0, empty belt): " + reason);
             RefuseLoadoutJson("a version 1 loadout edited after it was written", v1Loadout.Replace("\"quantity\":8", "\"quantity\":7"), "integrity");
 
             // a version 2 wrapper around a version 1 container is refused
@@ -915,8 +915,8 @@ namespace Emberdelve.EditorTools
             v2Gear.Seal();
             string v2GearJson = v2Gear.ToJson();
             Check(v2GearJson.StartsWith("{\"schemaVersion\":2,", StringComparison.Ordinal) && v2GearJson.Contains("\"slot\":\"Legs\"") && !v2GearJson.Contains("\"Feet\""), "a version 2 equipment document with the boots in Legs is built");
-            Check(ContainerSnapshot.TryFromJson(v2GearJson, out ContainerSnapshot gear3, out reason) && gear3.schemaVersion == 4 && gear3.ChecksumMatches() && gear3.ToJson() == gearJson0,
-                "the version 2 equipment migrates: Legs/footpad_boots becomes Feet, entries re-ordered, uid and rolls untouched, bytes equal a version 4 write: " + reason);
+            Check(ContainerSnapshot.TryFromJson(v2GearJson, out ContainerSnapshot gear3, out reason) && gear3.schemaVersion == 5 && gear3.ChecksumMatches() && gear3.ToJson() == gearJson0,
+                "the version 2 equipment migrates: Legs/footpad_boots becomes Feet, entries re-ordered, uid and rolls untouched, bytes equal a version 5 write: " + reason);
             Check(gear3 != null && SlotEntry(gear3, "Feet").item.itemId == "footpad_boots" && SlotEntry(gear3, "Feet").item.uid == SlotEntry(gearSnap0, "Feet").item.uid, "the migrated Feet entry is the same boots with the same uid");
             RefuseJson("a version 2 equipment edited after it was written", v2GearJson.Replace("\"quantity\":1", "\"quantity\":2"), "integrity");
 
@@ -940,8 +940,8 @@ namespace Emberdelve.EditorTools
             v2Loadout.equipment.schemaVersion = 2;
             SlotEntry(v2Loadout.equipment, "Feet").slot = "Legs";
             v2Loadout.Seal();
-            Check(LoadoutSnapshot.TryFromJson(v2Loadout.ToJson(), out LoadoutSnapshot lo3, out reason) && lo3.schemaVersion == 4 && lo3.ToJson() == loadoutJson0,
-                "an intact version 2 loadout migrates to the version 4 bytes: " + reason);
+            Check(LoadoutSnapshot.TryFromJson(v2Loadout.ToJson(), out LoadoutSnapshot lo3, out reason) && lo3.schemaVersion == 5 && lo3.ToJson() == loadoutJson0,
+                "an intact version 2 loadout migrates to the version 5 bytes: " + reason);
             RefuseLoadoutJson("a version 2 loadout edited after it was written", v2Loadout.ToJson().Replace("\"quantity\":8", "\"quantity\":7"), "integrity");
 
             Check(State() == baseline, "production migration checks left the fixture state intact");
@@ -1258,7 +1258,7 @@ namespace Emberdelve.EditorTools
 
                 RefuseJson("a v0 document edited after it was written (original checksum fails)", v0Bag.Replace("\"quantity\":8", "\"quantity\":7"), "integrity");
                 RefuseJson("a v0 document with a wrong checksum", Rep(v0Bag, "\"checksum\":\"sha256:", "\"checksum\":\"sha256:0", "bad v0 checksum"), "integrity");
-                RefuseJson("a version 5 document is still newer even with migrations registered", Rep(bagJson0, "\"schemaVersion\":4", "\"schemaVersion\":5", "v5"), "newer");
+                RefuseJson("a version 6 document is still newer even with migrations registered", Rep(bagJson0, "\"schemaVersion\":5", "\"schemaVersion\":6", "v6"), "newer");
 
                 // loadout: wrapper and both containers at v0
                 string v0Loadout = MakeV0(loadoutJson0, true);

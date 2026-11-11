@@ -1071,10 +1071,19 @@ namespace Emberdelve.EditorTools
         private static void WriteAtomic(string path, string value)
         {
             string temp = path + ".tmp";
-            File.WriteAllText(temp, value, Encoding.UTF8);
-            if (!File.Exists(path)) { File.Move(temp, path); return; }
-            try { File.Replace(temp, path, null); }
-            catch (PlatformNotSupportedException) { File.Delete(path); File.Move(temp, path); }
+            // The live proof reader can briefly hold the destination on Windows.
+            // Retry the atomic publication; never expose a partially-written command.
+            for (int attempt = 0; ; attempt++)
+            {
+                File.WriteAllText(temp, value, Encoding.UTF8);
+                try
+                {
+                    if (!File.Exists(path)) File.Move(temp, path);
+                    else File.Replace(temp, path, null);
+                    return;
+                }
+                catch (IOException) when (attempt < 19) { System.Threading.Thread.Sleep(25); }
+            }
         }
 
         private static void Check(bool success, string message)

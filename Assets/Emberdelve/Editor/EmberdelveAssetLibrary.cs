@@ -2414,7 +2414,7 @@ namespace Emberdelve.EditorTools
             });
 
             Config.levelTitle = Layout.levelName;
-            Config.objectiveText = "Recover at least one relic, then hold [E] at the Ember Gate.";
+            Config.objectiveText = "Recover at least one relic, then hold [F] at the Ember Gate.";
             Config.requireLootToExtract = true;
             Config.extractionHoldDuration = 3f;
             Config.enableRaidCountdown = true;

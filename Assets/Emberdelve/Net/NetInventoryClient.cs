@@ -193,9 +193,6 @@ namespace Emberdelve.Net
                     }
                     _screen.HandlePointer();
                 }
-                if (!IsOpen && _bag != null)
-                    for (int i = 0; i < HotbarBindings.SlotCount; i++)
-                        if (_rig.Input.SlotPressed(i)) _bag.Hotbar.TryUse(i, out _);
             }
             double realtime = Time.realtimeSinceStartupAsDouble;
             if (_pendingChestCompletionSequence != 0 && IsChestCompletionTimedOut(_pendingChestCompletionStartedAt,

@@ -143,7 +143,8 @@ namespace Emberdelve.Net
             empty.bag.entries = Array.Empty<ContainerEntry>();
             empty.equipment.entries = Array.Empty<ContainerEntry>();
             empty.weaponSet = 0;
-            empty.belt = new[] { "", "", "", "" };
+            empty.belt = new string[HotbarBindings.SlotCount];
+            for (int i = 0; i < empty.belt.Length; i++) empty.belt[i] = "";
             empty.Seal();
             if (HasCorpseUidOverlap(model))
             { reason = "a gear UID from this loadout is already held by another network corpse"; return false; }

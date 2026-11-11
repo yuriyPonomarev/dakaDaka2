@@ -73,6 +73,8 @@ namespace Emberdelve.EditorTools
         /// <summary>U1C1: satchel pointer routing and conserving cursor operations (move/swap/merge/equip/cancel).</summary>
         public static void RunInventoryUiFlow() => StartRun("inventoryui");
 
+        public static void RunQuickAccessUiFlow() => StartRun("quickaccessui");
+
         /// <summary>P4c: enemy telegraph/body geometry near the player (no screen-filling artefact, readable body).</summary>
         public static void RunEnemyVisual() => StartRun("enemyvisual");
 
@@ -87,7 +89,7 @@ namespace Emberdelve.EditorTools
             // The item flows need the archer, whose class carries no shield, so they go through the lobby the
             // same way the archer flow does. The satchel pointer flow needs that same class plus the dungeon
             // HUD that builds the screen it clicks, so it descends through the lobby too.
-            string scenePath = (mode == "lobby" || mode == "archer" || mode == "items" || mode == "inventoryui" || mode == "realcombatarcher")
+            string scenePath = (mode == "lobby" || mode == "archer" || mode == "items" || mode == "inventoryui" || mode == "quickaccessui" || mode == "realcombatarcher")
                 ? EmberdelvePaths.LobbyScenePath
                 : EmberdelvePaths.ModularDungeonScenePath;
             EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
@@ -250,7 +252,7 @@ namespace Emberdelve.EditorTools
                     yield return LobbyFlow();
                     yield return ItemFlow();
                 }
-                else if (Mode == "inventoryui")
+                else if (Mode == "inventoryui" || Mode == "quickaccessui")
                 {
                     // The satchel screen is built by the dungeon HUD, so a run has to exist before the pointer
                     // fixtures can click it. Same lobby route as the item tests: the pointer fixtures measure
@@ -258,7 +260,7 @@ namespace Emberdelve.EditorTools
                     yield return LobbyFlow();
                     _rig = FindFirstObjectByType<PlayerRig>();
                     _director = FindFirstObjectByType<RunDirector>();
-                    yield return EmberdelveInventoryUiChecks.Run(_rig, _director, Check);
+                    yield return EmberdelveInventoryUiChecks.Run(_rig, _director, Check, Mode == "quickaccessui");
                 }
                 else if (_rig == null || _director == null)
                 {

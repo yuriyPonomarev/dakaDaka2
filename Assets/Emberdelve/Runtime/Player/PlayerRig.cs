@@ -186,7 +186,11 @@ namespace Emberdelve.Player
         }
 
         /// <summary>The weapon the loadout actually has in hand; the combat authority resolves attacks against this.</summary>
-        public WeaponData ActiveWeapon => loadout != null ? loadout.ActiveWeapon : null;
+        public bool IsHoldingUtility => inventory != null && inventory.HeldItem != null;
+        private int _utilityInputFrame = -1;
+        public bool WeaponInputSuppressed => IsHoldingUtility || _utilityInputFrame == Time.frameCount;
+        public void SuppressWeaponInputForFrame() { _utilityInputFrame = Time.frameCount; }
+        public WeaponData ActiveWeapon => !IsHoldingUtility && loadout != null ? loadout.ActiveWeapon : null;
         public int WeaponChangeCount => loadout != null ? loadout.WeaponChangeCount : 0;
 
         // ---- what the combat authority reads about this caster (ISkillCasterState / IAmmoSource) ----
@@ -249,7 +253,8 @@ namespace Emberdelve.Player
                 seed.ManaRegenDelay = mana.RegenDelay;
             }
 
-            WeaponData weapon = ActiveWeapon;
+            // Held utilities suppress attacks, but preserve the selected weapon ammo pool.
+            WeaponData weapon = loadout != null ? loadout.ActiveWeapon : null;
             seed.ActiveWeaponId = weapon != null && weapon.IsRanged ? weapon.weaponId : string.Empty;
             seed.Pools = loadout != null ? loadout.CaptureAmmoSeeds(Ranged) : new KitAmmoSeed[0];
 
@@ -282,7 +287,7 @@ namespace Emberdelve.Player
         public bool IsDead => health != null && health.IsDead;
         public float CurrentHealth => health != null ? health.CurrentHealth : 0f;
         public float MaxHealth => health != null ? health.MaxHealth : 0f;
-        public bool IsGuarding => _guardHeld && Defense.CanBlock && !IsDead && !IsGuardStaggered;
+        public bool IsGuarding => !IsHoldingUtility && _guardHeld && Defense.CanBlock && !IsDead && !IsGuardStaggered;
 
         /// <summary>
         /// D1b: true while a broken guard keeps this player from raising the guard. The stagger is the combat
@@ -290,7 +295,7 @@ namespace Emberdelve.Player
         /// </summary>
         public bool IsGuardStaggered =>
             GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) && authority is ICombatFlowState flow && flow.IsGuardStaggered(_combatId);
-        public bool CanGuard => Defense.CanBlock;
+        public bool CanGuard => !IsHoldingUtility && Defense.CanBlock;
 
         /// <summary>U3C3: a shield contributes to the guard (a shield never parries, so the authority never records a riposte for it).</summary>
         public bool GuardHasShield => Defense.HasShield;
@@ -988,7 +993,7 @@ namespace Emberdelve.Player
         // D1c5: the guard flag does not reduce incoming damage while this rig's own swing runs on the authority (the
         // authority also refuses a swing begin while the flag is up, so the two states never legitimately overlap).
         private bool IsGuardingWithDefense(DefenseProfile defense) =>
-            _guardHeld && defense.CanBlock && !IsDead && !IsGuardStaggered && !OwnSwingRunning;
+            !IsHoldingUtility && _guardHeld && defense.CanBlock && !IsDead && !IsGuardStaggered && !OwnSwingRunning;
 
         private bool OwnSwingRunning =>
             GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)

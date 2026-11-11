@@ -19,12 +19,13 @@ namespace Emberdelve.Items
 
         public LoadoutSnapshot Loadout;
         public ulong Revision;
+        public ulong HeldStackId;
         public StackIdentity[] Stacks;
 
         public static NetworkLoadoutState Capture(Inventory bag, Equipment equipment)
         {
             if (bag == null || equipment == null) return null;
-            var state = new NetworkLoadoutState { Loadout = LoadoutSnapshot.Capture(bag, equipment), Revision = bag.Revision,
+            var state = new NetworkLoadoutState { Loadout = LoadoutSnapshot.Capture(bag, equipment), Revision = bag.Revision, HeldStackId = bag.HeldStackId,
                 Stacks = new StackIdentity[bag.Slots.Count] };
             for (int i = 0; i < state.Stacks.Length; i++)
             {
@@ -56,10 +57,25 @@ namespace Emberdelve.Items
                 if (entry == null || !ids.ContainsKey(new Vector2Int(entry.x, entry.y)))
                 { reason = "stack identity position mismatch"; return false; }
 
+            if (HeldStackId != 0)
+            {
+                if (!uniqueIds.Contains(HeldStackId)) { reason = "held quick item identity is absent"; return false; }
+                ContainerEntry heldEntry = null;
+                foreach (var entry in Loadout.bag.entries)
+                    if (ids[new Vector2Int(entry.x, entry.y)] == HeldStackId) { heldEntry = entry; break; }
+                if (heldEntry?.item == null || bag.Catalog == null ||
+                    !bag.Catalog.TryResolveItem(heldEntry.item.itemId, out var definition, out _) ||
+                    !HotbarBindings.IsUsableDefinition(definition))
+                { reason = "held item is not a quick item"; return false; }
+            }
+
+            var localBelt = bag.HasNetworkRevision ? bag.Hotbar.CaptureIdentities() : null;
             using (GameEventTransaction.Defer())
             {
                 if (!LoadoutSnapshot.TryRestore(Loadout, bag, equipment, null, out reason)) return false;
                 bag.ApplyNetworkIdentities(ids, Revision);
+                bag.ApplyNetworkHeldStack(HeldStackId);
+                if (localBelt != null) bag.Hotbar.RebindFromIdentities(localBelt, allowEmpty: true);
             }
             reason = null;
             return true;

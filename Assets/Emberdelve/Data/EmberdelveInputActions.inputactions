@@ -362,7 +362,7 @@
                 {
                     "name": "",
                     "id": "404307df-1ada-4bd1-8793-cec2a10bd548",
-                    "path": "<Keyboard>/e",
+                    "path": "<Keyboard>/f",
                     "interactions": "",
                     "processors": "",
                     "groups": "Keyboard&Mouse",
@@ -394,17 +394,6 @@
                 },
                 {
                     "name": "",
-                    "id": "ab6e7dd5-b1c3-4e2e-966d-3125c0d49132",
-                    "path": "<Keyboard>/q",
-                    "interactions": "",
-                    "processors": "",
-                    "groups": "Keyboard&Mouse",
-                    "action": "SwapWeapon",
-                    "isComposite": false,
-                    "isPartOfComposite": false
-                },
-                {
-                    "name": "",
                     "id": "1b8c817b-b71d-4761-a986-c38c3fba4804",
                     "path": "<Gamepad>/rightShoulder",
                     "interactions": "",
@@ -417,7 +406,7 @@
                 {
                     "name": "",
                     "id": "aab23ae4-a95f-4f6f-8537-e6fe03fdc1c6",
-                    "path": "<Keyboard>/f",
+                    "path": "<Keyboard>/q",
                     "interactions": "",
                     "processors": "",
                     "groups": "Keyboard&Mouse",
@@ -439,7 +428,7 @@
                 {
                     "name": "",
                     "id": "64215aaf-10fb-4e2b-9b16-a149683d64da",
-                    "path": "<Keyboard>/g",
+                    "path": "<Keyboard>/e",
                     "interactions": "",
                     "processors": "",
                     "groups": "Keyboard&Mouse",
@@ -525,8 +514,7 @@
                     "isPartOfComposite": false
                 }
             ]
-        }
-    ,
+        },
         {
             "name": "System",
             "id": "1fc31178-d23b-4a6a-ad66-8fb216882afc",

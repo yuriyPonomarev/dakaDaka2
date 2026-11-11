@@ -308,6 +308,13 @@ namespace Emberdelve.Skills
                 return false;
             }
 
+            if (rig.IsHoldingUtility && (skill.requiresRangedWeapon || skill.requiresMeleeWeapon || skill.IsProjectileSkill))
+            {
+                reason = "Put away the utility item and draw a weapon first";
+                code = SkillRefusalCode.Requirement;
+                return false;
+            }
+
             if (_cooldownRemaining[slot] > 0f)
             {
                 reason = $"on cooldown ({_cooldownRemaining[slot]:F1}s)";

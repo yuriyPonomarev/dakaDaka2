@@ -126,6 +126,23 @@ namespace Emberdelve.Items
             reason = null;
             switch (command.Kind)
             {
+                case InventoryCommandKind.HoldQuickItem:
+                    if (!ResolveBagStack(command.SourceStackId, command.ExpectedSourceGearUid, out var quick, out _, out reason)) return false;
+                    if (!HotbarBindings.IsUsableDefinition(quick.Item)) { reason = "item cannot be held in quick access"; return false; }
+                    if (_rig.Loadout != null && _rig.Loadout.IsActionLocked) { reason = "cannot change held item during an attack"; return false; }
+                    if (!_inventory.CanCommitRevision(out reason)) return false;
+                    _inventory.SetHeldStack(command.SourceStackId);
+                    return true;
+                case InventoryCommandKind.SelectWeaponSet:
+                    if (_rig.Loadout != null && _rig.Loadout.IsActionLocked) { reason = "cannot change held item during an attack"; return false; }
+                    if (!_inventory.CanCommitRevision(out reason)) return false;
+                    using (GameEventTransaction.Defer())
+                    {
+                        bool changedSet = _equipment.ActiveWeaponSet != command.DestinationCell.x;
+                        if (changedSet && !_equipment.TrySwapWeaponSet(out reason)) return false;
+                        _inventory.SetHeldStack(0, !changedSet);
+                    }
+                    return true;
                 case InventoryCommandKind.Move:
                 case InventoryCommandKind.Use:
                 case InventoryCommandKind.Equip:
@@ -135,6 +152,7 @@ namespace Emberdelve.Items
                         return _inventory.TryMove(sourceIndex, command.DestinationCell, out reason);
                     if (command.Kind == InventoryCommandKind.Equip)
                     {
+                        if (HotbarBindings.IsUsableDefinition(source.Item)) { reason = "quick items belong in quick access, not weapon slots"; return false; }
                         if (source.Item == null || !EquipmentSlots.Accepts(source.Item.equipSlot, command.DestinationSlot))
                         {
                             reason = "the source item does not fit the requested equipment slot";
@@ -211,7 +229,12 @@ namespace Emberdelve.Items
                         reason = "the expected gear identity no longer matches the other weapon set";
                         return false;
                     }
-                    return _equipment.TrySwapWeaponSet(out reason);
+                    using (GameEventTransaction.Defer())
+                    {
+                        if (!_equipment.TrySwapWeaponSet(out reason)) return false;
+                        _inventory.SetHeldStack(0, false);
+                        return true;
+                    }
                 }
 
                 case InventoryCommandKind.Drop:
@@ -427,6 +450,7 @@ namespace Emberdelve.Items
 
         private bool UseStack(InventorySlot slot, ulong stackId, out string reason)
         {
+            if (_inventory.HeldStackId != stackId) { reason = "take that item in hand before using it"; return false; }
             ItemData item = slot.Item;
             HealthComponent health = _rig.Health;
             RangedCombat ranged = _rig.GetComponent<RangedCombat>();

@@ -100,12 +100,12 @@ namespace Emberdelve.UI
         private const float SkillRejectFlash = 1.6f;
 
         // The raid hotbar. HotbarController.Update uses the StackId bound to key N (Inventory.Hotbar, R6c2), so the
-        // strip draws the live stack behind each of the four bindings, and an empty chip for a slot with no
+        // strip draws the live stack behind each of the six wheel bindings, and an empty chip for a slot with no
         // binding or whose stack has retired. It never shows bag list positions.
-        private const int HotbarCapacity = 4;
-        private const float HotbarChipWidth = 96f;
+        private const int HotbarCapacity = 6;
+        private const float HotbarChipWidth = 76f;
         private const float HotbarChipHeight = 44f;
-        private const float HotbarChipGap = 12f;
+        private const float HotbarChipGap = 8f;
 
         // Offsets of each widget's pivot above the window's bottom edge, which is what their bottom-centre
         // anchors are relative to. See RebuildInventory for the neighbour rectangles they were measured against.
@@ -593,9 +593,9 @@ namespace Emberdelve.UI
         }
 
         /// <summary>
-        /// The raid hotbar: the four stacks the 1-4 keys actually reach, plus one compact line saying what the
+        /// The raid hotbar: the six stacks the 3/4 quick wheels reach, plus one compact line saying what the
         /// rest of the bag is doing. The full 10x4 satchel is not squeezed into the HUD; it is the screen
-        /// opened with I or Tab, and this strip only names the stacks the 1-4 bindings point at.
+        /// opened with I or Tab, and this strip only names the stacks the six wheel entries point at.
         /// </summary>
         private void BuildHotbar()
         {
@@ -661,7 +661,7 @@ namespace Emberdelve.UI
                 chip.raycastTarget = false;
 
                 // The key glyph is the hint, and it is the key HotbarController reads for this hotbar slot.
-                Text key = UiFactory.CreateText(chip.transform, "Key", (i + 1).ToString(), 18,
+                Text key = UiFactory.CreateText(chip.transform, "Key", (i / 3 + 3) + "." + (i % 3 + 1), 12,
                     item != null ? new Color(1f, 0.9f, 0.72f, 1f) : new Color(0.55f, 0.52f, 0.46f, 0.85f),
                     TextAnchor.MiddleCenter, FontStyle.Bold);
                 UiFactory.SetRect(key.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
@@ -728,8 +728,7 @@ namespace Emberdelve.UI
             Equipment equipment = _director != null && _director.Player != null ? _director.Player.Equipment : null;
             int worn = equipment != null ? equipment.FilledCount : 0;
 
-            _bagSummaryLabel.text = $"1-4 use bound items   bag {inventory.UsedCells}/{inventory.Capacity} cells   " +
-                                    $"value {inventory.CarriedValue}   worn {worn}   [I] satchel";
+            _bagSummaryLabel.text = $"1/2 weapons   hold 3/4 quick wheels   LMB use held item   [I] bag";
         }
 
         private void OnPlayerHealth(int playerId, float current, float max)
@@ -819,6 +818,7 @@ namespace Emberdelve.UI
         {
             if (!PlayerView.Shows(playerId)) return;
             RebuildInventory();
+            ApplyActiveWeapon(_director != null && _director.Player != null && _director.Player.Loadout != null ? _director.Player.Loadout.ActiveWeapon : null);
         }
 
         private void OnHotbarChanged(int playerId)
@@ -999,6 +999,8 @@ namespace Emberdelve.UI
         private void ApplyActiveWeapon(WeaponData weapon)
         {
             if (_weaponLabel == null) return;
+            var held = _director != null && _director.Player != null && _director.Player.Inventory != null ? _director.Player.Inventory.HeldItem : null;
+            if (held != null) { _weaponLabel.text = held.displayName + (held.healAmount > 0 || held.ammoGrant > 0 ? "  [LMB]" : ""); return; }
             // D3c: weapon set 2 is marked; set 1 reads exactly as before.
             string setTag = _director != null && _director.Player != null && _director.Player.Equipment != null &&
                             _director.Player.Equipment.ActiveWeaponSet == 1 ? "  (II)" : string.Empty;

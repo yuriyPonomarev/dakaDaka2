@@ -63,3 +63,7 @@ Class: the id string only (`warrior`, `archer`); the server resolves everything 
 `Emberdelve.EditorTools.EmberdelveNetFinalGate.Run` is the roadmap acceptance (build, server max-players 3, A+B, walk, cheats, late join through the lobby Join path, full refusal, hard kill, retry, rejoin, graceful quits, offline retention, no leftover processes). The earlier gates stay separate entries: `EmberdelveNetProofGate`, `EmberdelveNetAdmissionGate`, `EmberdelveNetMovementGate`, `EmberdelveNetSeamsGate`, `EmberdelveNetSkillGate` (U3B2: server-owned active skills, abuse control; see `Docs/Tasks/U3B2.md`). Each ends with `PASS|FAIL checks=N failures=M`.
 
 `Emberdelve.EditorTools.EmberdelveUtpResetProbe.Run` is a diagnostic gate, not part of the acceptance set: it loops a leaving client against a staying one and reports whether the dedicated server keeps receiving (A/B of the two UTP reset mitigations). Run it with `-TimeoutSeconds 3600`. How to read it: `Docs/Tasks/UTP_RESET.md`.
+
+## Current player controls
+
+Q/E activate abilities; 1/2 select weapon sets. Hold 3 or 4 to open a three-slot quick wheel, point at an item, then release to take it in hand and stow weapons. LMB uses the held item; items cannot be consumed directly from the bag. In the inventory, hover or select an item and hold 3/4 to assign a wheel slot; right-click takes a utility item in hand. F interacts with containers, doors and lights. I opens the inventory.

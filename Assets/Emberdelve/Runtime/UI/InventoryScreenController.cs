@@ -330,6 +330,7 @@ namespace Emberdelve.UI
         public void HandlePointer()
         {
             if (!IsOpen) return;
+            if (_rig != null && _rig.Input != null && _rig.Input.QuickWheelCaptured) return;
             if (!IsLootCompanion && Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
             {
                 Close();
@@ -364,6 +365,7 @@ namespace Emberdelve.UI
             Mouse mouse = Mouse.current;
             if (mouse == null) return;
 
+            if (_rig != null && _rig.GetComponent<HotbarController>() is HotbarController activeWheel && activeWheel.WheelOpen) return;
             Vector2 screen = mouse.position.ReadValue();
 
             UpdateGhost(screen);
@@ -426,40 +428,28 @@ namespace Emberdelve.UI
         }
 
         /// <summary>
-        /// R6c2: while the satchel is open, keys 1-4 ASSIGN the stack under the pointer (or, with the pointer on no
+        /// R6c2: while the satchel is open, holding 3/4 opens a wheel to assign the stack under the pointer (or, with the pointer on no
         /// stack, the selected stack) to that hotbar slot. The run layer switches the player action map off while
         /// the satchel is open, so the same keys cannot also use an item; this reads the keyboard device directly,
         /// as HandlePointer reads the mouse, because that action map is not live.
         /// </summary>
         private void HandleHotbarKeys(Vector2 screen)
         {
-            if (!IsOpen || _showCharacter) return;
-
-            Keyboard keyboard = Keyboard.current;
-            if (keyboard == null) return;
-
-            for (int i = 0; i < HotbarBindings.SlotCount; i++)
-            {
-                if (HotbarDigitPressed(keyboard, i)) TryAssignHotbarSlot(i, screen);
-            }
-        }
-
-        private static bool HotbarDigitPressed(Keyboard keyboard, int hotbarSlot)
-        {
-            switch (hotbarSlot)
-            {
-                case 0: return keyboard.digit1Key.wasPressedThisFrame;
-                case 1: return keyboard.digit2Key.wasPressedThisFrame;
-                case 2: return keyboard.digit3Key.wasPressedThisFrame;
-                case 3: return keyboard.digit4Key.wasPressedThisFrame;
-                default: return false;
-            }
+            if (!IsOpen || _showCharacter || _rig == null || !_model.CommandsAllowed) return;
+            var input = _rig.Input;
+            var controller = _rig.GetComponent<HotbarController>();
+            if (input == null || controller == null) return;
+            ulong stack = TryCellAt(screen, out Vector2Int cell) ? _model.StackIdAtCell(cell) : 0;
+            if (stack == 0) stack = _model.SelectedStackId;
+            for (int group = 0; group < 2; group++)
+                if (input.QuickWheelPressed(group) && !controller.OpenAssignmentWheel(group, stack))
+                    GameEvents.RaiseToast(ToastOwner, "Point at a potion, ammo pack or torch, then hold 3 or 4");
         }
 
         /// <summary>
-        /// The one assignment entry point the 1-4 key handler calls (and the focused UI checks call). Binds the stack
+        /// The assignment adapter used by focused UI checks. Binds the stack
         /// under <paramref name="screenPosition"/> - falling back to the selected stack when the pointer is over no
-        /// stack - to hotbar slot <paramref name="hotbarSlot"/> (0-3) by StackId, moving it off any other slot.
+        /// stack - to hotbar slot <paramref name="hotbarSlot"/> (0-5) by StackId, moving it off any other slot.
         /// An unusable or vanished stack is refused with a toast and nothing changes.
         /// </summary>
         public bool TryAssignHotbarSlot(int hotbarSlot, Vector2 screenPosition)
@@ -713,6 +703,17 @@ namespace Emberdelve.UI
                 InventorySlot source = _inventory.Slots[index];
                 if (source.Item == null) return;
 
+                if (HotbarBindings.IsUsableDefinition(source.Item))
+                {
+                    if (_inventory.RequestHoldStack(source.StackId, out string holdReason))
+                    {
+                        Close();
+                        _director?.SetInventoryOpen(false);
+                    }
+                    else GameEvents.RaiseToast(ToastOwner, holdReason);
+                    return;
+                }
+
                 if (source.Item.IsEquippable)
                 {
                     if (_equipment == null)
@@ -746,17 +747,7 @@ namespace Emberdelve.UI
                     return;
                 }
 
-                if (SubmitInventoryCommand(InventoryCommandKind.Use, source, default, Vector2Int.zero,
-                        EquipmentSlot.None, Guid.Empty, Guid.Empty, out string useReason))
-                {
-                    if (_model.SelectedStackId == source.StackId) ClearSelection();
-                    Rebuild();
-                }
-                else
-                {
-                    GameEvents.RaiseToast(ToastOwner, useReason);
-                    RefreshAfterRefusal();
-                }
+                GameEvents.RaiseToast(ToastOwner, "This item cannot be held or used");
             }
         }
 
@@ -1509,8 +1500,8 @@ namespace Emberdelve.UI
             {
                 _carryLabel.text = HasSelection
                     ? $"Selected {_model.SelectedItem.displayName} x{_model.SelectedAmount} ({SelectedSummary()})   " +
-                      "left click: move, swap, combine or wear   right click: let go"
-                    : "left click: select   right click a bag item: wear or use it   right click a worn item: take it off";
+                      "left click: move or wear   hold 3/4: assign wheel   right click: cancel"
+                    : "Right click: wear / take in hand. Hover item + hold 3/4: assign wheel. LMB uses held items after closing.";
                 _carryLabel.rectTransform.sizeDelta = new Vector2(leftColumnWidth, InstructionHeight);
                 _carryLabel.rectTransform.anchoredPosition = PanelToRoot(new Vector2(innerLeft, instructionTop));
             }

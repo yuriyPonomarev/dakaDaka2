@@ -254,6 +254,8 @@ namespace Emberdelve.Net
 
             MeleeCombat melee = conn.Melee;
             RangedCombat ranged = conn.Ranged;
+            if (rig.IsHoldingUtility && intent != CombatIntentKind.GuardUp && intent != CombatIntentKind.SwapWeapon)
+                return CombatRefusalCode.WrongWeapon;
             bool meleeActive = melee != null && melee.isActiveAndEnabled && melee.Weapon != null && !melee.Weapon.IsRanged;
             bool rangedActive = ranged != null && ranged.isActiveAndEnabled && ranged.Weapon != null && ranged.Weapon.IsRanged;
 
@@ -515,8 +517,9 @@ namespace Emberdelve.Net
             if (conn.NetRig == null || !conn.NetRig.IsSpawned) return;
             var rig=conn.Rig;
             var pose=new AvatarCombatWire {
+                Utility=rig.Inventory != null && rig.Inventory.HeldItem != null ? rig.Inventory.HeldItem.itemId : "",
                 Main=rig.ActiveWeapon!=null ? rig.ActiveWeapon.weaponId : "",
-                Off=rig.OffhandWeapon!=null && (rig.ActiveWeapon==null || !rig.ActiveWeapon.twoHanded) ? rig.OffhandWeapon.weaponId : "",
+                Off=!rig.IsHoldingUtility && rig.OffhandWeapon!=null && (rig.ActiveWeapon==null || !rig.ActiveWeapon.twoHanded) ? rig.OffhandWeapon.weaponId : "",
                 Guard=rig.IsGuarding,
                 EyeOffset=rig.AimOrigin-rig.transform.position,
                 Aim=Quaternion.LookRotation(rig.AimDirection,Vector3.up)

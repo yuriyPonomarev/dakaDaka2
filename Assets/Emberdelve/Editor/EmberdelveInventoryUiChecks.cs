@@ -81,7 +81,7 @@ namespace Emberdelve.EditorTools
             public void OnToast(int playerId, string message) { Toasts.Add(message); }
         }
 
-        public static IEnumerator Run(PlayerRig rig, RunDirector director, System.Action<bool, string> check)
+        public static IEnumerator Run(PlayerRig rig, RunDirector director, System.Action<bool, string> check, bool quickAccessOnly = false)
         {
             check(rig != null && director != null, "the inventory UI flow found a rig and a director");
             if (rig == null || director == null) yield break;
@@ -135,6 +135,8 @@ namespace Emberdelve.EditorTools
                 yield return PrepareScreen(fixture);
                 if (fixture.UiRoot == null) yield break;
 
+                if (!quickAccessOnly)
+                {
                 yield return ClickedMoveConservesTheStack(fixture);
                 yield return ValidSwapConservesBothStacks(fixture);
                 yield return ImpossibleSwapChangesNothing(fixture);
@@ -145,6 +147,7 @@ namespace Emberdelve.EditorTools
                 yield return ExternalBagChangeKeepsSelectionHonest(fixture);
                 yield return StableSelectionTracksIdentity(fixture);
                 yield return RebindingDropsSelectionFromTheOldBag(fixture);
+                }
                 yield return RightClickUseSubmitsCommand(fixture);
                 yield return HotbarDefaultsAtLoadoutAndRestore(fixture);
                 yield return HotbarKeyUsesBoundStackIdentity(fixture);
@@ -152,8 +155,11 @@ namespace Emberdelve.EditorTools
                 yield return HotbarAssignFromOpenScreen(fixture);
                 yield return HotbarRealKeyboardPath(fixture);
                 yield return HotbarHudMatchesBindings(fixture);
-                yield return CloakSlotAndTooltips(fixture);
-                yield return PlayerFacingFixes(fixture);
+                if (!quickAccessOnly)
+                {
+                    yield return CloakSlotAndTooltips(fixture);
+                    yield return PlayerFacingFixes(fixture);
+                }
 
                 check(!rig.IsDead, $"the rig survived the pointer tests ({rig.CurrentHealth:F0}/{rig.MaxHealth:F0})");
             }
@@ -166,7 +172,7 @@ namespace Emberdelve.EditorTools
                 GameEvents.ToastRaised -= fixture.OnToast;
 
                 fixture.Screen.Close();
-                fixture.Equipment.Clear();
+                fixture.Equipment.ClearToBare();
                 fixture.Inventory.Clear();
 
                 check(fixture.Inventory.Slots.Count == 0 && fixture.Inventory.UsedCells == 0 &&
@@ -871,16 +877,18 @@ namespace Emberdelve.EditorTools
             ulong revisionBefore = f.Inventory.Revision;
             f.InventoryEvents = 0;
 
-            yield return ClickCell(f, cell, true);
+            RectTransform cellRect = FindChildRect(f.UiRoot, "Cell_0_0");
+            f.Check(cellRect != null, "the potion cell is rendered");
+            if (cellRect == null) yield break;
+            f.Screen.HandleClick(ScreenPoint(f, cellRect), true);
 
-            float expectedHealth = Mathf.Min(f.Rig.MaxHealth, healthBefore + draught.healAmount);
-            f.Check(Mathf.Abs(f.Rig.CurrentHealth - expectedHealth) < 0.01f
-                && f.Inventory.IndexOfStack(stackId) < 0,
-                $"the right-click use command heals from the definition and consumes the exact stack ({f.Rig.CurrentHealth:F1}/{expectedHealth:F1} HP)");
+            f.Check(Mathf.Abs(f.Rig.CurrentHealth - healthBefore) < 0.01f &&
+                    f.Inventory.IndexOfStack(stackId) >= 0 && f.Inventory.HeldStackId == stackId,
+                 $"right-click holds without consuming/healing: held={f.Inventory.HeldStackId}, expected={stackId}, index={f.Inventory.IndexOfStack(stackId)}, HP={healthBefore}/{f.Rig.CurrentHealth}");
             f.Check(f.Inventory.Revision == revisionBefore + 1 && f.InventoryEvents == 1,
-                $"the authority commits one revision and publishes one final inventory change ({f.Inventory.Revision - revisionBefore}, {f.InventoryEvents})");
-            f.Check(!f.Screen.HasSelection && f.Screen.SelectedStackId == 0,
-                "using the item through the screen leaves no stale selection");
+                "taking in hand commits one authoritative inventory change");
+            f.Check(!f.Screen.IsOpen && !f.Director.InventoryOpen && !f.Screen.HasSelection,
+                "taking in hand closes the bag and clears its selection");
         }
 
         // ------------------------------------------------------------------ R6c2 hotbar scenarios
@@ -907,8 +915,9 @@ namespace Emberdelve.EditorTools
 
         private static string BoundIds(Fixture f)
         {
-            return f.Inventory.Hotbar.StackIdAt(0) + "," + f.Inventory.Hotbar.StackIdAt(1) + "," +
-                   f.Inventory.Hotbar.StackIdAt(2) + "," + f.Inventory.Hotbar.StackIdAt(3);
+            var ids = new string[HotbarBindings.SlotCount];
+            for (int i = 0; i < ids.Length; i++) ids[i] = f.Inventory.Hotbar.StackIdAt(i).ToString();
+            return string.Join(",", ids);
         }
 
         private static int BoundCount(Fixture f, ulong stackId)
@@ -1032,6 +1041,7 @@ namespace Emberdelve.EditorTools
                 "the draught stack is bound to key 1: " + assignReason);
 
             f.Rig.Health.SetHealth(Mathf.Max(1f, f.Rig.MaxHealth - 30f));
+            f.Check(f.Inventory.RequestHoldStack(draughtId, out _), "the bound stack is taken in hand before use");
             float healthBefore = f.Rig.CurrentHealth;
             ulong revisionBefore = f.Inventory.Revision;
             f.InventoryEvents = 0;
@@ -1083,6 +1093,7 @@ namespace Emberdelve.EditorTools
                 "the first stack is bound to key 1; the lookalike has its own StackId and no binding");
 
             f.Rig.Health.SetHealth(Mathf.Max(1f, f.Rig.MaxHealth - 30f));
+            f.Check(f.Inventory.RequestHoldStack(boundId, out _), "the bound stack is held before use");
             f.Check(f.Inventory.Hotbar.TryUse(0, out _) && f.Inventory.IndexOfStack(boundId) < 0,
                 "key 1 consumes the bound stack's only unit and retires it");
             int lookalikeIndex = f.Inventory.IndexOfStack(lookalikeId);
@@ -1105,6 +1116,8 @@ namespace Emberdelve.EditorTools
                 "the lookalike never inherited the retired binding");
 
             // The index-based adapter is kept for existing callers: it still addresses the list position.
+            f.Check(!f.Inventory.TryUseSlot(0), "the legacy adapter also rejects an unheld item");
+            f.Check(f.Inventory.RequestHoldStack(lookalikeId, out _), "the remaining stack is taken in hand");
             f.Check(f.Inventory.TryUseSlot(0) && f.Inventory.Slots[f.Inventory.IndexOfStack(lookalikeId)].Count == 1,
                 "the legacy index-based TryUseSlot adapter still works for existing callers");
         }
@@ -1135,7 +1148,7 @@ namespace Emberdelve.EditorTools
             ulong draughtId = StackIdAtCell(f, draughtCell);
             ulong arrowId = StackIdAtCell(f, arrowCell);
             ulong bladeId = StackIdAtCell(f, bladeCell);
-            f.Check(coinId != 0 && draughtId != 0 && arrowId != 0 && bladeId != 0 && BoundIds(f) == "0,0,0,0",
+            f.Check(coinId != 0 && draughtId != 0 && arrowId != 0 && bladeId != 0 && BoundIds(f) == "0,0,0,0,0,0",
                 "all four stacks are live and the hotbar starts empty");
 
             ulong revisionBefore = f.Inventory.Revision;
@@ -1302,8 +1315,8 @@ namespace Emberdelve.EditorTools
                 ulong draughtId = StackIdAtCell(f, draughtCell);
                 f.Check(draughtId != 0 && f.Inventory.Hotbar.StackIdAt(0) == 0 &&
                         f.Inventory.Hotbar.StackIdAt(1) == 0 && f.Inventory.Hotbar.StackIdAt(2) == 0 &&
-                        f.Inventory.Hotbar.StackIdAt(3) == 0,
-                    "the stack has a StackId and all four hotbar slots start empty");
+                        f.Inventory.Hotbar.StackIdAt(3) == 0 && f.Inventory.Hotbar.StackIdAt(4) == 0 && f.Inventory.Hotbar.StackIdAt(5) == 0,
+                    "the stack has a StackId and all six wheel slots start empty");
                 if (draughtId == 0) yield break;
 
                 f.InventoryEvents = 0;
@@ -1327,27 +1340,24 @@ namespace Emberdelve.EditorTools
                 int unitsBeforeAssignment = f.Inventory.TotalUnits;
                 f.InventoryEvents = 0;
                 f.HotbarEvents = 0;
-                Key[] digits = { Key.Digit1, Key.Digit2, Key.Digit3, Key.Digit4 };
-                for (int i = 0; i < digits.Length; i++)
+                var controller = f.Rig.GetComponent<HotbarController>();
+                for (int i = 0; i < HotbarBindings.SlotCount; i++)
                 {
                     InputSystem.QueueStateEvent(mouse, new MouseState { position = new Vector2(-1000f, -1000f) });
-                    InputSystem.QueueStateEvent(keyboard, new KeyboardState(digits[i]));
+                    InputSystem.QueueStateEvent(keyboard, new KeyboardState(i < 3 ? Key.Digit3 : Key.Digit4));
                     yield return WaitFrames(1);
-
-                    int expectedSlot = i;
-                    f.Check(f.Inventory.Hotbar.StackIdAt(expectedSlot) == draughtId &&
-                            f.Inventory.Hotbar.SlotOf(draughtId) == expectedSlot,
-                        $"a real {(i + 1)} key event assigns the selected StackId into its empty slot and moves it off the previous slot ({BoundIds(f)})");
-                    f.Check(f.Rig.Input != null && !f.Rig.Input.SlotPressed(expectedSlot),
-                        $"the gameplay UseItem{i + 1} action stays disabled while the satchel is open");
-                    f.Check(f.Inventory.TotalUnits == unitsBeforeAssignment &&
-                            f.Inventory.Revision == revisionBeforeAssignment && f.InventoryEvents == 0,
-                        $"open-screen key {i + 1} only assigns: no unit is consumed and inventory state is unchanged");
-                    f.Check(f.HotbarEvents == i + 1,
-                        $"real assignment key {i + 1} raises exactly one cumulative HotbarChanged event ({f.HotbarEvents})");
-
+                    f.Check(controller.WheelOpen, "holding the quick key opens assignment wheel");
+                    float angle = (i % 3) * 120f * Mathf.Deg2Rad;
+                    Vector2 pointer = new Vector2(Screen.width * .5f, Screen.height * .5f) + new Vector2(Mathf.Sin(angle), Mathf.Cos(angle)) * 130f;
+                    InputSystem.QueueStateEvent(mouse, new MouseState { position = pointer });
+                    yield return WaitFrames(1);
                     InputSystem.QueueStateEvent(keyboard, new KeyboardState());
                     yield return WaitFrames(1);
+                    f.Check(f.Inventory.Hotbar.StackIdAt(i) == draughtId && f.Inventory.Hotbar.SlotOf(draughtId) == i,
+                        $"wheel release assigns sector {i + 1} to the selected stack ({BoundIds(f)})");
+                    f.Check(f.Inventory.TotalUnits == unitsBeforeAssignment && f.Inventory.Revision == revisionBeforeAssignment && f.InventoryEvents == 0,
+                        "assignment does not consume an item or mutate inventory authority");
+                    f.Check(f.HotbarEvents == i + 1, "one binding-change event per assignment");
                 }
 
                 InputSystem.QueueStateEvent(mouse, new MouseState { position = new Vector2(-1000f, -1000f) });
@@ -1362,18 +1372,27 @@ namespace Emberdelve.EditorTools
                 float healthBeforeUse = f.Rig.CurrentHealth;
                 float expectedHealth = Mathf.Min(f.Rig.MaxHealth, healthBeforeUse + draught.healAmount);
                 int unitsBeforeUse = f.Inventory.TotalUnits;
-                ulong revisionBeforeUse = f.Inventory.Revision;
-                f.InventoryEvents = 0;
                 InputSystem.QueueStateEvent(keyboard, new KeyboardState(Key.Digit4));
                 yield return WaitFrames(1);
+                float selectedAngle = 240f * Mathf.Deg2Rad;
+                InputSystem.QueueStateEvent(mouse, new MouseState { position = new Vector2(Screen.width * .5f, Screen.height * .5f) + new Vector2(Mathf.Sin(selectedAngle), Mathf.Cos(selectedAngle)) * 130f });
+                yield return WaitFrames(1);
                 InputSystem.QueueStateEvent(keyboard, new KeyboardState());
+                yield return WaitFrames(2);
+                f.Check(f.Inventory.HeldStackId == draughtId && f.Inventory.TotalUnits == unitsBeforeUse,
+                    "wheel release holds the selected stack without consuming it");
+                ulong revisionBeforeUse = f.Inventory.Revision;
+                f.InventoryEvents = 0;
+                InputSystem.QueueStateEvent(mouse, new MouseState { buttons = 1 });
+                yield return WaitFrames(1);
+                InputSystem.QueueStateEvent(mouse, new MouseState());
 
                 f.Check(f.Inventory.TotalUnits == unitsBeforeUse - 1 &&
                         Mathf.Abs(f.Rig.CurrentHealth - expectedHealth) < 0.01f,
-                    $"a real closed-screen 4 key event uses one bound draught through authority and heals to {expectedHealth:F1} HP");
+                    $"a real LMB event uses one held draught through authority and heals to {expectedHealth:F1} HP");
                 f.Check(f.Inventory.Revision == revisionBeforeUse + 1 && f.InventoryEvents == 1,
                     $"the real-key authority use commits exactly one inventory revision and change event ({f.Inventory.Revision - revisionBeforeUse}, {f.InventoryEvents})");
-                f.Check(f.Inventory.Hotbar.StackIdAt(3) == draughtId,
+                f.Check(f.Inventory.Hotbar.StackIdAt(5) == draughtId,
                     "the partial real-key use keeps the slot bound to the same StackId");
                 yield return WaitFrames(1);
             }
@@ -1434,6 +1453,7 @@ namespace Emberdelve.EditorTools
 
             // A partial use updates the count and keeps the chip.
             f.Rig.Health.SetHealth(Mathf.Max(1f, f.Rig.MaxHealth - 30f));
+            f.Check(f.Inventory.RequestHoldStack(draughtId, out _), "the HUD-bound draught is taken in hand");
             f.Check(f.Inventory.Hotbar.TryUse(1, out _), "key 2 drinks one draught");
             yield return WaitFrames(3);
             row = FindHudHotbarRow();
@@ -1459,7 +1479,7 @@ namespace Emberdelve.EditorTools
             yield return WaitFrames(3);
             row = FindHudHotbarRow();
             f.Check(row != null && ChipText(row, 1) == null && ChipText(row, 2) == null &&
-                    ChipText(row, 3) == null && ChipText(row, 4) == null && BoundIds(f) == "0,0,0,0",
+                    ChipText(row, 3) == null && ChipText(row, 4) == null && BoundIds(f) == "0,0,0,0,0,0",
                 "Clear empties every chip and binding");
         }
 
@@ -1920,7 +1940,7 @@ namespace Emberdelve.EditorTools
             // Closing goes through the production path, so any selection left by the previous scenario is
             // cleared the way a player's close would clear it.
             f.Screen.Close();
-            f.Equipment.Clear();
+            f.Equipment.ClearToBare();
             f.Inventory.Clear();
         }
 

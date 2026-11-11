@@ -139,7 +139,7 @@ namespace Emberdelve.Combat
             EmberdelveInput input = rig.Input;
             if (input == null || !input.GameplayInputEnabled) { CancelDraw(); return; }
 
-            if (rig.IsDead)
+            if (rig.IsDead || rig.WeaponInputSuppressed)
             {
                 CancelDraw();
                 return;
@@ -202,7 +202,7 @@ namespace Emberdelve.Combat
         /// <summary>U3B3: per-frame upkeep of a remote-driven rig: the server draw dies with the weapon, the wielder, a reload or an abandoned client.</summary>
         private void UpdateRemoteDriven()
         {
-            if (_weapon == null || !_weapon.IsRanged || rig == null || rig.IsDead || _reloading) { CancelDraw(); return; }
+            if (_weapon == null || !_weapon.IsRanged || rig == null || rig.IsDead || rig.IsHoldingUtility || _reloading) { CancelDraw(); return; }
             if (_drawing && (_drawWeapon != _weapon || _serverDraw.IsStale(Time.time))) CancelDraw();
 
             if (_drawing)
@@ -225,7 +225,7 @@ namespace Emberdelve.Combat
         {
             refusal = CombatRefusalCode.None;
             if (!RemoteDriven) { refusal = CombatRefusalCode.Unsupported; return false; }
-            if (rig == null || _weapon == null || !_weapon.IsRanged) { refusal = CombatRefusalCode.WrongWeapon; return false; }
+            if (rig == null || rig.IsHoldingUtility || _weapon == null || !_weapon.IsRanged) { refusal = CombatRefusalCode.WrongWeapon; return false; }
             if (rig.IsDead) { refusal = CombatRefusalCode.Dead; return false; }
             if (_reloading || _magazine <= 0) { refusal = CombatRefusalCode.NoAmmo; return false; }
             if (_drawing) { refusal = CombatRefusalCode.AlreadyDrawing; return false; }

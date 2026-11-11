@@ -33,7 +33,9 @@ namespace Emberdelve.Items
         /// dropped). The server checks the identity, removes the item from the model and spawns the ground item; one uid is in exactly one place.
         /// Appended after SwapWeaponSet: the integers are stable.
         /// </summary>
-        Drop = 8
+        Drop = 8,
+        HoldQuickItem = 9,
+        SelectWeaponSet = 10
     }
 
     /// <summary>A client intent containing identities and preconditions, never item data or effect amounts.</summary>
@@ -126,6 +128,11 @@ namespace Emberdelve.Items
                         return true;
                     }
                     break;
+                case InventoryCommandKind.SelectWeaponSet:
+                    if (SourceStackId == 0 && TargetStackId == 0 && slotIsNone && DestinationCell.y == 0 &&
+                        DestinationCell.x >= 0 && DestinationCell.x < 2 && ExpectedSourceGearUid == Guid.Empty && ExpectedTargetGearUid == Guid.Empty)
+                    { reason = null; return true; }
+                    break;
                 case InventoryCommandKind.Drop:
                     if (TargetStackId == 0 && cellIsZero && ExpectedSourceGearUid != Guid.Empty && ExpectedTargetGearUid == Guid.Empty &&
                         ((SourceStackId != 0 && slotIsNone) || (SourceStackId == 0 && IsEquipmentSlot(DestinationSlot))))
@@ -134,6 +141,7 @@ namespace Emberdelve.Items
                         return true;
                     }
                     break;
+                case InventoryCommandKind.HoldQuickItem:
                 case InventoryCommandKind.Use:
                     if (SourceStackId != 0 && TargetStackId == 0 && cellIsZero && slotIsNone &&
                         ExpectedTargetGearUid == Guid.Empty)

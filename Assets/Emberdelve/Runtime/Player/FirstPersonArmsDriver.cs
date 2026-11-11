@@ -195,8 +195,21 @@ namespace Emberdelve.Player
         }
 
         /// <summary>Puts the models of the held weapons into the hands. Returns true when the main hand weapon has a model.</summary>
+        private ItemData _utilityItem;
+        public bool SetUtility(ItemData item)
+        {
+            SetWeapons(null, null);
+            _utilityItem=item;
+            if (item == null || gripRight == null) return false;
+            _mainHand=HandheldUtilityVisual.Create(item,gripRight);
+            if (_mainHand != null) SetLayerRecursive(_mainHand,LayerMask.NameToLayer("Ignore Raycast"));
+            _hasWeaponModel=_mainHand != null;
+            return _hasWeaponModel;
+        }
+
         public bool SetWeapons(WeaponData main, WeaponData off)
         {
+            _utilityItem=null;
             DestroyHeld(ref _mainHand);
             DestroyHeld(ref _offHand);
             DestroyHeld(ref _guardDirectionMarker);
@@ -490,7 +503,7 @@ namespace Emberdelve.Player
         {
             if (!ResolveBones() || frame == null) return;
 
-            if (_mainData != null && !_mainData.IsRanged) PoseFingers(false, 0f);
+            if (_utilityItem != null || (_mainData != null && !_mainData.IsRanged)) PoseFingers(false, 0f);
 
             // Scale the mannequin and hold the middle of the shoulders at its viewmodel anchor.
             Transform model = animator.transform;
@@ -529,6 +542,12 @@ namespace Emberdelve.Player
                 handLocal = Vector3.Lerp(handLocal,
                     ClampToView(camera, new Vector3(.34f, -.36f, .52f) + offsetRight), ready);
                 localRotation = Quaternion.Slerp(localRotation, Quaternion.Euler(-48f, 25f, 0f), ready);
+            }
+            if (_utilityItem != null)
+            {
+                bool torch = _utilityItem.itemId == "pitch_torch";
+                handLocal = ClampToView(camera, (torch ? new Vector3(.34f,-.36f,.52f) : new Vector3(.22f,-.24f,.43f)) + offsetRight);
+                localRotation = Quaternion.Euler(torch ? -48f : -82f, torch ? 25f : 15f, 0f);
             }
             Quaternion gripRotation = frame.rotation * localRotation * GripFromRig;
             Vector3 gripPosition = frame.TransformPoint(handLocal);

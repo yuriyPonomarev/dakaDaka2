@@ -56,6 +56,7 @@ namespace Emberdelve.EditorTools
         private readonly List<PlayerRig> _rigs = new List<PlayerRig>();
         private InputSettings _originalSettings, _temporarySettings;
         private Keyboard _keyboard, _previousKeyboard;
+        private Mouse _mouse, _previousMouse;
         private void Check(bool ok, string label)
         {
             _checks++; if (ok) return; _failures++; Debug.LogError("[SkillCooldown] mismatch " + label);
@@ -110,11 +111,13 @@ namespace Emberdelve.EditorTools
             InputSystem.settings = _temporarySettings;
             _previousKeyboard = Keyboard.current; _keyboard = InputSystem.AddDevice<Keyboard>();
             InputSystem.EnableDevice(_keyboard); _keyboard.MakeCurrent();
+            _previousMouse = Mouse.current; _mouse = InputSystem.AddDevice<Mouse>();
+            InputSystem.EnableDevice(_mouse); _mouse.MakeCurrent();
             Check(_keyboard.enabled, "owned real InputSystem keyboard is enabled without focus");
             CheckProfiles(warrior);
             yield return FrozenClass(warrior, 1f, 14f, .96f, 13.44f, false);
             yield return FrozenClass(archer, 1.03f, 9.27f, 1f, 9f, true);
-            // Actual fallback F/G bindings on both real kits, both bare and wearing the accepted ring.
+            // Actual fallback Q/E (and projectile LMB) bindings on both real kits, both bare and wearing the accepted ring.
             yield return KeyCase(warrior, 0, false, 7f, 24, 0);
             yield return KeyCase(warrior, 1, false, 14f, 32, 0);
             yield return KeyCase(archer, 0, false, 9.27f, 26, 3);
@@ -310,22 +313,33 @@ namespace Emberdelve.EditorTools
             for (int i = 0; i < 4; i++) yield return null;
             int effectErrorsBefore = _skillEffectErrors;
             float mana = rig.Mana.CurrentMana; KitView before = View(rig);
-            InputSystem.QueueStateEvent(_keyboard, new KeyboardState(slot == 0 ? Key.F : Key.G));
+            InputSystem.QueueStateEvent(_keyboard, new KeyboardState(slot == 0 ? Key.Q : Key.E));
             yield return null; yield return null;
             InputSystem.QueueStateEvent(_keyboard, new KeyboardState()); yield return null; yield return null;
-            Check(_skillEffectErrors == effectErrorsBefore, "actual F/G effect runs without SkillCaster effect-failure diagnostics");
-            Close(Remaining(rig, skill.skillId), duration, "actual F/G input reaches accepted cooldown");
+            if (skill.IsProjectileSkill)
+            {
+                Check(rig.Skills.PreparedSlot == slot, "Q/E prepares the projectile skill without firing");
+                Close(rig.Mana.CurrentMana, mana, "preparing the shot spends no mana");
+                InputSystem.QueueStateEvent(_mouse, new MouseState { buttons = 1 });
+                yield return null; yield return null;
+                InputSystem.QueueStateEvent(_mouse, new MouseState());
+                yield return null; yield return null;
+            }
+            Check(_skillEffectErrors == effectErrorsBefore, "actual Q/E (and projectile LMB) effect runs without SkillCaster effect-failure diagnostics");
+            Close(Remaining(rig, skill.skillId), duration, "actual Q/E (and projectile LMB) input reaches accepted cooldown");
             Close(rig.Skills.CooldownRemaining(slot), duration, "actual input client remaining equals frozen authority duration");
             Close(rig.Skills.Snapshot(slot).CooldownSeconds, duration, "actual input HUD total uses literal capture");
-            Close(rig.Mana.CurrentMana, mana - manaCost, "F/G spends exact authored mana once");
+            Close(rig.Mana.CurrentMana, mana - manaCost, "Q/E (and projectile LMB) spends exact authored mana once");
             KitView after = View(rig);
             Check(after.Magazine == before.Magazine - ammoCost && after.Reserve == before.Reserve,
-                "F/G spends exact owned skill ammo once without refill");
+                "Q/E (and projectile LMB) spends exact owned skill ammo once without refill");
             rig.SetInputEnabled(false);
         }
         private void Cleanup()
         {
             Application.logMessageReceived -= ObserveSkillEffectError;
+            if (_mouse != null && _mouse.added) InputSystem.RemoveDevice(_mouse); _mouse = null;
+            if (_previousMouse != null && _previousMouse.added) _previousMouse.MakeCurrent(); _previousMouse = null;
             if (_keyboard != null && _keyboard.added) InputSystem.RemoveDevice(_keyboard); _keyboard = null;
             if (_previousKeyboard != null && _previousKeyboard.added) _previousKeyboard.MakeCurrent(); _previousKeyboard = null;
             if (_originalSettings != null)

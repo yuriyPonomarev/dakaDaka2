@@ -21,7 +21,15 @@ namespace Emberdelve.Player
             foreach(var pose in _modified) if(pose.Bone!=null) { pose.Bone.localPosition=pose.Position; pose.Bone.localRotation=pose.Rotation; }
             _modified.Clear();
         }
-        private GameObject _mainObject,_offObject;
+        private GameObject _mainObject,_offObject,_utilityObject;
+        private string _utilityId;
+        public void PresentUtility(string itemId)
+        {
+            if (_utilityId == itemId && (string.IsNullOrEmpty(itemId) || _utilityObject != null)) return;
+            _utilityId=itemId;
+            if (_utilityObject != null) { _utilityObject.SetActive(false); Destroy(_utilityObject); }
+            _utilityObject=HandheldUtilityVisual.Create(HandheldUtilityVisual.Find(itemId),transform);
+        }
         private Renderer[] _mainRenderers,_offRenderers;
         private WeaponData _main,_off;
         private string _mainId,_offId,_patternId;
@@ -77,7 +85,7 @@ namespace Emberdelve.Player
         }
         private void Replace(ref GameObject target,ref Renderer[] renderers,WeaponData weapon,bool main)
         {
-            if(target!=null) Destroy(target); target=null; renderers=null;
+            if(target!=null) { target.SetActive(false); Destroy(target); } target=null; renderers=null;
             if(weapon==null || weapon.isUnarmed) return;
             var entry=_models!=null ? _models.Find(weapon.weaponId) : null;
             if(entry!=null)
@@ -108,6 +116,16 @@ namespace Emberdelve.Player
             // The owner's remote model must not leave a second point light/flame running.
             if (_mainObject != null && _main != null && _main.weaponId == HandheldTorchVisual.WeaponId)
                 _mainObject.SetActive(visible);
+            if (_utilityObject != null)
+            {
+                _utilityObject.SetActive(visible);
+                if (visible)
+                {
+                    Vector3 grip=_rig.transform.TransformPoint(new Vector3(.24f,1.02f,.30f));
+                    _utilityObject.transform.SetPositionAndRotation(grip,_rig.transform.rotation);
+                    Reach(_rightShoulder,_rightElbow,_right,grip);
+                }
+            }
             if(!visible) return;
             if(_mainObject!=null)
             {
@@ -167,6 +185,6 @@ namespace Emberdelve.Player
             // Keep the grip on the actual hit segment; the replacement model can improve reach proportions.
             wrist.position=target;
         }
-        private void OnDestroy() { if(_mainObject!=null) Destroy(_mainObject); if(_offObject!=null) Destroy(_offObject); }
+        private void OnDestroy() { if(_mainObject!=null) Destroy(_mainObject); if(_offObject!=null) Destroy(_offObject); if(_utilityObject!=null) Destroy(_utilityObject); }
     }
 }

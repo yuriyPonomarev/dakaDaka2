@@ -208,7 +208,7 @@ namespace Emberdelve.EditorTools
             BoxCollider box = go.AddComponent<BoxCollider>(); box.center = Vector3.up; box.size = Vector3.one; box.isTrigger = true;
             Physics.SyncTransforms(); return chest;
         }
-        private void InteractKey(bool held) => InputSystem.QueueStateEvent(_keyboard, held ? new KeyboardState(Key.E) : new KeyboardState());
+        private void InteractKey(bool held) => InputSystem.QueueStateEvent(_keyboard, held ? new KeyboardState(Key.F) : new KeyboardState());
         private IEnumerator Target(Component target)
         {
             InteractKey(false);

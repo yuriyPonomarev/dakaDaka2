@@ -23,7 +23,7 @@ namespace Emberdelve.EditorTools
     ///
     /// One batch entry in two phases that share one final line. Phase 1 (edit mode, no scene): the real builder runs twice
     /// (idempotent, byte-identical), then every pure rule is checked against literals written here: slot integers, the
-    /// literal version 2 save with the boots in Legs migrating to Feet (now through version 4), unknown slot ints and names rejected,
+    /// literal version 2 save with the boots in Legs migrating to Feet (now through version 5), unknown slot ints and names rejected,
     /// item and affix assets, the resolver, the gear score arithmetic. Phase 2 (play mode on the real level scene) is needed
     /// only because the command authority is bound to a live rig: equip/unequip cycles per slot with no stat accumulation,
     /// wrong-slot refusals, ring placement, the atomic ring swap and its refusals, snapshots and the character pane.
@@ -40,9 +40,9 @@ namespace Emberdelve.EditorTools
 
         // The literal version 2 save (D3a): the boots are worn in Legs. Checksum computed outside Unity.
         internal const string EquipmentV2 = @"{""schemaVersion"":2,""kind"":""equipment"",""containerId"":""equipment"",""width"":0,""height"":0,""entries"":[{""slot"":""Legs"",""x"":0,""y"":0,""item"":{""uid"":""3c4d5e6f708192a3b4c5d6e7f8091a2b"",""itemId"":""footpad_boots"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""Back"",""x"":0,""y"":0,""item"":{""uid"":""5d6e7f8091a2b3c4d5e6f708192a3b4c"",""itemId"":""ashen_cloak"",""quantity"":1,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:9540a6efad0fd5ef3c4965e83fa13e794ce508028b46510509abcfb3ff75900b""}";
-        // The same save at version 4 (D3c; was version 3 before): boots in Feet, entries in slot-number order (Back 6, Feet 8). Checksum computed outside Unity.
-        internal const string EquipmentV4 = @"{""schemaVersion"":4,""kind"":""equipment"",""containerId"":""equipment"",""width"":0,""height"":0,""entries"":[{""slot"":""Back"",""x"":0,""y"":0,""item"":{""uid"":""5d6e7f8091a2b3c4d5e6f708192a3b4c"",""itemId"":""ashen_cloak"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""Feet"",""x"":0,""y"":0,""item"":{""uid"":""3c4d5e6f708192a3b4c5d6e7f8091a2b"",""itemId"":""footpad_boots"",""quantity"":1,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:cb0c2f7b21b3e701d48760d08a91580224ee3562ded63936fe3a94ebe8db5c46""}";
-        internal const string EquipmentV4Checksum = "sha256:cb0c2f7b21b3e701d48760d08a91580224ee3562ded63936fe3a94ebe8db5c46";
+        // The same save at version 5 (D3c; was version 3 before): boots in Feet, entries in slot-number order (Back 6, Feet 8). Checksum computed outside Unity.
+        internal const string EquipmentV5 = @"{""schemaVersion"":5,""kind"":""equipment"",""containerId"":""equipment"",""width"":0,""height"":0,""entries"":[{""slot"":""Back"",""x"":0,""y"":0,""item"":{""uid"":""5d6e7f8091a2b3c4d5e6f708192a3b4c"",""itemId"":""ashen_cloak"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""Feet"",""x"":0,""y"":0,""item"":{""uid"":""3c4d5e6f708192a3b4c5d6e7f8091a2b"",""itemId"":""footpad_boots"",""quantity"":1,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:41a6a15f5d595942d02538392e744d4c45c9ae123b3bc66d048fe0e9b9648d4f""}";
+        internal const string EquipmentV5Checksum = "sha256:41a6a15f5d595942d02538392e744d4c45c9ae123b3bc66d048fe0e9b9648d4f";
 
         private static int _n, _fail;
         private static readonly List<UnityEngine.Object> Cleanup = new List<UnityEngine.Object>();
@@ -217,13 +217,13 @@ namespace Emberdelve.EditorTools
 
             // ---- the literal version 2 save migrates: boots Legs -> Feet
             Check(ContainerSnapshot.TryFromJson(EquipmentV2, out ContainerSnapshot migrated, out string reason), "the literal version 2 equipment parses: " + reason);
-            Check(migrated != null && migrated.schemaVersion == 4 && migrated.ToJson() == EquipmentV4 && migrated.checksum == EquipmentV4Checksum,
-                "it migrates (2 to 3 to 4) to the literal version 4 document with its independently computed checksum");
+            Check(migrated != null && migrated.schemaVersion == 5 && migrated.ToJson() == EquipmentV5 && migrated.checksum == EquipmentV5Checksum,
+                "it migrates (2 to 3 to 4) to the literal version 5 document with its independently computed checksum");
             Check(migrated != null && migrated.entries.Length == 2 && migrated.entries[0].slot == "Back" && migrated.entries[1].slot == "Feet" &&
                   migrated.entries[1].item.itemId == "footpad_boots" && migrated.entries[1].item.uid == "3c4d5e6f708192a3b4c5d6e7f8091a2b", "boots are in Feet with the same uid; no Legs entry remains");
             Check(migrated != null && ContainerSnapshotValidator.TryValidate(migrated, catalog, null, ContainerKinds.Equipment, out ValidatedContainer validated, out reason) && validated != null,
                 "the migrated equipment passes the full validator against the real catalog: " + reason);
-            Check(ContainerSnapshot.TryFromJson(EquipmentV4, out ContainerSnapshot v3, out reason) && v3.ToJson() == EquipmentV4, "the version 4 document parses as current: " + reason);
+            Check(ContainerSnapshot.TryFromJson(EquipmentV5, out ContainerSnapshot v3, out reason) && v3.ToJson() == EquipmentV5, "the version 5 document parses as current: " + reason);
 
             // ---- unknown slot names and wrong slots are rejected by the validator
             foreach (string bad in new[] { "12", "Ring", "RingMiddle", "ringleft", "Hand", "" })
@@ -262,7 +262,7 @@ namespace Emberdelve.EditorTools
             Check(GearScoreRules.TryTotal(rares, weights, out score, out reason) && score == 60, "eleven Rare pieces score 60 (2*5 + 10*5): " + reason);
 
             // ---- the command: an unknown slot is not even a legal intent
-            Check(Enum.GetNames(typeof(InventoryCommandKind)).Length == 9 && (int)InventoryCommandKind.Drop == 8 && (int)InventoryCommandKind.SwapWeaponSet == 7 && (int)InventoryCommandKind.SwapEquipment == 6 && (int)InventoryCommandKind.Use == 5, "SwapEquipment is appended as 6 after Use 5");
+            Check(Enum.GetNames(typeof(InventoryCommandKind)).Length == 11 && (int)InventoryCommandKind.Drop == 8 && (int)InventoryCommandKind.SwapWeaponSet == 7 && (int)InventoryCommandKind.SwapEquipment == 6 && (int)InventoryCommandKind.Use == 5, "SwapEquipment is appended as 6 after Use 5");
         }
 
         // The harness reads the phase-1 totals and finishes the single final line.
@@ -632,8 +632,8 @@ namespace Emberdelve.EditorTools
             string beforeRestore = State();
             LoadoutSnapshot saved = LoadoutSnapshot.Capture(_bag, _gear);
             string json = saved.ToJson();
-            Check(saved.schemaVersion == 4 && saved.equipment.schemaVersion == 4 && json.Contains("\"slot\":\"RingLeft\"") && json.Contains("\"slot\":\"RingRight\"") && json.Contains("\"slot\":\"Feet\"") &&
-                  json.Contains("\"slot\":\"Hands\"") && json.Contains("\"slot\":\"Necklace\"") && !json.Contains("\"Legs\""), "the snapshot is version 4 and names the new slots; nothing is in Legs");
+            Check(saved.schemaVersion == 5 && saved.equipment.schemaVersion == 5 && json.Contains("\"slot\":\"RingLeft\"") && json.Contains("\"slot\":\"RingRight\"") && json.Contains("\"slot\":\"Feet\"") &&
+                  json.Contains("\"slot\":\"Hands\"") && json.Contains("\"slot\":\"Necklace\"") && !json.Contains("\"Legs\""), "the snapshot is version 5 and names the new slots; nothing is in Legs");
             _gear.ClearToBare();
             _bag.Clear();
             Check(LoadoutSnapshot.TryRestoreJson(json, _bag, _gear, null, out why), "the loadout restores from its JSON: " + why);

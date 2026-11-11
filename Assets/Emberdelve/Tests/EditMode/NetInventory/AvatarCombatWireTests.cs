@@ -7,7 +7,7 @@ namespace Emberdelve.Tests
 {
     public class AvatarCombatWireTests
     {
-        private static AvatarCombatWire Sample() => new AvatarCombatWire { Main="ashen_short_sword",Off="emberbulwark_shield",Pattern="diagonal",Swing=true,Guard=false,SwingId=42,Elapsed=.2f,Windup=.4f,Active=.2f,Recovery=.5f,EyeOffset=Vector3.up*1.68f,Aim=Quaternion.Euler(20,130,0),SampleTime=12.5 };
+        private static AvatarCombatWire Sample() => new AvatarCombatWire { Main="ashen_short_sword",Off="emberbulwark_shield",Pattern="diagonal",Utility="pitch_torch",Swing=true,Guard=false,SwingId=42,Elapsed=.2f,Windup=.4f,Active=.2f,Recovery=.5f,EyeOffset=Vector3.up*1.68f,Aim=Quaternion.Euler(20,130,0),SampleTime=12.5 };
         [Test] public void AcceptedTrajectoryAndLoadoutSurviveRoundTrip()
         {
             var original=Sample();
@@ -29,6 +29,7 @@ namespace Emberdelve.Tests
             var original=Sample(); var stopped=original; stopped.Swing=false; Assert.That(stopped.Equals(original),Is.False);
             var switched=original; switched.Main="ember_rapier"; Assert.That(switched.Equals(original),Is.False);
             var guarded=original; guarded.Guard=true; Assert.That(guarded.Equals(original),Is.False);
+            var utility=original; utility.Utility=""; Assert.That(utility.Equals(original),Is.False);
         }
         [Test] public void NonFinitePoseAndTimingAreRejected()
         {

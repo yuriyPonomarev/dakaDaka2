@@ -157,7 +157,7 @@ namespace Emberdelve.Combat
             EmberdelveInput input = rig.Input;
             if (input == null && !RemoteDriven) return;
 
-            if (rig.IsDead)
+            if (rig.IsDead || rig.WeaponInputSuppressed)
             {
                 _remoteGuard = false;
                 _remotePressPending = false;
@@ -272,7 +272,7 @@ namespace Emberdelve.Combat
         /// </summary>
         private bool TryBeginRequest(int step, int patternIndex)
         {
-            if (_weapon == null || rig == null) return false;
+            if (_weapon == null || rig == null || rig.IsHoldingUtility) return false;
 
             if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority))
             {

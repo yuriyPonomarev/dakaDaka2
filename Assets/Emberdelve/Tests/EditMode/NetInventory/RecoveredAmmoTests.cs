@@ -27,6 +27,21 @@ namespace Emberdelve.Tests.NetInventory
                 var item=AssetDatabase.LoadAssetAtPath<ItemData>("Assets/Emberdelve/Data/Item_Recovered"+itemName+".asset");
                 Assert.That(bag.TryAdd(item,1),Is.True);
                 var stack=bag.Slots[0];var authority=bag.CommandAuthority;
+                ranged.Initialize(Weapon(matching),3,20);
+                Assert.That(bag.TryUseStack(stack.StackId),Is.False,"unheld item cannot be used");
+                Assert.That(bag.TotalUnits,Is.EqualTo(1));
+                Assert.That(bag.RequestWeaponSet(2,out _),Is.False,"only two weapon sets exist");
+                Assert.That(bag.RequestHoldStack(stack.StackId,out var holdReason),Is.True,holdReason);
+                Assert.That(bag.HeldStackId,Is.EqualTo(stack.StackId));
+                Assert.That(rig.ActiveWeapon,Is.Null);
+                Assert.That(rig.IsGuarding,Is.False);
+                Assert.That(rig.CanGuard,Is.False);
+                Assert.That(bag.RequestWeaponSet(1,out _),Is.False,"missing weapon set cannot stow the held item");
+                Assert.That(bag.HeldStackId,Is.EqualTo(stack.StackId));
+                Assert.That(bag.RequestWeaponSet(0,out holdReason),Is.True,holdReason);
+                Assert.That(bag.HeldStackId,Is.Zero,"selecting the current weapon set stows the item");
+                Assert.That(bag.TryUseStack(stack.StackId),Is.False);
+                Assert.That(bag.RequestHoldStack(stack.StackId,out holdReason),Is.True,holdReason);
                 ranged.Initialize(Weapon(wrong),3,20);
                 Assert.That(authority.TryCreateLocalCommand(InventoryCommandKind.Use,stack.StackId,0,Vector2Int.zero,EquipmentSlot.None,Guid.Empty,Guid.Empty,out var denied,out var why),Is.True,why);
                 Assert.That(authority.Submit(rig,denied).Accepted,Is.False);
@@ -37,6 +52,9 @@ namespace Emberdelve.Tests.NetInventory
                 Assert.That(ranged.Reserve,Is.EqualTo(4));Assert.That(bag.TotalUnits,Is.Zero);
                 Assert.That(authority.Submit(rig,accepted).Accepted,Is.False,"replaying consumption cannot mint ammo");
                 Assert.That(ranged.Reserve,Is.EqualTo(4));
+                Assert.That(bag.HeldStackId,Is.Zero,"consumed stack cannot remain held");
+                Assert.That(bag.HeldItem,Is.Null);
+                Assert.That(bag.RequestHoldStack(stack.StackId,out _),Is.False,"retired stack cannot be selected");
             }
             finally {if(owner!=null)UnityEngine.Object.DestroyImmediate(owner);NetRole.Set(previous);}
         }

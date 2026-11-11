@@ -3,22 +3,20 @@
 Updated 11 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest completed: LIGHT-01 torch and source lighting
+## Completed: QUICK-01 controls and held utility items
 
-Pitch Torch is a UID inventory item in both starter bags; equip with inventory right-click, Q swaps sets/stows it. Owner and remote players see its flame and actual light. Removed phantom camera light; hands receive shadows, ambient is darker, point sources use soft shadows and small depth-occluded scattering. E extinguishes/relights authored local lights, including flame/glow; server validates reach/LOS and replicates state to late joiners. Moon remains environment light. Protocol11.
+Q/E abilities;1/2 direct weapon sets; hold3/4 for two three-entry wheels, release to hold. F interaction. Any held utility stows both weapons; LMB uses only the held stack. Inventory hover/selection +3/4 assigns slots; right-click holds without consuming. Server enforces exact held identity and rejects weapon attacks. Changing hands cancels drinking. Owner/observer visuals and six-slot HUD are implemented; ammo pools survive utility use. Protocol12, saved belt schema5 migrates old4 entries into6.
 
-Report: Tasks/LIGHTING_TORCH_20261111.md. Final build: Builds/Playable/20261111-154101-549/EmberdelveNet.exe. Final Hands92/0, Visual207/0/build PASS. Combined focused51 unique tests, harness15/0; network baseline NetInventory148/0, NetDoor37/0, NetFinal172/0, NetCombat312/0. Catalog143/0 after canonical serialization fix. Live host/client/latejoin toggle accepted; final owner/observer equipped-stowed-relit torch visually verified, seed11/protocol11. All review windows closed; main Editor untouched. No repeat of the full suite for cosmetic fixes.
+Report: Tasks/QUICK_HANDS_20261111.md. Final build: Builds/Playable/20261111-162703-147/EmberdelveNet.exe. Focused EditMode20/20; affected schema/authority/visual/input/network proofs passed across recorded runs. Final SkillCooldown253/0; graphical quick-access UI139/0. Initial failures and their fixes are recorded honestly in the report, not presented as a green aggregate. Seed11 live host/client wheels, held potion/torch, remote light, Q/E,1/2,F verified; final HUD/wheel polish rechecked on final build. All review windows closed; main Editor untouched.
 
-Limits: simple flame meshes/local scattering, not room-scale volumetrics; torch uses a weapon slot and no fuel system. Old unrelated materials, Human import formatting, Logs and Pipeline config changes remain uncommitted.
+## Previous accepted baseline
 
-## Recent accepted baseline
+LIGHT-01: inventory torch, source-based hand lighting and synchronized extinguish/relight of world lights; prior controls are superseded above. Simple flame/local scattering, no fuel or room-scale volumetrics. See Tasks/LIGHTING_TORCH_20261111.md.
 
-Sword hilt lowered below frame, upright35-degree ready retained, guard unchanged; bow accepted. Finger/palm grips and smoother weapon transitions completed. See Tasks/LOW_SWORD_20261111.md, FINGER_GRIP_20261111.md, WEAPON_TRANSITIONS_20261111.md.
+Sword hilt lowered, upright35-degree ready retained, bow accepted. Whole CC0 Innerscene/MakeHuman source supplies class bodies and first-person hands. Open moonlit ruins have terraces/stairs, dormant-to-aggro undead and server-owned breakable barrels. See Tasks/LOW_SWORD_20261111.md, UNIFIED_HUMAN_20261109.md and MOONLIT_RUINS_20261109.md.
 
-Open moonlit ruins have terraces/stairs, dormant-to-aggro undead and server-owned breakable barrels. Whole CC0 Innerscene/MakeHuman source supplies class bodies and first-person hands. See Tasks/MOONLIT_RUINS_20261109.md and UNIFIED_HUMAN_20261109.md. Current armour/materials remain simple.
+## Next actions and limits
 
-## Next actions
-
-1. Follow the next user-selected slice; no background full-suite reruns. Lighting is complete with the limits above.
-2. Existing separate visual work: sleeve seams, third-person bow draw state, crossbow model/reload, brief magenta impact material. Do not bundle these into the finished light milestone.
-3. Preserve and review inherited material/import/log/Pipeline drift separately; never blanket-add it to commits.
+1. Follow the next user-selected slice; no background full-suite reruns. Utility bottle/ammo models remain simple.
+2. Separate existing work: sleeve seams, third-person bow draw state, crossbow model/reload, brief magenta impact material. Old full inventory UI tests still assume pre-paper-doll text rows; quick-access UI has its own focused proof and requires real graphics for the portrait.
+3. Preserve/review inherited material/import/log/Pipeline drift separately. Never blanket-add it to commits.

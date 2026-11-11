@@ -24,7 +24,7 @@ namespace Emberdelve.Items
     /// </summary>
     public sealed class LoadoutSnapshot
     {
-        /// <summary>D3c: the belt has the same four keys as the hotbar (keys 1-4).</summary>
+        /// <summary>D3c: the belt has six entries split between the 3/4 quick wheels.</summary>
         public const int BeltSlotCount = HotbarBindings.SlotCount;
 
         public int schemaVersion = ContainerSnapshot.CurrentSchemaVersion;
@@ -33,7 +33,7 @@ namespace Emberdelve.Items
         /// <summary>D3c (version 4): the weapon set in hand, 0 or 1.</summary>
         public int weaponSet;
         /// <summary>D3c (version 4): the utility belt, one text per key: "" (empty), "i:" + itemId (a carried item) or "u:" + 32 hex digits (an item with an identity).</summary>
-        public string[] belt = new string[BeltSlotCount] { "", "", "", "" };
+        public string[] belt = new string[BeltSlotCount] { "", "", "", "", "", "" };
         public string checksum = "";
 
         /// <summary>Captures and seals the current bag and equipment. Read-only.</summary>
@@ -134,7 +134,11 @@ namespace Emberdelve.Items
         {
             result = null;
 
-            if (!StrictJson.TryExpectObject(root, "loadout snapshot", new[] { "schemaVersion", "bag", "equipment", "checksum" },
+            if (!StrictJson.TryInt(ContainerSchema.Member(root, "schemaVersion"), "loadout schemaVersion", out int version, out reason)) return false;
+            string[] fields = version >= 4
+                ? new[] { "schemaVersion", "bag", "equipment", "weaponSet", "belt", "checksum" }
+                : new[] { "schemaVersion", "bag", "equipment", "checksum" };
+            if (!StrictJson.TryExpectObject(root, "loadout snapshot", fields,
                     out Dictionary<string, JsonNode> map, out reason)) return false;
 
             LoadoutSnapshot parsed = new LoadoutSnapshot();
@@ -142,6 +146,18 @@ namespace Emberdelve.Items
             if (!ContainerSnapshot.TryReadFields(map["bag"], "loadout bag", out parsed.bag, out reason)) return false;
             if (!ContainerSnapshot.TryReadFields(map["equipment"], "loadout equipment", out parsed.equipment, out reason)) return false;
             if (!StrictJson.TryString(map["checksum"], "loadout checksum", out parsed.checksum, out reason)) return false;
+
+            if (version >= 4)
+            {
+                if (!StrictJson.TryInt(map["weaponSet"], "loadout weaponSet", out parsed.weaponSet, out reason)) return false;
+                if (parsed.weaponSet < 0 || parsed.weaponSet > 1) { reason = "invalid legacy weapon set"; return false; }
+                if (!StrictJson.TryArray(map["belt"], "legacy belt", 4, out List<JsonNode> entries, out reason)) return false;
+                if (entries.Count != 4) { reason = "a version 4 belt has exactly four entries"; return false; }
+                parsed.belt = new string[4];
+                for (int i = 0; i < 4; i++)
+                    if (!StrictJson.TryString(entries[i], "legacy belt entry", out parsed.belt[i], out reason)
+                        || !TryParseBeltText(parsed.belt[i], null, out _, out reason)) return false;
+            }
 
             result = parsed;
             return true;
