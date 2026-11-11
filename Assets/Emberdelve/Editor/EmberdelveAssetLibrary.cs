@@ -717,11 +717,13 @@ namespace Emberdelve.EditorTools
             {
                 i.itemId = "blood_draught";
                 i.displayName = "Blood Draught";
-                i.description = "Thick, warm, faintly metallic. Press 1-4 to drink.";
+                i.description = "Thick, warm, faintly metallic. Take in hand and hold still while drinking.";
                 i.kind = ItemKind.Consumable;
                 i.value = 18;
                 i.maxStack = 3;
                 i.healAmount = 45;
+                i.useChannelSeconds = 1.8f;
+                i.healOverTimeSeconds = 0f;
                 i.iconColor = new Color(0.75f, 0.18f, 0.18f);
                 i.worldMaterial = EmberdelveMaterials.DraughtMat;
                 i.worldSize = new Vector3(0.24f, 0.3f, 0.24f);

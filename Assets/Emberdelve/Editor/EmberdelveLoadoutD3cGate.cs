@@ -228,6 +228,11 @@ namespace Emberdelve.EditorTools
                     authored++;
                     expected = item.moveSpeedPenalty == 0f && item.useChannelSeconds == 1.8f && item.healOverTimeSeconds == 4f;
                 }
+                else if (item.itemId == "blood_draught")
+                {
+                    authored++;
+                    expected = item.moveSpeedPenalty == 0f && item.useChannelSeconds == 1.8f && item.healOverTimeSeconds == 0f;
+                }
                 else if (item.itemId == "graspwrap_gloves")
                 {
                     authored++;
@@ -240,7 +245,7 @@ namespace Emberdelve.EditorTools
                     Debug.LogError("[LoadoutD3c] unexpected authored D3c tuning: " + item.itemId);
                 }
             }
-            Check(assets >= 14 && authored == 2 && changed == 0, "D3d authors only gloves penalty 3 and tonic channel 1.8/heal duration 4; every older item retains its zero defaults");
+            Check(assets >= 14 && authored == 3 && changed == 0, "authored potions drink for 1.8 seconds; tonic heals over 4 seconds, Blood Draught immediately after drinking; gloves penalty remains 3");
         }
 
         private static ItemData MakeItem(string id)
@@ -742,7 +747,16 @@ namespace Emberdelve.EditorTools
             float low = _rig.Health.CurrentHealth;
             int units = _bag.TotalUnits;
             Check(_bag.RequestHoldStack(_bag.Hotbar.StackIdAt(0), out why), "draw the bound draught before using: " + why);
-            Check(_bag.Hotbar.TryUse(0, out why) && _bag.TotalUnits == units - 1 && Near(_rig.Health.CurrentHealth, Mathf.Min(max, low + draught.healAmount), 0.001f), "key 1 uses exactly the bound draught (+" + draught.healAmount + "): " + why);
+            bool startedDrink = _bag.Hotbar.TryUse(0, out why);
+            ConsumableChannel beltDrink = ConsumableChannel.Ensure(_rig.gameObject);
+            var previousSpeed = beltDrink.SpeedRatioOverride;
+            try
+            {
+                beltDrink.SpeedRatioOverride = () => 0f;
+                beltDrink.Tick(draught.useChannelSeconds);
+            }
+            finally { beltDrink.SpeedRatioOverride = previousSpeed; }
+            Check(startedDrink && _bag.TotalUnits == units - 1 && Near(_rig.Health.CurrentHealth, Mathf.Min(max, low + draught.healAmount), 0.001f), "key 1 uses exactly the bound draught (+" + draught.healAmount + "): " + why);
 
             // A full loadout explicitly saves its belt, including empty keys. Bare bag restores retain their separate default policy.
             saved.belt = new[] { "", "", "", "", "", "" };
@@ -798,12 +812,16 @@ namespace Emberdelve.EditorTools
                 Check(_rig.Health.MaxHealth > 70f && draught.healAmount == 45, "the live character has room for a 45 point potion (max " + _rig.Health.MaxHealth + ")");
                 float total = draught.healAmount;
 
-                // ---- default content: no channel, no heal over time -> the old instant heal
+                // Production potion: the visible drink finishes before consuming or healing.
+                Check(Near(authoredChannel, 1.8f, 0.0001f) && authoredOverTime == 0f, "Blood Draught authors a 1.8-second drink");
                 ulong stack = Stock(draught, 3);
                 ulong revision = _bag.Revision;
-                Check(_bag.TryUseStack(stack), "an ordinary draught is used");
+                Check(_bag.TryUseStack(stack) && channel.IsChanneling && channel.ChannelStackId == stack && Near(channel.ChannelDuration, authoredChannel, 0.0001f), "an ordinary draught starts the authored drink");
+                channel.Tick(authoredChannel * 0.5f);
+                Check(channel.IsChanneling && _bag.TotalUnits == 3 && _bag.Revision == revision && Near(_rig.Health.CurrentHealth, _low, 0.0001f), "halfway through the real potion nothing is consumed or healed");
+                channel.Tick(authoredChannel * 0.5f);
                 Check(!channel.IsChanneling && channel.ActiveHealCount == 0 && _bag.TotalUnits == 2 && _bag.Revision == revision + 1 && Near(_rig.Health.CurrentHealth, _low + total, 0.001f),
-                    "an authored-as-today draught heals the whole 45 at once, consumes one, commits one revision, opens no channel");
+                    "the authored drink completes before one consumption and the 45-point heal");
 
                 // ---- a channel with a heal over time
                 draught.useChannelSeconds = 2f;

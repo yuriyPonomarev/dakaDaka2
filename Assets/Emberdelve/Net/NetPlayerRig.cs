@@ -113,6 +113,8 @@ namespace Emberdelve.Net
             if (!IsSpawned || Rig == null) return;
             var view = Rig.GetComponent<Emberdelve.Player.PlayerAvatar>();
             var pose = AvatarCombat.Value;
+            if (NetRole.IsClientOnly && pose.IsValid)
+                PotionDrinkPresentation.Ensure(Rig).ApplyNetwork(pose.Drinking, pose.DrinkProgress, pose.DrinkDuration);
             if (view != null && pose.IsValid) view.PresentUtility(pose.Utility.ToString());
             if (view != null && pose.IsValid)
                 view.PresentCombat(pose.Main.ToString(),pose.Off.ToString(),pose.Pattern.ToString(),pose.Guard,pose.Swing,

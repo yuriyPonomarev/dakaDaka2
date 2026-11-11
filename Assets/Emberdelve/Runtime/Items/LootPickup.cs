@@ -212,6 +212,10 @@ namespace Emberdelve.Items
         private Vector3 _home;
         private float _phase;
         private ulong _networkLootId;
+        private GameObject _potionVisual;
+        private ItemData _potionVisualItem;
+        private bool _potionProxyWasEnabled;
+
 
         public ItemData Item => _instance != null ? _instance.Definition : item;
         public int Amount => _instance != null ? 1 : Mathf.Max(1, amount);
@@ -245,6 +249,7 @@ namespace Emberdelve.Items
             ulong bits = RngMix.Combine(unchecked((ulong)(long)Mathf.RoundToInt(p.x * 64f)),
                                         unchecked((ulong)(long)Mathf.RoundToInt(p.z * 64f)));
             _phase = (bits >> 40) / 16777216f * Mathf.PI * 2f;
+            RefreshPotionVisual();
         }
 
         public void Configure(ItemData newItem, int newAmount, MonoBehaviour newHost)
@@ -254,7 +259,48 @@ namespace Emberdelve.Items
             amount = Mathf.Max(1, newAmount);
             lootHost = newHost;
             _host = newHost as ILootHost;
+            RefreshPotionVisual();
             ProjectileRecovery.DressPickup(gameObject,Item);
+        }
+
+        // All creation paths keep their existing interaction proxy. Only the visible potion changes.
+        private void RefreshPotionVisual()
+        {
+            ItemData shown = Item;
+            bool potion = shown != null && shown.healAmount > 0;
+            if (_potionVisual != null && potion && _potionVisualItem == shown) return;
+            Renderer proxy = GetComponent<Renderer>();
+            if (_potionVisual != null)
+            {
+                _potionVisual.SetActive(false);
+                if (Application.isPlaying) Destroy(_potionVisual); else DestroyImmediate(_potionVisual);
+                _potionVisual = null;
+                _potionVisualItem = null;
+                if (proxy != null) proxy.enabled = _potionProxyWasEnabled;
+            }
+            if (!potion) return;
+            _potionProxyWasEnabled = proxy != null && proxy.enabled;
+            _potionVisual = Emberdelve.Player.PotionBottleVisual.Create(shown, transform);
+            _potionVisualItem = shown;
+            foreach (Transform part in _potionVisual.GetComponentsInChildren<Transform>()) part.gameObject.layer = gameObject.layer;
+            if (proxy != null) proxy.enabled = false;
+            FitPotionVisual();
+        }
+
+        private void LateUpdate()
+        {
+            // Network floor snapshots assign the root proxy scale after ConfigureNetworkReplica.
+            FitPotionVisual();
+        }
+
+        private void FitPotionVisual()
+        {
+            if (_potionVisual == null) return;
+            Vector3 scale = transform.lossyScale;
+            _potionVisual.transform.localScale = new Vector3(
+                1f / Mathf.Max(.0001f, Mathf.Abs(scale.x)),
+                1f / Mathf.Max(.0001f, Mathf.Abs(scale.y)),
+                1f / Mathf.Max(.0001f, Mathf.Abs(scale.z)));
         }
 
         /// <summary>Server-only registry hook; zero means this is still an offline-only pickup.</summary>
@@ -296,6 +342,7 @@ namespace Emberdelve.Items
             amount = 1;
             lootHost = newHost;
             _host = newHost as ILootHost;
+            RefreshPotionVisual();
             ProjectileRecovery.DressPickup(gameObject,Item);
         }
 

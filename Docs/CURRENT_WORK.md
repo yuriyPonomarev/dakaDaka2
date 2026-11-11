@@ -3,6 +3,12 @@
 Updated 11 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
+## Completed: POTION-01 model, glow and drinking
+
+Shared glass/cork/leather/brass vial for hands and ground pickups; dim emissive liquid without a Light. Owner and observer uncork/raise/sip/lower poses follow the authoritative1.8s drinking channel. Successful completion consumes/heals; cancellation retains the item. Protocol13.
+
+Build: Builds/Playable/20261111-170116-778/EmberdelveNet.exe. Wire6/6; Hands92/0, Visual207/0, InventoryAuthority116/0, LoadoutD3c204/0, NetCombat312/0, NetInventory148/0; corrected graphical QuickAccessUi140/0. Live seed11 host/client: dark-scene vial, drinking from both views, movement cancellation without loss and successful completion with weapon restoration. Windows closed. Report Tasks/POTION_20261111.md includes the initial UI fixture failure and material polish.
+
 ## Completed: AMMO-01 replenishment with weapon drawn
 
 User correction: ammo is exempt from held-item use. Choosing arrows/bolts in a quick wheel or right-clicking them replenishes the matching drawn ranged weapon directly. No weapon stow/swap or ammo model is involved. Potions still require holding; full/wrong-ammo requests consume nothing. Protocol12/schema5 unchanged.
@@ -23,6 +29,6 @@ Sword hilt lowered, upright35-degree ready retained, bow accepted. Whole CC0 Inn
 
 ## Next actions and limits
 
-1. Follow the next user-selected slice; no background full-suite reruns. Utility bottle/ammo models remain simple.
+1. Follow the next user-selected slice; no background full-suite reruns. Potion model and drinking are complete; ammo remains a direct replenishment action.
 2. Separate existing work: sleeve seams, third-person bow draw state, crossbow model/reload, brief magenta impact material. Old full inventory UI tests still assume pre-paper-doll text rows; quick-access UI has its own focused proof and requires real graphics for the portrait.
 3. Preserve/review inherited material/import/log/Pipeline drift separately. Never blanket-add it to commits.

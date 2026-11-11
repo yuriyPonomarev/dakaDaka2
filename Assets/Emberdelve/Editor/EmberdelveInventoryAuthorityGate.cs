@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -329,6 +330,31 @@ namespace Emberdelve.EditorTools
         }
 
         private void CheckConsumableAuthority(ItemData coin, ItemData draught, ItemData arrows)
+        {
+            // Transaction/reentrant-callback proofs need an instant item; never retune the production potion asset.
+            ItemCatalog authoredCatalog = _bag.Catalog;
+            ItemData instant = Instantiate(draught);
+            instant.useChannelSeconds = 0f;
+            instant.healOverTimeSeconds = 0f;
+            var items = new List<ItemData>(authoredCatalog.Items);
+            items[items.IndexOf(draught)] = instant;
+            ItemCatalog fixtureCatalog = ItemCatalog.CreateForTest(items, authoredCatalog.Affixes);
+            try
+            {
+                _bag.Clear();
+                _bag.SetCatalog(fixtureCatalog);
+                CheckInstantConsumableAuthority(coin, instant, arrows);
+            }
+            finally
+            {
+                _bag.Clear();
+                _bag.SetCatalog(authoredCatalog);
+                Destroy(instant);
+                Destroy(fixtureCatalog);
+            }
+        }
+
+        private void CheckInstantConsumableAuthority(ItemData coin, ItemData draught, ItemData arrows)
         {
             _equipment.Clear();
             _bag.Clear();

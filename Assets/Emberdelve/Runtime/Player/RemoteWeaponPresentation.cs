@@ -8,6 +8,8 @@ namespace Emberdelve.Player
     public sealed class RemoteWeaponPresentation : MonoBehaviour
     {
         private PlayerRig _rig;
+        private PotionDrinkPresentation _drink;
+        private float _drinkRaise;
         private Transform _right, _left, _rightElbow, _leftElbow, _rightShoulder, _leftShoulder;
         private readonly List<BonePose> _modified = new List<BonePose>(6);
         private struct BonePose { public Transform Bone; public Vector3 Position; public Quaternion Rotation; }
@@ -42,7 +44,7 @@ namespace Emberdelve.Player
         private static readonly Dictionary<string,WeaponData> Weapons=new Dictionary<string,WeaponData>();
         public void Bind(PlayerRig rig,GameObject model)
         {
-            _rig=rig; _models=WeaponViewModelSet.Load();
+            _rig=rig; _drink=PotionDrinkPresentation.Ensure(rig); _models=WeaponViewModelSet.Load();
             _right=_left=_rightElbow=_leftElbow=_rightShoulder=_leftShoulder=null;
             var animator=model.GetComponentInChildren<Animator>();
             if(animator!=null && animator.isHuman)
@@ -122,7 +124,21 @@ namespace Emberdelve.Player
                 if (visible)
                 {
                     Vector3 grip=_rig.transform.TransformPoint(new Vector3(.24f,1.02f,.30f));
-                    _utilityObject.transform.SetPositionAndRotation(grip,_rig.transform.rotation);
+                    Quaternion rotation = _rig.transform.rotation;
+                    var bottle = _utilityObject.GetComponent<PotionBottleVisual>();
+                    if (bottle != null)
+                    {
+                        bool drinking = _drink != null && _drink.IsDrinking;
+                        float progress = drinking ? _drink.Progress : 0f;
+                        _drinkRaise = Mathf.MoveTowards(_drinkRaise, drinking ? PotionDrinkPresentation.Raise(progress) : 0f, Time.deltaTime * 7f);
+                        // Bottle lip reaches the face while the base tips outwards.
+                        grip = Vector3.Lerp(grip, _rig.AimOrigin + _rig.transform.TransformVector(new Vector3(.05f,-.17f,.25f)), _drinkRaise);
+                        rotation *= Quaternion.Euler(-95f * _drinkRaise, 0f, -10f * _drinkRaise);
+                        bottle.SetDrinkProgress(progress, drinking);
+                        if (drinking && progress < .25f)
+                            Reach(_leftShoulder,_leftElbow,_left,grip + rotation * new Vector3(0,.145f,0));
+                    }
+                    _utilityObject.transform.SetPositionAndRotation(bottle != null ? grip + rotation * new Vector3(0,-.055f,0) : grip,rotation);
                     Reach(_rightShoulder,_rightElbow,_right,grip);
                 }
             }

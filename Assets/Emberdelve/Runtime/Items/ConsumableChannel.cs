@@ -50,6 +50,8 @@ namespace Emberdelve.Items
 
         public bool IsChanneling => _item != null;
         public ItemData ChannelItem => _item;
+        public float ChannelDuration => IsChanneling ? _duration : 0f;
+        public ulong ChannelStackId => IsChanneling ? _stackId : 0;
         public float ChannelProgress => _item != null ? ConsumableRules.Progress(_elapsed, _duration) : 0f;
         public int ActiveHealCount => _heals.Count;
         public int CompletedDrinks { get; private set; }

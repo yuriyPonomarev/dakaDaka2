@@ -14,11 +14,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.ItemData
   itemId: blood_draught
   displayName: Blood Draught
-  description: Thick, warm, faintly metallic. Press 1-4 to drink.
+  description: Thick, warm, faintly metallic. Take in hand and hold still while drinking.
   kind: 1
   value: 18
   maxStack: 3
   healAmount: 45
+  useChannelSeconds: 1.8
+  healOverTimeSeconds: 0
   ammoGrant: 0
   iconColor: {r: 0.75, g: 0.18, b: 0.18, a: 1}
   worldMaterial: {fileID: 2100000, guid: 566c7c45aa12e3c4b84a36314d7f2908, type: 2}

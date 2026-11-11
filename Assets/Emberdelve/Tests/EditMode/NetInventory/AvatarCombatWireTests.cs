@@ -38,5 +38,38 @@ namespace Emberdelve.Tests
             state=Sample(); state.SampleTime=double.PositiveInfinity; Assert.That(state.IsValid,Is.False);
             state=Sample(); state.EyeOffset=new Vector3(float.PositiveInfinity,0,0); Assert.That(state.IsValid,Is.False);
         }
+        [Test] public void DrinkProgressAndCancellationSurviveRoundTrip()
+        {
+            var original = Sample(); original.Utility = "blood_draught";
+            original.Drinking = true; original.DrinkProgress = .35f; original.DrinkDuration = 1.8f;
+            using (var writer = new FastBufferWriter(512, Allocator.Temp))
+            {
+                writer.WriteValueSafe(original);
+                using (var reader = new FastBufferReader(writer, Allocator.Temp))
+                {
+                    reader.ReadValueSafe(out AvatarCombatWire decoded);
+                    Assert.That(decoded.IsValid, Is.True);
+                    Assert.That(decoded.Equals(original), Is.True);
+                }
+            }
+            var changed = original; changed.Drinking = false; Assert.That(changed.Equals(original), Is.False);
+            changed = original; changed.DrinkProgress = .5f; Assert.That(changed.Equals(original), Is.False);
+            changed = original; changed.DrinkDuration = 2f; Assert.That(changed.Equals(original), Is.False);
+        }
+        [Test] public void InvalidDrinkStateIsRejected()
+        {
+            foreach (float value in new[] { float.NaN, float.PositiveInfinity, -.1f, 1.1f })
+            {
+                var state = Sample(); state.DrinkProgress = value; Assert.That(state.IsValid, Is.False);
+            }
+            foreach (float value in new[] { float.NaN, float.PositiveInfinity, -1f })
+            {
+                var state = Sample(); state.DrinkDuration = value; Assert.That(state.IsValid, Is.False);
+            }
+            var drinking = Sample(); drinking.Drinking = true;
+            Assert.That(drinking.IsValid, Is.False, "a drink requires positive duration");
+            drinking.DrinkDuration = 1.8f; drinking.Utility = "";
+            Assert.That(drinking.IsValid, Is.False, "a drink requires a held utility");
+        }
     }
 }

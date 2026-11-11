@@ -1045,7 +1045,7 @@ namespace Emberdelve.EditorTools
             float healthBefore = f.Rig.CurrentHealth;
             ulong revisionBefore = f.Inventory.Revision;
             f.InventoryEvents = 0;
-            bool used = f.Inventory.Hotbar.TryUse(0, out _);
+            bool used = CompleteAuthoredDrink(f, f.Inventory.Hotbar.TryUse(0, out _));
             float expectedHealth = Mathf.Min(f.Rig.MaxHealth, healthBefore + draught.healAmount);
             int afterIndex = f.Inventory.IndexOfStack(draughtId);
             f.Check(used && afterIndex >= 0 && f.Inventory.Slots[afterIndex].Count == 1 &&
@@ -1066,11 +1066,27 @@ namespace Emberdelve.EditorTools
             f.Rig.Health.SetHealth(Mathf.Max(1f, f.Rig.MaxHealth - 30f));
             revisionBefore = f.Inventory.Revision;
             f.InventoryEvents = 0;
-            used = f.Inventory.Hotbar.TryUse(0, out _);
+            used = CompleteAuthoredDrink(f, f.Inventory.Hotbar.TryUse(0, out _));
             f.Check(used && f.Inventory.IndexOfStack(draughtId) < 0 && f.Inventory.Revision == revisionBefore + 1 &&
                     f.InventoryEvents == 1,
                 "after compaction the key consumes that same stack's last unit (one revision, one event) and retires it");
             f.Check(f.Inventory.Hotbar.StackIdAt(0) == 0, "the fully consumed stack leaves the slot empty");
+        }
+
+        // UI identity/count fixtures advance the real channel clock instead of changing shared item assets.
+        private static bool CompleteAuthoredDrink(Fixture f, bool started)
+        {
+            if (!started) return false;
+            ConsumableChannel channel = f.Rig.GetComponent<ConsumableChannel>();
+            if (channel == null || !channel.IsChanneling) return true;
+            var previousSpeed = channel.SpeedRatioOverride;
+            try
+            {
+                channel.SpeedRatioOverride = () => 0f;
+                channel.Tick(channel.ChannelDuration + 0.01f);
+            }
+            finally { channel.SpeedRatioOverride = previousSpeed; }
+            return true;
         }
 
         private static IEnumerator HotbarRetiredBindingDoesNothing(Fixture f)
@@ -1094,7 +1110,7 @@ namespace Emberdelve.EditorTools
 
             f.Rig.Health.SetHealth(Mathf.Max(1f, f.Rig.MaxHealth - 30f));
             f.Check(f.Inventory.RequestHoldStack(boundId, out _), "the bound stack is held before use");
-            f.Check(f.Inventory.Hotbar.TryUse(0, out _) && f.Inventory.IndexOfStack(boundId) < 0,
+            f.Check(CompleteAuthoredDrink(f, f.Inventory.Hotbar.TryUse(0, out _)) && f.Inventory.IndexOfStack(boundId) < 0,
                 "key 1 consumes the bound stack's only unit and retires it");
             int lookalikeIndex = f.Inventory.IndexOfStack(lookalikeId);
             f.Check(lookalikeIndex == 0, "the lookalike now sits at the list index the bound stack used to hold");
@@ -1104,7 +1120,7 @@ namespace Emberdelve.EditorTools
             ulong revisionBefore = f.Inventory.Revision;
             int unitsBefore = f.Inventory.TotalUnits;
             f.InventoryEvents = 0;
-            bool used = f.Inventory.Hotbar.TryUse(0, out _);
+            bool used = CompleteAuthoredDrink(f, f.Inventory.Hotbar.TryUse(0, out _));
             lookalikeIndex = f.Inventory.IndexOfStack(lookalikeId);
             f.Check(!used && f.Inventory.Hotbar.StackIdAt(0) == 0,
                 "key 1 on a retired binding does nothing");
@@ -1118,7 +1134,7 @@ namespace Emberdelve.EditorTools
             // The index-based adapter is kept for existing callers: it still addresses the list position.
             f.Check(!f.Inventory.TryUseSlot(0), "the legacy adapter also rejects an unheld item");
             f.Check(f.Inventory.RequestHoldStack(lookalikeId, out _), "the remaining stack is taken in hand");
-            f.Check(f.Inventory.TryUseSlot(0) && f.Inventory.Slots[f.Inventory.IndexOfStack(lookalikeId)].Count == 1,
+            f.Check(CompleteAuthoredDrink(f, f.Inventory.TryUseSlot(0)) && f.Inventory.Slots[f.Inventory.IndexOfStack(lookalikeId)].Count == 1,
                 "the legacy index-based TryUseSlot adapter still works for existing callers");
         }
 
@@ -1284,9 +1300,12 @@ namespace Emberdelve.EditorTools
             InputSettings temporarySettings = UnityEngine.Object.Instantiate(originalSettings);
             Keyboard keyboard = null;
             Mouse mouse = null;
+            bool healthUpdatesEnabled = f.Rig.Health.enabled;
 
             try
             {
+                // Update only performs passive regeneration; keep potion Heal/Changed active and isolate its timing.
+                f.Rig.Health.enabled = false;
                 // The Input System disables new keyboard/mouse devices after focus loss. Use only a transient clone
                 // for this fixture, route input to the game, and restore the original settings object in finally.
                 temporarySettings.hideFlags = HideFlags.HideAndDontSave;
@@ -1386,6 +1405,12 @@ namespace Emberdelve.EditorTools
                 InputSystem.QueueStateEvent(mouse, new MouseState { buttons = 1 });
                 yield return WaitFrames(1);
                 InputSystem.QueueStateEvent(mouse, new MouseState());
+                ConsumableChannel drink = f.Rig.GetComponent<ConsumableChannel>();
+                f.Check(drink != null && drink.IsChanneling && drink.ChannelStackId == draughtId &&
+                        f.Inventory.TotalUnits == unitsBeforeUse && f.Inventory.Revision == revisionBeforeUse &&
+                        Mathf.Abs(f.Rig.CurrentHealth - healthBeforeUse) < 0.01f,
+                    $"a real LMB event begins drinking without early consumption or healing (channel={drink != null && drink.IsChanneling}, held={drink?.ChannelStackId}/{draughtId}, units={f.Inventory.TotalUnits}/{unitsBeforeUse}, revision={f.Inventory.Revision}/{revisionBeforeUse}, health={f.Rig.CurrentHealth:F4}/{healthBeforeUse:F4})");
+                CompleteAuthoredDrink(f, true);
 
                 f.Check(f.Inventory.TotalUnits == unitsBeforeUse - 1 &&
                         Mathf.Abs(f.Rig.CurrentHealth - expectedHealth) < 0.01f,
@@ -1398,6 +1423,7 @@ namespace Emberdelve.EditorTools
             }
             finally
             {
+                f.Rig.Health.enabled = healthUpdatesEnabled;
                 if (keyboard != null)
                 {
                     if (keyboard.enabled) InputSystem.QueueStateEvent(keyboard, new KeyboardState());
@@ -1454,7 +1480,7 @@ namespace Emberdelve.EditorTools
             // A partial use updates the count and keeps the chip.
             f.Rig.Health.SetHealth(Mathf.Max(1f, f.Rig.MaxHealth - 30f));
             f.Check(f.Inventory.RequestHoldStack(draughtId, out _), "the HUD-bound draught is taken in hand");
-            f.Check(f.Inventory.Hotbar.TryUse(1, out _), "key 2 drinks one draught");
+            f.Check(CompleteAuthoredDrink(f, f.Inventory.Hotbar.TryUse(1, out _)), "key 2 drinks one draught");
             yield return WaitFrames(3);
             row = FindHudHotbarRow();
             f.Check(row != null && ChipText(row, 2) == "Blood Draught", $"the chip count follows a partial use ('{ChipText(row, 2)}')");

@@ -524,6 +524,14 @@ namespace Emberdelve.Net
                 EyeOffset=rig.AimOrigin-rig.transform.position,
                 Aim=Quaternion.LookRotation(rig.AimDirection,Vector3.up)
             };
+            var channel = rig.GetComponent<Emberdelve.Items.ConsumableChannel>();
+            if (!rig.IsDead && !rig.IsExtracted && rig.IsHoldingUtility && channel != null && channel.IsChanneling
+                && rig.Inventory.HeldStackId == channel.ChannelStackId)
+            {
+                pose.Drinking = true;
+                pose.DrinkProgress = channel.ChannelProgress;
+                pose.DrinkDuration = channel.ChannelDuration;
+            }
             var melee=conn.Melee;
             if (melee!=null && melee.IsSwinging && melee.ActivePattern!=null && !rig.IsDead
                 && GameServices.TryGet<ICombatAuthority>(out var authority)

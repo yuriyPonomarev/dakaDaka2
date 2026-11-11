@@ -171,6 +171,7 @@ namespace Emberdelve.Player
         public void Bind(PlayerRig rig, Camera camera, WeaponViewModelSet set)
         {
             _rig = rig;
+            _drink = PotionDrinkPresentation.Ensure(rig);
             _camera = camera;
             _set = set;
             _levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
@@ -196,12 +197,18 @@ namespace Emberdelve.Player
 
         /// <summary>Puts the models of the held weapons into the hands. Returns true when the main hand weapon has a model.</summary>
         private ItemData _utilityItem;
+        private PotionDrinkPresentation _drink;
+        private float _drinkRaise;
+        private PotionBottleVisual _bottle;
         public bool SetUtility(ItemData item)
         {
             SetWeapons(null, null);
             _utilityItem=item;
             if (item == null || gripRight == null) return false;
             _mainHand=HandheldUtilityVisual.Create(item,gripRight);
+            _bottle = _mainHand != null ? _mainHand.GetComponent<PotionBottleVisual>() : null;
+            if (_bottle != null) _mainHand.transform.localPosition = new Vector3(0f, -.055f, 0f);
+            _drinkRaise = 0f;
             if (_mainHand != null) SetLayerRecursive(_mainHand,LayerMask.NameToLayer("Ignore Raycast"));
             _hasWeaponModel=_mainHand != null;
             return _hasWeaponModel;
@@ -210,6 +217,8 @@ namespace Emberdelve.Player
         public bool SetWeapons(WeaponData main, WeaponData off)
         {
             _utilityItem=null;
+            _bottle = null;
+            _drinkRaise = 0f;
             DestroyHeld(ref _mainHand);
             DestroyHeld(ref _offHand);
             DestroyHeld(ref _guardDirectionMarker);
@@ -546,8 +555,17 @@ namespace Emberdelve.Player
             if (_utilityItem != null)
             {
                 bool torch = _utilityItem.itemId == "pitch_torch";
-                handLocal = ClampToView(camera, (torch ? new Vector3(.34f,-.36f,.52f) : new Vector3(.22f,-.24f,.43f)) + offsetRight);
+                handLocal = ClampToView(camera, (torch ? new Vector3(.34f,-.36f,.52f) : new Vector3(.13f,-.22f,.45f)) + offsetRight);
                 localRotation = Quaternion.Euler(torch ? -48f : -82f, torch ? 25f : 15f, 0f);
+                if (_bottle != null)
+                {
+                    bool drinking = _drink != null && _drink.IsDrinking;
+                    float progress = drinking ? _drink.Progress : 0f;
+                    _drinkRaise = Mathf.MoveTowards(_drinkRaise, drinking ? PotionDrinkPresentation.Raise(progress) : 0f, Time.deltaTime * 7f);
+                    handLocal = Vector3.Lerp(handLocal, new Vector3(.08f, -.12f, .34f) + offsetRight * .25f, _drinkRaise);
+                    localRotation = Quaternion.Slerp(localRotation, Quaternion.Euler(-172f, 0f, -12f), _drinkRaise);
+                    _bottle.SetDrinkProgress(progress, drinking);
+                }
             }
             Quaternion gripRotation = frame.rotation * localRotation * GripFromRig;
             Vector3 gripPosition = frame.TransformPoint(handLocal);
@@ -555,6 +573,16 @@ namespace Emberdelve.Player
             {
                 SolveArm(_upperR, _lowerR, _handR, gripRight, gripPosition, gripRotation, frame.rotation * RightPole);
                 if (_mainHand != null) _mainHand.transform.localScale = Vector3.one * WeaponScale;
+            }
+
+            if (_bottle != null && _drink != null && _drink.IsDrinking && gripLeft != null)
+            {
+                float p = _drink.Progress;
+                float uncork = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(.12f, .27f, p));
+                Vector3 cork = gripRight.TransformPoint(new Vector3(0f, .145f, 0f));
+                Vector3 leftRest = frame.TransformPoint(new Vector3(-.20f, -.28f, .35f));
+                SolveArm(_upperL, _lowerL, _handL, gripLeft, Vector3.Lerp(leftRest, cork, uncork),
+                    frame.rotation * Quaternion.Euler(15f, 30f, -65f), frame.rotation * LeftPole);
             }
 
             // Left hand: on the shield (rest / raised), or on the second grip of a two-handed weapon, otherwise left to the idle pose.

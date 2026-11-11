@@ -29,7 +29,7 @@ namespace Emberdelve.Net.Rules
     public static class NetTuning
     {
         /// <summary>Wire protocol version checked in connection approval.</summary>
-        public const int ProtocolVersion = 12;
+        public const int ProtocolVersion = 13;
 
         public const int DefaultPort = 7777;
         public const string DefaultAddress = "127.0.0.1";
