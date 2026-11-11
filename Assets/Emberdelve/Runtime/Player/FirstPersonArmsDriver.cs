@@ -517,6 +517,9 @@ namespace Emberdelve.Player
 
             // Right hand: the rig's pose, the base brought to arm's reach and into the frustum.
             Vector3 handLocal = ClampToView(camera, ViewHand(localBase) + offsetRight);
+            // Keep the sword hilt mostly below frame; guard still raises it to its defensive pose.
+            if (_mainData != null && (_mainData.weaponId.Contains("sword") || _mainData.weaponId.Contains("rapier")))
+                handLocal.y -= .20f * (1f - Mathf.SmoothStep(0f, 1f, guardBlend));
             Quaternion gripRotation = frame.rotation * localRotation * GripFromRig;
             Vector3 gripPosition = frame.TransformPoint(handLocal);
             if (gripRight != null)

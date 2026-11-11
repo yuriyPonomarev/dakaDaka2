@@ -3,7 +3,11 @@
 Updated 11 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest completed: palm and finger grip
+## Latest completed: lower sword framing
+
+User accepted bow and requested most sword hilt below frame. Sword/rapier hand target lowered0.20m after view clamp, preserving35-degree angle; offset fades out for raised guard. Bow unchanged. WeaponViewModelTests34/0, Hands92/0, Visual207/0 and build PASS; live low ready/guard/return inspected on seed11/protocol10, windows closed. Report Tasks/LOW_SWORD_20261111.md. Build Builds/Playable/20261111-144837-286/EmberdelveNet.exe.
+
+## Previous completed: palm and finger grip
 
 Explicit finger curls wrap the sword/held shield and bow handle; bow draw uses a separate index/middle distal-joint string attachment and thumb clearance. Two-handed support uses its own palm grip. Finger retargeting preserves root and all non-finger animated transforms. Report Tasks/FINGER_GRIP_20261111.md. WeaponViewModelTests34/0, Hands92/0, Visual207/0; live sword windup/block, bow draw/release and prepared multishot reviewed on seed11/protocol10. Windows closed, user Editor untouched. Build Builds/Playable/20261111-142107-771/EmberdelveNet.exe. Next polish: sleeve seams and skin lighting. Finger contacts are authored poses, not physics-based finger collision. Existing materials/import drift excluded.
 
