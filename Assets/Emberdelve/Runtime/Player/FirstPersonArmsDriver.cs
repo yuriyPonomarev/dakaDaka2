@@ -190,6 +190,7 @@ namespace Emberdelve.Player
 
         private void OnDestroy()
         {
+            _fingerPoseHandler?.Dispose();
             if (_health != null) _health.Damaged -= OnDamaged;
         }
 
@@ -489,6 +490,8 @@ namespace Emberdelve.Player
         {
             if (!ResolveBones() || frame == null) return;
 
+            if (_mainData != null && !_mainData.IsRanged) PoseFingers(false, 0f);
+
             // Scale the mannequin and hold the middle of the shoulders at its viewmodel anchor.
             Transform model = animator.transform;
             model.localScale = Vector3.one * ModelScale;
@@ -537,7 +540,7 @@ namespace Emberdelve.Player
                 Vector3 second = gripRight.position - axis * (SecondGripOffset * WeaponScale);
                 // Solve the palm's authored grip, not the wrist. Keep its grasp aligned with the
                 // handle throughout the swing instead of preserving the idle wrist rotation.
-                SolveArm(_upperL, _lowerL, _handL, gripLeft, second, gripRight.rotation, frame.rotation * LeftPole);
+                SolveArm(_upperL, _lowerL, _handL, _leftWeaponGrip, second, gripRight.rotation, frame.rotation * LeftPole);
             }
         }
 
@@ -579,15 +582,104 @@ namespace Emberdelve.Player
             _weaponGripsCalibrated = true;
         }
 
+        private HumanPoseHandler _fingerPoseHandler;
+        private HumanPose _fingerPose;
+        private Transform[] _poseBones;
+        private Vector3[] _posePositions;
+        private Quaternion[] _poseRotations;
+        private static int[,,] FingerMuscles;
+        private Transform _stringGrip;
+
+        private static int[,,] FindFingerMuscles()
+        {
+            var result = new int[2, 5, 3];
+            string[] fingers = { "Thumb", "Index", "Middle", "Ring", "Little" };
+            for (int side = 0; side < 2; side++)
+                for (int finger = 0; finger < 5; finger++)
+                    for (int joint = 0; joint < 3; joint++)
+                    {
+                        result[side, finger, joint] = -1;
+                        for (int muscle = 0; muscle < HumanTrait.MuscleCount; muscle++)
+                        {
+                            string name = HumanTrait.MuscleName[muscle].Replace('.', ' ');
+                            if (name.StartsWith(side == 0 ? "Left" : "Right") && name.Contains(fingers[finger]) &&
+                                name.Contains(" " + (joint + 1) + " Stretched"))
+                                result[side, finger, joint] = muscle;
+                        }
+                    }
+            return result;
+        }
+
+        // Apply normalized humanoid finger curls before arm IK; preserve the current body pose.
+        private void PoseFingers(bool bow, float draw)
+        {
+            if (animator == null || animator.avatar == null || !animator.avatar.isHuman) return;
+            if (FingerMuscles == null) FingerMuscles = FindFingerMuscles();
+            if (_fingerPoseHandler == null) _fingerPoseHandler = new HumanPoseHandler(animator.avatar, animator.transform);
+            if (_poseBones == null)
+            {
+                int count = (int)HumanBodyBones.LastBone;
+                _poseBones = new Transform[count]; _posePositions = new Vector3[count]; _poseRotations = new Quaternion[count];
+                for (int i = 0; i < count; i++) _poseBones[i] = animator.GetBoneTransform((HumanBodyBones)i);
+            }
+            Vector3 rootPosition = animator.transform.localPosition;
+            Quaternion rootRotation = animator.transform.localRotation;
+            for (int i = 0; i < _poseBones.Length; i++) if (_poseBones[i] != null)
+            {
+                _posePositions[i] = _poseBones[i].localPosition;
+                _poseRotations[i] = _poseBones[i].localRotation;
+            }
+            _fingerPoseHandler.GetHumanPose(ref _fingerPose);
+            for (int side = 0; side < 2; side++)
+            {
+                if (!bow && side == 0 && _offHand == null && !(_mainData != null && _mainData.twoHanded)) continue;
+                for (int finger = 0; finger < 5; finger++)
+                    for (int joint = 0; joint < 3; joint++)
+                    {
+                        int index = FingerMuscles[side, finger, joint];
+                        if (index < 0) continue;
+                        float curl = joint == 0 ? -.25f : joint == 1 ? -.55f : -.4f;
+                        if (finger == 0) curl = joint == 0 ? .1f : -.25f;
+                        if (bow && side == 1)
+                        {
+                            // Index above the arrow, middle/ring below; thumb stays clear of the string.
+                            float hook = finger == 0 ? -.3f : joint == 0 ? .05f : joint == 1 ? -.9f : -.6f;
+                            curl = Mathf.Lerp(finger == 0 ? .4f : .65f, hook, Mathf.Lerp(.65f, 1f, Mathf.Clamp01(draw)));
+                        }
+                        _fingerPose.muscles[index] = curl;
+                    }
+            }
+            _fingerPoseHandler.SetHumanPose(ref _fingerPose);
+            // HumanPose also retargets the body root. Keep the already-scaled viewmodel and
+            // animated arms exactly where they were; retain only the requested finger rotations.
+            animator.transform.SetLocalPositionAndRotation(rootPosition, rootRotation);
+            for (int i = 0; i < _poseBones.Length; i++) if (_poseBones[i] != null)
+            {
+                _poseBones[i].localPosition = _posePositions[i];
+                bool finger = i >= (int)HumanBodyBones.LeftThumbProximal && i <= (int)HumanBodyBones.RightLittleDistal;
+                if (!finger) _poseBones[i].localRotation = _poseRotations[i];
+            }
+        }
+
         public void PoseBow(Transform frame, BowPresentation bow, float draw)
         {
             if (!ResolveBones() || frame == null || bow == null) return;
+            PoseFingers(true, draw);
             EnsureWeaponGrips();
             bow.SetDraw(draw);
             // Bow handle and string are vertical; the sword's +90-degree mapping is wrong here.
             SolveArm(_upperL, _lowerL, _handL, _leftWeaponGrip, bow.transform.position,
                 bow.transform.rotation, frame.rotation * LeftPole);
-            SolveArm(_upperR, _lowerR, _handR, gripRight, bow.transform.TransformPoint(bow.Nock),
+            if (_stringGrip == null)
+            {
+                _stringGrip = new GameObject("StringHook_R").transform;
+                _stringGrip.SetParent(_handR, false);
+            }
+            var index = animator.GetBoneTransform(HumanBodyBones.RightIndexDistal);
+            var middle = animator.GetBoneTransform(HumanBodyBones.RightMiddleDistal);
+            _stringGrip.position = index != null && middle != null ? Vector3.Lerp(index.position, middle.position, .5f) : gripRight.position;
+            _stringGrip.rotation = gripRight.rotation;
+            SolveArm(_upperR, _lowerR, _handR, _stringGrip, bow.transform.TransformPoint(bow.Nock),
                 bow.transform.rotation, frame.rotation * RightPole);
         }
 

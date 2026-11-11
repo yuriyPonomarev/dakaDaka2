@@ -3,7 +3,11 @@
 Updated 11 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest completed: weapon transition polish
+## Latest completed: palm and finger grip
+
+Explicit finger curls wrap the sword/held shield and bow handle; bow draw uses a separate index/middle distal-joint string attachment and thumb clearance. Two-handed support uses its own palm grip. Finger retargeting preserves root and all non-finger animated transforms. Report Tasks/FINGER_GRIP_20261111.md. WeaponViewModelTests34/0, Hands92/0, Visual207/0; live sword windup/block, bow draw/release and prepared multishot reviewed on seed11/protocol10. Windows closed, user Editor untouched. Build Builds/Playable/20261111-142107-771/EmberdelveNet.exe. Next polish: sleeve seams and skin lighting. Finger contacts are authored poses, not physics-based finger collision. Existing materials/import drift excluded.
+
+## Previous completed: weapon transition polish
 
 First-person windup starts from the current visible grip; recovery and wall recoil return smoothly to upright ready/held guard. Active damage samples and timings unchanged. Preview uses the runtime sampler. Report Tasks/WEAPON_TRANSITIONS_20261111.md. WeaponViewModelTests34/0, Hands92/0, Visual207/0; live windup/recovery/combo/guard/stone contact and return reviewed, seed11/protocol10. Windows closed. Build Builds/Playable/20261111-140730-196/EmberdelveNet.exe. Next hand work: palm/finger contact and sleeve seams; no claim of new finger animation in this slice. Additional inherited Bow_Walnut_Textured/Crossbow_Iron_Textured/Grip_Leather material and Human.fbx.meta drift excluded.
 
