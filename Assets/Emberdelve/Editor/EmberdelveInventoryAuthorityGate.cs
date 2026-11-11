@@ -550,6 +550,13 @@ namespace Emberdelve.EditorTools
             Check(_bag.HeldStackId == 0 && _rig.ActiveWeapon == weapon && ranged.Reserve == grantedReserve &&
                   _rig.TryGetAuthorityKit(out KitView returnedKit) && returnedKit.HasActiveAmmo && returnedKit.Reserve == grantedReserve,
                 "returning to the weapon preserves exactly the granted reserve in both authority and presentation");
+            EmberdelveKitFixtures.ResetAmmo(ranged, weapon, 0, state.maxReserve, ranged.Magazine);
+            before = _bag.Revision;
+            Check(_bag.RequestQuickStack(bundle.StackId, out reason), "quick ammo replenishes the drawn weapon: " + reason);
+            Check(_bag.HeldStackId == 0 && _rig.ActiveWeapon == weapon && ranged.enabled &&
+                  _bag.Revision == before + 1 && _bag.IndexOfStack(bundle.StackId) < 0 &&
+                  ranged.Reserve == Mathf.Min(state.maxReserve, arrows.ammoGrant),
+                "quick ammo consumes exactly one remaining bundle without stowing or switching the weapon");
         }
 
         private void CheckDeadAndExtractedOwnerRules()

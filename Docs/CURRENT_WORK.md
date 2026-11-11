@@ -3,7 +3,13 @@
 Updated 11 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Completed: QUICK-01 controls and held utility items
+## Completed: AMMO-01 replenishment with weapon drawn
+
+User correction: ammo is exempt from held-item use. Choosing arrows/bolts in a quick wheel or right-clicking them replenishes the matching drawn ranged weapon directly. No weapon stow/swap or ammo model is involved. Potions still require holding; full/wrong-ammo requests consume nothing. Protocol12/schema5 unchanged.
+
+Build: Builds/Playable/20261111-163521-097/EmberdelveNet.exe. RecoveredAmmoTests3/3, InventoryAuthority116/0, NetInventory148/0; build PASS. Live seed11 host/client: arrow wheel selection consumed the bundle, bow remained drawn, replicated bag updated. Windows closed. Report Tasks/AMMO_DRAWN_20261111.md.
+
+## Previous: QUICK-01 controls and held utility items
 
 Q/E abilities;1/2 direct weapon sets; hold3/4 for two three-entry wheels, release to hold. F interaction. Any held utility stows both weapons; LMB uses only the held stack. Inventory hover/selection +3/4 assigns slots; right-click holds without consuming. Server enforces exact held identity and rejects weapon attacks. Changing hands cancels drinking. Owner/observer visuals and six-slot HUD are implemented; ammo pools survive utility use. Protocol12, saved belt schema5 migrates old4 entries into6.
 

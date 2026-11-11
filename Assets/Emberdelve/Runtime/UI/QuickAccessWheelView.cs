@@ -77,7 +77,7 @@ namespace Emberdelve.UI
             _title.text = (controller.WheelGroup + 3) + "\nQUICK " + (controller.WheelGroup + 1);
             _hint.text = controller.Assigning
                 ? "Choose one of three slots. Release " + (controller.WheelGroup + 3) + " to assign. Esc cancels."
-                : "Choose an item. Release " + (controller.WheelGroup + 3) + " to hold it. 1 / 2 return to weapons.";
+                : "Choose an item. Release " + (controller.WheelGroup + 3) + " to hold / replenish ammo. 1 / 2 return to weapons.";
             for (int i = 0; i < 3; i++)
             {
                 int slot = controller.WheelGroup * 3 + i;

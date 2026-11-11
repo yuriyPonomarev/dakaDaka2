@@ -78,6 +78,8 @@ namespace Emberdelve.Items
         public bool HasSeeded => _seeded;
 
         /// <summary>Whether a definition can be put on the hotbar: the same test the Use authority applies to the item (heals or grants ammo).</summary>
+        public static bool IsAmmoSupply(ItemData item) => item != null && item.ammoGrant > 0 && item.healAmount <= 0;
+
         public static bool IsUsableDefinition(ItemData item)
         {
             return item != null && (item.healAmount > 0 || item.ammoGrant > 0 || (item.grantedWeapon != null && item.grantedWeapon.weaponId == HandheldTorchVisual.WeaponId));
@@ -315,7 +317,7 @@ namespace Emberdelve.Items
                 string reason;
                 bool accepted = _assignmentTarget != 0
                     ? inventory.Hotbar.TryAssign(slot, _assignmentTarget, out reason)
-                    : inventory.RequestHoldStack(inventory.Hotbar.StackIdAt(slot), out reason);
+                    : inventory.RequestQuickStack(inventory.Hotbar.StackIdAt(slot), out reason);
                 if (!accepted && rig != null) GameEvents.RaiseToast(rig.PlayerId, reason);
             }
             _assignmentTarget = 0;

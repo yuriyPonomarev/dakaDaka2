@@ -450,10 +450,16 @@ namespace Emberdelve.Items
 
         private bool UseStack(InventorySlot slot, ulong stackId, out string reason)
         {
-            if (_inventory.HeldStackId != stackId) { reason = "take that item in hand before using it"; return false; }
             ItemData item = slot.Item;
             HealthComponent health = _rig.Health;
             RangedCombat ranged = _rig.GetComponent<RangedCombat>();
+            bool drawnAmmoSupply = HotbarBindings.IsAmmoSupply(item) && _inventory.HeldStackId == 0 &&
+                ranged != null && ranged.enabled && (_rig.Loadout == null || _rig.ActiveWeapon == ranged.Weapon);
+            if (_inventory.HeldStackId != stackId && !drawnAmmoSupply)
+            {
+                reason = HotbarBindings.IsAmmoSupply(item) ? "draw the matching ranged weapon to replenish ammunition" : "take that item in hand before using it";
+                return false;
+            }
             bool canHeal = item != null && item.healAmount > 0 && health != null && !health.IsDead &&
                            health.CurrentHealth < health.MaxHealth;
             bool canGrantAmmo = item != null && item.ammoGrant > 0 && item.MatchesAmmo(ranged != null ? ranged.Weapon : null) && CanGrantAmmo(ranged, item.ammoGrant);

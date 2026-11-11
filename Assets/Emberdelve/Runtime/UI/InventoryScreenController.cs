@@ -705,7 +705,7 @@ namespace Emberdelve.UI
 
                 if (HotbarBindings.IsUsableDefinition(source.Item))
                 {
-                    if (_inventory.RequestHoldStack(source.StackId, out string holdReason))
+                    if (_inventory.RequestQuickStack(source.StackId, out string holdReason))
                     {
                         Close();
                         _director?.SetInventoryOpen(false);
@@ -1501,7 +1501,7 @@ namespace Emberdelve.UI
                 _carryLabel.text = HasSelection
                     ? $"Selected {_model.SelectedItem.displayName} x{_model.SelectedAmount} ({SelectedSummary()})   " +
                       "left click: move or wear   hold 3/4: assign wheel   right click: cancel"
-                    : "Right click: wear / take in hand. Hover item + hold 3/4: assign wheel. LMB uses held items after closing.";
+                    : "Right click: wear / hold / replenish ammo. Hover + hold 3/4: assign wheel. Potions require holding; ammo keeps weapons drawn.";
                 _carryLabel.rectTransform.sizeDelta = new Vector2(leftColumnWidth, InstructionHeight);
                 _carryLabel.rectTransform.anchoredPosition = PanelToRoot(new Vector2(innerLeft, instructionTop));
             }

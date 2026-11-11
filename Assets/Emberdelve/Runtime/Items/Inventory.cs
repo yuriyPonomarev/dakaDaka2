@@ -215,6 +215,20 @@ namespace Emberdelve.Items
             HotbarBindings.IsUsableDefinition(stack.Item) && (_rig == null || (!_rig.IsDead && _rig.IsInPlay)) ? _heldStackId : 0;
         public ItemData HeldItem => HeldStackId != 0 && TryGetStack(_heldStackId, out var stack) ? stack.Item : null;
 
+        /// <summary>Ammo replenishes the drawn weapon; other utilities must be taken in hand.</summary>
+        public bool RequestQuickStack(ulong stackId, out string reason)
+        {
+            if (!TryGetStack(stackId, out var slot) || !HotbarBindings.IsAmmoSupply(slot.Item))
+                return RequestHoldStack(stackId, out reason);
+            var authority = CommandAuthority;
+            reason = "inventory authority is unavailable";
+            if (authority == null) return false;
+            if (!authority.TryCreateLocalCommand(InventoryCommandKind.Use, stackId, 0, Vector2Int.zero,
+                EquipmentSlot.None, slot.Instance != null ? slot.Instance.Uid : Guid.Empty, Guid.Empty,
+                out var command, out reason)) return false;
+            var result = authority.Submit(_rig, command); reason = result.Reason; return result.Accepted;
+        }
+
         public bool RequestHoldStack(ulong stackId, out string reason)
         {
             reason = "that quick item is no longer in the bag";

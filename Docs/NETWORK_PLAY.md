@@ -66,4 +66,4 @@ Class: the id string only (`warrior`, `archer`); the server resolves everything 
 
 ## Current player controls
 
-Q/E activate abilities; 1/2 select weapon sets. Hold 3 or 4 to open a three-slot quick wheel, point at an item, then release to take it in hand and stow weapons. LMB uses the held item; items cannot be consumed directly from the bag. In the inventory, hover or select an item and hold 3/4 to assign a wheel slot; right-click takes a utility item in hand. F interacts with containers, doors and lights. I opens the inventory.
+Q/E activate abilities; 1/2 select weapon sets. Hold 3 or 4 to open a three-slot quick wheel, point at an item, then release to take it in hand and stow weapons. LMB uses the held item. Ammo is the exception: selecting arrows/bolts in a wheel or right-clicking them replenishes the matching drawn ranged weapon without stowing it; full reserves or the wrong weapon consume nothing. Potions still require holding. In the inventory, hover or select an item and hold 3/4 to assign a wheel slot; right-click takes a utility item in hand. F interacts with containers, doors and lights. I opens the inventory.
