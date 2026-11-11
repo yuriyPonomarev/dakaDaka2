@@ -1,9 +1,13 @@
 # DakaDaka — current work
 
-Updated 9 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
+Updated 11 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
-## Latest completed: upright sword ready pose
+## Latest completed: weapon transition polish
+
+First-person windup starts from the current visible grip; recovery and wall recoil return smoothly to upright ready/held guard. Active damage samples and timings unchanged. Preview uses the runtime sampler. Report Tasks/WEAPON_TRANSITIONS_20261111.md. WeaponViewModelTests34/0, Hands92/0, Visual207/0; live windup/recovery/combo/guard/stone contact and return reviewed, seed11/protocol10. Windows closed. Build Builds/Playable/20261111-140730-196/EmberdelveNet.exe. Next hand work: palm/finger contact and sleeve seams; no claim of new finger animation in this slice. Additional inherited Bow_Walnut_Textured/Crossbow_Iron_Textured/Grip_Leather material and Human.fbx.meta drift excluded.
+
+## Previous completed: upright sword ready pose
 
 Sword idle grip now points upward,35 degrees from vertical toward screen centre (previously almost horizontal). Viewmodel rig, fallback hands and preview share ReadyRotation; authored guard collision and active swing paths unchanged. Hands92/0, Visual207/0 and build PASS in Logs/runs/20261109-174832-380; WeaponViewModelTests34/0 in Logs/runs/sword-ready-editmode. Live seed11/protocol10: ready pose, real LMB swing, RMB guard and upright return verified in Logs/acceptance/20261109-sword-ready. Windows closed. Build Builds/Playable/20261109-174832-380/EmberdelveNet.exe. Three source files only; broad planner70 gates narrowed to visual/hand checks because combat authority and map did not change.
 

@@ -40,7 +40,8 @@ namespace Emberdelve.Player
         private bool _swinging;
         private bool _recoiling;
         private float _recoilStart;
-        private SwingPose _recoilFrom;
+        private Vector3 _transitionBase;
+        private Quaternion _transitionRotation;
         private Vector3 _restLocalPosition;
         private Quaternion _restLocalRotation;
         private SwingTrail _trail;
@@ -190,6 +191,7 @@ namespace Emberdelve.Player
         {
             if (_isRanged || pattern == null || weapon == null) return;
 
+            CaptureTransitionStart();
             _pattern = pattern;
             _timing = timing;
             _bladeLength = pattern.BladeLength(weapon);
@@ -218,7 +220,7 @@ namespace Emberdelve.Player
         {
             if (!_swinging || _pattern == null) return;
 
-            _recoilFrom = _pattern.Evaluate(Time.time - _swingStart, _timing);
+            CaptureTransitionStart();
             _recoilStart = Time.time;
             _recoiling = true;
             _swinging = false;
@@ -226,7 +228,7 @@ namespace Emberdelve.Player
         }
 
         /// <summary>
-        /// Poses the rig exactly where the pattern puts the weapon <paramref name="swingTime"/> seconds into the
+        /// Poses the active blade exactly where the pattern puts the weapon <paramref name="swingTime"/> seconds into the
         /// swing, in the world frame of the aim transform. The authority's sweep places the damage segment with
         /// the same pattern and the same frame, so this is the real path.
         /// </summary>
@@ -234,15 +236,53 @@ namespace Emberdelve.Player
         {
             if (_pattern == null) return;
             bool active = swingTime >= _timing.Windup && swingTime <= _timing.ActiveEnd;
-            ApplyPose(_pattern.Evaluate(swingTime, _timing), active);
+            SamplePresentation(_pattern, _timing, swingTime, _transitionBase, _transitionRotation, _guardHeld,
+                out Vector3 position, out Quaternion rotation);
+            ApplyPresentation(position, rotation, active);
         }
 
-        private void ApplyPose(in SwingPose pose, bool active)
+        private void CaptureTransitionStart()
+        {
+            Transform frame = _aimFrame != null ? _aimFrame : transform.parent;
+            _transitionBase = frame != null ? frame.InverseTransformPoint(transform.position) : transform.localPosition;
+            _transitionRotation = frame != null ? Quaternion.Inverse(frame.rotation) * transform.rotation : transform.localRotation;
+        }
+
+        // Only non-damaging phases are eased. Active blade samples stay identical to the authority.
+        public static void SamplePresentation(SwingPatternData pattern, in SwingTiming timing, float time,
+            Vector3 startBase, Quaternion startRotation, bool guarding, out Vector3 position, out Quaternion rotation)
+        {
+            SwingPose pose = pattern.Evaluate(time, timing);
+            position = pose.Base;
+            rotation = pose.LocalRotation;
+            if (time < timing.Windup && timing.Windup > 0f)
+            {
+                SwingPose contact = pattern.Evaluate(timing.Windup, timing);
+                float k = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(time / timing.Windup));
+                position = Vector3.Lerp(startBase, contact.Base, k);
+                rotation = Quaternion.Slerp(startRotation, contact.LocalRotation, k);
+            }
+            else if (time > timing.ActiveEnd)
+            {
+                SwingPose contact = pattern.Evaluate(timing.ActiveEnd, timing);
+                float k = Mathf.SmoothStep(0f, 1f, timing.Recovery > 0f ? Mathf.Clamp01((time - timing.ActiveEnd) / timing.Recovery) : 1f);
+                ReadyPose(guarding, out Vector3 endBase, out Quaternion endRotation);
+                position = Vector3.Lerp(contact.Base, endBase, k);
+                rotation = Quaternion.Slerp(contact.LocalRotation, endRotation, k);
+            }
+        }
+
+        private static void ReadyPose(bool guarding, out Vector3 position, out Quaternion rotation)
+        {
+            position = GuardBladePose.RootRestPosition + (guarding ? GuardBladePose.RootGuardOffset : Vector3.zero);
+            rotation = guarding ? GuardBladePose.RootRestRotation * GuardBladePose.RootGuardRotation : ReadyRotation;
+        }
+
+        private void ApplyPresentation(Vector3 position, Quaternion rotation, bool active)
         {
             Transform frame = _aimFrame != null ? _aimFrame : transform.parent;
             if (frame == null) return;
-
-            transform.SetPositionAndRotation(frame.position + frame.rotation * pose.Base, frame.rotation * pose.LocalRotation);
+            transform.SetPositionAndRotation(frame.position + frame.rotation * position, frame.rotation * rotation);
 
             if (_edge != null)
             {
@@ -300,7 +340,9 @@ namespace Emberdelve.Player
                 }
 
                 float eased = k * k * (3f - 2f * k);
-                ApplyPose(SwingPose.Lerp(_recoilFrom, _pattern.RestPose, eased), false);
+                ReadyPose(_guardHeld, out Vector3 endBase, out Quaternion endRotation);
+                ApplyPresentation(Vector3.Lerp(_transitionBase, endBase, eased),
+                    Quaternion.Slerp(_transitionRotation, endRotation, eased), false);
             }
             else ApplyGuardPose();
         }

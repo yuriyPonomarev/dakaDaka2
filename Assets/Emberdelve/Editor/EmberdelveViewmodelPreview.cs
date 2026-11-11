@@ -226,9 +226,15 @@ namespace Emberdelve.EditorTools
                 return;
             }
 
-            Emberdelve.Data.SwingPose pose = pattern == null ? new Emberdelve.Data.SwingPose(Emberdelve.Player.FirstPersonArmsDriver.PatternRest, 12f, -8f, 14f)
-                : (time < 0f ? pattern.RestPose : pattern.Evaluate(time, timing ?? pattern.Timing));
-            driver.Pose(camera.transform, camera, pose.Base, pose.LocalRotation, guard, Vector3.zero, Vector3.zero);
+            if (pattern != null)
+            {
+                Emberdelve.Player.WeaponVisualRig.SamplePresentation(pattern, timing ?? pattern.Timing, time,
+                    Emberdelve.Player.FirstPersonArmsDriver.PatternRest, Emberdelve.Player.WeaponVisualRig.ReadyRotation,
+                    guard > .5f, out Vector3 position, out Quaternion rotation);
+                driver.Pose(camera.transform, camera, position, rotation, guard, Vector3.zero, Vector3.zero);
+            }
+            else driver.Pose(camera.transform, camera, Emberdelve.Player.FirstPersonArmsDriver.PatternRest,
+                Emberdelve.Player.WeaponVisualRig.ReadyRotation, guard, Vector3.zero, Vector3.zero);
         }
 
         /// <summary>Stitches PNG files into one contact sheet (columns x rows of equally sized frames).</summary>
