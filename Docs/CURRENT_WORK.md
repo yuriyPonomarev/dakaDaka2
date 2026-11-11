@@ -1,42 +1,22 @@
 # DakaDaka — current work
 
-Updated 11 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
-User: autonomous work, minimal sufficient checks, commit only completed milestones.
+Updated11 November2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
+User priorities: finish existing features, autonomous work, minimal sufficient checks, milestone-only commits.
 
-## Completed: HEAL-01 potions over time and interruptible bandages
+## Completed: MAP-03 room identity and ruined architecture
 
-User: potions heal gradually after uninterruptible drinking; bandages apply slowly and heal instantly on completion, with cancellation allowed. Initial tuning: both potions45HP/4s after1.8s drink; linen bandage25HP after5s, movement/damage/hand switch cancels without consuming. New bandage starter item and shared linen roll/wrapping presentation. Baseline dd8441c2. LoadoutD3c244/0, D3Content53/0, quick UI143/0, Hands92/0, Visual207/0, InventoryAuthority116/0, NetInventory148/0. Build PASS: Builds/Playable/20261111-190017-299/EmberdelveNet.exe. Live seed11 owner/observer wrapping, cancel without loss,25HP bandage completion and gradual potion healing accepted. Windows closed. Report Tasks/HEAL_BANDAGE_20261111.md; prior potion instant-heal expectations below superseded.
+Continue the open moonlit ruins with fractured wall silhouettes, distinct landmarks for10 modules and purpose-grouped props/paving. Preserve existing sockets, clear axes, stairs, interactive lighting, dormant enemies and breakable barrels. Protocol14 for geometry compatibility. Baseline6f8387a1. Report Tasks/MAP_IDENTITY_20261111.md; 40 door approaches and18 terraces validated;43 level tests, NetMovement190/0, NetFinal172/0, NetDoor37/0, NetInventory148/0 passed. Build Builds/Playable/20261111-200854-084. Live host/client traversal on seeds11 and2043687868 accepted; windows closed. Main Editor untouched; root owns mirror.
 
-## Completed: POTION-02 uninterrupted drinking
+## Accepted foundation
 
-User correction: once started, drinking cannot be cancelled by movement, damage, switching hands or inventory operations. Death/leaving play/component teardown still abort safely. Completion consumes once even if regeneration fills health meanwhile. Existing animation/protocol13 unchanged. LoadoutD3c211/0, corrected D3Content53/0 (real game-clock input), InventoryAuthority116/0 and NetInventory148/0 passed. Build PASS: Builds/Playable/20261111-185112-164/EmberdelveNet.exe. Report Tasks/POTION_LOCK_20261111.md. This supersedes POTION-01 cancellation behavior below.
-
-## Completed: POTION-01 model, glow and drinking
-
-Shared glass/cork/leather/brass vial for hands and ground pickups; dim emissive liquid without a Light. Owner and observer uncork/raise/sip/lower poses follow the authoritative1.8s drinking channel. Successful completion consumes/heals; cancellation retains the item. Protocol13.
-
-Build: Builds/Playable/20261111-170116-778/EmberdelveNet.exe. Wire6/6; Hands92/0, Visual207/0, InventoryAuthority116/0, LoadoutD3c204/0, NetCombat312/0, NetInventory148/0; corrected graphical QuickAccessUi140/0. Live seed11 host/client: dark-scene vial, drinking from both views, movement cancellation without loss and successful completion with weapon restoration. Windows closed. Report Tasks/POTION_20261111.md includes the initial UI fixture failure and material polish.
-
-## Completed: AMMO-01 replenishment with weapon drawn
-
-User correction: ammo is exempt from held-item use. Choosing arrows/bolts in a quick wheel or right-clicking them replenishes the matching drawn ranged weapon directly. No weapon stow/swap or ammo model is involved. Potions still require holding; full/wrong-ammo requests consume nothing. Protocol12/schema5 unchanged.
-
-Build: Builds/Playable/20261111-163521-097/EmberdelveNet.exe. RecoveredAmmoTests3/3, InventoryAuthority116/0, NetInventory148/0; build PASS. Live seed11 host/client: arrow wheel selection consumed the bundle, bow remained drawn, replicated bag updated. Windows closed. Report Tasks/AMMO_DRAWN_20261111.md.
-
-## Previous: QUICK-01 controls and held utility items
-
-Q/E abilities;1/2 direct weapon sets; hold3/4 for two three-entry wheels, release to hold. F interaction. Any held utility stows both weapons; LMB uses only the held stack. Inventory hover/selection +3/4 assigns slots; right-click holds without consuming. Server enforces exact held identity and rejects weapon attacks. Changing hands cancels drinking. Owner/observer visuals and six-slot HUD are implemented; ammo pools survive utility use. Protocol12, saved belt schema5 migrates old4 entries into6.
-
-Report: Tasks/QUICK_HANDS_20261111.md. Final build: Builds/Playable/20261111-162703-147/EmberdelveNet.exe. Focused EditMode20/20; affected schema/authority/visual/input/network proofs passed across recorded runs. Final SkillCooldown253/0; graphical quick-access UI139/0. Initial failures and their fixes are recorded honestly in the report, not presented as a green aggregate. Seed11 live host/client wheels, held potion/torch, remote light, Q/E,1/2,F verified; final HUD/wheel polish rechecked on final build. All review windows closed; main Editor untouched.
-
-## Previous accepted baseline
-
-LIGHT-01: inventory torch, source-based hand lighting and synchronized extinguish/relight of world lights; prior controls are superseded above. Simple flame/local scattering, no fuel or room-scale volumetrics. See Tasks/LIGHTING_TORCH_20261111.md.
-
-Sword hilt lowered, upright35-degree ready retained, bow accepted. Whole CC0 Innerscene/MakeHuman source supplies class bodies and first-person hands. Open moonlit ruins have terraces/stairs, dormant-to-aggro undead and server-owned breakable barrels. See Tasks/LOW_SWORD_20261111.md, UNIFIED_HUMAN_20261109.md and MOONLIT_RUINS_20261109.md.
+- MAP-02: mostly open sky,1.8/3.6m terraces and stairs, dormant undead and breakable barrels. Tasks/MOONLIT_RUINS_20261109.md. Solid platforms, not overlapping walkable floors; ground enemy spawns.
+- HEAL-01: potion1.8s then45HP/4s, no cancellation; bandage5s then25HP instantly, interruptible. Model/owner-observer animation, starter inventory, focused/network/live proof passed. Commit6f8387a1; build Builds/Playable/20261111-190017-299. Tasks/HEAL_BANDAGE_20261111.md.
+- Controls: Q/E skills,1/2 weapons, hold3/4 for two3-slot quick wheels, F interaction, LMB held-item use. Ammo replenishes drawn matching weapon directly. Tasks/QUICK_HANDS_20261111.md and AMMO_DRAWN_20261111.md.
+- LIGHT-01: held inventory torch, source-based hands lighting, synchronized extinguish/relight. Tasks/LIGHTING_TORCH_20261111.md.
+- Loot/inventory: paired equipment/bag and container/corpse panels; exact server transfers. Whole CC0 human source supplies class bodies and first-person hands; lowered sword hilt and bow accepted.
 
 ## Next actions and limits
 
-1. Follow the next user-selected slice; no background full-suite reruns. Potion model and drinking are complete; ammo remains a direct replenishment action.
-2. Separate existing work: sleeve seams, third-person bow draw state, crossbow model/reload, brief magenta impact material. Old full inventory UI tests still assume pre-paper-doll text rows; quick-access UI has its own focused proof and requires real graphics for the portrait.
-3. Preserve/review inherited material/import/log/Pipeline drift separately. Never blanket-add it to commits.
+1. Next map slice can deepen room layouts and encounter/loot placement; current work is the accepted visual identity pass, not final campaign art. Follow the next user direction.
+2. Keep separate: sleeve seams, observer bow draw, crossbow/reload, brief magenta impact, persistent stash. No new unrelated systems or broad test reruns.
+3. Preserve/review inherited Art/Materials and Human.fbx import drift, Assets/Logs and Pipeline settings separately; never blanket-add.

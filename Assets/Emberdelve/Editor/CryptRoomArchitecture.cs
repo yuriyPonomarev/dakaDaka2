@@ -30,6 +30,10 @@ namespace Emberdelve.EditorTools
                 Column(root,new Vector3(side*10.5f,0,-side*9.5f),4.5f,stone);
                 Column(root,new Vector3(side*9f,0,-side*10.5f),2.1f,stone);
                 Arch(root,arch,new Vector3(side*7f,2.6f,-side*7f),2f,1.7f,.55f,side*20,stone);
+                Vector3 archFoot = new Vector3(side*7f,0,-side*7f);
+                Quaternion archYaw = Quaternion.Euler(0,side*20,0);
+                for(int end=-1;end<=1;end+=2)
+                    Column(root,archFoot + archYaw * new Vector3(end*2.1f,0,0),2.6f,stone);
                 Brazier(root,new Vector3(side*4.8f,0,-side*4.8f),stone,metal,false);
                 Urn(root,new Vector3(side*8.5f,0,-side*5.5f),floor);
             }
@@ -41,6 +45,7 @@ namespace Emberdelve.EditorTools
             if(kind == DungeonModuleKind.Extraction)
                 Arch(root,arch,new Vector3(0,3.2f,4.5f),3.2f,2.2f,.9f,0,stone);
             MoonlitRuinsContent.Dress(root, kind, variant, wood, stone);
+            RuinsRoomLandmarks.Build(root, kind, variant, stone, floor);
         }
 
         private static void Terrace(Transform root, Vector3 start, float yaw, float height, Material stone, Material floor)

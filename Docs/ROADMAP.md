@@ -1,6 +1,6 @@
 # DakaDaka — roadmap
 
-Updated 9 November 2026. Live handoff: CURRENT_WORK.md. Rules: ../AGENTS.md.
+Updated 11 November 2026. Live handoff: CURRENT_WORK.md. Rules: ../AGENTS.md.
 Status vocabulary: implemented / automated proof / visual proof / accepted.
 A passing historical test is evidence for that version, not acceptance of the current tree.
 
@@ -12,6 +12,7 @@ A passing historical test is evidence for that version, not acceptance of the cu
 | 3 — accepted | Hands, block, enemy attacks | Host/client grip and guard accepted; client attack phases agree with actual12 damage. Baked forward travel removed. Contact-based wall recoil accepted v21, wire/admission21/0; current full NetCombat also passed | Correct grips; readable guard and impact; visual windup/contact/recovery aligned with server damage on both clients |
 | 4 — accepted | Complete one readable raid | Normal600s timer enabled and readable on host/client; short timeout/result verified. Bridge and both doorway seams traversed on original regression seed and seed11 (v22/v23) | Lobby -> raid -> death or extraction -> result -> next raid works; legible timer enabled only after HUD review |
 | MAP-01 — accepted | Crypt architecture and room content | Ten saved modules rebuilt with vaults, arches, tomb alcoves, colonnades, pews, reliquaries and local lighting. Two layouts traversed live;29 level tests +5 wall-fixture tests; NetMovement190/0, NetFinal172/0, NetDoor37/0, NetInventory146/0 | Readable first-person spaces, intact door/bridge routes on two layouts, clear spawns and network agreement; Tasks/CRYPT_CONTENT_20261109.md |
+| MAP-03 — accepted | Distinct ruined rooms | Fractured masonry crowns, themed wall landmarks, route paving and supported courtyard arches;10 saved modules |40 clear door approaches,18 reachable terraces,43 level tests, four network scenarios and live traversal on two layouts passed; Tasks/MAP_IDENTITY_20261111.md |
 | LOOT-01 — accepted | Paired inventory and server-owned loot | Own equipment/bag left; chest/enemy grid or dead-player paper doll right. Exact server transfers, retained corpse layout, tooltips and modal input;21 focused tests, NetInventory148/0, NetExtraction136/0, two-window visual acceptance | Tasks/LOOT_UI_20261109.md |
 | 5 | Persistent server stash (U4C) | Not implemented | Atomic versioned save, exact UID/affix restore after restart, rejected corrupt data, no item loss/duplication |
 | 6 | Content, sound, balance and release (U7/U6) | Deferred | Licensed assets, measured performance, repeatable packaged two-client release acceptance |

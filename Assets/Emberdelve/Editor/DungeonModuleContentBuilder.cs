@@ -118,10 +118,16 @@ namespace Emberdelve.EditorTools
             Box(root.transform, "Floor", new Vector3(0,-0.3f,0), new Vector3(Half*2,0.6f,Half*2), floor);
             if (spec.Kind == DungeonModuleKind.Vault)
                 Box(root.transform, "Roof", new Vector3(0,WallHeight+0.3f,0), new Vector3(Half*2,0.6f,Half*2), ceiling);
-            BuildSide(root.transform, true, false, wall);  // north
-            BuildSide(root.transform, true, true, wall);   // south
-            BuildSide(root.transform, false, false, wall); // east
-            BuildSide(root.transform, false, true, wall);  // west
+            if (spec.Kind == DungeonModuleKind.Vault)
+            {
+                BuildSide(root.transform, true, false, wall);
+                BuildSide(root.transform, true, true, wall);
+                BuildSide(root.transform, false, false, wall);
+                BuildSide(root.transform, false, true, wall);
+            }
+            else
+                for (int side = 0; side < 4; side++)
+                    RuinsWallProfile.Build(root.transform, side < 2, side % 2 == 1, wall, ((int)spec.Kind + spec.Variant + side) % 3);
             for (int i = 0; i < 4; i++)
             {
                 bool horizontal = i == 0 || i == 2;
