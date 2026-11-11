@@ -50,6 +50,7 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 25c45fbc110d5f74780c79afc4c95ff2, type: 2}
   startingItems:
   - {fileID: 11400000, guid: c6fda9df47fce4e4da019554ee948f03, type: 2}
+  - {fileID: 11400000, guid: 192faa0db82142ce8f742b7f8792bced, type: 2}
   - {fileID: 11400000, guid: c8353182c117eae4fa072cb04d609e5f, type: 2}
   startingReserveAmmo: 0
   maxReserveAmmo: 0

@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a69090fdcbb9784688d25194e1e5755, type: 3}
+  m_Name: Item_LinenBandage
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.ItemData
+  itemId: linen_bandage
+  displayName: Linen Bandage
+  description: Apply for 5 seconds to restore 25 health at completion. Moving, taking damage or changing items interrupts application.
+  kind: 1
+  value: 12
+  maxStack: 3
+  healAmount: 25
+  useChannelSeconds: 5
+  healOverTimeSeconds: 0
+  consumableUseKind: 1
+  ammoGrant: 0
+  iconColor: {r: 0.72, g: 0.67, b: 0.53, a: 1}
+  worldMaterial: {fileID: 0}
+  worldSize: {x: 0.24, y: 0.16, z: 0.18}

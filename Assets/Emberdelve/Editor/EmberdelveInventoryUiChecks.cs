@@ -1083,7 +1083,9 @@ namespace Emberdelve.EditorTools
             try
             {
                 channel.SpeedRatioOverride = () => 0f;
+                float healDuration = channel.ChannelItem.healOverTimeSeconds;
                 channel.Tick(channel.ChannelDuration + 0.01f);
+                if (healDuration > 0f) channel.Tick(healDuration);
             }
             finally { channel.SpeedRatioOverride = previousSpeed; }
             return true;
@@ -1410,7 +1412,16 @@ namespace Emberdelve.EditorTools
                         f.Inventory.TotalUnits == unitsBeforeUse && f.Inventory.Revision == revisionBeforeUse &&
                         Mathf.Abs(f.Rig.CurrentHealth - healthBeforeUse) < 0.01f,
                     $"a real LMB event begins drinking without early consumption or healing (channel={drink != null && drink.IsChanneling}, held={drink?.ChannelStackId}/{draughtId}, units={f.Inventory.TotalUnits}/{unitsBeforeUse}, revision={f.Inventory.Revision}/{revisionBeforeUse}, health={f.Rig.CurrentHealth:F4}/{healthBeforeUse:F4})");
-                CompleteAuthoredDrink(f, true);
+                drink.Tick(drink.ChannelDuration);
+                f.Check(!drink.IsChanneling && drink.ActiveHealCount == 1 && f.Inventory.TotalUnits == unitsBeforeUse - 1 &&
+                        Mathf.Abs(f.Rig.CurrentHealth - healthBeforeUse) < .01f,
+                    "finishing the real drink consumes once and starts gradual healing without an instant payout");
+                drink.Tick(draught.healOverTimeSeconds * .5f);
+                float expectedHalf = Mathf.Min(f.Rig.MaxHealth, healthBeforeUse + draught.healAmount * .5f);
+                f.Check(Mathf.Abs(f.Rig.CurrentHealth - expectedHalf) < .01f && drink.ActiveHealCount == 1,
+                    "the consumed potion keeps healing at half duration");
+                drink.Tick(draught.healOverTimeSeconds * .5f);
+                f.Check(drink.ActiveHealCount == 0, "the gradual heal finishes after its authored duration");
 
                 f.Check(f.Inventory.TotalUnits == unitsBeforeUse - 1 &&
                         Mathf.Abs(f.Rig.CurrentHealth - expectedHealth) < 0.01f,

@@ -124,8 +124,10 @@ namespace Emberdelve.Items
         private bool Execute(InventoryCommand command, out string reason)
         {
             reason = null;
-            if (_rig.GetComponent<ConsumableChannel>() is ConsumableChannel drink && drink.IsChanneling)
-            { reason = "finish drinking before changing inventory"; return false; }
+            if (_rig.GetComponent<ConsumableChannel>() is ConsumableChannel drink && drink.IsChanneling &&
+                !(drink.IsInterruptible && (command.Kind == InventoryCommandKind.HoldQuickItem ||
+                  command.Kind == InventoryCommandKind.SelectWeaponSet || command.Kind == InventoryCommandKind.SwapWeaponSet)))
+            { reason = drink.IsInterruptible ? "finish applying the bandage before changing inventory" : "finish drinking before changing inventory"; return false; }
             switch (command.Kind)
             {
                 case InventoryCommandKind.HoldQuickItem:

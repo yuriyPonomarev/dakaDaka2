@@ -15,7 +15,7 @@ namespace Emberdelve.Items
     ///
     /// Rules (decision recorded in Docs/Tasks/D3c.md):
     ///  - A potion with <see cref="ItemData.useChannelSeconds"/> is DRUNK first: the stack is not touched while the player
-    ///    channels. Once started, movement and damage cannot interrupt drinking. Only death or leaving play stops it.
+    ///    channels. Once started, movement and damage cannot interrupt drinking. Only death or leaving play stops it. Bandages instead permit movement, damage and hand-change cancellation.
     ///  - A completed channel consumes exactly one unit of the same stack (one revision, one inventory notification) and then
     ///    delivers <see cref="ItemData.healAmount"/> over <see cref="ItemData.healOverTimeSeconds"/> (or at once when that is 0).
     ///    The delivered total is exactly healAmount; the heal is committed once consumed, so a hit AFTER the channel does not
@@ -35,6 +35,7 @@ namespace Emberdelve.Items
         }
 
         private PlayerRig _rig;
+        private HealthComponent _subscribedHealth;
         private readonly List<ActiveHeal> _heals = new List<ActiveHeal>(2);
 
         private ulong _stackId;
@@ -46,6 +47,7 @@ namespace Emberdelve.Items
         internal Func<float> SpeedRatioOverride { get; set; }
 
         public bool IsChanneling => _item != null;
+        public bool IsInterruptible => IsChanneling && _item.IsBandage;
         public ItemData ChannelItem => _item;
         public float ChannelDuration => IsChanneling ? _duration : 0f;
         public ulong ChannelStackId => IsChanneling ? _stackId : 0;
@@ -130,7 +132,9 @@ namespace Emberdelve.Items
             _duration = item.useChannelSeconds;
             _elapsed = 0f;
 
-            Notify(() => GameEvents.RaiseToast(OwnerId, "Drinking " + item.displayName + "..."));
+            if (item.IsBandage)
+            { _subscribedHealth = Rig.Health; _subscribedHealth.Damaged += OnDamaged; }
+            Notify(() => GameEvents.RaiseToast(OwnerId, (item.IsBandage ? "Applying " : "Drinking ") + item.displayName + "..."));
             reason = null;
             return true;
         }
@@ -159,7 +163,7 @@ namespace Emberdelve.Items
         /// <summary>Lifecycle cancellation only. A living player in play cannot cancel a begun drink.</summary>
         public bool Cancel(string reason)
         {
-            if (Rig != null && !Rig.IsDead && Rig.IsInPlay) return false;
+            if (!IsInterruptible && Rig != null && !Rig.IsDead && Rig.IsInPlay) return false;
             return Abort(reason);
         }
 
@@ -172,7 +176,7 @@ namespace Emberdelve.Items
             EndChannel();
             CancelledDrinks++;
             LastCancelReason = reason;
-            Notify(() => GameEvents.RaiseToast(OwnerId, "Interrupted drinking " + item.displayName + (string.IsNullOrEmpty(reason) ? "" : " (" + reason + ")")));
+            Notify(() => GameEvents.RaiseToast(OwnerId, "Interrupted " + (item.IsBandage ? "applying " : "drinking ") + item.displayName + (string.IsNullOrEmpty(reason) ? "" : " (" + reason + ")")));
             return true;
         }
 
@@ -224,6 +228,14 @@ namespace Emberdelve.Items
                 return;
             }
 
+            if (IsInterruptible)
+            {
+                float speed = SpeedRatioOverride != null ? SpeedRatioOverride() : rig.Movement != null ? rig.Movement.SpeedMultiplier : 0f;
+                if (ConsumableRules.IsMovingTooFast(speed)) { Cancel("moving"); return; }
+                if (rig.Inventory == null || rig.Inventory.HeldStackId != _stackId ||
+                    (rig.Loadout != null && rig.Loadout.IsActionLocked)) { Cancel("changed action"); return; }
+            }
+
             _elapsed += deltaTime;
             if (_elapsed >= _duration) Complete();
         }
@@ -262,8 +274,13 @@ namespace Emberdelve.Items
             catch (Exception exception) { Debug.LogException(exception); }
         }
 
+        private void OnDamaged(DamageInfo damage)
+        { if (damage.Amount > 0f && IsInterruptible) Cancel("hit"); }
+
         private void EndChannel()
         {
+            if (_subscribedHealth != null) _subscribedHealth.Damaged -= OnDamaged;
+            _subscribedHealth = null;
             _item = null;
             _stackId = 0;
             _elapsed = 0f;

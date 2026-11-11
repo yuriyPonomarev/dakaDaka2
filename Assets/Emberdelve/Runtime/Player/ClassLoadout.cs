@@ -306,7 +306,7 @@ namespace Emberdelve.Player
             if (_slots[slot] == null) return false;
             if (!CanMutateHands()) return false;
 
-            if (_rig != null && _rig.GetComponent<ConsumableChannel>() is ConsumableChannel drink && drink.IsChanneling)
+            if (_rig != null && _rig.GetComponent<ConsumableChannel>() is ConsumableChannel drink && drink.IsChanneling && !drink.IsInterruptible)
             { GameEvents.RaiseToast(OwnerId, "Finish drinking before switching weapons"); return false; }
 
             if (IsActionLocked)

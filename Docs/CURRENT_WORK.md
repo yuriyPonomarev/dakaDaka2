@@ -3,6 +3,10 @@
 Updated 11 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
+## Completed: HEAL-01 potions over time and interruptible bandages
+
+User: potions heal gradually after uninterruptible drinking; bandages apply slowly and heal instantly on completion, with cancellation allowed. Initial tuning: both potions45HP/4s after1.8s drink; linen bandage25HP after5s, movement/damage/hand switch cancels without consuming. New bandage starter item and shared linen roll/wrapping presentation. Baseline dd8441c2. LoadoutD3c244/0, D3Content53/0, quick UI143/0, Hands92/0, Visual207/0, InventoryAuthority116/0, NetInventory148/0. Build PASS: Builds/Playable/20261111-190017-299/EmberdelveNet.exe. Live seed11 owner/observer wrapping, cancel without loss,25HP bandage completion and gradual potion healing accepted. Windows closed. Report Tasks/HEAL_BANDAGE_20261111.md; prior potion instant-heal expectations below superseded.
+
 ## Completed: POTION-02 uninterrupted drinking
 
 User correction: once started, drinking cannot be cancelled by movement, damage, switching hands or inventory operations. Death/leaving play/component teardown still abort safely. Completion consumes once even if regeneration fills health meanwhile. Existing animation/protocol13 unchanged. LoadoutD3c211/0, corrected D3Content53/0 (real game-clock input), InventoryAuthority116/0 and NetInventory148/0 passed. Build PASS: Builds/Playable/20261111-185112-164/EmberdelveNet.exe. Report Tasks/POTION_LOCK_20261111.md. This supersedes POTION-01 cancellation behavior below.

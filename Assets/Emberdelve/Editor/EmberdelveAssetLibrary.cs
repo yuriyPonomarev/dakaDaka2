@@ -34,6 +34,7 @@ namespace Emberdelve.EditorTools
         public static ItemData CrossbowItem;
         public static ItemData Coin;
         public static ItemData Draught;
+        public static ItemData LinenBandage;
         public static ItemData SmolderingTonic;
         public static ItemData Relic;
         public static ItemData ArrowBundle;
@@ -717,16 +718,34 @@ namespace Emberdelve.EditorTools
             {
                 i.itemId = "blood_draught";
                 i.displayName = "Blood Draught";
-                i.description = "Thick, warm, faintly metallic. Take in hand and hold still while drinking.";
+                i.description = "Drink for 1.8 seconds, then recover 45 health over 4 seconds. Drinking cannot be interrupted.";
                 i.kind = ItemKind.Consumable;
                 i.value = 18;
                 i.maxStack = 3;
                 i.healAmount = 45;
                 i.useChannelSeconds = 1.8f;
-                i.healOverTimeSeconds = 0f;
+                i.healOverTimeSeconds = 4f;
+                i.consumableUseKind = ConsumableUseKind.Potion;
                 i.iconColor = new Color(0.75f, 0.18f, 0.18f);
                 i.worldMaterial = EmberdelveMaterials.DraughtMat;
                 i.worldSize = new Vector3(0.24f, 0.3f, 0.24f);
+            });
+
+            LinenBandage = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_LinenBandage.asset", i =>
+            {
+                i.itemId = "linen_bandage";
+                i.displayName = "Linen Bandage";
+                i.description = "Apply for 5 seconds to restore 25 health at completion. Moving, taking damage or changing items interrupts application.";
+                i.kind = ItemKind.Consumable;
+                i.value = 12;
+                i.maxStack = 3;
+                i.healAmount = 25;
+                i.useChannelSeconds = 5f;
+                i.healOverTimeSeconds = 0f;
+                i.consumableUseKind = ConsumableUseKind.Bandage;
+                i.iconColor = new Color(0.72f, 0.67f, 0.53f);
+                i.worldMaterial = null;
+                i.worldSize = new Vector3(0.24f, 0.16f, 0.18f);
             });
 
             Relic = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_AshenRelic.asset", i =>
@@ -1531,7 +1550,7 @@ namespace Emberdelve.EditorTools
                 c.standEyeHeight = 1.66f;
                 c.crouchEyeHeight = 1.05f;
                 c.primaryWeapon = Sword;
-                c.startingItems = EmberdelveTorchContent.WithStarterTorch(new[] { Draught });
+                c.startingItems = EmberdelveTorchContent.WithStarterTorch(new[] { Draught, LinenBandage });
                 c.startingReserveAmmo = 0;
                 c.maxReserveAmmo = 0;
                 c.blockReduction = 0.7f;
@@ -1566,7 +1585,7 @@ namespace Emberdelve.EditorTools
                 c.standEyeHeight = 1.64f;
                 c.crouchEyeHeight = 1.0f;
                 c.primaryWeapon = Bow;
-                c.startingItems = EmberdelveTorchContent.WithStarterTorch(new[] { ArrowBundle, Draught });
+                c.startingItems = EmberdelveTorchContent.WithStarterTorch(new[] { ArrowBundle, Draught, LinenBandage });
                 c.startingReserveAmmo = 20;
                 c.maxReserveAmmo = 34;
                 c.blockReduction = 0f;

@@ -263,11 +263,11 @@ namespace Emberdelve.Items
             ProjectileRecovery.DressPickup(gameObject,Item);
         }
 
-        // All creation paths keep their existing interaction proxy. Only the visible potion changes.
+        // All creation paths keep their existing interaction proxy. Only the visible healing supply changes.
         private void RefreshPotionVisual()
         {
             ItemData shown = Item;
-            bool potion = shown != null && shown.healAmount > 0;
+            bool potion = shown != null && (shown.IsBandage || shown.healAmount > 0);
             if (_potionVisual != null && potion && _potionVisualItem == shown) return;
             Renderer proxy = GetComponent<Renderer>();
             if (_potionVisual != null)
@@ -280,7 +280,9 @@ namespace Emberdelve.Items
             }
             if (!potion) return;
             _potionProxyWasEnabled = proxy != null && proxy.enabled;
-            _potionVisual = Emberdelve.Player.PotionBottleVisual.Create(shown, transform);
+            _potionVisual = shown.IsBandage
+                ? Emberdelve.Player.BandageVisual.Create(shown, transform)
+                : Emberdelve.Player.PotionBottleVisual.Create(shown, transform);
             _potionVisualItem = shown;
             foreach (Transform part in _potionVisual.GetComponentsInChildren<Transform>()) part.gameObject.layer = gameObject.layer;
             if (proxy != null) proxy.enabled = false;

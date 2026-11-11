@@ -231,7 +231,12 @@ namespace Emberdelve.EditorTools
                 else if (item.itemId == "blood_draught")
                 {
                     authored++;
-                    expected = item.moveSpeedPenalty == 0f && item.useChannelSeconds == 1.8f && item.healOverTimeSeconds == 0f;
+                    expected = item.moveSpeedPenalty == 0f && item.useChannelSeconds == 1.8f && item.healOverTimeSeconds == 4f;
+                }
+                else if (item.itemId == "linen_bandage")
+                {
+                    authored++;
+                    expected = item.IsBandage && item.healAmount == 25 && item.moveSpeedPenalty == 0f && item.useChannelSeconds == 5f && item.healOverTimeSeconds == 0f;
                 }
                 else if (item.itemId == "graspwrap_gloves")
                 {
@@ -245,7 +250,7 @@ namespace Emberdelve.EditorTools
                     Debug.LogError("[LoadoutD3c] unexpected authored D3c tuning: " + item.itemId);
                 }
             }
-            Check(assets >= 14 && authored == 3 && changed == 0, "authored potions drink for 1.8 seconds; tonic heals over 4 seconds, Blood Draught immediately after drinking; gloves penalty remains 3");
+            Check(assets >= 14 && authored == 4 && changed == 0, "both potions drink for1.8s then heal over4s; bandages apply for5s then heal25HP; gloves penalty remains3");
         }
 
         private static ItemData MakeItem(string id)
@@ -387,6 +392,7 @@ namespace Emberdelve.EditorTools
             ObserverFailures(baseHp);
             BeltByIdentity();
             PotionChannel();
+            BandageChannel();
 
             if (GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) && authority is LocalCombatAuthority clocked) clocked.SetClock(null);
             _gear.Clear();
@@ -754,6 +760,7 @@ namespace Emberdelve.EditorTools
             {
                 beltDrink.SpeedRatioOverride = () => 0f;
                 beltDrink.Tick(draught.useChannelSeconds);
+                beltDrink.Tick(draught.healOverTimeSeconds);
             }
             finally { beltDrink.SpeedRatioOverride = previousSpeed; }
             Check(startedDrink && _bag.TotalUnits == units - 1 && Near(_rig.Health.CurrentHealth, Mathf.Min(max, low + draught.healAmount), 0.001f), "key 1 uses exactly the bound draught (+" + draught.healAmount + "): " + why);
@@ -814,15 +821,26 @@ namespace Emberdelve.EditorTools
                 float total = draught.healAmount;
 
                 // Production potion: the visible drink finishes before consuming or healing.
-                Check(Near(authoredChannel, 1.8f, 0.0001f) && authoredOverTime == 0f, "Blood Draught authors a 1.8-second drink");
+                Check(Near(authoredChannel, 1.8f, 0.0001f) && authoredOverTime == 4f, "Blood Draught authors a 1.8-second drink then four-second heal");
                 ulong stack = Stock(draught, 3);
                 ulong revision = _bag.Revision;
                 Check(_bag.TryUseStack(stack) && channel.IsChanneling && channel.ChannelStackId == stack && Near(channel.ChannelDuration, authoredChannel, 0.0001f), "an ordinary draught starts the authored drink");
                 channel.Tick(authoredChannel * 0.5f);
                 Check(channel.IsChanneling && _bag.TotalUnits == 3 && _bag.Revision == revision && Near(_rig.Health.CurrentHealth, _low, 0.0001f), "halfway through the real potion nothing is consumed or healed");
                 channel.Tick(authoredChannel * 0.5f);
-                Check(!channel.IsChanneling && channel.ActiveHealCount == 0 && _bag.TotalUnits == 2 && _bag.Revision == revision + 1 && Near(_rig.Health.CurrentHealth, _low + total, 0.001f),
-                    "the authored drink completes before one consumption and the 45-point heal");
+                Check(!channel.IsChanneling && channel.ActiveHealCount == 1 && _bag.TotalUnits == 2 && _bag.Revision == revision + 1 && Near(_rig.Health.CurrentHealth, _low, 0.001f),
+                    "the authored drink consumes once and schedules healing without instant payout");
+                channel.Tick(2f);
+                Check(Near(_rig.Health.CurrentHealth, _low + total * .5f, .001f), "half of the authored gradual heal arrives after two seconds");
+                channel.Tick(2f);
+                Check(channel.ActiveHealCount == 0 && Near(_rig.Health.CurrentHealth, _low + total, .001f), "all45HP arrives after four seconds");
+                stack = Stock(draught, 1);
+                Check(_bag.TryUseStack(stack), "the last potion starts drinking");
+                channel.Tick(authoredChannel);
+                Check(_bag.IndexOfStack(stack) < 0 && channel.ActiveHealCount == 1, "the potion stack retires before its heal ticks");
+                Check(_bag.RequestWeaponSet(0, out _), "weapons can be drawn after the potion was consumed");
+                channel.Tick(4f);
+                Check(Near(_rig.Health.CurrentHealth, _low + total, .001f), "healing survives stack retirement and switching back to weapons");
 
                 // ---- a channel with a heal over time
                 draught.useChannelSeconds = 2f;
@@ -1022,6 +1040,64 @@ namespace Emberdelve.EditorTools
             }
 
             Check(draught.useChannelSeconds == authoredChannel && draught.healOverTimeSeconds == authoredOverTime, "the draught asset is back to its authored values");
+        }
+        private void BandageChannel()
+        {
+            ItemData bandage = Resolve("linen_bandage");
+            Check(bandage != null && bandage.IsBandage && bandage.healAmount == 25 && bandage.useChannelSeconds == 5f && bandage.healOverTimeSeconds == 0f,
+                "linen bandage authors25HP after5s application with no heal-over-time");
+            if (bandage == null) return;
+            ConsumableChannel channel = ConsumableChannel.Ensure(_rig.gameObject);
+            bool enabled = channel.enabled; channel.enabled = false;
+            channel.SpeedRatioOverride = () => 0f;
+            try
+            {
+                ulong stack = Stock(bandage, 2); ulong revision = _bag.Revision;
+                Check(_bag.TryUseStack(stack), "bandage application starts");
+                channel.SpeedRatioOverride = () => .6f; channel.Tick(1f);
+                Check(channel.IsChanneling, "bandaging permits movement at exactly0.6 walking speed");
+                channel.SpeedRatioOverride = () => .9f; channel.Tick(.1f);
+                Check(!channel.IsChanneling && _bag.TotalUnits == 2 && _bag.Revision == revision && Near(_rig.CurrentHealth, _low, .001f),
+                    "faster movement cancels bandaging without consumption or healing");
+                channel.SpeedRatioOverride = () => 0f;
+                stack = Stock(bandage, 2); revision = _bag.Revision;
+                Check(_bag.TryUseStack(stack), "bandage starts before a hit"); channel.Tick(1f); HitOnce();
+                Check(!channel.IsChanneling && _bag.TotalUnits == 2 && _bag.Revision == revision && Near(_rig.CurrentHealth, _low - 1f, .001f),
+                    "damage cancels bandaging and only the hit changes health");
+                stack = Stock(bandage, 2); revision = _bag.Revision;
+                Check(_bag.TryUseStack(stack) && channel.Cancel("player request"), "bandage permits manual cancellation");
+                Check(!channel.IsChanneling && _bag.TotalUnits == 2 && _bag.Revision == revision && Near(_rig.CurrentHealth, _low, .001f), "manual cancellation costs no bandage or health");
+                stack = Stock(bandage, 2);
+                Check(_bag.TryUseStack(stack) && _bag.RequestWeaponSet(0, out _), "choosing a weapon set cancels bandaging");
+                Check(!channel.IsChanneling && _bag.TotalUnits == 2 && _bag.HeldStackId == 0 && Near(_rig.CurrentHealth, _low, .001f), "weapon switch preserves bandages and health");
+                stack = Stock(bandage, 2);
+                ItemData torch = Resolve("pitch_torch"); Check(torch != null && _bag.TryAdd(torch, 1), "stock a second held item");
+                ulong torchStack = StackOf(torch);
+                Check(_bag.TryUseStack(stack) && _bag.RequestHoldStack(torchStack, out _), "choosing another utility cancels bandaging");
+                Check(!channel.IsChanneling && _bag.TotalUnits == 3 && _bag.HeldStackId == torchStack && Near(_rig.CurrentHealth, _low, .001f), "item switch preserves every unit and health");
+                stack = Stock(bandage, 1); revision = _bag.Revision; int completed = channel.CompletedDrinks;
+                Check(_bag.TryUseStack(stack), "the uninterrupted bandage starts");
+                _bag.TryGetStack(stack, out InventorySlot bandageStack);
+                Vector2Int origin = bandageStack.Origin;
+                bool builtMove = _authority.TryCreateLocalCommand(InventoryCommandKind.Move, stack, 0, new Vector2Int(5, 3),
+                    EquipmentSlot.None, Guid.Empty, Guid.Empty, out InventoryCommand move, out string moveReason);
+                InventoryCommandResult moveResult = builtMove ? _authority.Submit(_rig, move) : default;
+                Check(builtMove && !moveResult.Accepted && (moveResult.Reason ?? "").Contains("applying") && channel.IsChanneling &&
+                    _bag.TotalUnits == 1 && _bag.Revision == revision && _bag.TryGetStack(stack, out InventorySlot unmoved) && unmoved.Origin == origin,
+                    "a valid inventory move is blocked during bandage application without mutation: " + (builtMove ? moveResult.Reason : moveReason));
+                channel.Tick(4.9f);
+                Check(channel.IsChanneling && _bag.TotalUnits == 1 && _bag.Revision == revision && Near(_rig.CurrentHealth, _low, .001f), "bandaging pays nothing before five seconds");
+                channel.Tick(.11f);
+                Check(!channel.IsChanneling && _bag.TotalUnits == 0 && _bag.Revision == revision + 1 && channel.CompletedDrinks == completed + 1 && channel.ActiveHealCount == 0 && Near(_rig.CurrentHealth, _low + 25f, .001f),
+                    "completed bandaging consumes exactly once and instantly heals25HP");
+                channel.Tick(10f);
+                Check(channel.CompletedDrinks == completed + 1 && Near(_rig.CurrentHealth, _low + 25f, .001f), "completed bandage never pays twice");
+            }
+            finally
+            {
+                channel.Abort("bandage fixture end"); channel.SpeedRatioOverride = null; channel.enabled = enabled;
+                _bag.Clear();
+            }
         }
     }
 }

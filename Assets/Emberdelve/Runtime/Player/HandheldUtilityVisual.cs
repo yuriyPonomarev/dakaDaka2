@@ -24,6 +24,7 @@ namespace Emberdelve.Player
                 var entry = set != null ? set.Find(HandheldTorchVisual.WeaponId) : null;
                 if (entry != null && entry.prefab != null) return Object.Instantiate(entry.prefab, parent, false);
             }
+            if (item.IsBandage) return BandageVisual.Create(item, parent);
             if (item.healAmount > 0) return PotionBottleVisual.Create(item, parent);
             var root = new GameObject("Held utility " + item.itemId);
             root.transform.SetParent(parent, false);

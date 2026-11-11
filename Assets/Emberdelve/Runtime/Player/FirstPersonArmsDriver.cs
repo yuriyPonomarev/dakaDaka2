@@ -200,6 +200,7 @@ namespace Emberdelve.Player
         private PotionDrinkPresentation _drink;
         private float _drinkRaise;
         private PotionBottleVisual _bottle;
+        private BandageVisual _bandage;
         public bool SetUtility(ItemData item)
         {
             SetWeapons(null, null);
@@ -207,6 +208,7 @@ namespace Emberdelve.Player
             if (item == null || gripRight == null) return false;
             _mainHand=HandheldUtilityVisual.Create(item,gripRight);
             _bottle = _mainHand != null ? _mainHand.GetComponent<PotionBottleVisual>() : null;
+            _bandage = _mainHand != null ? _mainHand.GetComponent<BandageVisual>() : null;
             if (_bottle != null) _mainHand.transform.localPosition = new Vector3(0f, -.055f, 0f);
             _drinkRaise = 0f;
             if (_mainHand != null) SetLayerRecursive(_mainHand,LayerMask.NameToLayer("Ignore Raycast"));
@@ -218,6 +220,7 @@ namespace Emberdelve.Player
         {
             _utilityItem=null;
             _bottle = null;
+            _bandage = null;
             _drinkRaise = 0f;
             DestroyHeld(ref _mainHand);
             DestroyHeld(ref _offHand);
@@ -566,6 +569,17 @@ namespace Emberdelve.Player
                     localRotation = Quaternion.Slerp(localRotation, Quaternion.Euler(-172f, 0f, -12f), _drinkRaise);
                     _bottle.SetDrinkProgress(progress, drinking);
                 }
+                if (_bandage != null)
+                {
+                    bool applying = _drink != null && _drink.IsDrinking;
+                    float p = applying ? _drink.Progress : 0f;
+                    _drinkRaise = Mathf.MoveTowards(_drinkRaise, applying ? PotionDrinkPresentation.Raise(p) : 0f, Time.deltaTime * 7f);
+                    float turn = p * Mathf.PI * 12f;
+                    Vector3 wrap = new Vector3(-.015f + .055f * Mathf.Sin(turn), -.19f + .035f * Mathf.Cos(turn), .43f);
+                    handLocal = Vector3.Lerp(handLocal, wrap, _drinkRaise);
+                    localRotation = Quaternion.Slerp(localRotation, Quaternion.Euler(-60f, 15f, Mathf.Sin(turn) * 30f), _drinkRaise);
+                    _bandage.SetApplyProgress(p, applying);
+                }
             }
             Quaternion gripRotation = frame.rotation * localRotation * GripFromRig;
             Vector3 gripPosition = frame.TransformPoint(handLocal);
@@ -583,6 +597,15 @@ namespace Emberdelve.Player
                 Vector3 leftRest = frame.TransformPoint(new Vector3(-.20f, -.28f, .35f));
                 SolveArm(_upperL, _lowerL, _handL, gripLeft, Vector3.Lerp(leftRest, cork, uncork),
                     frame.rotation * Quaternion.Euler(15f, 30f, -65f), frame.rotation * LeftPole);
+            }
+
+            if (_bandage != null && gripLeft != null && _drinkRaise > 0f)
+            {
+                Vector3 leftRest = new Vector3(-.20f, -.28f, .35f);
+                Vector3 wrappedWrist = new Vector3(-.09f, -.18f, .43f);
+                SolveArm(_upperL, _lowerL, _handL, gripLeft,
+                    frame.TransformPoint(Vector3.Lerp(leftRest, wrappedWrist, _drinkRaise)),
+                    frame.rotation * Quaternion.Euler(10f, 65f, -75f), frame.rotation * LeftPole);
             }
 
             // Left hand: on the shield (rest / raised), or on the second grip of a two-handed weapon, otherwise left to the idle pose.

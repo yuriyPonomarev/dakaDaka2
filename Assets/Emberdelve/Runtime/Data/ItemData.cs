@@ -3,6 +3,8 @@ using Emberdelve.Stats;
 
 namespace Emberdelve.Data
 {
+    public enum ConsumableUseKind { Potion = 0, Bandage = 1 }
+
     public enum ItemKind { Currency, Consumable, Relic, AmmoPack, Weapon, Armor }
 
     /// <summary>
@@ -135,7 +137,9 @@ namespace Emberdelve.Data
                  "summed with the held weapons' own penalty by CombatFlowRules.HeldFactor. 0 = none. Armour, jewelry and any worn piece that is " +
                  "not a weapon; a weapon item's penalty is its WeaponData.heldMoveSpeedPenalty (counted once), so this field is ignored on an item that grants a weapon.")]
         [Range(0f, 100f)] public float moveSpeedPenalty = 0f;
-        [Tooltip("Seconds the player must stand and drink before the item is consumed (0 = used at once). Moving fast, being hit or attacking cancels the drink and keeps the item.")]
+        public ConsumableUseKind consumableUseKind;
+        public bool IsBandage => consumableUseKind == ConsumableUseKind.Bandage;
+        [Tooltip("Seconds before consumption/healing begins. Potions cannot be interrupted; bandages can.")]
         [Range(0f, 10f)] public float useChannelSeconds = 0f;
         [Tooltip("Seconds over which healAmount is delivered after the item is consumed (0 = all at once). The total is exactly healAmount.")]
         [Range(0f, 60f)] public float healOverTimeSeconds = 0f;

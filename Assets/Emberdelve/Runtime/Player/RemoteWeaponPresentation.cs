@@ -138,6 +138,20 @@ namespace Emberdelve.Player
                         if (drinking && progress < .25f)
                             Reach(_leftShoulder,_leftElbow,_left,grip + rotation * new Vector3(0,.145f,0));
                     }
+                    var bandage = _utilityObject.GetComponent<BandageVisual>();
+                    if (bandage != null)
+                    {
+                        bool applying = _drink != null && _drink.IsDrinking;
+                        float p = applying ? _drink.Progress : 0f;
+                        _drinkRaise = Mathf.MoveTowards(_drinkRaise, applying ? PotionDrinkPresentation.Raise(p) : 0f, Time.deltaTime * 7f);
+                        float turn = p * Mathf.PI * 12f;
+                        Vector3 wrist = _rig.transform.TransformPoint(new Vector3(-.09f, 1.12f, .38f));
+                        Vector3 wrap = wrist + _rig.transform.TransformVector(new Vector3(.075f + .055f * Mathf.Sin(turn), .035f * Mathf.Cos(turn), .015f));
+                        grip = Vector3.Lerp(grip, wrap, _drinkRaise);
+                        rotation *= Quaternion.Euler(0f, 0f, Mathf.Sin(turn) * 30f * _drinkRaise);
+                        if (_drinkRaise > 0f) Reach(_leftShoulder,_leftElbow,_left,wrist);
+                        bandage.SetApplyProgress(p, applying);
+                    }
                     _utilityObject.transform.SetPositionAndRotation(bottle != null ? grip + rotation * new Vector3(0,-.055f,0) : grip,rotation);
                     Reach(_rightShoulder,_rightElbow,_right,grip);
                 }
