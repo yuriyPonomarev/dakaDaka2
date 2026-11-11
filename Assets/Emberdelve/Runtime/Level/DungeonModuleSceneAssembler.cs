@@ -272,6 +272,7 @@ namespace Emberdelve.Level
             if (!ValidateClosureState(plan, out reason)) { ClearGeneratedModules(); return false; }
             if (!PrepareGameplayLayout(plan, out reason)) { ClearGeneratedModules(); return false; }
             DisableLegacyGeometry();
+            Emberdelve.Interaction.WorldLightInteractable.Install(generatedRoot);
             if (!PlaceExistingGameplayActors(out reason)) { ClearGeneratedModules(); return false; }
             if (!ValidateExtractionPlacement(out reason)) { ClearGeneratedModules(); return false; }
             RunDirector director = FindFirstObjectByType<RunDirector>(FindObjectsInactive.Include);

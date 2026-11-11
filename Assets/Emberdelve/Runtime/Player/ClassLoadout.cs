@@ -702,6 +702,9 @@ namespace Emberdelve.Player
             if (weapon == null) { SyncArms(null); return; }
             Transform aimFrame = _rig != null && _rig.Look != null ? _rig.Look.AimTransform : weaponAnchor;
             _visual = WeaponVisualBuilder.Build(weapon, weaponAnchor, aimFrame);
+            // Server/observer rigs still need the swing transform, but their camera weapon is
+            // not a world model. PlayerAvatar owns the visible remote hands and equipment.
+            if (_visual != null && _rig != null && !_rig.IsLocallyControlled) _visual.HideBlockoutRenderers();
             if (_visual != null && weapon.isUnarmed) _visual.HideBlockoutRenderers(); // U5A: the bare fists have no blockout model, only the swing
             SyncArms(weapon);
         }

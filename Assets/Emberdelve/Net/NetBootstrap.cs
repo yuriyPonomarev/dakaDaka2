@@ -227,6 +227,7 @@ namespace Emberdelve.Net
             };
             _nm.NetworkConfig = config;
             gameObject.AddComponent<NetBreakableWorld>().Configure(_nm);
+            gameObject.AddComponent<NetWorldLights>().Configure(_nm);
             GameObject playerPrefab = RegisterPrefabs();
 
             if (_args.DisconnectTimeoutMs > 0)

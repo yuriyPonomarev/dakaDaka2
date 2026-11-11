@@ -57,6 +57,17 @@ class SelectionTests(unittest.TestCase):
         p = self.plan("Assets/Emberdelve/Net/NetInventoryServer.cs")
         self.assertTrue({"NetInventory", h.DROP, "NetExtraction", "Hands", "NetCombat"}.issubset(p["gates"]))
 
+    def test_world_lights_select_interaction_join_and_visual_checks(self):
+        for path in ["Assets/Emberdelve/Runtime/Interaction/WorldLightInteractable.cs", "Assets/Emberdelve/Net/NetWorldLights.cs.meta"]:
+            p = self.plan(path)
+            self.assertEqual(set(p["gates"]), {"NetDoor", "NetFinal", "Visual"})
+            self.assertTrue(p["editMode"])
+            self.assertFalse(p["requiresFullApproval"])
+
+    def test_lighting_routes_rendering_and_player_setup(self):
+        for path in ["Assets/Emberdelve/Runtime/Feedback/WorldLightAppearance.cs", "Assets/Emberdelve/Resources/Emberdelve/LocalLightHaze.shader.meta", "Assets/Emberdelve/Runtime/Level/MoonlitRuinsEnvironment.cs"]:
+            self.assertEqual(set(self.plan(path)["gates"]), {"Visual", "NetFinal"})
+
     def test_traversal_rejected(self):
         for path in ["../secret.cs", "/tmp/x", "C:/outside.cs"]:
             with self.assertRaises(ValueError):

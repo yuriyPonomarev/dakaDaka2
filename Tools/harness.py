@@ -77,6 +77,10 @@ def select(paths, sets):
             edit, why = True, "EditMode tests changed; no automatic gameplay replay"
         elif p in ("Tools/Run-All.ps1", "Tools/Run-EmberdelveEditModeTests.ps1", "Tools/gate-sets.json") or p.startswith("Assets/Emberdelve/Editor/EmberdelvePlayerBuildCache"):
             gates, why, edit, harness_tests = ["NetProof", "NetAdmission"], "runner/cache: focused real-process smoke", True, True
+        elif p in ("Assets/Emberdelve/Runtime/Interaction/WorldLightInteractable.cs", "Assets/Emberdelve/Net/NetWorldLights.cs"):
+            gates, why, edit = ["NetDoor", "NetFinal", "Visual"], "world-light interaction, authority and late join; focused light tests also required", True
+        elif p in ("Assets/Emberdelve/Runtime/Feedback/WorldLightAppearance.cs", "Assets/Emberdelve/Resources/Emberdelve/LocalLightHaze.shader", "Assets/Emberdelve/Runtime/Level/MoonlitRuinsEnvironment.cs"):
+            gates, why, edit = ["Visual", "NetFinal"], "lighting presentation and player/late-join camera setup", True
         elif p.startswith("Assets/Emberdelve/Editor/"):
             name = Path(p).stem
             match = re.fullmatch(r"Emberdelve(.+)Gate", name)

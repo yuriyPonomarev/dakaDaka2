@@ -37,6 +37,10 @@ MonoBehaviour:
     prefab: {fileID: 3105251061381523984, guid: 05d40d018dab5da419fb761d5fa85b41, type: 3}
     length: 1.25
     sourceId: long_sword
+  - weaponId: pitch_torch
+    prefab: {fileID: 1576670954817187330, guid: f7e8cc32d7acec44cab719f71ebe4233, type: 3}
+    length: 0.7
+    sourceId: original_pitch_torch
   unmapped:
   - weaponId: ember_crossbow
     reason: 'ranged: needs draw / reload arm animation (not in the Quaternius libraries);

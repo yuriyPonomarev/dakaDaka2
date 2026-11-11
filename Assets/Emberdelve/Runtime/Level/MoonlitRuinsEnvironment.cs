@@ -22,9 +22,9 @@ namespace Emberdelve.Level
                 if(light != moon && light.type == LightType.Directional) light.enabled=false;
             RenderSettings.skybox=sky;
             RenderSettings.ambientMode=AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor=new Color(.18f,.23f,.34f);
-            RenderSettings.ambientEquatorColor=new Color(.085f,.11f,.17f);
-            RenderSettings.ambientGroundColor=new Color(.035f,.04f,.065f);
+            RenderSettings.ambientSkyColor=new Color(.10f,.14f,.22f);
+            RenderSettings.ambientEquatorColor=new Color(.028f,.04f,.065f);
+            RenderSettings.ambientGroundColor=new Color(.009f,.012f,.02f);
             RenderSettings.fog=true;
             RenderSettings.fogMode=FogMode.Exponential;
             RenderSettings.fogColor=new Color(.035f,.055f,.095f);

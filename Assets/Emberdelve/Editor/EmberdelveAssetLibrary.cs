@@ -1529,7 +1529,7 @@ namespace Emberdelve.EditorTools
                 c.standEyeHeight = 1.66f;
                 c.crouchEyeHeight = 1.05f;
                 c.primaryWeapon = Sword;
-                c.startingItems = new[] { Draught };
+                c.startingItems = EmberdelveTorchContent.WithStarterTorch(new[] { Draught });
                 c.startingReserveAmmo = 0;
                 c.maxReserveAmmo = 0;
                 c.blockReduction = 0.7f;
@@ -1564,7 +1564,7 @@ namespace Emberdelve.EditorTools
                 c.standEyeHeight = 1.64f;
                 c.crouchEyeHeight = 1.0f;
                 c.primaryWeapon = Bow;
-                c.startingItems = new[] { ArrowBundle, Draught };
+                c.startingItems = EmberdelveTorchContent.WithStarterTorch(new[] { ArrowBundle, Draught });
                 c.startingReserveAmmo = 20;
                 c.maxReserveAmmo = 34;
                 c.blockReduction = 0f;

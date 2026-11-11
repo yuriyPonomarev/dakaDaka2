@@ -332,6 +332,8 @@ namespace Emberdelve.EditorTools
                 entries.Add(new WeaponViewModelSet.Entry { weaponId = Mapping[i][0], prefab = prefab, length = spec.Length, sourceId = spec.Id });
             }
 
+            var torch = EmberdelveTorchContent.Entry();
+            if (torch != null) entries.Add(torch);
             set.entries = entries.ToArray();
             List<WeaponViewModelSet.Unmapped> unmapped = new List<WeaponViewModelSet.Unmapped>();
             for (int i = 0; i < Unmapped.Length; i++) unmapped.Add(new WeaponViewModelSet.Unmapped { weaponId = Unmapped[i][0], reason = Unmapped[i][1] });

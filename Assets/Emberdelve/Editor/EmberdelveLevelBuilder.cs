@@ -734,6 +734,8 @@ namespace Emberdelve.EditorTools
             torchLight.range = 9.5f;
             torchLight.intensity = 9f;
             torchLight.shadows = LightShadows.None;
+            // Legacy camera fill is kept for old prefab references, but never lights the raid.
+            torchLight.enabled = false;
             torchGo.AddComponent<TorchFlicker>();
 
             GameObject weaponAnchor = new GameObject("Weapon_Anchor");

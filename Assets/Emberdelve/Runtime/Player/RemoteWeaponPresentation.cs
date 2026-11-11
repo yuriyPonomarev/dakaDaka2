@@ -105,6 +105,9 @@ namespace Emberdelve.Player
             if(_rig==null) return;
             bool visible=!_rig.IsLocallyControlled && !_rig.IsExtracted && !_rig.IsDead;
             Visibility(_mainRenderers,visible); Visibility(_offRenderers,visible);
+            // The owner's remote model must not leave a second point light/flame running.
+            if (_mainObject != null && _main != null && _main.weaponId == HandheldTorchVisual.WeaponId)
+                _mainObject.SetActive(visible);
             if(!visible) return;
             if(_mainObject!=null)
             {
@@ -128,7 +131,7 @@ namespace Emberdelve.Player
                 {
                     t.localScale=Vector3.one;
                     t.SetPositionAndRotation(_right!=null ? _right.position : _rig.transform.position+Vector3.up,
-                        _rig.transform.rotation*(_main.IsRanged ? Quaternion.identity : Quaternion.Euler(150,0,-12)));
+                        _rig.transform.rotation*((_main.IsRanged || _main.weaponId == HandheldTorchVisual.WeaponId) ? Quaternion.identity : Quaternion.Euler(150,0,-12)));
                 }
             }
             if(_offObject!=null)

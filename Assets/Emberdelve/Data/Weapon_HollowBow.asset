@@ -48,6 +48,7 @@ MonoBehaviour:
   projectileSpeed: 42
   projectileRadius: 0.05
   projectileLength: 0.85
+  recoveredAmmo: {fileID: 11400000, guid: 186aae3048b949b589180ae5c174f61c, type: 2}
   drawTime: 0.85
   minChargeToFire: 0.2
   minChargeDamageScale: 0.4
@@ -74,4 +75,3 @@ MonoBehaviour:
   shaftMaterial: {fileID: 2100000, guid: 72acac9e04034ef5bb5e876c91c947d0, type: 2}
   edgeMaterial: {fileID: 2100000, guid: f4115d57bd8d322489a672ab46a79b43, type: 2}
   gripMaterial: {fileID: 2100000, guid: dbbcb94c1c991e3418d36e4675a2dfda, type: 2}
-  recoveredAmmo: {fileID: 11400000, guid: 186aae3048b949b589180ae5c174f61c, type: 2}

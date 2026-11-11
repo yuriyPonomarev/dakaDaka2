@@ -292,6 +292,7 @@ namespace Emberdelve.EditorTools
             UniversalAdditionalCameraData data = camera.GetUniversalAdditionalCameraData();
             data.renderPostProcessing = true;
             data.renderShadows = true;
+            data.requiresDepthTexture = true;
             data.dithering = true;
             data.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
             data.antialiasingQuality = AntialiasingQuality.High;
@@ -322,6 +323,7 @@ namespace Emberdelve.EditorTools
                 SerializedObject serialized = new SerializedObject(asset);
                 bool changed = false;
                 changed |= SetBool(serialized, "m_SupportsHDR", true);
+                changed |= SetBool(serialized, "m_RequireDepthTexture", true);
                 changed |= SetInt(serialized, "m_ColorGradingMode", 1, false);            // HighDynamicRange
                 changed |= SetInt(serialized, "m_AdditionalLightsRenderingMode", 1, false); // PerPixel
                 changed |= SetInt(serialized, "m_AdditionalLightsPerObjectLimit", 4, true);

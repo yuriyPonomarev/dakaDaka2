@@ -520,6 +520,16 @@ namespace Emberdelve.Player
             // Keep the sword hilt mostly below frame; guard still raises it to its defensive pose.
             if (_mainData != null && (_mainData.weaponId.Contains("sword") || _mainData.weaponId.Contains("rapier")))
                 handLocal.y -= .20f * (1f - Mathf.SmoothStep(0f, 1f, guardBlend));
+            // A long burning head needs its own ready framing: the sword's leftward yaw
+            // sends it through the top edge. Keep this cosmetic offset out of swing/guard poses.
+            if (_mainData != null && _mainData.weaponId == HandheldTorchVisual.WeaponId &&
+                (_visual == null || !_visual.IsSwinging))
+            {
+                float ready = 1f - Mathf.SmoothStep(0f, 1f, guardBlend);
+                handLocal = Vector3.Lerp(handLocal,
+                    ClampToView(camera, new Vector3(.34f, -.36f, .52f) + offsetRight), ready);
+                localRotation = Quaternion.Slerp(localRotation, Quaternion.Euler(-48f, 25f, 0f), ready);
+            }
             Quaternion gripRotation = frame.rotation * localRotation * GripFromRig;
             Vector3 gripPosition = frame.TransformPoint(handLocal);
             if (gripRight != null)

@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a69090fdcbb9784688d25194e1e5755, type: 3}
+  m_Name: Item_PitchTorch
+  m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.ItemData
+  itemId: pitch_torch
+  displayName: Pitch Torch
+  description: A wrapped pitch torch. Equip in a weapon slot to light your path;
+    stow it to go dark.
+  gridFootprint: {x: 1, y: 2}
+  maxStack: 1
+  equipSlot: 1
+  grantedWeapon: {fileID: 11400000, guid: e676f56789772174aa7bff657b0c54ad, type: 2}
+  statModifiers: []
+  attributeBonuses: []
+  kind: 4
+  value: 3
+  healAmount: 0
+  ammoGrant: 0
+  ammoWeaponId: 
+  moveSpeedPenalty: 0
+  useChannelSeconds: 0
+  healOverTimeSeconds: 0
+  iconColor: {r: 0.85, g: 0.48, b: 0.12, a: 1}
+  worldMaterial: {fileID: 2100000, guid: 39d876fbda02f8e4fb85fac94a8f33f5, type: 2}
+  worldSize: {x: 0.08, y: 0.65, z: 0.08}

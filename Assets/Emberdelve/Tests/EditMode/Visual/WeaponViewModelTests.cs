@@ -121,9 +121,16 @@ namespace Emberdelve.Tests.Visual
         public void SetEntries_MatchTheSpecs()
         {
             WeaponViewModelSet set = Set();
-            Assert.AreEqual(EmberdelveWeaponModels.Mapping.Length, set.entries.Length);
+            Assert.AreEqual(EmberdelveWeaponModels.Mapping.Length + 1, set.entries.Length);
             for (int i = 0; i < set.entries.Length; i++)
             {
+                if (set.entries[i].weaponId == HandheldTorchVisual.WeaponId)
+                {
+                    Assert.AreEqual(EmberdelveTorchContent.Length, set.entries[i].length, .001f);
+                    Assert.AreSame(AssetDatabase.LoadAssetAtPath<GameObject>(EmberdelveTorchContent.PrefabPath), set.entries[i].prefab);
+                    Assert.IsNotNull(set.entries[i].prefab.GetComponent<HandheldTorchVisual>());
+                    continue;
+                }
                 EmberdelveWeaponModels.Spec spec = EmberdelveWeaponModels.Find(set.entries[i].sourceId);
                 Assert.IsNotNull(spec, set.entries[i].weaponId);
                 Assert.AreEqual(spec.Length, set.entries[i].length, 0.001f, set.entries[i].weaponId + " length");

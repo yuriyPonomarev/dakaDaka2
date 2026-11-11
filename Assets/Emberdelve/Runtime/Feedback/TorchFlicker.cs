@@ -55,6 +55,18 @@ namespace Emberdelve.Feedback
             _handCamera = transform.parent != null ? transform.parent.GetComponent<Camera>() : null;
         }
 
+        // World lights may be retuned after instantiation/Awake by their shared appearance setup.
+        public void SetSourceIntensity(float intensity)
+        {
+            baseIntensity = Mathf.Max(0f, intensity);
+            if (lightSource == null) lightSource = GetComponent<Light>();
+            if (lightSource != null)
+            {
+                lightSource.intensity = baseIntensity;
+                _baseRange = lightSource.range;
+            }
+        }
+
         private void Start()
         {
             // The level builder drops each sconce at its cell centre, i.e. floating in the middle of a corridor, where

@@ -111,6 +111,7 @@ namespace Emberdelve.UI
         {
             string key = item.IsEquippable ? item.equipSlot.ToString() : item.kind.ToString();
             if (item.grantedWeapon != null && item.grantedWeapon.IsRanged) key = "Crossbow";
+            if (item.grantedWeapon != null && item.grantedWeapon.weaponId == Emberdelve.Player.HandheldTorchVisual.WeaponId) key = "Torch";
             return IconForKey(key);
         }
 
@@ -126,6 +127,7 @@ namespace Emberdelve.UI
                 bool fill;
                 switch (key)
                 {
+                    case "Torch": fill = (a < .09f && v > -.85f && v < .25f) || (a < .22f && v > .12f && v < .39f) || (v > .28f && v < .9f && a < .3f * Mathf.Sin((v - .28f) / .62f * Mathf.PI)); break;
                     case "Crossbow": fill = (a < .1f && v > -.8f && v < .75f) || (a < .85f && Mathf.Abs(v - (.22f-.35f*u*u)) < .07f) || (a < .7f && Mathf.Abs(v-.02f)<.025f); break;
                     case "Weapon": fill = (a < .12f && v > -.45f && v < .82f - a) || (a < .46f && v > -.5f && v < -.38f) || (a < .085f && v > -.82f && v < -.5f); break;
                     case "OffHand": fill = a < .74f && v < .67f && v > -.83f + a * .62f; break;

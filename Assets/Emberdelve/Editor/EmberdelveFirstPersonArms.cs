@@ -591,7 +591,7 @@ namespace Emberdelve.EditorTools
                     skinned[i].sharedMesh = mesh;
                     skinned[i].sharedMaterials = new[] { sleeve, skin };
                     skinned[i].shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                    skinned[i].receiveShadows = false;
+                    skinned[i].receiveShadows = true;
                     skinned[i].updateWhenOffscreen = true;
                     skinned[i].gameObject.layer = LayerMask.NameToLayer("Ignore Raycast") >= 0 ? LayerMask.NameToLayer("Ignore Raycast") : 0;
                 }

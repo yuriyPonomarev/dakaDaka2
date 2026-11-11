@@ -69,6 +69,7 @@ MonoBehaviour:
   projectileSpeed: 36
   projectileRadius: 0.07
   projectileLength: 0.9
+  recoveredAmmo: {fileID: 0}
   drawTime: 0.8
   minChargeToFire: 0.18
   minChargeDamageScale: 0.45
