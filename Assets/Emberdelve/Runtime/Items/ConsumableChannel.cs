@@ -15,13 +15,11 @@ namespace Emberdelve.Items
     ///
     /// Rules (decision recorded in Docs/Tasks/D3c.md):
     ///  - A potion with <see cref="ItemData.useChannelSeconds"/> is DRUNK first: the stack is not touched while the player
-    ///    channels. Moving faster than <see cref="ConsumableRules.MoveCancelRatio"/> of walking speed, being hit, attacking (a
-    ///    swing, a draw, a reload or an attack press), swapping weapon sets, dying or running out of the game cancel the drink,
-    ///    and a cancelled drink KEEPS the potion (nothing is consumed, nothing is healed).
+    ///    channels. Once started, movement and damage cannot interrupt drinking. Only death or leaving play stops it.
     ///  - A completed channel consumes exactly one unit of the same stack (one revision, one inventory notification) and then
     ///    delivers <see cref="ItemData.healAmount"/> over <see cref="ItemData.healOverTimeSeconds"/> (or at once when that is 0).
     ///    The delivered total is exactly healAmount; the heal is committed once consumed, so a hit AFTER the channel does not
-    ///    stop it. A stack that vanished during the channel, or a player already at full health, ends the drink without consuming.
+    ///    stop it. A stack that vanished during the channel ends the drink without consuming. A begun drink consumes even if regeneration fills health.
     ///  - One drink at a time; any number of heals over time may overlap.
     /// </summary>
     [DisallowMultipleComponent]
@@ -37,7 +35,6 @@ namespace Emberdelve.Items
         }
 
         private PlayerRig _rig;
-        private HealthComponent _subscribedHealth;
         private readonly List<ActiveHeal> _heals = new List<ActiveHeal>(2);
 
         private ulong _stackId;
@@ -87,14 +84,11 @@ namespace Emberdelve.Items
 
         private int OwnerId => Rig != null ? Rig.PlayerId : GameEvents.NoPlayer;
 
+        private void OnDisable() => Abort("no longer able to drink");
+
         private void Update()
         {
             Tick(Time.deltaTime);
-        }
-
-        private void OnDestroy()
-        {
-            Unsubscribe();
         }
 
         /// <summary>
@@ -136,10 +130,6 @@ namespace Emberdelve.Items
             _duration = item.useChannelSeconds;
             _elapsed = 0f;
 
-            Unsubscribe();
-            _subscribedHealth = Rig.Health;
-            _subscribedHealth.Damaged += OnDamaged;
-
             Notify(() => GameEvents.RaiseToast(OwnerId, "Drinking " + item.displayName + "..."));
             reason = null;
             return true;
@@ -166,8 +156,15 @@ namespace Emberdelve.Items
             });
         }
 
-        /// <summary>Ends a drink without consuming anything. False when nothing was being drunk.</summary>
+        /// <summary>Lifecycle cancellation only. A living player in play cannot cancel a begun drink.</summary>
         public bool Cancel(string reason)
+        {
+            if (Rig != null && !Rig.IsDead && Rig.IsInPlay) return false;
+            return Abort(reason);
+        }
+
+        // Lifecycle/fixture cleanup only; player actions cannot abort drinking.
+        internal bool Abort(string reason)
         {
             if (!IsChanneling) return false;
 
@@ -227,32 +224,8 @@ namespace Emberdelve.Items
                 return;
             }
 
-            if (rig.Loadout != null && rig.Loadout.IsActionLocked)
-            {
-                Cancel("attacking");
-                return;
-            }
-
-            if (rig.Inventory == null || rig.Inventory.HeldStackId != _stackId)
-            {
-                Cancel("attacking");
-                return;
-            }
-
-            if (ConsumableRules.IsMovingTooFast(CurrentSpeedRatio()))
-            {
-                Cancel("moving");
-                return;
-            }
-
             _elapsed += deltaTime;
             if (_elapsed >= _duration) Complete();
-        }
-
-        private float CurrentSpeedRatio()
-        {
-            if (SpeedRatioOverride != null) return SpeedRatioOverride();
-            return Rig != null && Rig.Movement != null ? Rig.Movement.SpeedMultiplier : 0f;
         }
 
         private void Complete()
@@ -265,12 +238,6 @@ namespace Emberdelve.Items
             Inventory inventory = rig != null ? rig.Inventory : null;
             HealthComponent health = rig != null ? rig.Health : null;
             if (inventory == null || health == null || health.IsDead || inventory.HeldStackId != stackId) return;
-
-            if (health.CurrentHealth >= health.MaxHealth)
-            {
-                GameEvents.RaiseToast(OwnerId, "Already at full health");
-                return;
-            }
 
             if (!inventory.CanCommitRevision(out string reason) ||
                 !inventory.TryConsumeStackSilently(stackId, 1, item, out ItemData consumed, out reason))
@@ -295,24 +262,13 @@ namespace Emberdelve.Items
             catch (Exception exception) { Debug.LogException(exception); }
         }
 
-        private void OnDamaged(DamageInfo info)
-        {
-            if (info.Amount > 0f) Cancel("hit");
-        }
-
         private void EndChannel()
         {
             _item = null;
             _stackId = 0;
             _elapsed = 0f;
             _duration = 0f;
-            Unsubscribe();
         }
 
-        private void Unsubscribe()
-        {
-            if (_subscribedHealth != null) _subscribedHealth.Damaged -= OnDamaged;
-            _subscribedHealth = null;
-        }
     }
 }

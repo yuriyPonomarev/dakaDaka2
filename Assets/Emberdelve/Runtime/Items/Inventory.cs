@@ -250,7 +250,8 @@ namespace Emberdelve.Items
         internal void SetHeldStack(ulong stackId, bool commit = true)
         {
             if (_heldStackId == stackId) return;
-            _rig?.GetComponent<ConsumableChannel>()?.Cancel("changed held item");
+            if (_rig != null && !_rig.IsDead && _rig.IsInPlay &&
+                _rig.GetComponent<ConsumableChannel>() is ConsumableChannel drink && drink.IsChanneling) return;
             _heldStackId = stackId;
             if (stackId != 0) _rig?.SetGuardHeld(false);
             if (commit) CommitRevision();

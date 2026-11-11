@@ -248,7 +248,7 @@ namespace Emberdelve.UI
                     lines.Add("Restores " + definition.healAmount + " health over " + definition.healOverTimeSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s");
                 else if (definition.healAmount > 0) lines.Add("Restores " + definition.healAmount + " health");
                 if (definition.healAmount > 0 && definition.useChannelSeconds > 0f)
-                    lines.Add("Takes " + definition.useChannelSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s to drink; moving fast, a hit or an attack interrupts it");
+                    lines.Add("Takes " + definition.useChannelSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s to drink; cannot be interrupted");
                 if (definition.ammoGrant > 0) lines.Add("Grants " + definition.ammoGrant + " ammo");
                 lines.Add("Value " + definition.value);
             }

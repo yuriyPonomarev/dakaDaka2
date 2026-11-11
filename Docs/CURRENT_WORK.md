@@ -3,6 +3,10 @@
 Updated 11 November 2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
 User: autonomous work, minimal sufficient checks, commit only completed milestones.
 
+## Completed: POTION-02 uninterrupted drinking
+
+User correction: once started, drinking cannot be cancelled by movement, damage, switching hands or inventory operations. Death/leaving play/component teardown still abort safely. Completion consumes once even if regeneration fills health meanwhile. Existing animation/protocol13 unchanged. LoadoutD3c211/0, corrected D3Content53/0 (real game-clock input), InventoryAuthority116/0 and NetInventory148/0 passed. Build PASS: Builds/Playable/20261111-185112-164/EmberdelveNet.exe. Report Tasks/POTION_LOCK_20261111.md. This supersedes POTION-01 cancellation behavior below.
+
 ## Completed: POTION-01 model, glow and drinking
 
 Shared glass/cork/leather/brass vial for hands and ground pickups; dim emissive liquid without a Light. Owner and observer uncork/raise/sip/lower poses follow the authoritative1.8s drinking channel. Successful completion consumes/heals; cancellation retains the item. Protocol13.

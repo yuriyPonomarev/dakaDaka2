@@ -78,7 +78,7 @@ namespace Emberdelve.EditorTools
                 Check(EmberdelveAssetLibrary.Gloves.moveSpeedPenalty == 3f, "gloves author three movement points (one percent base)");
                 ItemData tonic = EmberdelveAssetLibrary.SmolderingTonic;
                 Check(tonic != null && tonic.itemId == "smoldering_tonic" && tonic.healAmount == 45 && tonic.useChannelSeconds == 1.8f && tonic.healOverTimeSeconds == 4f && tonic.maxStack == 2, "authored tonic: two per stack, 1.8s drink then 45 HP over 4s");
-                Check(EmberdelveAssetLibrary.Draught.useChannelSeconds == 0f && EmberdelveAssetLibrary.Draught.healOverTimeSeconds == 0f, "old blood draught remains instant");
+                Check(EmberdelveAssetLibrary.Draught.useChannelSeconds == 1.8f && EmberdelveAssetLibrary.Draught.healOverTimeSeconds == 0f, "Blood Draught drinks for 1.8 seconds before applying its heal at completion");
                 Check(EmberdelveAssetLibrary.JewelerLoot.Validate().Count == 0 && EmberdelveAssetLibrary.JewelerLoot.maxRolls == 4 && EmberdelveAssetLibrary.JewelerLoot.nothingWeight == 0, "the new four-entry cache is a valid loot table");
             }
             catch (Exception exception) { _failures++; Debug.LogException(exception); }
@@ -236,23 +236,21 @@ namespace Emberdelve.EditorTools
             Check(channel != null && channel.IsChanneling && Count(bag, tonic) == 2 && rig.CurrentHealth == low && bag.Revision == revision, "real LMB input starts drinking without consuming or healing early");
             Vector3 beforeMove = rig.transform.position;
             InputSystem.QueueStateEvent(_keyboard, new KeyboardState(Key.W));
-            float moveDeadline = Time.time + 1f, moveWatchdog = Time.realtimeSinceStartup + 10f;
+            float moveDeadline = Time.time + 0.35f, moveWatchdog = Time.realtimeSinceStartup + 10f;
             while (channel != null && channel.IsChanneling && Time.time < moveDeadline && Time.realtimeSinceStartup < moveWatchdog) yield return null;
             InputSystem.QueueStateEvent(_keyboard, new KeyboardState());
-            float settleUntil = Time.time + 0.5f;
+            float settleUntil = Time.time + 0.1f;
             while (Time.time < settleUntil && Time.realtimeSinceStartup < moveWatchdog) yield return null;
             Check(Vector3.ProjectOnPlane(rig.transform.position - beforeMove, Vector3.up).magnitude > 0.01f, "the real movement key displaces the live character controller horizontally");
-            Check(channel != null && !channel.IsChanneling && channel.LastCancelReason == "moving" && Count(bag, tonic) == 2 && rig.CurrentHealth == low && bag.Revision == revision,
-                "real movement input interrupts drinking and preserves both potions and health; cancel=" + channel?.LastCancelReason + " count=" + Count(bag, tonic) + " hp=" + rig.CurrentHealth + " revision=" + bag.Revision);
-            InputSystem.QueueStateEvent(_mouse, new MouseState { buttons = 1 });
-            yield return null; yield return null;
-            InputSystem.QueueStateEvent(_mouse, new MouseState());
-            yield return null;
-            Check(channel != null && channel.IsChanneling, "the same normal LMB input starts a fresh drink after cancellation");
-            float started = Time.time;
+            Check(channel != null && channel.IsChanneling && Count(bag, tonic) == 2 && rig.CurrentHealth == low && bag.Revision == revision,
+                "real movement does not interrupt drinking or consume/heal early; count=" + Count(bag, tonic) + " hp=" + rig.CurrentHealth + " revision=" + bag.Revision);
+            rig.Health.ApplyDamage(new DamageInfo(1f, Vector3.zero, Vector3.forward, Vector3.zero, 999, EntityKind.Enemy, DamageType.Physical, false, false, 0f));
+            low = rig.CurrentHealth;
+            Check(channel != null && channel.IsChanneling && Count(bag, tonic) == 2 && bag.Revision == revision,
+                "incoming damage leaves the same real-input drink running without early consumption");
+            Check(!bag.RequestWeaponSet(rig.Equipment.ActiveWeaponSet, out _) && !channel.Cancel("player request") && channel.IsChanneling && bag.HeldStackId == tonicStack && bag.Revision == revision,
+                "weapon selection and manual cancellation cannot interrupt the real-input drink");
             float deadline = Time.realtimeSinceStartup + 20f;
-            while (Time.time < started + 0.7f && Time.realtimeSinceStartup < deadline) yield return null;
-            Check(Count(bag, tonic) == 2 && rig.CurrentHealth == low, "the unfinished authored channel still consumes and heals nothing");
             while (channel != null && (channel.IsChanneling || channel.ActiveHealCount > 0) && Time.realtimeSinceStartup < deadline) yield return null;
             Check(Time.realtimeSinceStartup < deadline && channel != null && !channel.IsChanneling && channel.ActiveHealCount == 0, "the drink and gradual heal finish on the real game clock");
             Check(Count(bag, tonic) == 1 && bag.Revision == revision + 1 && Mathf.Abs(rig.CurrentHealth - low - 45f) < 0.02f, "one authored tonic consumes once, commits once and heals exactly 45 HP");

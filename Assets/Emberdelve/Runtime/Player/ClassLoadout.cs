@@ -306,6 +306,9 @@ namespace Emberdelve.Player
             if (_slots[slot] == null) return false;
             if (!CanMutateHands()) return false;
 
+            if (_rig != null && _rig.GetComponent<ConsumableChannel>() is ConsumableChannel drink && drink.IsChanneling)
+            { GameEvents.RaiseToast(OwnerId, "Finish drinking before switching weapons"); return false; }
+
             if (IsActionLocked)
             {
                 // Refused with no state change and nothing queued: the swap input is only read on the frame it is pressed.

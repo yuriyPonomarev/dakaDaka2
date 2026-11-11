@@ -782,6 +782,7 @@ namespace Emberdelve.EditorTools
 
         private ulong Stock(ItemData draught, int count)
         {
+            _rig.GetComponent<ConsumableChannel>()?.Abort("fixture reset");
             _bag.Clear();
             _bag.TryAdd(draught, count);
             float max = _rig.Health.MaxHealth;
@@ -827,7 +828,7 @@ namespace Emberdelve.EditorTools
                 draught.useChannelSeconds = 2f;
                 draught.healOverTimeSeconds = 4f;
 
-                // cancelled by a hit
+                // Damage cannot interrupt the committed drink
                 stack = Stock(draught, 2);
                 revision = _bag.Revision;
                 int cancelled = channel.CancelledDrinks;
@@ -836,13 +837,14 @@ namespace Emberdelve.EditorTools
                 channel.Tick(1f);
                 Check(channel.IsChanneling && Near(channel.ChannelProgress, 0.5f, 1e-4f), "halfway through the drink");
                 HitOnce();
-                Check(!channel.IsChanneling && channel.CancelledDrinks == cancelled + 1 && channel.LastCancelReason == "hit", "being hit cancels the drink");
+                Check(channel.IsChanneling && channel.CancelledDrinks == cancelled && _bag.TotalUnits == 2 && _bag.Revision == revision, "being hit cannot cancel drinking or consume early");
                 float afterHit = _rig.Health.CurrentHealth;
-                channel.Tick(10f);
-                Check(_bag.TotalUnits == 2 && _bag.Revision == revision && Near(_rig.Health.CurrentHealth, afterHit, 0.0001f) && channel.PendingHeal == 0f && channel.ActiveHealCount == 0,
-                    "a cancelled drink leaves no heal and KEEPS the potion (no unit consumed, no revision)");
+                channel.Tick(1f);
+                Check(!channel.IsChanneling && _bag.TotalUnits == 1 && _bag.Revision == revision + 1 && Near(_rig.Health.CurrentHealth, afterHit, 0.0001f), "the damaged drink consumes exactly once at its original deadline");
+                channel.Tick(4f);
+                Check(Near(_rig.Health.CurrentHealth, afterHit + total, 0.0001f) && channel.ActiveHealCount == 0, "damage does not prevent the completed drink from paying its full heal");
 
-                // cancelled by moving: 0.6 is fine, faster is not
+                // Both creeping and running leave the drink active
                 stack = Stock(draught, 2);
                 revision = _bag.Revision;
                 cancelled = channel.CancelledDrinks;
@@ -852,8 +854,8 @@ namespace Emberdelve.EditorTools
                 Check(channel.IsChanneling, "creeping at exactly 0.6 of walking speed does not interrupt");
                 channel.SpeedRatioOverride = () => 0.9f;
                 channel.Tick(0.1f);
-                Check(!channel.IsChanneling && channel.CancelledDrinks == cancelled + 1 && channel.LastCancelReason == "moving" && _bag.TotalUnits == 2 && _bag.Revision == revision && Near(_rig.Health.CurrentHealth, _low, 0.0001f),
-                    "moving at pace cancels the drink and keeps the potion");
+                Check(channel.IsChanneling && channel.CancelledDrinks == cancelled && _bag.TotalUnits == 2 && _bag.Revision == revision && Near(_rig.Health.CurrentHealth, _low, 0.0001f),
+                    "running cannot cancel the drink or consume it early");
                 channel.SpeedRatioOverride = () => 0f;
 
                 // LMB is the held item's use button and must not cancel its own drink.
@@ -866,7 +868,8 @@ namespace Emberdelve.EditorTools
                 _rig.Input.PrimaryPressedOverride = null;
                 Check(channel.IsChanneling && channel.CancelledDrinks == cancelled && _bag.TotalUnits == 2 && _bag.Revision == revision && Near(_rig.Health.CurrentHealth, _low, 0.0001f),
                     "the use button keeps the held potion channel running without consuming it early");
-                Check(channel.Cancel("test"), "the use-button fixture finishes its channel");
+                Check(!channel.Cancel("player request") && channel.IsChanneling, "manual cancellation is refused while drinking");
+                channel.Abort("fixture reset");
 
                 // A running weapon swing must reject both drawing and using a bag potion.
                 stack = Stock(draught, 2);
@@ -886,22 +889,37 @@ namespace Emberdelve.EditorTools
                     finally { EndSwing(local); }
                 }
 
-                // Direct weapon selection cancels drinking and stows the utility.
+                // The drink locks hands and inventory commands until completion.
                 stack = Stock(draught, 2);
+                ItemData torch = Resolve("pitch_torch");
+                Check(torch != null && _bag.TryAdd(torch, 1), "stock a different quick item for locked-hands requests");
+                ulong torchStack = StackOf(torch);
+                _bag.TryGetStack(torchStack, out InventorySlot heldTorch);
                 revision = _bag.Revision;
                 cancelled = channel.CancelledDrinks;
-                Check(_bag.TryUseStack(stack), "a fifth drink starts");
-                bool selected = _bag.RequestWeaponSet(1, out selectReason);
-                Check(selected && !channel.IsChanneling && channel.CancelledDrinks == cancelled + 1 && _bag.HeldStackId == 0 && _bag.TotalUnits == 2 && Near(_rig.Health.CurrentHealth, _low, 0.0001f) && _bag.Revision == revision + 1,
-                    "selecting weapon set 2 cancels the drink and keeps the potion: " + selectReason);
-                Check(_bag.RequestWeaponSet(0, out _) && _gear.ActiveWeaponSet == 0, "selected set 1 again");
+                Check(_bag.TryUseStack(stack), "the locked-hands drink starts");
+                Check(!_bag.RequestWeaponSet(1, out selectReason) && !_bag.RequestWeaponSet(0, out _) &&
+                      !_bag.RequestHoldStack(torchStack, out _) && channel.IsChanneling && channel.CancelledDrinks == cancelled &&
+                      _bag.HeldStackId == stack && _bag.TotalUnits == 3 && _bag.Revision == revision,
+                    "weapon and quick-item switches are rejected without interrupting or mutating the drink: " + selectReason);
+                bool dropCreated = _authority.TryCreateLocalCommand(InventoryCommandKind.Drop, torchStack, 0,
+                    Vector2Int.zero, EquipmentSlot.None, heldTorch.Instance != null ? heldTorch.Instance.Uid : Guid.Empty, Guid.Empty,
+                    out InventoryCommand drop, out string dropReason);
+                InventoryCommandResult dropResult = dropCreated ? _authority.Submit(_rig, drop) : default;
+                Check(dropCreated && !dropResult.Accepted && (dropResult.Reason ?? "").Contains("drinking") && channel.IsChanneling && _bag.TotalUnits == 3 && _bag.Revision == revision &&
+                      _bag.TryGetStack(torchStack, out _) && _bag.HeldStackId == stack,
+                    "a valid drop request is rejected while drinking with every stack intact: " + (dropCreated ? dropResult.Reason : dropReason));
 
                 // one drink at a time
                 stack = Stock(draught, 3);
                 Check(_bag.TryUseStack(stack) && channel.IsChanneling, "a drink starts");
                 string busy = Snap();
                 Check(!_bag.TryUseStack(stack) && channel.IsChanneling && Snap() == busy, "a second use while drinking is refused and changes nothing");
-                Check(channel.Cancel("test") && !channel.IsChanneling && !channel.Cancel("again"), "Cancel ends the drink once and reports nothing to cancel afterwards");
+                Check(!channel.Cancel("player request") && channel.IsChanneling && Snap() == busy, "manual cancellation preserves the running drink and inventory");
+                revision = _bag.Revision;
+                channel.enabled = true;
+                channel.enabled = false;
+                Check(!channel.IsChanneling && _bag.TotalUnits == 3 && _bag.Revision == revision && Near(_rig.Health.CurrentHealth, _low, 0.0001f), "disabling the component aborts lifecycle work without consuming or healing");
 
                 // ---- completion: consumed once, heal over time pays out the exact total once
                 stack = Stock(draught, 2);
@@ -965,6 +983,18 @@ namespace Emberdelve.EditorTools
                 Check(!channel.IsChanneling && _bag.TotalUnits == 1 && Near(_rig.Health.CurrentHealth, _low + total, 0.001f) && channel.ActiveHealCount == 0 && channel.CompletedDrinks == completed + 1,
                     "the channel ends: one unit consumed, the whole 45 healed once");
 
+                // A heal from another source cannot turn a committed drink into a free cancellation.
+                stack = Stock(draught, 2);
+                revision = _bag.Revision;
+                completed = channel.CompletedDrinks;
+                Check(_bag.TryUseStack(stack), "the full-health-at-completion fixture starts while injured");
+                _rig.Health.SetHealth(_rig.Health.MaxHealth);
+                channel.Tick(draught.useChannelSeconds);
+                channel.Tick(5f);
+                Check(!channel.IsChanneling && _bag.TotalUnits == 1 && _bag.Revision == revision + 1 &&
+                      channel.CompletedDrinks == completed + 1 && Near(_rig.Health.CurrentHealth, _rig.Health.MaxHealth, 0.0001f),
+                    "healing to full during the drink still consumes exactly one potion at completion");
+
                 // ---- heal over time without a channel: consumed now, delivered over time
                 draught.useChannelSeconds = 0f;
                 draught.healOverTimeSeconds = 3f;
@@ -983,7 +1013,7 @@ namespace Emberdelve.EditorTools
             {
                 draught.useChannelSeconds = authoredChannel;
                 draught.healOverTimeSeconds = authoredOverTime;
-                channel.Cancel("gate over");
+                channel.Abort("gate over");
                 channel.SpeedRatioOverride = null;
                 channel.enabled = wasEnabled;
                 _rig.Input.PrimaryPressedOverride = null;

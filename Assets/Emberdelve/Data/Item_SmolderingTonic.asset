@@ -14,8 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.ItemData
   itemId: smoldering_tonic
   displayName: Smoldering Tonic
-  description: Drink carefully to recover health over time. Moving fast or taking
-    damage interrupts drinking.
+  description: Drink to recover health over time. Once started, drinking cannot be interrupted.
   gridFootprint: {x: 1, y: 1}
   maxStack: 2
   equipSlot: 0

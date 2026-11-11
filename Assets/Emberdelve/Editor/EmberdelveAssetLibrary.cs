@@ -970,7 +970,7 @@ namespace Emberdelve.EditorTools
             {
                 i.itemId = "smoldering_tonic";
                 i.displayName = "Smoldering Tonic";
-                i.description = "Drink carefully to recover health over time. Moving fast or taking damage interrupts drinking.";
+                i.description = "Drink to recover health over time. Once started, drinking cannot be interrupted.";
                 i.kind = ItemKind.Consumable;
                 i.value = 28;
                 i.maxStack = 2;
