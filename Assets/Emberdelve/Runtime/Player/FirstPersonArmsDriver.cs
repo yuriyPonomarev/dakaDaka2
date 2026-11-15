@@ -104,6 +104,7 @@ namespace Emberdelve.Player
 
         private WeaponViewModelSet _set;
         private PlayerRig _rig;
+        private EquippedArmorView _gloves;
         private Camera _camera;
         private Transform _frame;
         private WeaponVisualRig _visual;
@@ -135,6 +136,7 @@ namespace Emberdelve.Player
         public Animator Animator => animator;
         public Transform GripRight => gripRight;
         public Transform GripLeft => gripLeft;
+        public Transform SupportGrip => _leftWeaponGrip;
         public GameObject MainHandModel => _mainHand;
         public GameObject OffHandModel => _offHand;
         public bool HasWeaponModel => _hasWeaponModel;
@@ -176,6 +178,9 @@ namespace Emberdelve.Player
             _set = set;
             _levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
             if (animator == null) animator = GetComponentInChildren<Animator>(true);
+            _gloves = GetComponent<EquippedArmorView>() ?? gameObject.AddComponent<EquippedArmorView>();
+            _gloves.Bind(rig != null ? rig.Equipment : null, handsOnly: true);
+            _gloves.Refresh();
             transform.localPosition = restPosition;
             transform.localRotation = Quaternion.identity;
             if (rig != null) _lastRigPosition = rig.transform.position;
@@ -256,7 +261,7 @@ namespace Emberdelve.Player
 
             UpdateGuardDirectionMarker();
             ApplyBlockClip(_offHand != null);
-            return _hasWeaponModel || (main != null && main.weaponId == "hollow_bow");
+            return _hasWeaponModel || (main != null && (main.weaponId == "hollow_bow" || main.CanCrossbowGuard));
         }
 
         /// <summary>The length of the damage segment of the weapon's first melee pattern (what the Sweep_Edge bar used to show).</summary>
@@ -455,6 +460,7 @@ namespace Emberdelve.Player
         private void LateUpdate()
         {
             if (_camera == null) return;
+            _gloves?.Refresh();
             float dt = Time.deltaTime;
 
             // Camera clipping: a ray along the view; when level geometry is closer than the weapon's reach the arms step back.
@@ -523,14 +529,31 @@ namespace Emberdelve.Player
             Vector3 mid = (_upperR.position + _upperL.position) * 0.5f;
             model.position += frame.TransformPoint(ShoulderCenter) - mid;
 
+            if (_mainData != null && _mainData.CanCrossbowGuard && _visual != null)
+            {
+                RangedCombat ranged = _rig != null ? _rig.GetComponent<RangedCombat>() : null;
+                PoseCrossbow(frame, _visual.transform, !_blockHeld && ranged != null && ranged.IsReloading,
+                    ranged != null ? ranged.ReloadProgress : 0f, _blockHeld || guardBlend > .5f);
+                return;
+            }
+
             if (_mainData != null && _mainData.weaponId == "hollow_bow" && _visual != null)
             {
                 var bow = _visual.GetComponentInChildren<BowPresentation>();
+                if (_blockHeld && _mainData.CanBowGuard && bow != null)
+                {
+                    PoseBowGuard(frame, bow);
+                    return;
+                }
                 var skills = _rig != null ? _rig.GetComponent<Emberdelve.Skills.SkillCaster>() : null;
                 bool prepared = skills != null && skills.PreparedSlot >= 0;
                 bool held = _rig != null && _rig.Input != null && _rig.Input.PrimaryHeld && !(skills != null && skills.SuppressPrimary);
                 bool draw = !InventoryInputFocus.OwnsEscape && _rig != null && !_rig.IsDead && _rig.Input != null && _rig.Input.GameplayInputEnabled && (prepared || held);
-                _bowDraw = Mathf.MoveTowards(_bowDraw, draw ? 1f : 0f, Time.deltaTime * (draw ? 1f / Mathf.Max(.1f, _mainData.drawTime) : 16f));
+                // Ordinary draw comes from RangedCombat's captured, stat-scaled clock. Never run a second authored-time clock.
+                // Prepared skills have their own held pose and do not use the ordinary ranged draw state.
+                _bowDraw = prepared
+                    ? Mathf.MoveTowards(_bowDraw, draw ? 1f : 0f, Time.deltaTime * (draw ? 1f / Mathf.Max(.1f, _mainData.drawTime) : 16f))
+                    : _visual.DrawProgress;
                 if (bow != null)
                 {
                     PoseBow(frame, bow, _bowDraw);
@@ -616,6 +639,15 @@ namespace Emberdelve.Player
                 Vector3 shieldPosition = Vector3.Lerp(ShieldRest, ShieldRaised, guardBlend) + offsetLeft;
                 Quaternion shieldRotation = Quaternion.Euler(Vector3.Lerp(ShieldRestEuler, ShieldRaisedEuler, guardBlend));
                 SolveArm(_upperL, _lowerL, _handL, gripLeft, frame.TransformPoint(ClampToView(camera, shieldPosition)), frame.rotation * shieldRotation, frame.rotation * LeftPole);
+                if (_blockHeld)
+                {
+                    GuardShieldShape shield = GuardShieldPose.Resolve(frame.position, frame.rotation);
+                    // Raised defense follows the physical surface immediately; cosmetic bob/clamping
+                    // must not make the shield appear somewhere the server cannot block.
+                    SolveArm(_upperL, _lowerL, _handL, gripLeft,
+                        frame.TransformPoint(GuardShieldPose.Grip), shield.Rotation, frame.rotation * LeftPole);
+                    GuardShieldPose.ApplyModel(_offHand.transform, shield);
+                }
             }
             else if (_mainData != null && _mainData.twoHanded && gripRight != null && gripLeft != null)
             {
@@ -742,6 +774,58 @@ namespace Emberdelve.Player
                 bool finger = i >= (int)HumanBodyBones.LeftThumbProximal && i <= (int)HumanBodyBones.RightLittleDistal;
                 if (!finger) _poseBones[i].localRotation = _poseRotations[i];
             }
+        }
+
+        public static readonly Vector3 CrossbowRightGrip = new Vector3(0f, -.15f, -.01f);
+        public static readonly Vector3 CrossbowSupportGrip = new Vector3(0f, -.07f, .24f);
+
+        /// <summary>Original-authored support/string pull/bolt seating motion; no gameplay clock or ammunition changes.</summary>
+        public static Vector3 CrossbowLeftGrip(bool reloading, float progress)
+        {
+            if (!reloading || float.IsNaN(progress) || float.IsInfinity(progress)) return CrossbowSupportGrip;
+            float p = Mathf.Clamp01(progress);
+            Vector3 stringGrip = new Vector3(0f, 0f, -.025f);
+            Vector3 pulledString = new Vector3(0f, 0f, -.22f);
+            Vector3 boltSeat = new Vector3(0f, .045f, .18f);
+            if (p < .2f) return Vector3.Lerp(CrossbowSupportGrip, stringGrip, Mathf.SmoothStep(0f, 1f, p / .2f));
+            if (p < .5f) return Vector3.Lerp(stringGrip, pulledString, Mathf.SmoothStep(0f, 1f, (p - .2f) / .3f));
+            if (p < .75f) return Vector3.Lerp(pulledString, boltSeat, Mathf.SmoothStep(0f, 1f, (p - .5f) / .25f));
+            return Vector3.Lerp(boltSeat, CrossbowSupportGrip, Mathf.SmoothStep(0f, 1f, (p - .75f) / .25f));
+        }
+
+        public void PoseCrossbow(Transform frame, Transform crossbow, bool reloading, float reloadProgress, bool guarding = false)
+        {
+            if (!ResolveBones() || frame == null || crossbow == null) return;
+            PoseFingers(false, 0f);
+            EnsureWeaponGrips();
+            // The procedural weapon stays in its physical pose; only the mannequin follows it.
+            SolveArm(_upperR, _lowerR, _handR, gripRight, crossbow.TransformPoint(CrossbowRightGrip),
+                crossbow.rotation * Quaternion.Euler(-12f, 0f, 0f), frame.rotation * RightPole);
+            // Calibrated grip +Z runs wrist-to-fingers. At rest fingers point up around the stock,
+            // keeping the wrist below the sightline. Raised guard retains the reachable overhead grip.
+            float turn = 0f;
+            if (reloading && !float.IsNaN(reloadProgress) && !float.IsInfinity(reloadProgress))
+            {
+                float p = Mathf.Clamp01(reloadProgress);
+                // Turn over the stock to pull the string and seat the bolt from above.
+                // Match the resting orientation at both ends, without moving the physical weapon.
+                turn = Mathf.SmoothStep(0f, 1f, p / .2f)
+                    * (1f - Mathf.SmoothStep(0f, 1f, (p - .75f) / .25f));
+            }
+            SolveArm(_upperL, _lowerL, _handL, _leftWeaponGrip, crossbow.TransformPoint(CrossbowLeftGrip(reloading, reloadProgress)),
+                crossbow.rotation * Quaternion.Euler(guarding ? 90f : Mathf.Lerp(-90f, 25f, turn), 0f, 0f), frame.rotation * LeftPole);
+        }
+
+        public void PoseBowGuard(Transform frame, BowPresentation bow)
+        {
+            if (!ResolveBones() || frame == null || bow == null) return;
+            PoseFingers(false, 0f);
+            EnsureWeaponGrips();
+            bow.SetDraw(0f);
+            SolveArm(_upperL, _lowerL, _handL, _leftWeaponGrip, bow.transform.TransformPoint(BowGuardPose.LeftGrip),
+                bow.transform.rotation, frame.rotation * LeftPole);
+            SolveArm(_upperR, _lowerR, _handR, gripRight, bow.transform.TransformPoint(BowGuardPose.RightGrip),
+                bow.transform.rotation, frame.rotation * RightPole);
         }
 
         public void PoseBow(Transform frame, BowPresentation bow, float draw)

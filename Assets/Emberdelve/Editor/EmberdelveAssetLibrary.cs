@@ -38,6 +38,7 @@ namespace Emberdelve.EditorTools
         public static ItemData SmolderingTonic;
         public static ItemData Relic;
         public static ItemData ArrowBundle;
+        public static ItemData BoltBundle;
         public static ItemData Cuirass;
         public static ItemData Boots;
         public static ItemData AshenCloak;
@@ -154,6 +155,7 @@ namespace Emberdelve.EditorTools
             {
                 w.weaponId = "hollow_bow";
                 w.displayName = "Hollow Bow";
+                w.ammoDisplayName = "Arrows";
                 w.kind = WeaponKind.Ranged;
                 w.baseDamage = 34f;
                 w.damageType = DamageType.Pierce;
@@ -260,8 +262,9 @@ namespace Emberdelve.EditorTools
                 w.drawTime = 0.3f;
                 w.minChargeToFire = 0.12f;
                 w.minChargeDamageScale = 0.55f;
-                w.magazineSize = 4;
+                w.magazineSize = 1;
                 w.reloadTime = 2.2f;
+                w.reloadWhileHeld = false;
                 w.falloffStartRange = 12f;
                 w.falloffEndRange = 34f;
                 w.falloffMinScale = 0.5f;
@@ -327,10 +330,29 @@ namespace Emberdelve.EditorTools
         private static void ApplyDefenseKit()
         {
             SetDefense(Sword, DefenseRole.Weapon, DefenseCapability.Block, -1f, -1f, false);
-            SetDefense(Bow, DefenseRole.Weapon, DefenseCapability.None, -1f, -1f, true);
+            SetDefense(Bow, DefenseRole.Weapon, DefenseCapability.Block, 1f, -1f, true);
+            if (Bow != null)
+            {
+                Bow.rangedGuardShape = RangedGuardShape.Bow;
+                Bow.impactGuard = true;
+                Bow.reloadWhileHeld = true;
+                Bow.impactGuardDuration = .35f;
+                Bow.impactGuardResistance = 10f;
+                Bow.impactGuardRearmDelay = .65f;
+                EditorUtility.SetDirty(Bow);
+            }
             SetDefense(Claw, DefenseRole.Weapon, DefenseCapability.None, -1f, -1f, false);
             SetDefense(ClawElite, DefenseRole.Weapon, DefenseCapability.None, -1f, -1f, false);
-            SetDefense(Crossbow, DefenseRole.Weapon, DefenseCapability.None, -1f, -1f, true);
+            SetDefense(Crossbow, DefenseRole.Weapon, DefenseCapability.Block, -1f, -1f, true);
+            if (Crossbow != null)
+            {
+                Crossbow.rangedGuardShape = RangedGuardShape.Crossbow;
+                Crossbow.impactGuard = true;
+                Crossbow.impactGuardDuration = .35f;
+                Crossbow.impactGuardResistance = 10f;
+                Crossbow.impactGuardRearmDelay = .65f;
+                EditorUtility.SetDirty(Crossbow);
+            }
             SetDefense(Fists, DefenseRole.Weapon, DefenseCapability.None, -1f, -1f, false); // U5A: fists never block or parry
 
             // The rapier is the first asset to actually claim Parry. It is still only a capability flag:
@@ -721,7 +743,7 @@ namespace Emberdelve.EditorTools
                 i.description = "Drink for 1.8 seconds, then recover 45 health over 4 seconds. Drinking cannot be interrupted.";
                 i.kind = ItemKind.Consumable;
                 i.value = 18;
-                i.maxStack = 3;
+                i.maxStack = 5;
                 i.healAmount = 45;
                 i.useChannelSeconds = 1.8f;
                 i.healOverTimeSeconds = 4f;
@@ -738,7 +760,7 @@ namespace Emberdelve.EditorTools
                 i.description = "Apply for 5 seconds to restore 25 health at completion. Moving, taking damage or changing items interrupts application.";
                 i.kind = ItemKind.Consumable;
                 i.value = 12;
-                i.maxStack = 3;
+                i.maxStack = 5;
                 i.healAmount = 25;
                 i.useChannelSeconds = 5f;
                 i.healOverTimeSeconds = 0f;
@@ -765,11 +787,28 @@ namespace Emberdelve.EditorTools
             {
                 i.itemId = "arrow_bundle";
                 i.displayName = "Arrow Bundle";
-                i.description = "Eight fletched shafts. Press 1-4 to restock the quiver.";
+                i.description = "Eight arrows for a bow. Open in preparation or use from a quick slot.";
                 i.kind = ItemKind.AmmoPack;
                 i.value = 10;
                 i.maxStack = 4;
                 i.ammoGrant = 8;
+                i.ammoWeaponId = "hollow_bow";
+                i.iconColor = new Color(0.6f, 0.62f, 0.55f);
+                i.worldMaterial = EmberdelveMaterials.ArrowMat;
+                i.worldSize = new Vector3(0.26f, 0.26f, 0.26f);
+            });
+
+            ArrowBundle.ammoWeaponId = "hollow_bow";
+            ArrowBundle.description = "Eight arrows for a bow. Open in preparation or use from a quick slot.";
+            EditorUtility.SetDirty(ArrowBundle);
+            BoltBundle = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_BoltBundle.asset", i =>
+            {
+                i.itemId = "bolt_bundle";
+                i.displayName = "Bolt Bundle";
+                i.description = "Eight bolts for a crossbow. Open in preparation or use from a quick slot.";
+                i.kind = ItemKind.AmmoPack;
+                i.value = 10; i.maxStack = 4; i.ammoGrant = 8;
+                i.ammoWeaponId = "ember_crossbow";
                 i.iconColor = new Color(0.6f, 0.62f, 0.55f);
                 i.worldMaterial = EmberdelveMaterials.ArrowMat;
                 i.worldSize = new Vector3(0.26f, 0.26f, 0.26f);
@@ -780,8 +819,8 @@ namespace Emberdelve.EditorTools
             Cuirass = LoadOrCreate<ItemData>(EmberdelvePaths.Data + "/Item_BoiledCuirass.asset", i =>
             {
                 i.itemId = "boiled_cuirass";
-                i.displayName = "Boiled Cuirass";
-                i.description = "Leather boiled hard enough to keep a claw out of the ribs. Right click to wear.";
+                i.displayName = "Steel Cuirass";
+                i.description = "Fitted steel breastplate and backplate with overlapping waist lames. Right click to wear.";
                 i.kind = ItemKind.Armor;
                 i.value = 40;
                 i.maxStack = 1;
@@ -992,7 +1031,7 @@ namespace Emberdelve.EditorTools
                 i.description = "Drink to recover health over time. Once started, drinking cannot be interrupted.";
                 i.kind = ItemKind.Consumable;
                 i.value = 28;
-                i.maxStack = 2;
+                i.maxStack = 5;
                 i.healAmount = 45;
                 i.useChannelSeconds = 1.8f;
                 i.healOverTimeSeconds = 4f;
@@ -2016,6 +2055,7 @@ namespace Emberdelve.EditorTools
             if (Bow != null)
             {
                 Bow.projectileGravity = 9.81f;
+                Bow.ammoDisplayName = "Arrows";
                 Bow.recoveredAmmo = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_RecoveredArrow.asset");
                 Bow.projectileMaxFlightTime = 1.6f;
                 Bow.projectileFalloff = new[]
@@ -2084,7 +2124,7 @@ namespace Emberdelve.EditorTools
                 Sword.riposteSwingPatterns = new[] { 0, 1 };
                 Sword.riposteStrikeGap = 0.10f;
                 // FIX2: the warrior carries a shield in the off hand; the parry is the sword's, so the shield must not refuse it.
-                Sword.riposteWithOffhandShield = true;
+                Sword.riposteWithOffhandShield = false;
                 EditorUtility.SetDirty(Sword);
             }
 
@@ -2356,7 +2396,7 @@ namespace Emberdelve.EditorTools
                 ArmingSword.riposteDamageMultiplier = 1.5f;
                 ArmingSword.riposteSwingPatterns = new[] { 3, 1 };   // thrust, then the right-to-left slash
                 ArmingSword.riposteStrikeGap = 0.10f;
-                ArmingSword.riposteWithOffhandShield = true;
+                ArmingSword.riposteWithOffhandShield = false;
                 SetDefense(ArmingSword, DefenseRole.Weapon, DefenseCapability.Block, -1f, -1f, false);
                 SetFinesse(ArmingSword, false);
                 EditorUtility.SetDirty(ArmingSword);
@@ -2444,7 +2484,7 @@ namespace Emberdelve.EditorTools
             Config.interactSphereRadius = 0.45f;
             Config.inventoryCapacity = 8;
             Config.inventoryGridWidth = 10;
-            Config.inventoryGridHeight = 4;
+            Config.inventoryGridHeight = 5;
             Config.mouseSensitivity = 1.2f;
             Config.fieldOfView = 68f;
             Config.itemCatalog = ItemCatalogAsset;

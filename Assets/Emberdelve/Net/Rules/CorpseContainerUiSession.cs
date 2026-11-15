@@ -7,14 +7,16 @@ namespace Emberdelve.Net.Rules
         public readonly int Amount;
         public readonly ulong CorpseRevision;
         public readonly ulong BagRevision;
+        public readonly UnityEngine.Vector2Int? DestinationCell;
 
-        public CorpseTransferUiRequest(ulong corpseId, ulong entryId, int amount, ulong corpseRevision, ulong bagRevision)
+        public CorpseTransferUiRequest(ulong corpseId, ulong entryId, int amount, ulong corpseRevision, ulong bagRevision, UnityEngine.Vector2Int? destinationCell = null)
         {
             CorpseId = corpseId;
             EntryId = entryId;
             Amount = amount;
             CorpseRevision = corpseRevision;
             BagRevision = bagRevision;
+            DestinationCell = destinationCell;
         }
     }
 
@@ -68,7 +70,7 @@ namespace Emberdelve.Net.Rules
         {
             if (sequence == 0 || StateRequestSequence != sequence) return;
             StateRequestSequence = 0;
-            Status = reason ?? "Could not refresh corpse contents";
+            Status = reason ?? "Could not refresh container contents";
         }
 
         public bool ApplyState(CorpseContainerDocument document)
@@ -78,22 +80,22 @@ namespace Emberdelve.Net.Rules
             Document = document;
             StateRequestSequence = 0;
             NeedsRefresh = false;
-            Status = document.entries.Length == 0 ? "This corpse is empty" : string.Empty;
+            Status = document.entries.Length == 0 ? "This container is empty" : string.Empty;
             return true;
         }
 
         public bool TryBeginTransfer(ulong entryId, int amount, ulong bagRevision,
-            out CorpseTransferUiRequest request, out string reason)
+            out CorpseTransferUiRequest request, out string reason, UnityEngine.Vector2Int? destinationCell = null)
         {
             request = default;
             if (!IsOpen || Document == null)
             {
-                reason = "Wait for current corpse contents";
+                reason = "Wait for current container contents";
                 return false;
             }
             if (StateRequestSequence != 0 || IsTransferPending)
             {
-                reason = "Wait for the previous corpse request";
+                reason = "Wait for the previous container request";
                 return false;
             }
             if (entryId == 0 || amount <= 0)
@@ -114,14 +116,14 @@ namespace Emberdelve.Net.Rules
             }
             if (selected?.item == null || amount > selected.item.quantity)
             {
-                reason = "That corpse item is no longer available";
+                reason = "That item is no longer available";
                 return false;
             }
 
             _preparingTransfer = true;
             _pendingEntryId = entryId;
             _pendingAmount = amount;
-            request = new CorpseTransferUiRequest(ActiveCorpseId, entryId, amount, Document.revision, bagRevision);
+            request = new CorpseTransferUiRequest(ActiveCorpseId, entryId, amount, Document.revision, bagRevision, destinationCell);
             Status = "Sending transfer…";
             reason = null;
             return true;

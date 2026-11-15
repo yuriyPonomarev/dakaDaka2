@@ -192,10 +192,9 @@ namespace Emberdelve.Interaction
                 Collider collider = _probeBuffer[i];
                 if (collider == null) continue;
 
-                MonoBehaviour host = collider.GetComponentInParent<MonoBehaviour>();
-                if (host == null) continue;
-
-                IInteractable candidate = host as IInteractable;
+                // Presentation components may precede the interaction adapter on the same object.
+                // Resolve the contract directly rather than relying on component insertion order.
+                IInteractable candidate = collider.GetComponentInParent<IInteractable>();
                 if (candidate == null) continue;
 
                 Vector3 center = collider.bounds.center;

@@ -19,9 +19,9 @@ namespace Emberdelve.Combat.Tests
         {
             var old = Legacy();
             Assert.IsTrue(LoadoutSnapshot.TryFromJson(old.ToJson(), out var current, out string reason), reason);
-            Assert.AreEqual(5, current.schemaVersion);
-            Assert.AreEqual(5, current.bag.schemaVersion);
-            Assert.AreEqual(5, current.equipment.schemaVersion);
+            Assert.AreEqual(ContainerSnapshot.CurrentSchemaVersion, current.schemaVersion);
+            Assert.AreEqual(ContainerSnapshot.CurrentSchemaVersion, current.bag.schemaVersion);
+            Assert.AreEqual(ContainerSnapshot.CurrentSchemaVersion, current.equipment.schemaVersion);
             Assert.AreEqual(1, current.weaponSet);
             CollectionAssert.AreEqual(new[] { old.belt[0], old.belt[1], old.belt[2], old.belt[3], "", "" }, current.belt);
             Assert.IsTrue(current.ChecksumMatches());

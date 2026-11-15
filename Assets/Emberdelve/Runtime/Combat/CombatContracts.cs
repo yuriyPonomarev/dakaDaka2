@@ -156,7 +156,7 @@ namespace Emberdelve.Combat
 
     public enum SwingPhase { Windup, Active, Recovery, Finished }
 
-    public enum SwingEndReason { None, Completed, WallStop, InstigatorDied, InstigatorGone, WeaponChanged }
+    public enum SwingEndReason { None, Completed, WallStop, InstigatorDied, InstigatorGone, WeaponChanged, GuardStop }
 
     /// <summary>One damage event of a swing, as the authority recorded it.</summary>
     public readonly struct MeleeSwingHit
@@ -277,6 +277,8 @@ namespace Emberdelve.Combat
 
         public bool Finished => Phase == SwingPhase.Finished;
         public bool WallStopped => EndReason == SwingEndReason.WallStop;
+        public bool GuardStopped => EndReason == SwingEndReason.GuardStop;
+        public bool Recoiled => WallStopped || GuardStopped;
     }
 
     /// <summary>

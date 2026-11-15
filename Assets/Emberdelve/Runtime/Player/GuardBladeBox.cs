@@ -71,6 +71,17 @@ namespace Emberdelve.Player
                 Mathf.Clamp(point.y, -HalfExtents.y, HalfExtents.y), Mathf.Clamp(point.z, -HalfExtents.z, HalfExtents.z));
             return (point - closest).sqrMagnitude;
         }
+
+        /// <summary>Classifies an already confirmed blade contact, along the blade from hilt to tip.</summary>
+        public bool IsInParryRegion(Vector3 contact, Vector2 region)
+        {
+            if (!(HalfExtents.z > 0f) || !(region.x >= 0f) || !(region.y <= 1f) || !(region.x < region.y)) return false;
+            float along = ((Quaternion.Inverse(Rotation) * (contact - Center)).z + HalfExtents.z) / (2f * HalfExtents.z);
+            // The caller already proved physical contact. Full-length parry includes the
+            // rounded end contacts and avoids projection roundoff excluding the exact tips.
+            if (region.x == 0f && region.y == 1f) return float.IsFinite(along);
+            return along >= region.x && along <= region.y;
+        }
     }
 
     /// <summary>Single authored local pose and shape shared by first-person visuals and authority queries.</summary>
@@ -84,6 +95,19 @@ namespace Emberdelve.Player
         // visible blade while stopping at the hand guard rather than extending over the grip.
         public static readonly Vector3 BladeLocalCenter = new Vector3(0f, 0f, 0.40f);
         public static readonly Vector3 BladeSize = new Vector3(0.055f, 0.018f, 0.80f);
+
+        public static readonly Vector3 GripLocalCenter = new Vector3(0f, -0.02f, -0.07f);
+        public static readonly Vector3 GripSize = new Vector3(0.035f, 0.035f, 0.15f);
+
+        /// <summary>The hand around the visible grip is vulnerable flesh, never defensive metal.</summary>
+        public static Emberdelve.Combat.HitShape ResolveGripHitShape(Vector3 aimOrigin, Quaternion aimRotation)
+        {
+            ResolveRoot(aimOrigin, aimRotation, true, out Vector3 rootPosition, out Quaternion rootRotation);
+            Vector3 center = rootPosition + rootRotation * GripLocalCenter;
+            float radius = Mathf.Max(GripSize.x, GripSize.y) * .5f;
+            Vector3 axis = rootRotation * Vector3.forward * (GripSize.z * .5f - radius);
+            return new Emberdelve.Combat.HitShape(Emberdelve.Core.HitLocation.Arms, center - axis, center + axis, radius);
+        }
 
         public static GuardBladeBox Resolve(Vector3 aimOrigin, Quaternion aimRotation, bool guarding)
         {

@@ -486,6 +486,11 @@ namespace Emberdelve.EditorTools
                     "a sender-less attack for a player is refused and does no damage (" + reason + ")");
             }
 
+            // The ownership control requires an awake enemy, not a newly dormant spawn.
+            _enemy.Brain.NotifyDamaged(DamageInfo.Invalid);
+            _enemy.Brain.Tick(EnemyBrain.WakeSeconds, Time.time, _enemy.transform.position, _enemy.transform.forward, null);
+            _enemy.RefreshDormantHitPose(null);
+            Physics.SyncTransforms();
             // the enemy is unowned: its own sender-less path keeps working
             int swingsBefore = _authority.SwingsStarted;
             refusals = _authority.SenderRefusalCount;

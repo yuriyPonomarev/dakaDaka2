@@ -13,6 +13,7 @@ namespace Emberdelve.Items
     {
         private readonly LoadoutSnapshot _loadout;
         private readonly Guid[] _gearUids;
+        private readonly Dictionary<Vector2Int, Vector2Int> _bagFootprints;
 
         public int SourcePlayerId { get; }
         public Vector3 WorldPosition { get; }
@@ -20,14 +21,18 @@ namespace Emberdelve.Items
         public int GearUidCount => _gearUids.Length;
 
         private CorpseLootManifest(int sourcePlayerId, Vector3 worldPosition, ulong sourceRevision,
-            LoadoutSnapshot loadout, Guid[] gearUids)
+            LoadoutSnapshot loadout, Guid[] gearUids, Dictionary<Vector2Int, Vector2Int> bagFootprints)
         {
             SourcePlayerId = sourcePlayerId;
             WorldPosition = worldPosition;
             SourceRevision = sourceRevision;
             _loadout = loadout;
             _gearUids = gearUids;
+            _bagFootprints = bagFootprints;
         }
+
+        internal bool TryGetCapturedFootprint(int x, int y, out Vector2Int size) =>
+            _bagFootprints.TryGetValue(new Vector2Int(x, y), out size);
 
         /// <summary>Returns a detached deep copy; callers cannot mutate the manifest's captured item data.</summary>
         public LoadoutSnapshot CopyLoadout() => _loadout.Clone();
@@ -94,7 +99,14 @@ namespace Emberdelve.Items
             if (!CollectGearUids(captured.bag, seen, gearUids, out reason) ||
                 !CollectGearUids(captured.equipment, seen, gearUids, out reason)) return false;
 
-            manifest = new CorpseLootManifest(sourcePlayerId, worldPosition, bag.Revision, captured.Clone(), gearUids.ToArray());
+            var footprints = new Dictionary<Vector2Int, Vector2Int>();
+            foreach (var stack in bag.Slots)
+            {
+                if (footprints.ContainsKey(stack.Origin)) { reason = "captured bag repeats an origin"; return false; }
+                // Belt display is one slot, but corpse looting needs the item's actual bag footprint.
+                footprints.Add(stack.Origin, stack.Item.EffectiveFootprint);
+            }
+            manifest = new CorpseLootManifest(sourcePlayerId, worldPosition, bag.Revision, captured.Clone(), gearUids.ToArray(), footprints);
             reason = null;
             return true;
         }

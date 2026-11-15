@@ -140,6 +140,126 @@ namespace Emberdelve.Net
         }
 #endif
 
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        private bool _royaleExitStarted, _royaleExitCompleted, _royaleExitReported;
+        private float _royaleExitCompleteAt, _royaleExitStableAt;
+        private string _royaleExitRequestPath;
+        private string _botLootObservedUid;
+        private bool _botLootObservedPresent, _botLootObservedRemoved;
+        private void ObserveRoyaleBotLoot(NetPlayerRig owner)
+        {
+            if (!_observeRoyale || owner == null || string.IsNullOrEmpty(_royaleExitRequestPath)
+                || !File.Exists(_royaleExitRequestPath)) return;
+            string command = ReadSharedText(_royaleExitRequestPath).Trim();
+            string[] fields = command.Split(' ');
+            if (fields.Length != 2 || (fields[0] != "botloot-watch" && fields[0] != "botloot-go")
+                || !Guid.TryParseExact(fields[1], "N", out _)) return;
+            if (_botLootObservedUid != fields[1])
+            { _botLootObservedUid = fields[1]; _botLootObservedPresent = _botLootObservedRemoved = false; }
+            var inventory = owner.GetComponent<NetInventoryClient>();
+            if (inventory == null || !inventory.IsOwnerReady) return;
+            int count = inventory.CountFloorLootProofUid(_botLootObservedUid);
+            if (!_botLootObservedPresent && count == 1)
+            {
+                _botLootObservedPresent = true;
+                Debug.Log("[RoyaleBotLoot] present uid=" + _botLootObservedUid + " count=1");
+            }
+            if (_botLootObservedPresent && !_botLootObservedRemoved && count == 0)
+            {
+                _botLootObservedRemoved = true;
+                Debug.Log("[RoyaleBotLoot] removed uid=" + _botLootObservedUid + " count=0");
+            }
+        }
+        private void ObserveFinalExtraction(NetPlayerRig owner)
+        {
+            if (!_observeRoyale || owner?.Rig == null || _royaleExitReported) return;
+            if (RunContext.HasResult && RunContext.LastResult.PlayerId == owner.Rig.PlayerId)
+            {
+                _royaleExitReported = true;
+                Debug.Log("[RoyaleFinal] outcome=" + RunContext.LastResult.Outcome + " id=" + owner.Rig.PlayerId
+                    + " extracted=" + owner.Rig.IsExtracted + " cache=True loot=" + RunContext.LastResult.LootValue.ToString("F3", CultureInfo.InvariantCulture)); return;
+            }
+            if (_royaleExitRequestPath == null)
+            {
+                var args = Environment.GetCommandLineArgs(); int index = Array.IndexOf(args, "-ember-royale-descent-proof-file");
+                _royaleExitRequestPath = index >= 0 && index + 1 < args.Length ? args[index + 1] : "";
+            }
+            if (string.IsNullOrEmpty(_royaleExitRequestPath) || !File.Exists(_royaleExitRequestPath)
+                || ReadSharedText(_royaleExitRequestPath).Trim() != "4") return;
+            var point = owner.GetComponent<NetFinalExitView>()?.Point;
+            if (point == null || !point.CanInteract(owner.Rig, out _)) return;
+            if (!_royaleExitStarted)
+            {
+                if (Vector3.Distance(owner.Rig.transform.position, point.transform.position - Vector3.up * 1.1f) > .2f)
+                { _royaleExitStableAt = 0; return; }
+                if (_royaleExitStableAt == 0) { _royaleExitStableAt = Time.unscaledTime; return; }
+                if (Time.unscaledTime - _royaleExitStableAt < .5f) return;
+                owner.GetComponent<NetExtractionClient>().HoldResultReceived += OnRoyaleHoldResult;
+                if (!point.OnHoldStarted(owner.Rig)) { owner.GetComponent<NetExtractionClient>().HoldResultReceived -= OnRoyaleHoldResult; return; }
+                _royaleExitStarted = true; _royaleExitCompleteAt = Time.unscaledTime + point.HoldDuration;
+                Debug.Log("[RoyaleFinal] client hold started");
+            }
+            point.OnHoldProgress(owner.Rig);
+            if (!_royaleExitCompleted && Time.unscaledTime >= _royaleExitCompleteAt)
+            { _royaleExitCompleted = true; point.OnHoldComplete(owner.Rig); }
+        }
+        private void OnRoyaleHoldResult(uint sequence, bool accepted, string reason)
+            => Debug.Log("[RoyaleFinal] hold result seq=" + sequence + " accepted=" + accepted + " reason=" + reason);
+        private byte _royaleObservedFloor;
+        private readonly bool _observeRoyale = Array.IndexOf(Environment.GetCommandLineArgs(), "-ember-royale-observe") >= 0;
+        private bool _descentNegativeSent;
+        private float _nextDescentAttempt;
+        private void ObservePortalInteractions(NetPlayerRig owner)
+        {
+            if (!_observeRoyale || owner?.Rig == null || owner.Rig.IsInFloorTransit) return;
+            var state = owner.DescentPortals.Value;
+            if (!_descentNegativeSent && state.Floor == 1 && state.Count > 0 && owner.RaidClock.Value.Enabled)
+            {
+                _descentNegativeSent = true;
+                foreach (var other in NetPlayerRig.Spawned)
+                    if (other != null && !other.IsOwner && other.IsSpawned)
+                    { other.DescentIntentRpc(1, 0, 0); break; }
+                owner.DescentIntentRpc(3, 0, 0); owner.DescentIntentRpc(1, 0, 255); owner.DescentIntentRpc(1, 0, 0);
+                Debug.Log("[RoyalePortal] negative probes sent count=" + state.Count);
+            }
+            if (Time.unscaledTime < _nextDescentAttempt || state.Floor < 1 || state.Floor > 2 || state.Available == 0) return;
+            var views = owner.GetComponent<NetDescentPortalViews>(); if (views == null) return;
+            foreach (var slot in views.Slots)
+                if (slot != null && slot.CanInteract(owner.Rig, out _))
+                {
+                    _nextDescentAttempt = Time.unscaledTime + .25f;
+                    slot.OnInteractInstant(owner.Rig);
+                    Debug.Log("[RoyalePortal] interaction floor=" + slot.Floor + " group=" + slot.Group + " slot=" + slot.Slot);
+                    break;
+                }
+        }
+        private void ObserveRoyaleArrival(NetPlayerRig owner)
+        {
+            if (!_observeRoyale || owner == null || owner.Rig == null || owner.Rig.IsInFloorTransit) return;
+            var clock = owner.RaidClock.Value;
+            var inventory = owner.GetComponent<NetInventoryClient>();
+            if (inventory == null || !inventory.IsOwnerReady || !clock.IsValid || !clock.Enabled || clock.Waiting
+                || clock.Floor == 0 || clock.Floor == _royaleObservedFloor || clock.MovementGeneration != owner.Rig.FloorMovementGeneration) return;
+            var zone = owner.RoyaleZone.Value;
+            if (!zone.VisibleFor(owner.Rig.FloorMovementGeneration, owner.Rig.IsInPlay, owner.Rig.IsDead) || zone.Floor != clock.Floor) return;
+            Debug.Log("[RoyaleZone] floor=" + zone.Floor + " generation=" + zone.Generation + " radius=" + zone.Radius.ToString("F3", CultureInfo.InvariantCulture));
+            if (clock.Floor == 3)
+            {
+                var exit = owner.GetComponent<NetFinalExitView>()?.Point;
+                if (!zone.HasFinalExit || exit == null || !exit.gameObject.activeInHierarchy || exit.Floor != 3
+                    || exit.transform.position != zone.ExitPosition || exit.HoldDuration != zone.ExitHoldDuration) return;
+                Debug.Log("[RoyaleExit] floor=3 generation=" + zone.Generation + " position=" + exit.transform.position.ToString("F3")
+                    + " hold=" + exit.HoldDuration.ToString("F3", CultureInfo.InvariantCulture));
+            }
+            _royaleObservedFloor = clock.Floor;
+            var ammo = owner.RangedAmmo.Value;
+            Debug.Log("[RoyaleOwner] floor=" + clock.Floor + " id=" + owner.ServerPlayerId.Value + " netId=" + owner.NetworkObjectId
+                + " generation=" + clock.MovementGeneration + " kit=" + LoadoutSnapshot.Capture(owner.Rig.Inventory, owner.Rig.Equipment).checksum
+                + " magazine=" + ammo.Magazine + " reserve=" + ammo.Reserve + " remaining=" + clock.RemainingSeconds.ToString("F1", CultureInfo.InvariantCulture)
+                + " pos=" + owner.Rig.transform.position.ToString("F3"));
+        }
+#endif
+
         private void Update()
         {
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -171,6 +291,12 @@ namespace Emberdelve.Net
                 }
             }
 
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            ObserveRoyaleArrival(ownedRig);
+            ObservePortalInteractions(ownedRig);
+            ObserveFinalExtraction(ownedRig);
+            ObserveRoyaleBotLoot(ownedRig);
+#endif
             _ids.Sort();
             StringBuilder csv = new StringBuilder();
             for (int i = 0; i < _ids.Count; i++)

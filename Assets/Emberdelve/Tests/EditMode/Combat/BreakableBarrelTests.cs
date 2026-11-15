@@ -52,6 +52,13 @@ namespace Emberdelve.Tests.Combat
                 ulong initial=_barrel.StableId;
                 outer.name="ClientRoot"; Assert.AreEqual(initial,_barrel.StableId);
                 module.name="crypt_hall_01_1_0"; Assert.AreNotEqual(initial,_barrel.StableId);
+                ulong unscoped = _barrel.StableId;
+                Assert.False(_barrel.BindStagedFloor(1)); Assert.AreEqual(unscoped, _barrel.StableId);
+                Assert.True(_barrel.BindStagedFloor(2)); ulong scoped = _barrel.StableId;
+                Assert.AreNotEqual(unscoped, scoped, "Binding invalidates a previously cached ID");
+                Assert.True(_barrel.BindStagedFloor(2)); Assert.AreEqual(scoped, _barrel.StableId);
+                Assert.False(_barrel.BindStagedFloor(3)); Assert.AreEqual(scoped, _barrel.StableId);
+                outer.name = "AnotherClientRoot"; Assert.AreEqual(scoped, _barrel.StableId);
             }
             finally { _root.transform.SetParent(null); Object.DestroyImmediate(outer); }
         }

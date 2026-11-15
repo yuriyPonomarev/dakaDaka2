@@ -3,6 +3,7 @@ using Emberdelve.BladeDefense;
 using Emberdelve.Combat;
 using Emberdelve.Net.Rules;
 using Unity.Netcode;
+using Unity.Collections;
 
 namespace Emberdelve.Net
 {
@@ -205,9 +206,25 @@ namespace Emberdelve.Net
     }
 
     /// <summary>
-    /// U3B3: the server's health picture of one player body (see <see cref="CombatVitalsData"/>), the payload of an everyone-read /
-    /// server-write NetworkVariable. The IEquatable implementation lets change detection compare values (the SkillStateWire pattern).
+    /// Server-owned ammunition for the owner's currently wielded weapon. Never sent to observers.
     /// </summary>
+    public struct RangedAmmoWire : INetworkSerializable, IEquatable<RangedAmmoWire>
+    {
+        public FixedString64Bytes Weapon;
+        public int Magazine, Reserve;
+        public bool IsValid => Magazine >= 0 && Magazine <= 99 && Reserve >= 0
+            && (Weapon.Length > 0 || (Magazine == 0 && Reserve == 0));
+        public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+        {
+            serializer.SerializeValue(ref Weapon);
+            serializer.SerializeValue(ref Magazine);
+            serializer.SerializeValue(ref Reserve);
+        }
+        public bool Equals(RangedAmmoWire other) => Weapon.Equals(other.Weapon)
+            && Magazine == other.Magazine && Reserve == other.Reserve;
+    }
+
+    /// <summary>Server-owned health replicated to owners and observers.</summary>
     public struct CombatVitalsWire : INetworkSerializable, IEquatable<CombatVitalsWire>
     {
         public float Health;

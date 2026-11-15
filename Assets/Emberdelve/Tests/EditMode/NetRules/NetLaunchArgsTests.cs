@@ -6,6 +6,18 @@ namespace Emberdelve.NetRules.Tests
 {
     public sealed class NetLaunchArgsTests
     {
+        [TestCase("solo", 1)] [TestCase("duo", 2)] [TestCase("trio", 3)]
+        public void RoyaleSelectionIsExplicitAndBounded(string mode, int size)
+        {
+            var args = NetLaunchArgs.Parse(new[] { "game", "-ember-net", "host", "-ember-royale-mode", mode });
+            Assert.True(args.IsValid); Assert.That(args.RoyalePartySize, Is.EqualTo(size));
+        }
+        [TestCase("squad")] [TestCase("0")] [TestCase("")]
+        public void InvalidRoyaleModeDoesNotSilentlyChooseAnotherMode(string mode)
+        {
+            Assert.False(NetLaunchArgs.Parse(new[] { "game", "-ember-net", "host", "-ember-royale-mode", mode }).IsValid);
+        }
+
         [Test]
         public void NoArguments_IsOffline()
         {

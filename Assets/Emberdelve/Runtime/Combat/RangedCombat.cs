@@ -44,6 +44,12 @@ namespace Emberdelve.Combat
         private float _reloadTimer;
         private float _reloadDuration;
         private bool _viewBound;
+        private bool _remoteGuard;
+        private bool _localGuardHeld;
+        private string _replicatedAmmoWeapon = "", _replicatedReloadWeapon = "";
+        private int _replicatedMagazine, _replicatedReserve;
+        private bool _replicatedReloading;
+        private float _replicatedReloadProgress, _replicatedReloadDuration;
 
         public event Action<AttackIntent> AttackStarted;
         public event Action ShotFired;
@@ -57,23 +63,53 @@ namespace Emberdelve.Combat
         public ServerDrawTimer ServerDraw => _serverDraw;
 
         public WeaponData Weapon => _weapon;
-        public int Magazine => _magazine;
-        public int Reserve => _reserve;
+        public int Magazine => NetRole.IsClientOnly ? (HasAuthoritativeAmmo ? _replicatedMagazine : 0) : _magazine;
+        public int Reserve => NetRole.IsClientOnly ? (HasAuthoritativeAmmo ? _replicatedReserve : 0) : _reserve;
+        public bool HasAuthoritativeAmmo => NetRole.IsClientOnly ? MatchesReplicatedWeapon(_replicatedAmmoWeapon) : _viewBound;
         internal int MaxReserve => _maxReserve;
         /// <summary>R1c2: true once the combat authority pushes its ammunition record here; the numbers are then a display.</summary>
         public bool IsAuthorityView => _viewBound;
         internal bool CanAcceptAmmo(int amount) => _weapon != null && amount > 0 &&
-            (_maxReserve <= 0 || _reserve < _maxReserve);
+            (long)_reserve + amount <= _maxReserve;
         public bool IsDrawing => _drawing;
-        public bool IsReloading => _reloading;
+        public bool IsReloading => NetRole.IsClientOnly
+            ? _replicatedReloading && rig != null && (!rig.IsLocallyControlled || MatchesReplicatedWeapon(_replicatedReloadWeapon)) && !rig.IsDead && !rig.IsExtracted
+            : _reloading;
         /// <summary>Local accepted press capture; U3B must own equivalent server-clock begin/cancel state.</summary>
         public float ActiveDrawDuration => _drawing ? _drawDuration : 0f;
         public float ActiveAuthoredDrawTime => _drawing ? _drawAuthoredTime : 0f;
         public float Charge => _drawing && _drawDuration > 0f
             ? Mathf.Clamp01((Time.time - _drawStartedAt) / _drawDuration) : 0f;
-        public float ReloadDuration => _reloadDuration;
-        public float ReloadProgress => _reloading && _reloadDuration > 0f
-            ? 1f - Mathf.Clamp01(_reloadTimer / _reloadDuration) : 0f;
+        public float ReloadDuration => NetRole.IsClientOnly ? (IsReloading ? _replicatedReloadDuration : 0f) : _reloadDuration;
+        public float ReloadProgress => NetRole.IsClientOnly ? (IsReloading ? _replicatedReloadProgress : 0f)
+            : _reloading && _reloadDuration > 0f ? 1f - Mathf.Clamp01(_reloadTimer / _reloadDuration) : 0f;
+
+        private bool MatchesReplicatedWeapon(string id) => rig != null && rig.ActiveWeapon != null
+            && rig.ActiveWeapon.IsRanged && !string.IsNullOrEmpty(id) && rig.ActiveWeapon.weaponId == id;
+
+        // Presentation only, including disabled client components. These never feed the authority kit.
+        public void ApplyReplicatedAmmo(string weaponId, int magazine, int reserve)
+        {
+            if (!NetRole.IsClientOnly) return;
+            if (rig == null) rig = GetComponent<PlayerRig>();
+            bool valid = magazine >= 0 && magazine <= 99 && reserve >= 0 && !string.IsNullOrEmpty(weaponId);
+            _replicatedAmmoWeapon = valid ? weaponId : "";
+            _replicatedMagazine = valid ? magazine : 0;
+            _replicatedReserve = valid ? reserve : 0;
+        }
+
+        public void ApplyReplicatedReload(string weaponId, bool reloading, float progress, float duration)
+        {
+            if (!NetRole.IsClientOnly) return;
+            if (rig == null) rig = GetComponent<PlayerRig>();
+            bool valid = !string.IsNullOrEmpty(weaponId) && !float.IsNaN(progress) && !float.IsInfinity(progress)
+                && progress >= 0f && progress <= 1f && !float.IsNaN(duration) && !float.IsInfinity(duration)
+                && duration > 0f && duration <= 120f;
+            _replicatedReloadWeapon = valid ? weaponId : "";
+            _replicatedReloading = valid && reloading;
+            _replicatedReloadProgress = valid ? progress : 0f;
+            _replicatedReloadDuration = valid ? duration : 0f;
+        }
 
         /// <summary>R7: the player this component belongs to; every event it raises carries it (0 = no player, e.g. a bare bag in a tool).</summary>
         private int OwnerId
@@ -108,6 +144,9 @@ namespace Emberdelve.Combat
         private void InitializeLocal(WeaponData weapon, int startingReserve, int maxReserve, int startingMagazine)
         {
             CancelDraw();
+            _remoteGuard = false;
+            _localGuardHeld = false;
+            if (rig != null) rig.SetGuardHeld(false);
             _weapon = weapon;
             _reloadTimer = _reloadDuration = 0f;
 
@@ -134,21 +173,31 @@ namespace Emberdelve.Combat
         private void Update()
         {
             if (RemoteDriven) { UpdateRemoteDriven(); return; }
-            if (_weapon == null || !_weapon.IsRanged || rig == null) { CancelDraw(); return; }
+            if (_weapon == null || !_weapon.IsRanged || rig == null) { CancelDraw(); if (rig != null) rig.SetGuardHeld(false); return; }
 
             EmberdelveInput input = rig.Input;
-            if (input == null || !input.GameplayInputEnabled) { CancelDraw(); return; }
+            if (input == null || !input.GameplayInputEnabled || input.QuickWheelCaptured || InventoryInputFocus.OwnsEscape) { CancelDraw(); rig.SetGuardHeld(false); return; }
 
             if (rig.IsDead || rig.WeaponInputSuppressed)
             {
                 CancelDraw();
+                rig.SetGuardHeld(false);
                 return;
             }
 
             var skills = rig.GetComponent<Emberdelve.Skills.SkillCaster>();
             if (skills != null) skills.PollSkillInput();
-            if (skills != null && skills.SuppressPrimary) { CancelDraw(); return; }
+            if (skills != null && skills.SuppressPrimary) { CancelDraw(); rig.SetGuardHeld(false); return; }
 
+            bool requestedGuard = input.SecondaryHeld && !input.QuickWheelCaptured;
+            if (requestedGuard != _localGuardHeld)
+            {
+                _localGuardHeld = requestedGuard;
+                SetRemoteGuard(requestedGuard);
+            }
+            bool guard = _remoteGuard && _weapon.CanRangedGuard && !_reloading;
+            rig.SetGuardHeld(guard);
+            if (guard) { CancelDraw(); return; }
             if (_drawing && _drawWeapon != _weapon) CancelDraw();
 
             float dt = Time.deltaTime;
@@ -162,7 +211,8 @@ namespace Emberdelve.Combat
                     if (_reloadTimer <= 0f) FinishReload();
                 }
             }
-            else if (input.ReloadPressed && CanReload)
+            else if ((input.ReloadPressed || (_weapon.reloadWhileHeld && input.ReloadHeld))
+                && (!_weapon.reloadWhileHeld || !_drawing) && CanReload)
             {
                 if (_viewBound) RequestReload();
                 else StartReload();
@@ -202,7 +252,10 @@ namespace Emberdelve.Combat
         /// <summary>U3B3: per-frame upkeep of a remote-driven rig: the server draw dies with the weapon, the wielder, a reload or an abandoned client.</summary>
         private void UpdateRemoteDriven()
         {
-            if (_weapon == null || !_weapon.IsRanged || rig == null || rig.IsDead || rig.IsHoldingUtility || _reloading) { CancelDraw(); return; }
+            if (_weapon == null || !_weapon.IsRanged || rig == null || rig.IsDead || rig.WeaponInputSuppressed || _reloading)
+            { CancelDraw(); _remoteGuard = false; if (rig != null) rig.SetGuardHeld(false); return; }
+            rig.SetGuardHeld(_remoteGuard && _weapon.CanRangedGuard);
+            if (_remoteGuard) { CancelDraw(); return; }
             if (_drawing && (_drawWeapon != _weapon || _serverDraw.IsStale(Time.time))) CancelDraw();
 
             if (_drawing)
@@ -227,6 +280,7 @@ namespace Emberdelve.Combat
             if (!RemoteDriven) { refusal = CombatRefusalCode.Unsupported; return false; }
             if (rig == null || rig.IsHoldingUtility || _weapon == null || !_weapon.IsRanged) { refusal = CombatRefusalCode.WrongWeapon; return false; }
             if (rig.IsDead) { refusal = CombatRefusalCode.Dead; return false; }
+            if (rig.IsGuarding || _remoteGuard) { refusal = CombatRefusalCode.Guarding; return false; }
             if (_reloading || _magazine <= 0) { refusal = CombatRefusalCode.NoAmmo; return false; }
             if (_drawing) { refusal = CombatRefusalCode.AlreadyDrawing; return false; }
 
@@ -270,6 +324,30 @@ namespace Emberdelve.Combat
             return true;
         }
 
+        public CombatRefusalCode ServerRequestReload()
+        {
+            if (!RemoteDriven) return CombatRefusalCode.Unsupported;
+            if (rig == null || _weapon == null || !_weapon.IsRanged) return CombatRefusalCode.WrongWeapon;
+            if (rig.IsDead) return CombatRefusalCode.Dead;
+            if (rig.IsGuarding || _remoteGuard) return CombatRefusalCode.Guarding;
+            if (_reloading) return CombatRefusalCode.TooEarly;
+            if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
+                || !authority.TryStartReload(rig.CombatSender, rig.CombatId, out _)) return CombatRefusalCode.NoAmmo;
+            CancelDraw();
+            return CombatRefusalCode.None;
+        }
+
+        public CombatRefusalCode SetRemoteGuard(bool held)
+        {
+            if (!held) { _remoteGuard = false; if (rig != null) rig.SetGuardHeld(false); return CombatRefusalCode.None; }
+            if (rig == null || _weapon == null || !_weapon.CanRangedGuard || !rig.CanGuard) return CombatRefusalCode.CannotGuard;
+            if (_reloading) return CombatRefusalCode.TooEarly;
+            CancelDraw();
+            _remoteGuard = true;
+            rig.SetGuardHeld(true);
+            return CombatRefusalCode.None;
+        }
+
         private bool CanReload => _magazine < _weapon.magazineSize && _reserve > 0;
 
         private void StartReload()
@@ -296,6 +374,8 @@ namespace Emberdelve.Combat
         {
             _viewBound = true;
             if (_weapon == null || !_weapon.IsRanged || !view.HasActiveAmmo || view.ActiveWeaponId != _weapon.weaponId) return;
+            if (rig != null && rig.Loadout != null && !string.IsNullOrEmpty(view.AmmoPoolId)
+                && view.AmmoPoolId != rig.Loadout.ActiveAmmoPoolId) return;
 
             bool changed = _magazine != view.Magazine || _reserve != view.Reserve;
             _magazine = view.Magazine;
@@ -393,6 +473,7 @@ namespace Emberdelve.Combat
         private bool FireCore(float charge, out string rejectReason)
         {
             rejectReason = string.Empty;
+            if (rig == null || rig.IsGuarding || _remoteGuard) { rejectReason = "guarding"; return false; }
             // Sequence is allocated per combat id, not per component: swapping between a bow and a
             // rapier must not make the second weapon's first attack look like a replayed command.
             int sequence = CombatRegistry.NextSequence(rig.CombatId);
@@ -430,6 +511,9 @@ namespace Emberdelve.Combat
 
         private void OnDisable()
         {
+            _remoteGuard = false;
+            _localGuardHeld = false;
+            if (rig != null) rig.SetGuardHeld(false);
             CancelDraw();
             if (rig != null) rig.SetAimingPenalty(1f);
         }

@@ -102,7 +102,7 @@ namespace Emberdelve.Items
     public sealed class Inventory : MonoBehaviour
     {
         [SerializeField] private int gridWidth = 10;
-        [SerializeField] private int gridHeight = 4;
+        [SerializeField] private int gridHeight = 5;
 
         /// <summary>
         /// One cell-anchored stack. Definition-facing reads go through <see cref="Definition"/>, which prefers
@@ -121,7 +121,7 @@ namespace Emberdelve.Items
 
         private readonly List<Stack> _stacks = new List<Stack>();
         private readonly List<InventorySlot> _views = new List<InventorySlot>();
-        private int[] _cells = new int[40];
+        private int[] _cells = new int[50];
         [NonSerialized] private bool _gridMapInitialized;
         [NonSerialized] private ulong _nextStackId = 1;
         [NonSerialized] private bool _stackIdsExhausted;
@@ -212,8 +212,57 @@ namespace Emberdelve.Items
         private ulong _heldStackId;
         // Held state is session-only; the stack stays in the bag, with its existing identity.
         public ulong HeldStackId => _heldStackId != 0 && TryGetStack(_heldStackId, out var stack) &&
-            HotbarBindings.IsUsableDefinition(stack.Item) && (_rig == null || (!_rig.IsDead && _rig.IsInPlay)) ? _heldStackId : 0;
+            HotbarBindings.IsUsableDefinition(stack.Item) && IsBeltCell(stack.Origin) && (_rig == null || (!_rig.IsDead && _rig.IsInPlay)) ? _heldStackId : 0;
         public ItemData HeldItem => HeldStackId != 0 && TryGetStack(_heldStackId, out var stack) ? stack.Item : null;
+
+        public Vector2Int BeltCell(int slot) => QuickBeltRules.Cell(slot, gridWidth);
+        public bool IsBeltCell(Vector2Int cell) => QuickBeltRules.TryGetSlot(cell, gridWidth, out _);
+        public bool TryGetBeltStack(int slot, out InventorySlot stack)
+        {
+            int index = IndexAtCell(BeltCell(slot));
+            stack = index >= 0 ? _views[index] : default;
+            return index >= 0;
+        }
+        public bool CanPlaceItem(ItemData item, int count, Vector2Int origin, int ignoreIndex = -1, int alsoIgnore = -1)
+        {
+            if (item == null || count <= 0) return false;
+            if (IsBeltCell(origin) && (!QuickBeltRules.CanStore(item) || count > QuickBeltRules.StackLimit(item))) return false;
+            return CanPlace(origin, item.EffectiveFootprint, ignoreIndex, alsoIgnore);
+        }
+        public bool RequestBeltPlacement(int slot, ulong stackId, out string reason)
+        {
+            reason = "that utility cannot go in the belt";
+            if (slot < 0 || slot >= QuickBeltRules.SlotCount || !TryGetStack(stackId, out var source) || !QuickBeltRules.CanStore(source.Item)) return false;
+            var destination = BeltCell(slot);
+            if (source.Origin == destination) { reason = null; return true; }
+            var target = SlotAtCell(destination);
+            var kind = target.StackId == 0 ? InventoryCommandKind.Move :
+                target.Item == source.Item && target.Instance == null && source.Instance == null ? InventoryCommandKind.Merge : InventoryCommandKind.Swap;
+            var authority = CommandAuthority;
+            if (authority == null) { reason = "inventory authority is unavailable"; return false; }
+            if (!authority.TryCreateLocalCommand(kind, stackId, target.StackId,
+                kind == InventoryCommandKind.Move ? destination : Vector2Int.zero, EquipmentSlot.None,
+                source.Instance != null ? source.Instance.Uid : Guid.Empty, target.Instance != null ? target.Instance.Uid : Guid.Empty,
+                out var command, out reason)) return false;
+            var result = authority.Submit(_rig, command); reason = result.Reason; return result.Accepted;
+        }
+        // Only starting-kit construction calls this. Restoring state never rearranges physical pockets.
+        internal void SeedBeltDefaults()
+        {
+            if (NetRole.IsClientOnly || !CanCommitRevision(out _)) return;
+            bool changed = false;
+            foreach (var stack in _stacks)
+            {
+                if (IsBeltCell(stack.Origin) || !QuickBeltRules.CanStore(stack.Definition) || stack.Count > QuickBeltRules.StackLimit(stack.Definition)) continue;
+                for (int slot = 0; slot < QuickBeltRules.SlotCount; slot++)
+                {
+                    var cell = BeltCell(slot);
+                    if (!CanPlaceItem(stack.Definition, stack.Count, cell)) continue;
+                    stack.Origin = cell; changed = true; Recompute(); break;
+                }
+            }
+            if (changed) { CommitRevision(); GameEvents.RaiseInventoryChanged(OwnerId); }
+        }
 
         /// <summary>Ammo replenishes the drawn weapon; other utilities must be taken in hand.</summary>
         public bool RequestQuickStack(ulong stackId, out string reason)
@@ -232,7 +281,7 @@ namespace Emberdelve.Items
         public bool RequestHoldStack(ulong stackId, out string reason)
         {
             reason = "that quick item is no longer in the bag";
-            if (!TryGetStack(stackId, out var slot) || !HotbarBindings.IsUsableDefinition(slot.Item)) return false;
+            if (!TryGetStack(stackId, out var slot) || !IsBeltCell(slot.Origin) || !QuickBeltRules.CanStore(slot.Item)) return false;
             var authority = CommandAuthority;
             if (authority == null) { reason = "inventory authority is unavailable"; return false; }
             if (!authority.TryCreateLocalCommand(InventoryCommandKind.HoldQuickItem, stackId, 0, Vector2Int.zero,
@@ -257,7 +306,11 @@ namespace Emberdelve.Items
             if (commit) CommitRevision();
             NotifyAuthorityMutation();
         }
-        internal void ApplyNetworkHeldStack(ulong stackId) { _heldStackId = stackId; }
+        internal void ApplyNetworkHeldStack(ulong stackId)
+        {
+            _heldStackId = stackId;
+            _rig?.Loadout?.RefreshHeldCombat();
+        }
 
         public ulong Revision { get; private set; }
 
@@ -306,6 +359,76 @@ namespace Emberdelve.Items
 
         internal bool OwnsDropLease(DropMutationLease lease) => lease != null && ReferenceEquals(_dropMutationLease, lease);
 
+        internal sealed class StackDropState
+        {
+            internal Inventory Owner;
+            internal DropMutationLease Lease;
+            internal InventorySlot Source;
+            internal int Amount, TotalUnits, CarriedValue;
+            internal ulong Revision;
+            internal bool Restored;
+        }
+
+        // Definition-only stacks have no item UID. The exclusive lease, stack identity and revision
+        // protect their count while the ground representation is prepared/published.
+        internal bool TryDetachStackForDrop(DropMutationLease lease, ulong stackId, int amount,
+            out StackDropState state, out string reason)
+        {
+            state = null;
+            if (!OwnsDropLease(lease) || Revision == ulong.MaxValue)
+            { reason = "drop reservation is no longer valid"; return false; }
+            EnsureGrid();
+            int index = IndexOfStack(stackId);
+            if (index < 0 || amount <= 0 || _stacks[index].Instance != null ||
+                _stacks[index].Definition == null || _stacks[index].Definition.IsEquippable ||
+                amount > _stacks[index].Count)
+            { reason = "source stack cannot supply the requested drop"; return false; }
+
+            Stack stack = _stacks[index];
+            state = new StackDropState {
+                Owner = this, Lease = lease,
+                Source = new InventorySlot(stack.Definition, null, stack.Count, stack.Origin,
+                    stack.Definition.EffectiveFootprint, index, stack.StackId),
+                Amount = amount, TotalUnits = TotalUnits, CarriedValue = CarriedValue, Revision = Revision
+            };
+            stack.Count -= amount;
+            if (stack.Count == 0) _stacks.RemoveAt(index);
+            Recompute();
+            TotalUnits -= amount;
+            CarriedValue -= stack.Definition.value * amount;
+            reason = null;
+            return true;
+        }
+
+        internal bool TryRestoreStackAfterDropRefusal(DropMutationLease lease, StackDropState state, out string reason)
+        {
+            reason = "the original stack state cannot be restored";
+            if (!OwnsDropLease(lease) || state == null || state.Restored || state.Owner != this ||
+                !ReferenceEquals(state.Lease, lease) || Revision != state.Revision) return false;
+            InventorySlot source = state.Source;
+            int index = IndexOfStack(source.StackId);
+            int remaining = source.Count - state.Amount;
+            if (remaining > 0)
+            {
+                if (index != source.Index || _stacks[index].Instance != null ||
+                    _stacks[index].Definition != source.Item || _stacks[index].Count != remaining ||
+                    _stacks[index].Origin != source.Origin) return false;
+                _stacks[index].Count = source.Count;
+            }
+            else
+            {
+                if (index >= 0 || source.Index > _stacks.Count || !CanPlaceItem(source.Item, source.Count, source.Origin, -1)) return false;
+                _stacks.Insert(source.Index, new Stack { StackId = source.StackId, Item = source.Item,
+                    Count = source.Count, Origin = source.Origin });
+            }
+            Recompute();
+            TotalUnits = state.TotalUnits;
+            CarriedValue = state.CarriedValue;
+            state.Restored = true;
+            reason = null;
+            return true;
+        }
+
         /// <summary>Detaches one gear stack provisionally for a ground transfer; no revision or observers change yet.</summary>
         internal bool TryDetachInstanceForDrop(DropMutationLease lease, ulong stackId, Guid expectedUid, out ItemInstance instance,
             out Vector2Int origin, out ulong originalRevision, out string reason)
@@ -338,7 +461,7 @@ namespace Emberdelve.Items
             ulong originalRevision, out string reason)
         {
             if (!OwnsDropLease(lease) || instance == null || stackId == 0 || Revision != originalRevision || HoldsInstanceUid(instance.Uid) ||
-                !CanPlace(origin, instance.Definition.EffectiveFootprint, -1))
+                !CanPlaceItem(instance.Definition, 1, origin, -1))
             {
                 reason = "the original bag state cannot be restored";
                 return false;
@@ -360,7 +483,7 @@ namespace Emberdelve.Items
                 return false;
             }
             AdvanceRevision();
-            GameEvents.RaiseInventoryChanged(OwnerId);
+            NotifyAuthorityMutation();
             reason = null;
             return true;
         }
@@ -449,6 +572,7 @@ namespace Emberdelve.Items
                 return;
             }
 
+            int previousWidth = gridWidth;
             gridWidth = newWidth;
             gridHeight = newHeight;
 
@@ -467,7 +591,8 @@ namespace Emberdelve.Items
 
                 // Re-seating is a move, not a re-issue: the same instance object is placed in the new grid, so a
                 // resized bag never mints a second identity or drops the rolls one gear stack already had.
-                Vector2Int origin = FindFreeOrigin(definition.EffectiveFootprint);
+                Vector2Int origin = QuickBeltRules.TryGetSlot(stack.Origin, previousWidth, out int beltSlot)
+                    ? BeltCell(beltSlot) : FindFreeOrigin(definition.EffectiveFootprint);
                 if (origin.x < 0)
                 {
                     TotalUnits = Mathf.Max(0, TotalUnits - stack.Count);
@@ -596,7 +721,7 @@ namespace Emberdelve.Items
             {
                 Stack stack = _stacks[i];
                 if (stack.Definition != item || stack.Instance != null) continue;
-                int space = Mathf.Max(0, stackLimit - stack.Count);
+                int space = Mathf.Max(0, (IsBeltCell(stack.Origin) ? QuickBeltRules.StackLimit(item) : stackLimit) - stack.Count);
                 unitsAfterExistingStacks -= Mathf.Min(space, unitsAfterExistingStacks);
             }
 
@@ -617,7 +742,7 @@ namespace Emberdelve.Items
                 // Gear stacks are separate items with their own identity: they never take units of a lookalike.
                 if (stack.Instance != null) continue;
 
-                int space = stackLimit - stack.Count;
+                int space = (IsBeltCell(stack.Origin) ? QuickBeltRules.StackLimit(item) : stackLimit) - stack.Count;
                 if (space <= 0) continue;
 
                 int move = Mathf.Min(space, remaining);
@@ -708,7 +833,7 @@ namespace Emberdelve.Items
             EnsureGrid();
 
             Vector2Int size = item.EffectiveFootprint;
-            if (!CanPlace(origin, size, -1))
+            if (!CanPlaceItem(item, IsBeltCell(origin) ? amount : 1, origin, -1))
             {
                 reason = $"no room for {item.displayName} at cell {origin}";
                 return false;
@@ -951,7 +1076,7 @@ namespace Emberdelve.Items
             Vector2Int footprint = definition.EffectiveFootprint;
             Vector2Int landed = exactOrigin ? origin : FindFreeOrigin(footprint);
 
-            if (landed.x < 0 || (exactOrigin && !CanPlace(landed, footprint, -1)))
+            if (landed.x < 0 || (exactOrigin && !CanPlaceItem(definition, 1, landed, -1)))
             {
                 reason = exactOrigin
                     ? $"no room for {definition.displayName} [{instance.UidText}] at cell {origin}"
@@ -1219,8 +1344,7 @@ namespace Emberdelve.Items
         internal void ApplyRestore(ValidatedContainer validated)
         {
             _heldStackId = 0;
-            // D3c: the belt is read as item identities while the old stacks still exist, and bound again to the restored stacks below.
-            BeltIdentity[] belt = Hotbar.CaptureIdentities();
+            // Physical belt placement is part of each authoritative entry origin.
 
             _stacks.Clear();
 
@@ -1245,11 +1369,8 @@ namespace Emberdelve.Items
             CarriedValue = value;
             Recompute();
 
-            // R6c2: every restored stack has a fresh StackId, so no old BINDING can survive. D3c: the belt does - by item identity
-            // (uid or definition), never by index: each key is bound again to the restored stack that carries what it pointed at.
-            // A belt that held nothing before the restore (a fresh bag) gets the default assignment, as before. No event is
-            // raised here (see the doc above); NotifyRestore's InventoryChanged refreshes the HUD.
-            if (!Hotbar.RebindFromIdentities(belt)) Hotbar.SeedDefaults();
+            Hotbar.RetireAll(); // Initialized; never reseed or rearrange an authoritative restore.
+
         }
 
         internal bool HasNetworkRevision => _hasNetworkRevision;
@@ -1269,7 +1390,6 @@ namespace Emberdelve.Items
         // Caller has validated an exact mapping for every restored stack before any mutation.
         internal void ApplyNetworkIdentities(Dictionary<Vector2Int, ulong> ids, ulong revision)
         {
-            BeltIdentity[] belt = Hotbar.CaptureIdentities();
             ulong maximum = 0;
             foreach (Stack stack in _stacks)
             {
@@ -1281,7 +1401,7 @@ namespace Emberdelve.Items
             Revision = revision;
             _hasNetworkRevision = true;
             Recompute();
-            Hotbar.RebindFromIdentities(belt, allowEmpty: true);
+            Hotbar.RetireAll();
         }
 
         /// <summary>Notify half of a restore: a throwing subscriber is logged and cannot undo or abort an applied restore.</summary>
@@ -1317,6 +1437,11 @@ namespace Emberdelve.Items
         public bool CanPlace(Vector2Int origin, Vector2Int size, int ignoreIndex = -1, int alsoIgnore = -1)
         {
             EnsureGrid();
+            if (IsBeltCell(origin))
+            {
+                int occupant = IndexAtCell(origin);
+                return occupant < 0 || occupant == ignoreIndex || occupant == alsoIgnore;
+            }
 
             int width = Mathf.Max(1, size.x);
             int height = Mathf.Max(1, size.y);
@@ -1366,6 +1491,35 @@ namespace Emberdelve.Items
             return new Vector2Int(-1, -1);
         }
 
+        /// <summary>Separates part of a definition stack into a new identity without collecting new loot.</summary>
+        internal bool TrySplitStack(ulong sourceStackId, int amount, Vector2Int destination, out string reason)
+        {
+            if (NetRole.IsClientOnly) { reason = "inventory changes require the server"; return false; }
+            EnsureGrid();
+            int index = IndexOfStack(sourceStackId);
+            if (index < 0) { reason = "source stack is no longer available"; return false; }
+            Stack source = _stacks[index];
+            if (source.Instance != null || source.Definition == null || source.Definition.IsEquippable ||
+                amount <= 0 || amount >= source.Count)
+            { reason = "choose an amount smaller than the source stack"; return false; }
+            // The source remains occupied. Splitting never overwrites or merges the destination.
+            if (!CanPlaceItem(source.Definition, amount, destination))
+            { reason = "the separated stack does not fit in those cells"; return false; }
+            if (!CanCommitRevision(out reason)) return false;
+            if (!CanAllocateStackIds(1))
+            { reason = "this inventory has exhausted its stack identities"; return false; }
+
+            var separated = new Stack { StackId = AllocateStackId(), Item = source.Definition,
+                Count = amount, Origin = destination };
+            _stacks.Add(separated);
+            source.Count -= amount;
+            Recompute();
+            CommitRevision();
+            NotifyAuthorityMutation();
+            reason = null;
+            return true;
+        }
+
         /// <summary>Moves an existing stack to a new cell. The stack keeps its count and its shape.</summary>
         public bool TryMove(int index, Vector2Int origin, out string reason)
         {
@@ -1382,7 +1536,7 @@ namespace Emberdelve.Items
             bool changed = stack.Origin != origin;
             Vector2Int size = stack.Definition.EffectiveFootprint;
 
-            if (!CanPlace(origin, size, index))
+            if (!CanPlaceItem(stack.Definition, stack.Count, origin, index))
             {
                 reason = $"{stack.Definition.displayName} does not fit at cell {origin}";
                 return false;
@@ -1391,8 +1545,11 @@ namespace Emberdelve.Items
             if (changed && !CanCommitRevision(out reason)) return false;
 
             stack.Origin = origin;
+            bool stowed = _heldStackId == stack.StackId && !IsBeltCell(origin);
+            if (stowed) _heldStackId = 0;
             Recompute();
             if (changed) CommitRevision();
+            if (stowed) _rig?.Loadout?.RefreshHeldCombat();
             GameEvents.RaiseInventoryChanged(OwnerId);
             return true;
         }
@@ -1443,14 +1600,14 @@ namespace Emberdelve.Items
             // third stack in the bag, and the two destination rectangles are checked against each other.
             // Two unequal shapes can each fit in the other's hole on their own and still cover the same
             // cell once both are put down, which is an overlap the grid may never hold.
-            if (!CanPlace(secondOrigin, firstShape, a, b) ||
-                !CanPlace(firstOrigin, secondShape, b, a))
+            if (!CanPlaceItem(first.Definition, first.Count, secondOrigin, a, b) ||
+                !CanPlaceItem(second.Definition, second.Count, firstOrigin, b, a))
             {
                 reason = $"{first.Definition.displayName} and {second.Definition.displayName} cannot trade places";
                 return false;
             }
 
-            bool destinationsCollide = firstDestMinX < secondDestMaxX && secondDestMinX < firstDestMaxX &&
+            bool destinationsCollide = !IsBeltCell(firstOrigin) && !IsBeltCell(secondOrigin) && firstDestMinX < secondDestMaxX && secondDestMinX < firstDestMaxX &&
                                        firstDestMinY < secondDestMaxY && secondDestMinY < firstDestMaxY;
 
             if (destinationsCollide)
@@ -1468,8 +1625,12 @@ namespace Emberdelve.Items
 
             first.Origin = secondOrigin;
             second.Origin = firstOrigin;
+            bool stowed = (_heldStackId == first.StackId && !IsBeltCell(first.Origin)) ||
+                (_heldStackId == second.StackId && !IsBeltCell(second.Origin));
+            if (stowed) _heldStackId = 0;
             Recompute();
             CommitRevision();
+            if (stowed) _rig?.Loadout?.RefreshHeldCombat();
             GameEvents.RaiseInventoryChanged(OwnerId);
             return true;
         }
@@ -1532,7 +1693,7 @@ namespace Emberdelve.Items
                 return false;
             }
 
-            int limit = target.Definition.StackLimitForFootprint;
+            int limit = IsBeltCell(target.Origin) ? QuickBeltRules.StackLimit(target.Definition) : target.Definition.StackLimitForFootprint;
             int space = limit - target.Count;
 
             if (space <= 0)
@@ -1850,7 +2011,11 @@ namespace Emberdelve.Items
         }
 
         /// <summary>Publishes the inventory half after a silent authority-owned consume and its effect commit.</summary>
-        internal void NotifyAuthorityMutation() => GameEvents.RaiseInventoryChanged(OwnerId);
+        internal void NotifyAuthorityMutation()
+        {
+            _rig?.Loadout?.RefreshHeldCombat();
+            GameEvents.RaiseInventoryChanged(OwnerId);
+        }
 
         public int IndexOfItem(ItemData item)
         {
@@ -1862,6 +2027,11 @@ namespace Emberdelve.Items
         public int IndexAtCell(Vector2Int cell)
         {
             EnsureGrid();
+            if (IsBeltCell(cell))
+            {
+                for (int i = 0; i < _stacks.Count; i++) if (_stacks[i].Origin == cell) return i;
+                return -1;
+            }
             if (cell.x < 0 || cell.y < 0 || cell.x >= gridWidth || cell.y >= gridHeight) return -1;
             return _cells[cell.y * gridWidth + cell.x];
         }
@@ -1889,7 +2059,7 @@ namespace Emberdelve.Items
             // An instance-backed stack is one concrete item: it does not take on units of a lookalike.
             if (stack.Instance != null) return 0;
 
-            int space = stack.Definition.StackLimitForFootprint - stack.Count;
+            int space = (IsBeltCell(stack.Origin) ? QuickBeltRules.StackLimit(stack.Definition) : stack.Definition.StackLimitForFootprint) - stack.Count;
             int added = Mathf.Min(space, amount);
             if (added <= 0) return 0;
 

@@ -14,12 +14,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.ItemData
   itemId: arrow_bundle
   displayName: Arrow Bundle
-  description: Eight fletched shafts. Press 1-4 to restock the quiver.
+  description: Eight arrows for a bow. Open in preparation or use from a quick slot.
   kind: 3
   value: 10
   maxStack: 4
   healAmount: 0
   ammoGrant: 8
+  ammoWeaponId: hollow_bow
   iconColor: {r: 0.6, g: 0.62, b: 0.55, a: 1}
   worldMaterial: {fileID: 2100000, guid: 4d4684ae3afb2f946a71c4c8d7baf8e5, type: 2}
   worldSize: {x: 0.26, y: 0.26, z: 0.26}

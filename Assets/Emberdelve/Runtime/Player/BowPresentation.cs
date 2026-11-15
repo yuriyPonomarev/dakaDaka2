@@ -5,7 +5,7 @@ namespace Emberdelve.Player
     // Presentation only: the authority still owns launch origin, charge and collisions.
     public sealed class BowPresentation : MonoBehaviour
     {
-        const int Rings = 17, Sides = 6;
+        const int Rings = BowSolidGeometry.Rings, Sides = BowSolidGeometry.Sides;
         Mesh _mesh;
         Vector3[] _vertices = new Vector3[Rings * Sides * 2];
         Transform _upperString, _lowerString, _arrow;
@@ -35,8 +35,8 @@ namespace Emberdelve.Player
             bow._mesh.vertices = bow._vertices; bow._mesh.uv = uv; bow._mesh.triangles = triangles;
             root.AddComponent<MeshFilter>().sharedMesh = bow._mesh;
             root.AddComponent<MeshRenderer>().sharedMaterial = weapon.shaftMaterial;
-            for (int i = 0; i < 9; i++)
-                Part(root.transform, "LeatherWrap", new Vector3(0, -.065f + i * .016f, 0), new Vector3(.054f, .014f, .07f), weapon.gripMaterial);
+            for (int i = 0; i < BowSolidGeometry.GripCount; i++)
+                Part(root.transform, "LeatherWrap", BowSolidGeometry.GripCenter(i), BowSolidGeometry.GripSize, weapon.gripMaterial);
             bow._upperString = Part(root.transform, "UpperString", Vector3.zero, Vector3.one, weapon.gripMaterial);
             bow._lowerString = Part(root.transform, "LowerString", Vector3.zero, Vector3.one, weapon.gripMaterial);
             bow._arrow = new GameObject("NockedArrow").transform; bow._arrow.SetParent(root.transform, false);
@@ -55,23 +55,15 @@ namespace Emberdelve.Player
             if (Application.isPlaying) Destroy(c); else DestroyImmediate(c);
             go.GetComponent<Renderer>().sharedMaterial = material; return go.transform;
         }
-        Vector3 Curve(float t, int sign)
-        {
-            return new Vector3(0, sign * (.075f + .48f * t - .035f * Draw * t),
-                .12f * Mathf.Sin(t * Mathf.PI) - .055f * t - .085f * Draw * t * t);
-        }
+        Vector3 Curve(float t, int sign) => BowSolidGeometry.Curve(t, sign, Draw);
         public void SetDraw(float value)
         {
             Draw = Mathf.Clamp01(value);
             for (int side = 0; side < 2; side++)
                 for (int r = 0; r < Rings; r++)
                 {
-                    float t = (float)r / (Rings - 1); var center = Curve(t, side == 0 ? 1 : -1);
                     for (int j = 0; j < Sides; j++)
-                    {
-                        float angle = j * Mathf.PI * 2 / Sides;
-                        _vertices[side * Rings * Sides + r * Sides + j] = center + new Vector3(Mathf.Cos(angle) * Mathf.Lerp(.025f, .008f, t), 0, Mathf.Sin(angle) * Mathf.Lerp(.028f, .012f, t));
-                    }
+                        _vertices[side * Rings * Sides + r * Sides + j] = BowSolidGeometry.RingVertex(side, r, j, Draw);
                 }
             _mesh.vertices = _vertices; _mesh.RecalculateNormals(); _mesh.RecalculateBounds();
             Segment(_upperString, Curve(1, 1), Nock); Segment(_lowerString, Curve(1, -1), Nock);

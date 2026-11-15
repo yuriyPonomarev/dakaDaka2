@@ -80,7 +80,7 @@ namespace Emberdelve.EditorTools
                 }
         }
 
-        private static void Tomb(Transform root, Vector3 position, float yaw, Material stone, Material trim)
+        internal static void Tomb(Transform root, Vector3 position, float yaw, Material stone, Material trim)
         {
             Transform tomb = Group(root, "Sarcophagus", position, yaw);
             Part(tomb, "Footing", new Vector3(0, .12f, 0), new Vector3(1.8f, .24f, 3.2f), trim);
@@ -90,7 +90,7 @@ namespace Emberdelve.EditorTools
             Cylinder(tomb, "Head_Relief", new Vector3(0, 1.43f, .95f), new Vector3(.46f, .08f, .46f), stone);
         }
 
-        private static void Column(Transform root, Vector3 position, float height, Material material)
+        internal static void Column(Transform root, Vector3 position, float height, Material material)
         {
             Part(root, "Column_Base", position + Vector3.up * .16f, new Vector3(1.1f, .32f, 1.1f), material);
             Cylinder(root, "Column_Shaft", position + Vector3.up * (height * .5f), new Vector3(.7f, height * .5f, .7f), material);
@@ -103,7 +103,7 @@ namespace Emberdelve.EditorTools
             Cylinder(root, "Urn_Lip", position + Vector3.up * .48f, new Vector3(.48f, .035f, .48f), material);
         }
 
-        private static void Brazier(Transform root, Vector3 position, Material stone, Material metal, bool blue)
+        internal static void Brazier(Transform root, Vector3 position, Material stone, Material metal, bool blue)
         {
             Column(root, position, 1.3f, stone);
             Cylinder(root, "Brazier_Bowl", position + Vector3.up * 1.4f, new Vector3(.85f, .13f, .85f), metal);
@@ -113,20 +113,49 @@ namespace Emberdelve.EditorTools
             light.cullingMask = LayerMask.GetMask(GameConfig.LevelLayerName);
             light.color = blue ? new Color(.3f, .65f, 1f) : new Color(1f, .49f, .19f);
             light.shadows = LightShadows.None;
-            string path = "Assets/Emberdelve/Art/Generated/CryptFlame_" + (blue ? "Blue" : "Amber") + ".mat";
-            Material flameMaterial = AssetDatabase.LoadAssetAtPath<Material>(path);
-            if (flameMaterial == null)
-            {
-                flameMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
-                flameMaterial.SetColor("_BaseColor", blue ? new Color(.3f, 1.1f, 2f) : new Color(2.5f, .8f, .08f));
-                AssetDatabase.CreateAsset(flameMaterial, path);
-            }
-            GameObject flame = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            flame.name = "Brazier_Flame"; flame.transform.SetParent(root, false);
+            // Preserve this sibling slot: light network identities include sibling indices.
+            GameObject flame = new GameObject("Brazier_Flame");
+            flame.transform.SetParent(root, false);
             flame.transform.localPosition = position + Vector3.up * 1.8f;
-            flame.transform.localScale = new Vector3(.28f, .65f, .28f);
-            Object.DestroyImmediate(flame.GetComponent<Collider>());
-            flame.GetComponent<Renderer>().sharedMaterial = flameMaterial;
+            EmberdelveTorchFactory.BuildBrazierFlame(lamp, blue);
+        }
+
+        public static void UpdateSavedBrazierFlames()
+        {
+            if (!Application.isBatchMode) throw new System.InvalidOperationException("Run on the batch test mirror");
+            int count = 0;
+            foreach (string guid in AssetDatabase.FindAssets("t:Prefab", new[] { "Assets/Emberdelve/Prefabs/DungeonModules" }))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                var root = PrefabUtility.LoadPrefabContents(path);
+                try
+                {
+                    bool changed = false;
+                    foreach (var light in root.GetComponentsInChildren<Light>(true))
+                    {
+                        if (light.name != "Brazier_Light") continue;
+                        // Keep original sibling roots and all light properties intact.
+                        foreach (var renderer in light.transform.parent.GetComponentsInChildren<MeshRenderer>(true))
+                            if (renderer.name == "Brazier_Flame" && Vector3.SqrMagnitude(renderer.transform.position-light.transform.position)<.25f)
+                            {
+                                var mesh = renderer.GetComponent<MeshFilter>();
+                                Object.DestroyImmediate(renderer);
+                                if (mesh != null) Object.DestroyImmediate(mesh);
+                                changed = true;
+                            }
+                        if (light.transform.Find("Brazier_ParticleFlame") == null)
+                        {
+                            EmberdelveTorchFactory.BuildBrazierFlame(light.transform, light.color.b > light.color.r);
+                            changed = true;
+                        }
+                        count++;
+                    }
+                    if (changed) PrefabUtility.SaveAsPrefabAsset(root, path);
+                }
+                finally { PrefabUtility.UnloadPrefabContents(root); }
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("[Emberdelve][BrazierFlame] authored particle flames count=" + count);
         }
 
         private static Transform Group(Transform parent, string name, Vector3 position, float yaw)

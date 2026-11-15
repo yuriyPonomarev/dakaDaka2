@@ -65,17 +65,17 @@ namespace Emberdelve.Items
                     if (ids[new Vector2Int(entry.x, entry.y)] == HeldStackId) { heldEntry = entry; break; }
                 if (heldEntry?.item == null || bag.Catalog == null ||
                     !bag.Catalog.TryResolveItem(heldEntry.item.itemId, out var definition, out _) ||
-                    !HotbarBindings.IsUsableDefinition(definition))
+                    (!QuickBeltRules.CanStore(definition) ||
+                     !QuickBeltRules.TryGetSlot(new Vector2Int(heldEntry.x, heldEntry.y), Loadout.bag.width, out _)))
                 { reason = "held item is not a quick item"; return false; }
             }
 
-            var localBelt = bag.HasNetworkRevision ? bag.Hotbar.CaptureIdentities() : null;
             using (GameEventTransaction.Defer())
             {
                 if (!LoadoutSnapshot.TryRestore(Loadout, bag, equipment, null, out reason)) return false;
                 bag.ApplyNetworkIdentities(ids, Revision);
                 bag.ApplyNetworkHeldStack(HeldStackId);
-                if (localBelt != null) bag.Hotbar.RebindFromIdentities(localBelt, allowEmpty: true);
+                // Belt ownership and placement come from this server snapshot; never reapply local bindings.
             }
             reason = null;
             return true;

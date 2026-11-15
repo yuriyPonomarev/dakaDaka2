@@ -110,7 +110,81 @@ namespace Emberdelve.Player
 
         /// <summary>True after this player extracted: they left the dungeon and are nobody's target.</summary>
         public bool IsExtracted => _extracted;
-        public bool IsInPlay => !_extracted;
+        public bool IsInFloorTransit { get; private set; }
+        public uint FloorMovementGeneration { get; private set; }
+        public event System.Action<PlayerRig> FloorMovementChanged;
+        public bool IsInPlay => !_extracted && !IsInFloorTransit;
+
+        /// <summary>Freezes the existing authority-owned actor without changing its carried state.</summary>
+        public bool TryBeginFloorTransit(out string reason)
+        {
+            reason = null;
+            if (NetRole.IsClientOnly || IsDead || _extracted || IsInFloorTransit)
+            { reason = "Actor cannot begin floor transit"; return false; }
+            IsInFloorTransit = true;
+            FloorMovementGeneration++;
+            GetComponent<MeleeCombat>()?.SetRemoteAttack(false);
+            SetGuardHeld(false);
+            _impactGuard.Reset();
+            _replicatedImpactGuardUntil = 0f;
+            if (movement != null) movement.CancelDash();
+            SetInputEnabled(false);
+            RefreshFloorTransitPresentation();
+            FloorMovementChanged?.Invoke(this);
+            return true;
+        }
+
+        /// <summary>The caller validates map readiness and a safe destination before releasing this actor.</summary>
+        public bool TryEndFloorTransit(Vector3 position, Quaternion rotation, out string reason)
+        {
+            reason = null;
+            if (NetRole.IsClientOnly || !IsInFloorTransit || IsDead || _extracted || movement == null)
+            { reason = "Actor cannot end floor transit"; return false; }
+            float rotationLength = rotation.x * rotation.x + rotation.y * rotation.y +
+                                   rotation.z * rotation.z + rotation.w * rotation.w;
+            if (!FiniteTransitValue(position.x) || !FiniteTransitValue(position.y) || !FiniteTransitValue(position.z) ||
+                !FiniteTransitValue(rotationLength) || rotationLength < 0.000001f)
+            { reason = "Floor destination must be finite with a valid rotation"; return false; }
+            movement.TeleportTo(position);
+            transform.rotation = rotation.normalized;
+            IsInFloorTransit = false;
+            FloorMovementGeneration++;
+            RefreshFloorTransitPresentation();
+            SetInputEnabled(locallyControlled);
+            FloorMovementChanged?.Invoke(this);
+            return true;
+        }
+
+        /// <summary>Presentation of the server-owned flag only. Clients cannot use it to admit or settle a transfer.</summary>
+        public void ApplyReplicatedFloorTransit(bool inTransit)
+        {
+            if (!NetRole.IsClientOnly || IsInFloorTransit == inTransit) return;
+            IsInFloorTransit = inTransit;
+            SetInputEnabled(!inTransit && locallyControlled);
+            RefreshFloorTransitPresentation();
+        }
+
+        public bool ApplyReplicatedFloorMovement(uint generation, bool inTransit, Vector3 position, Quaternion rotation)
+        {
+            if (!NetRole.IsClientOnly || generation < FloorMovementGeneration || movement == null
+                || !FiniteTransitValue(position.x) || !FiniteTransitValue(position.y) || !FiniteTransitValue(position.z)
+                || !FiniteTransitValue(rotation.x) || !FiniteTransitValue(rotation.y) || !FiniteTransitValue(rotation.z)
+                || !FiniteTransitValue(rotation.w) || Quaternion.Dot(rotation, rotation) < .000001f) return false;
+            FloorMovementGeneration = generation;
+            ApplyReplicatedFloorTransit(inTransit);
+            movement.TeleportTo(position);
+            transform.rotation = rotation;
+            return true;
+        }
+
+        private void RefreshFloorTransitPresentation()
+        {
+            var view = GetComponent<FloorTransitPresentation>();
+            if (view == null && IsInFloorTransit) view = gameObject.AddComponent<FloorTransitPresentation>();
+            if (view != null) view.Refresh(this);
+        }
+
+        private static bool FiniteTransitValue(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
 
         /// <summary>Called by the run director when it admits the rig to a run (and by tools that build rigs): party and control. Identity never changes the player id.</summary>
         public void AssignParty(int partyId, bool isLocallyControlled)
@@ -176,6 +250,9 @@ namespace Emberdelve.Player
                     shapes[i] = new HitShape(s.Location, a, b, s.Radius);
                 }
             }
+            // Append after crouch compression: the shared guard root already follows the lowered eye.
+            // The grip is an Arms hit volume, so normal melee/projectile damage and interruption apply.
+            if (TryGetGuardGripHitShape(out HitShape grip)) shapes.Add(grip);
         }
 
         /// <summary>The authoritative aim pose the swept melee is positioned from: the camera the player looks through.</summary>
@@ -188,9 +265,19 @@ namespace Emberdelve.Player
         /// <summary>The weapon the loadout actually has in hand; the combat authority resolves attacks against this.</summary>
         public bool IsHoldingUtility => inventory != null && inventory.HeldItem != null;
         private int _utilityInputFrame = -1;
-        public bool WeaponInputSuppressed => IsHoldingUtility || _utilityInputFrame == Time.frameCount;
+        public WeaponData HeldMeleeWeapon
+        {
+            get
+            {
+                ItemData held = inventory != null ? inventory.HeldItem : null;
+                WeaponData weapon = held != null ? held.grantedWeapon : null;
+                return held != null && held.itemId == "pitch_torch" && weapon != null &&
+                    weapon.weaponId == HandheldTorchVisual.WeaponId && !weapon.IsRanged ? weapon : null;
+            }
+        }
+        public bool WeaponInputSuppressed => IsInFloorTransit || (IsHoldingUtility && HeldMeleeWeapon == null) || _utilityInputFrame == Time.frameCount;
         public void SuppressWeaponInputForFrame() { _utilityInputFrame = Time.frameCount; }
-        public WeaponData ActiveWeapon => !IsHoldingUtility && loadout != null ? loadout.ActiveWeapon : null;
+        public WeaponData ActiveWeapon => IsHoldingUtility ? HeldMeleeWeapon : loadout != null ? loadout.ActiveWeapon : null;
         public int WeaponChangeCount => loadout != null ? loadout.WeaponChangeCount : 0;
 
         // ---- what the combat authority reads about this caster (ISkillCasterState / IAmmoSource) ----
@@ -256,6 +343,7 @@ namespace Emberdelve.Player
             // Held utilities suppress attacks, but preserve the selected weapon ammo pool.
             WeaponData weapon = loadout != null ? loadout.ActiveWeapon : null;
             seed.ActiveWeaponId = weapon != null && weapon.IsRanged ? weapon.weaponId : string.Empty;
+            seed.ActiveAmmoPoolId = loadout != null ? loadout.ActiveAmmoPoolId : string.Empty;
             seed.Pools = loadout != null ? loadout.CaptureAmmoSeeds(Ranged) : new KitAmmoSeed[0];
 
             IReadOnlyList<SkillData> active = skills != null ? skills.ActiveSkills : null;
@@ -274,6 +362,7 @@ namespace Emberdelve.Player
             _authorityKit = view;
             _hasAuthorityKit = true;
             if (mana != null) mana.ApplyView(view.Mana, view.MaxMana, view.ManaRegen, view.ManaRegenDelay, view.ManaSinceSpend, view.ManaRegenAllowed);
+            if (loadout != null) loadout.ApplyAmmoView(in view);
             RangedCombat ranged = Ranged;
             if (ranged != null) ranged.ApplyKitView(in view);
         }
@@ -281,8 +370,8 @@ namespace Emberdelve.Player
         private RangedCombat _ranged;
         private RangedCombat Ranged => _ranged != null ? _ranged : (_ranged = GetComponent<RangedCombat>());
 
-        bool IAmmoSource.HasAmmo(int count) => Ranged != null && Ranged.HasAmmo(count);
-        bool IAmmoSource.TryConsumeAmmo(int count) => Ranged != null && Ranged.TryConsumeAmmo(count);
+        bool IAmmoSource.HasAmmo(int count) => !IsInFloorTransit && Ranged != null && Ranged.HasAmmo(count);
+        bool IAmmoSource.TryConsumeAmmo(int count) => !IsInFloorTransit && Ranged != null && Ranged.TryConsumeAmmo(count);
 
         public bool IsDead => health != null && health.IsDead;
         public float CurrentHealth => health != null ? health.CurrentHealth : 0f;
@@ -384,6 +473,7 @@ namespace Emberdelve.Player
         private void Awake()
         {
             WireRig();
+            if (GetComponent<Emberdelve.Feedback.WorldFootsteps>() == null) gameObject.AddComponent<Emberdelve.Feedback.WorldFootsteps>();
         }
 
         /// <summary>
@@ -397,6 +487,9 @@ namespace Emberdelve.Player
             if (input == null) input = GetComponent<EmberdelveInput>();
             if (movement == null) movement = GetComponent<PlayerMovement>();
             if (look == null) look = GetComponent<PlayerLook>();
+            // Old saved rigs predate item-owned torch lighting. Migrate only in a running game,
+            // never while editor tooling wires the user's open scene.
+            if (Application.isPlaying) DisableLegacyCameraFill(look != null ? look.AimTransform : null);
             if (health == null) health = GetComponent<HealthComponent>();
             if (inventory == null) inventory = GetComponent<Inventory>();
             if (loadout == null) loadout = GetComponent<ClassLoadout>();
@@ -447,6 +540,14 @@ namespace Emberdelve.Player
             if (movement != null) movement.DashEnded += OnDashEnded;
 
             _wired = true;
+        }
+
+        internal static void DisableLegacyCameraFill(Transform camera)
+        {
+            if (camera == null || camera.GetComponent<Camera>() == null) return;
+            Transform legacy = camera.Find("Player_Torch"); // Exact direct child, never an equipped item.
+            Light source = legacy != null ? legacy.GetComponent<Light>() : null;
+            if (source != null) source.enabled = false;
         }
 
         private void OnHealthChanged(float current, float max)
@@ -593,6 +694,8 @@ namespace Emberdelve.Player
         /// </summary>
         private void OnPlayerDied()
         {
+            _impactGuard.Reset();
+            _replicatedImpactGuardUntil = 0f;
             GetComponent<RangedCombat>()?.CancelDraw();
             if (skills != null) skills.HandleDeath();
             if (movement != null) movement.CancelDash();
@@ -685,6 +788,11 @@ namespace Emberdelve.Player
             InvalidateEffectiveStats();
 
             // R1c2: a class apply is a run start; the authority rebuilds and refills its record from the finished rig.
+            // Restoring gear may publish weapon changes. Suppress intermediate metadata seeds;
+            // the final ClassApply below replaces the authority record with the validated kit/ammo.
+            _kitSeedSuppress++;
+            try { Emberdelve.Items.OfflineProfileSession.ApplyPrepared(this); }
+            finally { _kitSeedSuppress--; }
             SeedKit(KitSeedReason.ClassApply);
             PlayerAvatar.Bind(this);
         }
@@ -862,14 +970,45 @@ namespace Emberdelve.Player
         /// </summary>
         public void ApplyDamage(DamageInfo damage)
         {
-            if (health == null) return;
+            if (health == null || IsInFloorTransit) return;
             health.ApplyDamage(damage);
         }
 
         public void SetGuardHeld(bool held)
         {
-            _guardHeld = held;
+            RefreshImpactGuard(); // Observe a swapped kit before consuming this input edge.
+            _guardHeld = held && !IsInFloorTransit;
+            RefreshImpactGuard();
             SyncGuardVisual();
+        }
+
+        private readonly ImpactGuardWindow _impactGuard = new ImpactGuardWindow();
+        private float _replicatedImpactGuardUntil;
+        public void ApplyReplicatedImpactGuard(float remaining)
+        {
+            if (!NetRole.IsClientOnly) return;
+            _replicatedImpactGuardUntil = Time.time + (float.IsNaN(remaining) || float.IsInfinity(remaining) ? 0f : Mathf.Max(0f, remaining));
+        }
+        public float ImpactGuardRemaining
+        {
+            get
+            {
+                if (IsDead || IsExtracted) return 0f;
+                if (NetRole.IsClientOnly) return Mathf.Max(0f, _replicatedImpactGuardUntil - Time.time);
+                RefreshImpactGuard();
+                return _impactGuard.Remaining(AuthorityClock());
+            }
+        }
+        private void RefreshImpactGuard()
+        {
+            if (NetRole.IsClientOnly) return;
+            WeaponData weapon = ActiveWeapon;
+            int epoch = weapon != null ? weapon.GetInstanceID() : 0;
+            if (GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
+                && authority is LocalCombatAuthority local && local.TryGetKit(_combatId, out KitView kit)) epoch = kit.Epoch;
+            _impactGuard.Update(weapon != null && weapon.CanImpactGuard && IsGuardingWithDefense(Defense),
+                _guardHeld, epoch, AuthorityClock(), weapon != null ? weapon.impactGuardDuration : 0f,
+                weapon != null ? weapon.impactGuardRearmDelay : 0f);
         }
 
         private void SyncGuardVisual()
@@ -879,8 +1018,68 @@ namespace Emberdelve.Player
             if (loadout != null) loadout.SetGuardHeldVisual(guarding);
         }
 
-        /// <summary>The current visible guard blade shape, available to the projectile authority at every flight step.</summary>
-        public bool TryGetProjectileGuardBlade(out GuardBladeBox blade)
+        public bool TryGetProjectileGuardBlade(out GuardBladeBox blade) => TryGetGuardBlade(out blade);
+
+        public bool TryGetGuardShield(out GuardShieldShape shield)
+        {
+            shield = default;
+            DefenseProfile defense = Defense;
+            if (!defense.HasShield || !IsGuardingWithDefense(defense) || AimDirection.sqrMagnitude < .0001f) return false;
+            shield = GuardShieldPose.Resolve(AimOrigin, Quaternion.LookRotation(AimDirection.normalized, Vector3.up));
+            return true;
+        }
+
+        public bool TrySweepGuard(Vector3 start, Vector3 end, float radius, out float distance, out bool shieldContact, out bool weaponContact)
+        {
+            distance = 0f;
+            shieldContact = false;
+            weaponContact = false;
+            if (TryGetGuardShield(out GuardShieldShape shield))
+            {
+                shieldContact = shield.TrySweep(start, end, radius, out distance);
+                return shieldContact;
+            }
+            if (TryGetCrossbowGuard(out CrossbowGuardShape crossbow))
+            {
+                weaponContact = crossbow.TrySweep(start, end, radius, out distance);
+                return weaponContact;
+            }
+            if (TryGetBowGuard(out BowGuardShape bow))
+            {
+                weaponContact = bow.TrySweep(start, end, radius, out distance);
+                return weaponContact;
+            }
+            return TryGetGuardBlade(out GuardBladeBox blade) && blade.TrySweep(start, end, radius, out distance);
+        }
+
+        public bool TryGetBowGuard(out BowGuardShape shape)
+        {
+            shape = default;
+            if (ActiveWeapon == null || !ActiveWeapon.CanBowGuard || Defense.HasShield
+                || !IsGuardingWithDefense(Defense) || AimDirection.sqrMagnitude < .0001f) return false;
+            shape = BowGuardPose.Resolve(AimOrigin, Quaternion.LookRotation(AimDirection.normalized, Vector3.up));
+            return true;
+        }
+
+        public bool TryGetCrossbowGuard(out CrossbowGuardShape shape)
+        {
+            shape = default;
+            if (ActiveWeapon == null || !ActiveWeapon.CanCrossbowGuard || Defense.HasShield
+                || !IsGuardingWithDefense(Defense) || AimDirection.sqrMagnitude < .0001f) return false;
+            shape = CrossbowGuardPose.Resolve(AimOrigin, Quaternion.LookRotation(AimDirection.normalized, Vector3.up));
+            return true;
+        }
+
+        public bool TryGetGuardGripHitShape(out HitShape grip)
+        {
+            grip = default;
+            if (!TryGetGuardBlade(out _)) return false;
+            grip = GuardBladePose.ResolveGripHitShape(AimOrigin, Quaternion.LookRotation(AimDirection.normalized, Vector3.up));
+            return true;
+        }
+
+        /// <summary>The current visible guard blade shape, shared by projectile and melee authority sweeps.</summary>
+        public bool TryGetGuardBlade(out GuardBladeBox blade)
         {
             blade = default;
             DefenseProfile defense = Defense;
@@ -919,10 +1118,16 @@ namespace Emberdelve.Player
         {
             result = default;
             DefenseProfile defense = Defense;
-            // A held sword/rapier blocks a projectile only where the live blade physically caught it.
-            // A contributing shield keeps the existing directional block semantics.
-            if (incoming.RangedProjectile && !defense.HasShield && _mainHand != null && _mainHand.CanBlock
-                && !incoming.GuardBladeContact) return false;
+            // Swept melee and projectiles must touch the actual raised defensive surface.
+            // Facing alone cannot turn a body hit into either a blade or a shield block.
+            if (incoming.RangedProjectile || incoming.MeleeGuardChecked || (ActiveWeapon != null && ActiveWeapon.CanRangedGuard))
+            {
+                bool contact = defense.HasShield ? incoming.GuardShieldContact
+                    : ActiveWeapon != null && ActiveWeapon.CanRangedGuard ? incoming.GuardWeaponContact : incoming.GuardBladeContact;
+                if (!contact) return false;
+            }
+
+            bool physicalGuard = incoming.GuardShieldContact || incoming.GuardWeaponContact || (incoming.GuardBladeContact && !defense.HasShield);
 
             CombatFlowTuning flow = tuning ?? CombatFlowTuning.Default;
             bool enduranceOn = flow.GuardEnduranceEnabled;
@@ -934,13 +1139,13 @@ namespace Emberdelve.Player
                 Raised = IsGuardingWithDefense(defense),
                 BlockReduction = defense.BlockReduction,
                 ArcDegrees = defense.BlockArcDegrees,
-                BearingDegrees = BearingToSource(incoming),
+                BearingDegrees = physicalGuard ? 0f : BearingToSource(incoming),
                 HasShield = defense.HasShield,
                 GuardHeight = CurrentGuardHeight(flow),
-                AttackHeight = incoming.AttackHeight,
+                AttackHeight = physicalGuard ? BladeHeight.Unspecified : incoming.AttackHeight,
                 HeightTolerance = defense.HasShield ? flow.shieldHeightTolerance : flow.bladeHeightTolerance,
                 ImpactPower = incoming.ImpactPower,
-                ImpactResist = defense.ImpactResist,
+                ImpactResist = defense.ImpactResist + (ImpactGuardRemaining > 0f && ActiveWeapon != null ? Mathf.Max(0f, ActiveWeapon.impactGuardResistance) : 0f),
                 BreakReductionScale = tuning != null ? tuning.guardBreakReductionScale : CombatFlowTuning.DefaultGuardBreakReductionScale,
                 EnduranceEnabled = enduranceOn,
                 EnduranceCurrent = _guardEndurance.Current,
@@ -1054,6 +1259,7 @@ namespace Emberdelve.Player
 
         public void SetInputEnabled(bool enabled)
         {
+            enabled = enabled && !IsInFloorTransit;
             if (!enabled) GetComponent<RangedCombat>()?.CancelDraw();
             if (input != null) input.SetGameplayInputEnabled(enabled);
         }

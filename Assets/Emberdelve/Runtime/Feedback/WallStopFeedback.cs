@@ -182,7 +182,9 @@ namespace Emberdelve.Feedback
         {
             if (_sharedMaterial != null) return _sharedMaterial;
 
-            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            // Resources inclusion retains this tiny URP pass in players; Shader.Find-only fallbacks can be stripped.
+            Shader shader = Resources.Load<Shader>("Emberdelve/ImpactFlash");
+            if (shader == null) shader = Shader.Find("Universal Render Pipeline/Unlit");
             if (shader == null) shader = Shader.Find("Sprites/Default");
             if (shader == null) return null;
 

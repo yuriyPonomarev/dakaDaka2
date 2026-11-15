@@ -1327,6 +1327,7 @@ namespace Emberdelve.EditorTools
             yield return SwapLock();
             yield return ReloadSwapLock();
             yield return ReviewFollowups();
+            yield return HeldMeleeInput();
 
             // real time: hit slow on the player, measured distance
             yield return HitSlowDistance();
@@ -1443,6 +1444,9 @@ namespace Emberdelve.EditorTools
         private void GuardBreak()
         {
             ZonesOff();
+            // Face the raised shield into the incoming slash, as in the live shield review.
+            // Holding guard alone no longer intercepts a trajectory beside the visible shield.
+            _rig.Look.ApplyAimPose(35f, 0f);
             _rig.SetGuardHeld(false);
             Check(_rig.Defense.CanBlock && !_rig.CanParry, "guard: the warrior blocks and cannot parry");
             Near(20f, _rig.Defense.ImpactResist, 1e-4f, "guard: the kit's impact resist is the heater shield's 20");
@@ -1465,6 +1469,8 @@ namespace Emberdelve.EditorTools
             DamageInfo? control = SwingAtRig(_sword, true);
             Check(control.HasValue && !control.Value.Blocked && !control.Value.GuardBroken, "guard control: with the guard down the hit is neither blocked nor broken");
             float unguarded = control.HasValue ? control.Value.Amount : 0f;
+            float shieldContactDamage = control.HasValue
+                ? unguarded / _table.Multiplier(control.Value.Location) : 0f;
             Cooldown(3f);
 
             // 1. sword (10) against the heater shield (20): blocked normally
@@ -1498,7 +1504,9 @@ namespace Emberdelve.EditorTools
             if (heavyHit.HasValue)
             {
                 Near(reduction * 0.3f, heavyHit.Value.BlockReduction, 1e-4f, "broken guard: only 30 percent of the normal reduction remains");
-                Near(unguarded * (1f - reduction * 0.3f), heavyHit.Value.Amount, 0.01f, "broken guard: damage = unguarded x (1 - 0.3 x reduction)");
+                Check(heavyHit.Value.GuardShieldContact && heavyHit.Value.Location == HitLocation.Unspecified,
+                    "broken guard: the sweep contacted the shield, not a body hit volume");
+                Near(shieldContactDamage * (1f - reduction * 0.3f), heavyHit.Value.Amount, 0.01f, "broken guard: shield-contact damage x (1 - 0.3 x reduction), without an arm multiplier");
                 Check(heavyHit.Value.Amount > unguarded * (1f - reduction) + 1f, "broken guard: takes clearly more damage than a normal block");
                 Near(30f, heavyHit.Value.ImpactPower, 1e-4f, "the hit carries the heavy weapon's impact power");
             }
@@ -1540,8 +1548,12 @@ namespace Emberdelve.EditorTools
             Check(slash17.HasValue && slash17.Value.Blocked && !slash17.Value.GuardBroken, "impact 17 slash: normal block");
             Cooldown(3f);
             _rig.SetGuardHeld(true);
+            // Raise the shield towards the descending blade rather than keep the slash-facing pose.
+            _rig.Look.ApplyAimPose(18f, -35f);
             DamageInfo? over17 = SwingAtRig(borderline, true, pattern: 2, legacyPattern: true);
-            Check(over17.HasValue && over17.Value.GuardBroken, "impact 17 overhead (x1.2 = 20.4): breaks the same guard");
+            Check(over17.HasValue && over17.Value.GuardShieldContact && over17.Value.GuardBroken,
+                $"impact 17 overhead (x1.2 = 20.4): breaks the same guard (contact={over17?.GuardShieldContact}, location={over17?.Location}, impact={over17?.ImpactPower})");
+            _rig.Look.ApplyAimPose(35f, 0f);
             Cooldown(3f);
             _clock += 2f;
 
@@ -1589,6 +1601,7 @@ namespace Emberdelve.EditorTools
             string[] damageFields = Array.ConvertAll(typeof(DamageInfo).GetFields(BindingFlags.Instance | BindingFlags.Public), x => x.Name.ToLowerInvariant());
             Check(Array.TrueForAll(damageFields, x => !x.Contains("parry")), "DamageInfo has no parry state: guard break did not introduce one");
 
+            _rig.Look.ApplyAimPose(0f, 0f);
             _clock += 2f;
         }
 
@@ -1759,6 +1772,77 @@ namespace Emberdelve.EditorTools
         }
 
         // ---- weapon swap is blocked during an attack -----------------------------------------------------
+
+        private IEnumerator HeldMeleeInput()
+        {
+            ZonesOff();
+            _clock += 10f;
+            _authority.StepSwings();
+            var melee = _rig.GetComponent<MeleeCombat>();
+            _rig.Loadout.ForceSwitchToSlot(0);
+            melee.Initialize(_rig.ActiveWeapon);
+            _rig.SetInputEnabled(true);
+            _rig.Input.PrimaryPressedOverride = false;
+            _rig.Input.SecondaryHeldOverride = false;
+            int swings = 0;
+            Action<MeleeSwingIntent> count = _ => swings++;
+            melee.AttackStarted += count;
+            try
+            {
+                _rig.Input.PrimaryHeldOverride = true;
+                yield return AdvanceHeldInput(4f);
+                Check(swings >= 2, "held primary continues real authority-accepted melee without press edges");
+                _rig.Input.PrimaryHeldOverride = false;
+                int released = swings;
+                yield return AdvanceHeldInput(2f);
+                Check(swings == released, "released primary starts no further swings");
+
+                _rig.Input.PrimaryHeldOverride = true;
+                _rig.Input.SecondaryHeldOverride = true;
+                yield return AdvanceHeldInput(2f);
+                Check(swings == released, "held guard excludes held melee attacks");
+                _rig.Input.SecondaryHeldOverride = false;
+                _rig.Input.SetGameplayInputEnabled(false);
+                yield return AdvanceHeldInput(2f);
+                Check(swings == released, "disabled gameplay input prevents a held attack");
+
+                _rig.Input.PrimaryHeldOverride = false;
+                _rig.Input.SetGameplayInputEnabled(true);
+                melee.RemoteDriven = true;
+                melee.SetRemoteAttack(true);
+                yield return AdvanceHeldInput(0.1f);
+                Check(swings > released, "remote held intent starts an authority-accepted swing");
+                yield return AdvanceHeldInput(1f);
+                Check(!melee.RemoteAttackWanted, "unrefreshed remote intent expires");
+                int expired = swings;
+                yield return AdvanceHeldInput(2f);
+                Check(swings == expired, "expired remote intent cannot keep attacking");
+                melee.SetRemoteAttack(true);
+                melee.SetRemoteAttack(false);
+                yield return AdvanceHeldInput(1f);
+                Check(swings == expired, "remote release cancels pending held intent before another swing");
+            }
+            finally
+            {
+                melee.AttackStarted -= count;
+                melee.SetRemoteAttack(false);
+                melee.RemoteDriven = false;
+                _rig.Input.PrimaryHeldOverride = null;
+                _rig.Input.PrimaryPressedOverride = null;
+                _rig.Input.SecondaryHeldOverride = null;
+                _rig.SetInputEnabled(true);
+            }
+        }
+
+        private IEnumerator AdvanceHeldInput(float seconds)
+        {
+            for (float elapsed = 0f; elapsed < seconds; elapsed += Time.deltaTime)
+            {
+                _clock += Time.deltaTime;
+                _authority.StepSwings();
+                yield return null;
+            }
+        }
 
         private IEnumerator SwapLock()
         {
@@ -2018,8 +2102,26 @@ namespace Emberdelve.EditorTools
             if (ranged == null || !ranged.enabled) yield break;
 
             // 1. reload in hand: swap refused (both entry points and the input path), nothing changes, nothing queued
-            EmberdelveKitFixtures.ConsumeAmmo(ranged, 1);
+            // SwapLock's preceding release can have fired the sole bolt depending on frame timing.
+            // Establish a loaded starting state through a real reload before testing the lock itself.
             ranged.AddAmmo(3);
+            if (ranged.Magazine == 0)
+            {
+                int setupReserve = ranged.Reserve;
+                _rig.Input.ReloadPressedOverride = true;
+                yield return null;
+                _rig.Input.ReloadPressedOverride = null;
+                yield return null;
+                Check(ranged.IsReloading && ranged.Magazine == 0 && ranged.Reserve == setupReserve,
+                    "reload lock setup: empty crossbow starts an ordinary reload without early refill");
+                _clock += ranged.ReloadDuration + .01f;
+                _authority.AdvanceKitsTo(_clock);
+                yield return null;
+                Check(!ranged.IsReloading && ranged.Magazine == 1 && ranged.Reserve == setupReserve - 1,
+                    "reload lock setup: one real reload loads exactly one bolt");
+            }
+            Check(ranged.Magazine == 1 && EmberdelveKitFixtures.ConsumeAmmo(ranged, 1),
+                "reload lock: spend the one loaded bolt explicitly");
             int magazine = ranged.Magazine, reserve = ranged.Reserve;
             Check(magazine < _crossbow.magazineSize && reserve > 0, $"reload lock: a reload is possible (mag {magazine}/{_crossbow.magazineSize}, reserve {reserve})");
             _rig.Input.ReloadPressedOverride = true;
@@ -2060,7 +2162,8 @@ namespace Emberdelve.EditorTools
 
             // 2. forced change during a reload goes through and cancels it cleanly (no free ammo, nothing completes later)
             Check(loadout.SwitchToSlot(1) && _rig.ActiveWeapon == _crossbow, "forced: back to the crossbow");
-            EmberdelveKitFixtures.ConsumeAmmo(ranged, 2);
+            Check(ranged.Magazine == 1 && EmberdelveKitFixtures.ConsumeAmmo(ranged, 1),
+                "forced: spend the single loaded bolt before cancellation proof");
             magazine = ranged.Magazine;
             reserve = ranged.Reserve;
             _rig.Input.ReloadPressedOverride = true;
@@ -2249,6 +2352,8 @@ namespace Emberdelve.EditorTools
                 string why;
                 if (c.weapon.IsRanged)
                 {
+                    Check(_rig.TryGetGuardShield(out GuardShieldShape shieldShape), "projectile guard: raised physical shield exists");
+                    towardRig = (shieldShape.Position - p).normalized;
                     ProjectileAttacker rangedAttacker = new ProjectileAttacker
                     {
                         CombatId = attackerId, Point = p, Weapon = c.weapon, AimDirection = towardRig
@@ -2278,6 +2383,7 @@ namespace Emberdelve.EditorTools
                 {
                     DamageInfo info = _playerHits[0];
                     Check(info.Blocked && info.GuardBroken == c.expectBreak, $"{c.label}: blocked, guard broken = {c.expectBreak} (impact {info.ImpactPower})");
+                    if (c.weapon.IsRanged) Check(info.GuardShieldContact, $"{c.label}: actual flight contacts the shield shape");
                 }
 
                 if (c.expectBreak)
@@ -2429,6 +2535,10 @@ namespace Emberdelve.EditorTools
             EnemyAgent agent = FindFirstObjectByType<EnemyAgent>(FindObjectsInactive.Include);
             if (agent != null && agent.Status != null)
             {
+                // Hit-slow fixture targets an upright, awake enemy; dormant floor hit shapes are tested separately.
+                agent.Brain.NotifyDamaged(DamageInfo.Invalid);
+                agent.Brain.Tick(EnemyBrain.WakeSeconds, Time.time, agent.transform.position, agent.transform.forward, null);
+                agent.RefreshDormantHitPose(null);
                 agent.transform.position = Origin + new Vector3(0f, 0f, 20f);
                 Physics.SyncTransforms();
                 Scenario s = NewScenario(_sword);

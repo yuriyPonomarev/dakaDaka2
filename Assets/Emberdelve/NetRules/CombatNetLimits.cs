@@ -19,7 +19,15 @@ namespace Emberdelve.Net.Rules
         /// <summary>Primary button released: the server measures the charge from its own clock and fires or refuses.</summary>
         DrawRelease = 5,
         /// <summary>Weapon set swap key (the authority's SwapWeaponSet command decides).</summary>
-        SwapWeapon = 6
+        SwapWeapon = 6,
+        /// <summary>Refresh a short-lived held melee intent. Server timing still decides each swing.</summary>
+        AttackHold = 7,
+        /// <summary>Release held melee intent without cancelling an already committed swing.</summary>
+        AttackRelease = 8,
+        /// <summary>Request server-owned reload of the equipped ranged weapon.</summary>
+        Reload = 9,
+        /// <summary>Cancel an uncommitted ranged draw without firing or changing ammo, guard, or reload.</summary>
+        DrawCancel = 10
     }
 
     /// <summary>Why the server did not do what a combat request (that passed the wire gate) asked. Nothing was spent for any value but None.</summary>
@@ -69,7 +77,7 @@ namespace Emberdelve.Net.Rules
     public static class CombatNetLimits
     {
         /// <summary>Largest valid <see cref="CombatIntentKind"/> value.</summary>
-        public const byte KindMax = (byte)CombatIntentKind.SwapWeapon;
+        public const byte KindMax = (byte)CombatIntentKind.DrawCancel;
 
         /// <summary>
         /// Client side: smallest gap between two sends. Above the server gate's refill period (1 / <see cref="CombatIntentGate.RequestsPerSecond"/>),

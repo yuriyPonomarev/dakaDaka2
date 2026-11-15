@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using Emberdelve.Data;
+using Emberdelve.Rules;
 
 namespace Emberdelve.Core
 {
@@ -35,6 +36,14 @@ namespace Emberdelve.Core
     /// </summary>
     public static class RunContext
     {
+        public static RoyalePartyMode? SelectedRoyaleMode { get; private set; }
+        public static void SelectRoyaleMode(RoyalePartyMode? mode)
+        {
+            if (mode.HasValue && (mode.Value < RoyalePartyMode.Solo || mode.Value > RoyalePartyMode.Trio))
+                throw new ArgumentOutOfRangeException(nameof(mode));
+            SelectedRoyaleMode = mode;
+        }
+
         public static CharacterClassData SelectedClass { get; private set; }
         public static RunResult LastResult { get; private set; }
         public static bool HasResult { get; private set; }
@@ -49,6 +58,7 @@ namespace Emberdelve.Core
         public static void ResetHandoff()
         {
             SelectedClass = null;
+            SelectedRoyaleMode = null;
             LastResult = default;
             HasResult = false;
             _hasPendingRaidSeed = false;

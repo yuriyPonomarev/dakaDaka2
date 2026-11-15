@@ -13,8 +13,8 @@ namespace Emberdelve.EditorTools
     /// First-person arms of the local player. The same CC0 MakeHuman-derived body as the world character
     /// is reused, but only its ARMS are kept: a derived skinned mesh (<see cref="MeshPath"/>) made of the triangles whose strongest bone
     /// weight is an upper arm, forearm, hand or finger bone, so head, neck, torso, hips and legs do not exist in the mesh at all (nothing
-    /// to hide, nothing that can show through when the rig bends). Two submeshes: sleeves (dark quilted gambeson, upper arm and forearm)
-    /// and hands (weathered human skin, hand and fingers); both with a code-generated 128 px point-filtered URP Lit material, not undead.
+    /// to hide, nothing that can show through when the rig bends). Two submeshes: sleeves (dark linen, upper arm and forearm)
+    /// and hands (weathered human skin, hand and fingers); both with code-generated, mipmapped URP Lit materials, not undead.
     ///
     /// Prefab <see cref="PrefabPath"/>: FirstPersonArms (<see cref="FirstPersonArmsDriver"/>) / Model (the rig, Humanoid Animator with the controller
     /// below, turned and moved so the right hand sits at the guard position in front of the camera) with the weapon grips
@@ -95,7 +95,7 @@ namespace Emberdelve.EditorTools
 
             if (!force && AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath) != null) return "up to date";
 
-            Material sleeve = EnsureMaterial(SleeveTexturePath, SleeveMaterialPath, 128, true, 0.12f);
+            Material sleeve = EnsureMaterial(SleeveTexturePath, SleeveMaterialPath, 256, true, 0.12f);
             Material skin = EnsureMaterial(SkinTexturePath, SkinMaterialPath, 64, false, 0.22f);
 
             Mesh mesh = BuildArmsMesh();
@@ -124,7 +124,7 @@ namespace Emberdelve.EditorTools
             return 0;
         }
 
-        /// <summary>The arms-only mesh: triangles whose three vertices are all dominated by arm / hand bones. Submesh 0 sleeves, submesh 1 hands.</summary>
+        /// <summary>The arms-only mesh: arm/hand triangles split cleanly at each wrist plane. Submesh 0 sleeves, submesh 1 hands.</summary>
         public static Mesh BuildArmsMesh()
         {
             GameObject fbx = AssetDatabase.LoadAssetAtPath<GameObject>(BodySource);
@@ -162,6 +162,7 @@ namespace Emberdelve.EditorTools
 
                 // Cylinder axes (shoulder -> hand, bind pose, in the mesh's local space) for the UVs.
                 Vector3[] axisOrigin = new Vector3[2], axisDirection = new Vector3[2];
+                Vector3[] wrist = new Vector3[2], wristDirection = new Vector3[2];
                 for (int side = 0; side < 2; side++)
                 {
                     string suffix = side == 0 ? ".L" : ".R";
@@ -170,52 +171,76 @@ namespace Emberdelve.EditorTools
                     {
                         if (bones[i] == null || !bones[i].name.EndsWith(suffix)) continue;
                         if ((bones[i].name.Contains("upper_arm") || bones[i].name.Contains("upperarm01"))) from = smr.transform.InverseTransformPoint(bones[i].position);
-                        if ((bones[i].name.Contains("DEF-hand") || bones[i].name.Contains("wrist"))) to = smr.transform.InverseTransformPoint(bones[i].position);
+                        if ((bones[i].name.Contains("DEF-hand") || bones[i].name.Contains("wrist")))
+                        {
+                            to = smr.transform.InverseTransformPoint(bones[i].position);
+                            if (bones[i].parent != null)
+                                wristDirection[side] = (to - smr.transform.InverseTransformPoint(bones[i].parent.position)).normalized;
+                        }
                     }
 
                     axisOrigin[side] = from;
                     axisDirection[side] = (to - from).normalized;
+                    if (wristDirection[side].sqrMagnitude < .5f) wristDirection[side] = axisDirection[side];
+                    wrist[side] = to - wristDirection[side] * .025f;
                 }
 
-                List<int> sleeveTris = new List<int>(), handTris = new List<int>();
+                List<Vector3> nv = new List<Vector3>(), nn = new List<Vector3>();
+                List<Vector2> nuv = new List<Vector2>();
+                List<BoneWeight> nw = new List<BoneWeight>();
+                List<int> sleeveFinal = new List<int>(), handFinal = new List<int>();
+                var vertexLookup = new Dictionary<(Vector3, Vector3, Vector2, BoneWeight), int>();
+                ArmWristGeometry.Vertex Vertex(int index) => new ArmWristGeometry.Vertex(vertices[index],
+                    normals.Length > index ? normals[index] : Vector3.up, weights[index]);
+
+                void Emit(List<ArmWristGeometry.Vertex> polygon, List<int> output, int side)
+                {
+                    for (int i = 1; i + 1 < polygon.Count; i++)
+                    {
+                        var tri = new[] { polygon[0], polygon[i], polygon[i + 1] };
+                        if (Vector3.Cross(tri[1].Position - tri[0].Position,
+                            tri[2].Position - tri[0].Position).sqrMagnitude < 1e-16f) continue;
+                        var uv = new Vector2[3];
+                        float maxAngle = float.NegativeInfinity;
+                        for (int j = 0; j < 3; j++)
+                        {
+                            uv[j] = CylinderUv(tri[j].Position, axisOrigin[side], axisDirection[side]);
+                            maxAngle = Mathf.Max(maxAngle, uv[j].y);
+                        }
+                        // Split UV seam vertices only; reuse identical skinned vertices everywhere else.
+                        for (int j = 0; j < 3; j++)
+                        {
+                            if (maxAngle - uv[j].y > 2f) uv[j].y += 4f;
+                            var key = (tri[j].Position, tri[j].Normal, uv[j], tri[j].Weight);
+                            if (!vertexLookup.TryGetValue(key, out int vertexIndex))
+                            {
+                                vertexIndex = nv.Count;
+                                vertexLookup.Add(key, vertexIndex);
+                                nv.Add(tri[j].Position); nn.Add(tri[j].Normal);
+                                nw.Add(tri[j].Weight); nuv.Add(uv[j]);
+                            }
+                            output.Add(vertexIndex);
+                        }
+                    }
+                }
+
                 for (int t = 0; t < triangles.Length; t += 3)
                 {
                     int a = triangles[t], b = triangles[t + 1], c = triangles[t + 2];
                     if (vGroup[a] == 0 || vGroup[b] == 0 || vGroup[c] == 0) continue;
-                    bool hand = vGroup[a] == 2 || vGroup[b] == 2 || vGroup[c] == 2;
-                    List<int> list = hand ? handTris : sleeveTris;
-                    list.Add(a); list.Add(b); list.Add(c);
+                    int side = left[DominantBone(weights[a])] ? 0 : 1;
+                    Emit(ArmWristGeometry.ClipTriangle(Vertex(a), Vertex(b), Vertex(c),
+                        wrist[side], wristDirection[side], false), sleeveFinal, side);
+                    Emit(ArmWristGeometry.ClipTriangle(Vertex(a), Vertex(b), Vertex(c),
+                        wrist[side], wristDirection[side], true), handFinal, side);
                 }
-
-                // Compact the vertices actually used.
-                Dictionary<int, int> remap = new Dictionary<int, int>();
-                List<Vector3> nv = new List<Vector3>(), nn = new List<Vector3>();
-                List<Vector2> nuv = new List<Vector2>();
-                List<BoneWeight> nw = new List<BoneWeight>();
-                int Map(int index)
-                {
-                    int mapped;
-                    if (remap.TryGetValue(index, out mapped)) return mapped;
-                    mapped = nv.Count;
-                    remap[index] = mapped;
-                    nv.Add(vertices[index]);
-                    nn.Add(normals.Length > index ? normals[index] : Vector3.up);
-                    nw.Add(weights[index]);
-                    int side = left[DominantBone(weights[index])] ? 0 : 1;
-                    nuv.Add(CylinderUv(vertices[index], axisOrigin[side], axisDirection[side]));
-                    return mapped;
-                }
-
-                List<int> sleeveFinal = new List<int>(), handFinal = new List<int>();
-                for (int i = 0; i < sleeveTris.Count; i++) sleeveFinal.Add(Map(sleeveTris[i]));
-                for (int i = 0; i < handTris.Count; i++) handFinal.Add(Map(handTris[i]));
 
                 Mesh mesh = AssetDatabase.LoadAssetAtPath<Mesh>(MeshPath);
                 bool create = mesh == null;
                 if (create) mesh = new Mesh();
                 mesh.Clear();
                 mesh.name = "FP_Arms";
-                mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt16;
+                mesh.indexFormat = nv.Count > 65535 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
                 mesh.SetVertices(nv);
                 mesh.SetNormals(nn);
                 mesh.SetUVs(0, nuv);
@@ -300,7 +325,8 @@ namespace Emberdelve.EditorTools
             TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
             if (importer != null)
             {
-                importer.filterMode = FilterMode.Point;
+                importer.filterMode = FilterMode.Trilinear;
+                importer.anisoLevel = 8;
                 importer.wrapMode = TextureWrapMode.Repeat;
                 importer.mipmapEnabled = true;
                 importer.maxTextureSize = 256;
@@ -320,23 +346,18 @@ namespace Emberdelve.EditorTools
             return material;
         }
 
-        /// <summary>Quilted gambeson: dark brown-grey, diamond seams, puffy cells, frayed pale thread, dirt.</summary>
+        /// <summary>Charcoal linen: restrained warp/weft and broad wear, no high-contrast quilting.</summary>
         private static Color32 Sleeve(int x, int y, int size)
         {
-            int cell = size / 8;
-            int a = (x + y) % cell, b = (x - y + size * 4) % cell;
-            float m = Mathf.Min(a, cell - a), n = Mathf.Min(b, cell - b);
-            float puff = Mathf.Min(m, n) / (cell * 0.5f);
-            bool seam = Mathf.Min(m, n) < 1f;
-            float dirt = Noise(x * 0.11f, y * 0.11f, 3);
-            float grain = Hash(x, y, 7);
-            float shade = 0.72f + 0.42f * puff;
-            float baseValue = 0.15f + 0.05f * (dirt - 0.5f);
-            Color c = new Color(baseValue * 1.18f, baseValue * 0.95f, baseValue * 0.78f);
-            c *= shade;
-            c += (grain - 0.5f) * 0.035f * Color.white;
-            if (seam) c = c * 0.55f + (Hash(x / 2, y / 2, 11) > 0.72f ? new Color(0.14f, 0.12f, 0.09f) : Color.black);
-            return (Color32)new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
+            float u = (x + .5f) / size, v = (y + .5f) / size;
+            float warp = Mathf.Sin(u * Mathf.PI * 64f);
+            float weft = Mathf.Sin(v * Mathf.PI * 64f);
+            float weave = warp * weft;
+            // Periodic broad variation avoids a visible seam in this repeating cloth tile.
+            float wear = Mathf.Sin(u * Mathf.PI * 2f) * Mathf.Sin(v * Mathf.PI * 4f);
+            float shade = 1f + .045f * weave + .035f * wear;
+            Color c = new Color(.145f, .15f, .155f) * shade;
+            return (Color32)new Color(c.r, c.g, c.b, 1f);
         }
 
         /// <summary>Weathered human skin: desaturated pale-brown, mottled, a few darker veins and dirt, not undead.</summary>

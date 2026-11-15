@@ -7,6 +7,7 @@ using Emberdelve.Stats;
 namespace Emberdelve.Data
 {
     public enum WeaponKind { Melee, Ranged }
+    public enum RangedGuardShape { None, Crossbow, Bow }
 
     /// <summary>U5A: which hands a held item needs. Derived from the weapon data (never a per-instance claim): a shield is off-hand only, a two-handed weapon takes the main hand and blocks the off hand, everything else is one main-hand weapon.</summary>
     public enum HandUse { OneHanded, TwoHanded, OffHandOnly }
@@ -115,15 +116,28 @@ namespace Emberdelve.Data
         [Tooltip("Impact resist of this item when it blocks: a hit with power >= this breaks the block (reduced mitigation and a guard stagger).")]
         [Range(0f, 100f)] public float impactResist = 15f;
 
+        [Header("Impact Guard (project tuning)")]
+        public RangedGuardShape rangedGuardShape;
+        public bool impactGuard;
+        [Min(0f)] public float impactGuardDuration = .35f;
+        [Min(0f)] public float impactGuardResistance = 10f;
+        [Min(0f)] public float impactGuardRearmDelay = .65f;
+        public bool CanCrossbowGuard => IsRanged && CanBlock && rangedGuardShape == RangedGuardShape.Crossbow;
+        public bool CanBowGuard => IsRanged && CanBlock && rangedGuardShape == RangedGuardShape.Bow;
+        public bool CanRangedGuard => CanCrossbowGuard || CanBowGuard;
+        public bool CanImpactGuard => impactGuard && twoHanded && !canRiposte && !IsShield && CanBlock;
+
         [Header("Riposte (U3C3)")]
-        [Tooltip("Sword-class marker: a successful block with this weapon (never with a shield) opens a riposte window. Authored data on the definition; the runtime never looks at a weapon id or name to decide it.")]
+        [Tooltip("Sword-class marker: a confirmed parry-region block with this weapon (never with a shield) opens a riposte window. Authored data on the definition; the runtime never looks at a weapon id or name to decide it.")]
         public bool canRiposte = false;
-        [Tooltip("FIX2: the riposte still works while a shield is carried in the off hand (the warrior's sword and shield). The parry is this weapon's; a shield alone never parries.")]
+        [Tooltip("Legacy serialized setting, ignored. A shield block cannot grant this weapon a riposte.")]
         public bool riposteWithOffhandShield = false;
         [Tooltip("Seconds after a successful block within which pressing block again starts the riposte (server clock, inclusive).")]
         [Range(0.1f, 3f)] public float riposteWindow = 1.0f;
-        [Tooltip("Damage multiplier of every riposte strike. Impact power is NOT multiplied, so a riposte never breaks a holding guard that the normal swing would not.")]
+        [Tooltip("Damage multiplier of every strike granted by a confirmed blade-region parry. Ordinary block ripostes use 1. Impact power is not multiplied.")]
         [Range(0.1f, 3f)] public float riposteDamageMultiplier = 1.5f;
+        [Tooltip("Normalized blade interval that grants parry. Temporarily the full blade (0..1), explicitly requested by the user. Physical interception is still required.")]
+        public Vector2 parryBladeRegion = new Vector2(0f, 1f);
         [Tooltip("Indices into Swing Patterns, one per riposte strike in order (the strike count is this array's length).")]
         public int[] riposteSwingPatterns = new int[0];
         [Tooltip("Seconds between the end of one riposte strike and the start of the next.")]
@@ -150,6 +164,8 @@ namespace Emberdelve.Data
         [Range(0.1f, 1f)] public float minChargeDamageScale = 0.45f;
         public int magazineSize = 7;
         public float reloadTime = 1.7f;
+        [Tooltip("Keep R held to begin reloading after releasing an ordinary shot; never interrupt its draw.")]
+        public bool reloadWhileHeld;
         [Tooltip("Legacy RANGE falloff (metres from the muzzle). A projectile uses it only when the weapon has no air-time table below, or when the authority runs with ballistics off.")]
         public float falloffStartRange = 16f;
         public float falloffEndRange = 42f;

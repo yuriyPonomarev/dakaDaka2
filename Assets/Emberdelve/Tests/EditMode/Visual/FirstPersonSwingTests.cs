@@ -21,6 +21,22 @@ namespace Emberdelve.Tests.Visual
         private const string SwordId = "ashen_short_sword";
         private const string ShieldId = "emberbulwark_shield";
 
+        [TestCaseSource(nameof(PatternNames))]
+        public void NetworkRecoilStartsAtAcceptedContactAndReturnsToReady(string patternName)
+        {
+            var pattern=Pattern(patternName);
+            const float stop=.37f;
+            SwingPose contact=pattern.ActivePose(stop);
+            WeaponVisualRig.SampleRecoil(pattern,stop,0f,false,out var start,out var startRotation);
+            Assert.That(Vector3.Distance(start,contact.Base),Is.LessThan(.0001f));
+            Assert.That(Quaternion.Angle(startRotation,contact.LocalRotation),Is.LessThan(.05f));
+            WeaponVisualRig.SampleRecoil(pattern,stop,1f,false,out var end,out var endRotation);
+            Assert.That(Vector3.Distance(end,GuardBladePose.RootRestPosition),Is.LessThan(.0001f));
+            Assert.That(Quaternion.Angle(endRotation,WeaponVisualRig.ReadyRotation),Is.LessThan(.05f));
+            WeaponVisualRig.SampleRecoil(pattern,stop,.5f,false,out var middle,out _);
+            Assert.That(Vector3.Distance(middle,(start+end)*.5f),Is.LessThan(.0001f));
+        }
+
         [TestCase(1f)]
         [TestCase(FirstPersonArmsDriver.ModelScale)]
         [TestCase(0.75f)]
@@ -130,7 +146,7 @@ namespace Emberdelve.Tests.Visual
         private static float PitchDownOf(Vector3 direction) => -Mathf.Asin(Mathf.Clamp(direction.normalized.y, -1f, 1f)) * Mathf.Rad2Deg;
 
         [TestCaseSource(nameof(PatternNames))]
-        public void Blade_FollowsThePatternDirection_AtEveryPhase(string patternName)
+        public void Blade_FollowsDamageDirectionDuringActive_AndEasedPresentationOutside(string patternName)
         {
             SwingPatternData pattern = Pattern(patternName);
             SwingTiming timing = pattern.Timing;
@@ -140,7 +156,11 @@ namespace Emberdelve.Tests.Visual
                 for (int i = 0; i < times.Length; i++)
                 {
                     scene.Pose(pattern, times[i]);
-                    Vector3 expected = pattern.Evaluate(times[i], timing).LocalDirection;
+                    // Active samples must remain exact damage geometry; windup/recovery use the accepted ready-pose blend.
+                    WeaponVisualRig.SamplePresentation(pattern, timing, times[i], FirstPersonArmsDriver.PatternRest,
+                        WeaponVisualRig.ReadyRotation, false, out _, out Quaternion presented);
+                    bool active = times[i] >= timing.Windup && times[i] <= timing.ActiveEnd;
+                    Vector3 expected = active ? pattern.Evaluate(times[i], timing).LocalDirection : presented * Vector3.forward;
                     float angle = Vector3.Angle(expected, scene.TipDirection());
                     Assert.Less(angle, 3f, patternName + " t=" + times[i] + ": the model's blade points along the pattern's blade direction");
                 }
@@ -165,14 +185,15 @@ namespace Emberdelve.Tests.Visual
                 Vector3 tipEnd = scene.TipDirection();
                 Vector3 handEnd = scene.GripLocal();
 
-                float yawData = end.Yaw - start.Yaw;
+                float yawData = Mathf.DeltaAngle(YawOf(start.LocalDirection), YawOf(end.LocalDirection));
+                float yawMidData = Mathf.DeltaAngle(YawOf(start.LocalDirection), YawOf(pattern.Evaluate(timing.Windup + timing.Active * .5f, timing).LocalDirection));
                 float pitchData = end.Pitch - start.Pitch;
                 float forwardData = end.Base.z - start.Base.z;
 
                 if (Mathf.Abs(yawData) > 5f)
                 {
-                    Assert.AreEqual(Mathf.Sign(yawData), Mathf.Sign(YawOf(tipEnd) - YawOf(tipStart)), patternName + ": the blade sweeps to the side the pattern's yaw does");
-                    Assert.AreEqual(Mathf.Sign(yawData), Mathf.Sign(YawOf(tipMid) - YawOf(tipStart)), patternName + ": and already at the middle of the active phase");
+                    Assert.AreEqual(Mathf.Sign(yawData), Mathf.Sign(Mathf.DeltaAngle(YawOf(tipStart), YawOf(tipEnd))), patternName + ": the blade sweeps to the side the pattern's yaw does");
+                    Assert.AreEqual(Mathf.Sign(yawMidData), Mathf.Sign(Mathf.DeltaAngle(YawOf(tipStart), YawOf(tipMid))), patternName + ": and already at the middle of the active phase");
                 }
 
                 if (Mathf.Abs(pitchData) > 5f)
@@ -188,6 +209,22 @@ namespace Emberdelve.Tests.Visual
                 if (pattern.kind == SwingKind.HorizontalLeftToRight) Assert.Greater(handEnd.x, handStart.x, patternName + ": left-to-right moves the hand to the right");
                 if (pattern.kind == SwingKind.HorizontalRightToLeft) Assert.Less(handEnd.x, handStart.x, patternName + ": right-to-left moves the hand to the left");
                 if (pattern.kind == SwingKind.Overhead) Assert.Greater(PitchDownOf(tipEnd), PitchDownOf(tipStart) + 20f, patternName + ": the overhead comes down");
+            }
+        }
+
+        [TestCaseSource(nameof(PatternNames))]
+        public void Presentation_IsContinuousAtDamageWindowBoundaries(string patternName)
+        {
+            var pattern = Pattern(patternName);
+            var timing = pattern.Timing;
+            foreach (float boundary in new[] { timing.Windup, timing.ActiveEnd })
+            {
+                WeaponVisualRig.SamplePresentation(pattern, timing, boundary - .00001f, FirstPersonArmsDriver.PatternRest,
+                    WeaponVisualRig.ReadyRotation, false, out var before, out var beforeRotation);
+                WeaponVisualRig.SamplePresentation(pattern, timing, boundary + .00001f, FirstPersonArmsDriver.PatternRest,
+                    WeaponVisualRig.ReadyRotation, false, out var after, out var afterRotation);
+                Assert.Less(Vector3.Distance(before, after), .002f, patternName + " boundary translation");
+                Assert.Less(Quaternion.Angle(beforeRotation, afterRotation), .2f, patternName + " boundary rotation");
             }
         }
 
@@ -215,7 +252,7 @@ namespace Emberdelve.Tests.Visual
         }
 
         [TestCaseSource(nameof(PatternNames))]
-        public void Hand_StaysInsideTheCameraFrustum_ThroughTheWholeSwing(string patternName)
+        public void SwordGrip_FollowsTheAcceptedLoweredPresentation_ThroughTheWholeSwing(string patternName)
         {
             SwingPatternData pattern = Pattern(patternName);
             SwingTiming timing = pattern.Timing;
@@ -226,10 +263,13 @@ namespace Emberdelve.Tests.Visual
                 {
                     float time = timing.Total * i / steps;
                     scene.Pose(pattern, time);
-                    Assert.IsTrue(scene.InFrustum(scene.Driver.GripRight.position), patternName + " t=" + time.ToString("0.000") + ": the grip is inside the frustum (fov " + scene.Camera.fieldOfView + ", near " + scene.Camera.nearClipPlane + ")");
-
-                    SwingPose pose = pattern.Evaluate(time, timing);
-                    Vector3 expected = scene.Camera.transform.TransformPoint(FirstPersonArmsDriver.ClampToView(scene.Camera, FirstPersonArmsDriver.ViewHand(pose.Base)));
+                    WeaponVisualRig.SamplePresentation(pattern, timing, time, FirstPersonArmsDriver.PatternRest,
+                        WeaponVisualRig.ReadyRotation, false, out Vector3 presentedBase, out _);
+                    Vector3 framed = FirstPersonArmsDriver.ClampToView(scene.Camera, FirstPersonArmsDriver.ViewHand(presentedBase));
+                    // The accepted sword framing intentionally lowers the hilt by 20 cm below the clamped target.
+                    // Validate the pre-offset framing AND the final exact hand target instead of requiring the lowered hilt onscreen.
+                    Assert.IsTrue(scene.InFrustum(scene.Camera.transform.TransformPoint(framed)));
+                    Vector3 expected = scene.Camera.transform.TransformPoint(framed + Vector3.down * .20f);
                     Assert.Less(Vector3.Distance(expected, scene.Driver.GripRight.position), 0.06f, patternName + " t=" + time.ToString("0.000") + ": the arm reaches the hand target");
                 }
             }
@@ -282,11 +322,11 @@ namespace Emberdelve.Tests.Visual
             {
                 Assert.IsTrue(scene.Driver.ShieldShown, "spawn: sword and shield");
 
-                // The loadout calls SetWeapons for every equip: the crossbow (arms are hidden for it), then the sword set again, repeatedly.
+                // The procedural crossbow keeps the same arms alive, then the sword set restores its models.
                 for (int round = 0; round < 3; round++)
                 {
-                    scene.Driver.SetWeapons(crossbow, shield);
-                    scene.Arms.SetActive(false);
+                    Assert.IsTrue(scene.Driver.SetWeapons(crossbow, shield), "crossbow supports the existing arms");
+                    Assert.IsFalse(scene.Driver.ShieldShown, "the two-handed crossbow has no shield");
                     scene.Driver.SetWeapons(sword, shield);
                     scene.Arms.SetActive(true);
 
@@ -302,6 +342,147 @@ namespace Emberdelve.Tests.Visual
                     Assert.Less(Vector3.Distance(scene.Camera.transform.InverseTransformPoint(scene.Driver.GripLeft.position), FirstPersonArmsDriver.ShieldRest), 0.08f, "the left hand holds it at its rest position");
                     Assert.AreEqual(0, CountEnabledShields(scene.Driver, shield) - 1, "exactly one shield is shown");
                 }
+            }
+        }
+
+        [Test] public void CrossbowLoadedVisual_FollowsAmmoAndReloadWithoutMovingMuzzle()
+        {
+            using (Scene scene = Scene.Create("ember_crossbow", null))
+            {
+                var visual = WeaponVisualBuilder.Build(EmberdelveViewmodelPreview.FindWeapon("ember_crossbow"), scene.Camera.transform, scene.Camera.transform);
+                var bolt = visual.transform.Find("Crossbow_Bolt");
+                var left = visual.transform.Find("Crossbow_String/Left");
+                Vector3 muzzle = visual.Muzzle.position;
+                visual.SetCrossbowState(true, false, 0f);
+                Assert.IsTrue(bolt.gameObject.activeSelf);
+                Assert.Less(left.localPosition.z, -.1f);
+                Assert.That(bolt.localPosition.z - bolt.localScale.z * .5f, Is.EqualTo(-.22f).Within(.001f), "bolt tail meets cocked string");
+                visual.SetDrawProgress(0f);
+                Assert.IsTrue(bolt.gameObject.activeSelf, "idle draw reset must not hide loaded bolt");
+                visual.SetCrossbowState(false, false, 0f);
+                Assert.IsFalse(bolt.gameObject.activeSelf);
+                Assert.That(left.localPosition.z, Is.EqualTo(-.025f).Within(.001f));
+                visual.SetCrossbowState(false, true, .3f);
+                Assert.IsFalse(bolt.gameObject.activeSelf);
+                visual.SetCrossbowState(false, true, .65f);
+                Assert.IsTrue(bolt.gameObject.activeSelf);
+                visual.SetCrossbowState(false, false, 0f);
+                Assert.IsFalse(bolt.gameObject.activeSelf, "cancelled reload removes uncommitted bolt");
+                Assert.Less(Vector3.Distance(muzzle, visual.Muzzle.position), .0001f);
+            }
+        }
+
+        [TestCase(0f, false)]
+        [TestCase(.3f, true)]
+        [TestCase(.65f, true)]
+        [TestCase(1f, false)]
+        public void CrossbowReload_HandReachesActionFromAbove_WithoutMovingWeapon(float progress, bool above)
+        {
+            WeaponData crossbow = EmberdelveViewmodelPreview.FindWeapon("ember_crossbow");
+            using (Scene scene = Scene.Create("ember_crossbow", null))
+            {
+                Assert.IsTrue(scene.Driver.SetWeapons(crossbow, null));
+                WeaponVisualRig visual = WeaponVisualBuilder.Build(crossbow, scene.Camera.transform, scene.Camera.transform);
+                scene.Driver.SetVisual(visual);
+                scene.Pose(null, -1f, 0f);
+                Vector3 position = visual.transform.position;
+                Quaternion rotation = visual.transform.rotation;
+                scene.Driver.PoseCrossbow(scene.Camera.transform, visual.transform, true, progress);
+                Vector3 grip = FirstPersonArmsDriver.CrossbowLeftGrip(true, progress);
+                Assert.Less(Vector3.Distance(scene.Driver.SupportGrip.position, visual.transform.TransformPoint(grip)), .08f);
+                Transform wrist = scene.Driver.GetComponentInChildren<Animator>().GetBoneTransform(HumanBodyBones.LeftHand);
+                float relativeHeight = visual.transform.InverseTransformPoint(wrist.position).y - grip.y;
+                if (above) Assert.Greater(relativeHeight, .02f, "reload wrist stays above the string/bolt rather than hidden behind the stock");
+                else Assert.Less(relativeHeight, -.02f, "reload endpoints retain the ordinary support orientation");
+                if (above)
+                    Assert.Less(scene.Camera.WorldToViewportPoint(wrist.position).y, .6f,
+                        "working wrist must not rise into the upper view and obscure the action");
+                Assert.Less(Vector3.Distance(position, visual.transform.position), .0001f);
+                Assert.Less(Quaternion.Angle(rotation, visual.transform.rotation), .001f);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void CrossbowHands_FollowSingleVisibleProceduralWeapon_WithoutMovingGuard(bool raised)
+        {
+            WeaponData crossbow = EmberdelveViewmodelPreview.FindWeapon("ember_crossbow");
+            using (Scene scene = Scene.Create("ember_crossbow", null))
+            {
+                Assert.IsTrue(scene.Driver.SetWeapons(crossbow, null));
+                Assert.IsNull(scene.Driver.MainHandModel, "no duplicate weapon is parented to the hand");
+                WeaponVisualRig visual = WeaponVisualBuilder.Build(crossbow, scene.Camera.transform, scene.Camera.transform);
+                scene.Driver.SetVisual(visual);
+                visual.SetGuardHeld(raised);
+                Vector3 before = visual.transform.position;
+                Quaternion rotation = visual.transform.rotation;
+                scene.Pose(null, -1f, raised ? 1f : 0f);
+                Assert.Less(Vector3.Distance(scene.Driver.GripRight.position,
+                    visual.transform.TransformPoint(FirstPersonArmsDriver.CrossbowRightGrip)), .08f, "right palm reaches the grip");
+                Assert.IsNotNull(scene.Driver.SupportGrip);
+                Assert.Less(Vector3.Distance(scene.Driver.SupportGrip.position,
+                    visual.transform.TransformPoint(FirstPersonArmsDriver.CrossbowSupportGrip)), .08f, "left palm reaches the stock support");
+                Transform supportWrist = scene.Driver.GetComponentInChildren<Animator>().GetBoneTransform(HumanBodyBones.LeftHand);
+                if (!raised)
+                    Assert.Less(visual.transform.InverseTransformPoint(supportWrist.position).y,
+                        FirstPersonArmsDriver.CrossbowSupportGrip.y - .02f,
+                        "resting support wrist approaches from below the stock, keeping the forearm out of the sightline");
+                Assert.That(Vector3.Distance(before, visual.transform.position), Is.LessThan(.0001f));
+                Assert.That(Quaternion.Angle(rotation, visual.transform.rotation), Is.LessThan(.001f));
+                Renderer stock = visual.transform.Find("Crossbow_Stock").GetComponent<Renderer>();
+                Assert.IsTrue(stock.enabled && stock.gameObject.activeInHierarchy, "the sole procedural weapon stays visible");
+                if (raised)
+                {
+                    CrossbowGuardShape shape = CrossbowGuardPose.Resolve(scene.Camera.transform.position,
+                        Quaternion.LookRotation(scene.Camera.transform.forward, Vector3.up));
+                    Assert.Less(Vector3.Distance(shape.Position, visual.transform.position), .0001f);
+                    Assert.Less(Quaternion.Angle(shape.Rotation, visual.transform.rotation), .001f);
+                }
+            }
+        }
+
+        [Test]
+        public void BowGuard_HandsFollowWood_WithoutMovingAuthorityPose()
+        {
+            WeaponData weapon=EmberdelveViewmodelPreview.FindWeapon("hollow_bow");
+            using (Scene scene=Scene.Create("hollow_bow",null))
+            {
+                WeaponVisualRig visual=WeaponVisualBuilder.Build(weapon,scene.Camera.transform,scene.Camera.transform);
+                scene.Driver.SetVisual(visual);
+                visual.SetGuardHeld(true);
+                Vector3 position=visual.transform.position;
+                Quaternion rotation=visual.transform.rotation;
+                scene.Pose(null,-1f,1f);
+                var bow=visual.GetComponentInChildren<BowPresentation>();
+                scene.Driver.PoseBowGuard(scene.Camera.transform,bow);
+                Assert.Less(Vector3.Distance(scene.Driver.GripRight.position,bow.transform.TransformPoint(BowGuardPose.RightGrip)),.08f);
+                Assert.Less(Vector3.Distance(scene.Driver.SupportGrip.position,bow.transform.TransformPoint(BowGuardPose.LeftGrip)),.08f);
+                Assert.Less(Vector3.Distance(position,visual.transform.position),.0001f);
+                Assert.Less(Quaternion.Angle(rotation,visual.transform.rotation),.001f);
+                Assert.That(bow.Draw,Is.Zero);
+                BowGuardShape shape=BowGuardPose.Resolve(scene.Camera.transform.position,scene.Camera.transform.rotation);
+                Assert.Less(Vector3.Distance(position,shape.Position),.0001f);
+            }
+        }
+
+        [Test]
+        public void CrossbowReload_MovesSupportHandAndReturns_WithoutMovingWeaponOrRightGrip()
+        {
+            WeaponData crossbow = EmberdelveViewmodelPreview.FindWeapon("ember_crossbow");
+            using (Scene scene = Scene.Create("ember_crossbow", null))
+            {
+                WeaponVisualRig visual = WeaponVisualBuilder.Build(crossbow, scene.Camera.transform, scene.Camera.transform);
+                scene.Driver.SetVisual(visual);
+                scene.Pose(null, -1f);
+                Vector3 before = visual.transform.position;
+                Vector3 right = scene.Driver.GripRight.position;
+                Vector3 support = scene.Driver.SupportGrip.position;
+                scene.Driver.PoseCrossbow(scene.Camera.transform, visual.transform, true, .5f);
+                Assert.Greater(Vector3.Distance(scene.Driver.SupportGrip.position, support), .15f, "reload visibly pulls the string");
+                Assert.Less(Vector3.Distance(scene.Driver.GripRight.position, right), .01f, "right hand keeps its grip");
+                scene.Driver.PoseCrossbow(scene.Camera.transform, visual.transform, true, 1f);
+                Assert.Less(Vector3.Distance(scene.Driver.SupportGrip.position, support), .01f, "reload returns to support");
+                Assert.Less(Vector3.Distance(visual.transform.position, before), .0001f, "hands never reposition physical weapon");
             }
         }
 
@@ -330,7 +511,8 @@ namespace Emberdelve.Tests.Visual
             DefenseProfile ranged = DefenseProfile.Resolve(warrior, warrior.secondaryWeapon, warrior.offhandShield, 0f);
             DefenseProfile after = DefenseProfile.Resolve(warrior, warrior.primaryWeapon, warrior.offhandShield, 0f);
             Assert.IsTrue(before.HasShield, "spawn: the shield defends");
-            Assert.IsFalse(ranged.CanBlock, "a crossbow does not block");
+            Assert.IsTrue(ranged.CanBlock && warrior.secondaryWeapon.CanCrossbowGuard, "crossbow blocks with its own physical shape");
+            Assert.IsFalse(ranged.HasShield, "the two-handed crossbow does not borrow the stowed shield");
             Assert.IsTrue(after.HasShield, "after the swap back the shield defends again (gameplay is not what disappeared)");
             Assert.AreEqual(before.BlockReduction, after.BlockReduction, 1e-5f);
         }

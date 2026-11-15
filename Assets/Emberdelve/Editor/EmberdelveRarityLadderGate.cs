@@ -751,8 +751,8 @@ namespace Emberdelve.EditorTools
                 Check(result.GearScore == 21 && new RunResult(RunState.Dead, "Archer", 0f, 0, 0, 1f).GearScore == 0, "RunResult carries the gear score and defaults to 0");
                 new LobbyScreenView().Build(canvas, new CharacterClassData[0], null, null, result, true);
                 Text label = null;
-                foreach (Text text in canvasObject.GetComponentsInChildren<Text>(true)) if (text.name == "GearScore") label = text;
-                Check(label != null && label.text == "Gear score  21", "the lobby shows the last run's gear score: " + (label != null ? label.text : "no label"));
+                foreach (Text text in canvasObject.GetComponentsInChildren<Text>(true)) if (text.name == "LastRun") label = text;
+                Check(label != null && label.text.StartsWith("Last run: Extracted") && label.text.EndsWith("gear score 21"), "the lobby explicitly identifies the score as last-run history: " + (label != null ? label.text : "no label"));
             }
             finally
             {
@@ -765,8 +765,8 @@ namespace Emberdelve.EditorTools
                 Canvas canvas = emptyCanvas.AddComponent<Canvas>();
                 new LobbyScreenView().Build(canvas, new CharacterClassData[0], null, null, default, false);
                 Text label = null;
-                foreach (Text text in emptyCanvas.GetComponentsInChildren<Text>(true)) if (text.name == "GearScore") label = text;
-                Check(label != null && label.text == "Gear score  0", "before any run the lobby shows 0");
+                foreach (Text text in emptyCanvas.GetComponentsInChildren<Text>(true)) if (text.name == "GearScore" || text.name == "LastRun") label = text;
+                Check(label == null, "before any run the lobby does not invent a current or historical gear score");
                 Check(GearScore.ForEquipment(null) == 0 && GearScore.Label(35) == "Gear score  35", "GearScore.ForEquipment(null) is 0 and the label is 'Gear score  N'");
             }
             finally

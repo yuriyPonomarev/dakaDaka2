@@ -23,9 +23,13 @@ namespace Emberdelve.Tests.Combat
             NetRole.ResetToOffline();
             var catalog = AssetDatabase.LoadAssetAtPath<ItemCatalog>("Assets/Emberdelve/Data/EmberdelveItemCatalog.asset");
             Assert.IsNotNull(catalog);
-            var items = catalog.Items.Where(i => i != null && !i.IsEquippable)
-                .OrderByDescending(HotbarBindings.IsUsableDefinition).Take(2).ToArray();
-            Assert.AreEqual(2, items.Length);
+            // Usable also includes ammunition, which cannot occupy a physical utility pocket.
+            // Require a heal explicitly so belt tests do not depend on catalog ordering.
+            var utility = catalog.Items.FirstOrDefault(i => i != null && i.healAmount > 0 && QuickBeltRules.CanStore(i));
+            Assert.IsNotNull(utility, "the fixture requires a physical-belt healing item");
+            var bagItem = catalog.Items.FirstOrDefault(i => i != null && !i.IsEquippable && i != utility);
+            Assert.IsNotNull(bagItem, "the fixture requires a distinct ordinary bag item");
+            var items = new[] { utility, bagItem };
             _sourceObject = new GameObject("source");
             _source = _sourceObject.AddComponent<Inventory>();
             _sourceGear = _sourceObject.AddComponent<Equipment>();
@@ -162,19 +166,18 @@ namespace Emberdelve.Tests.Combat
         }
 
         [Test]
-        public void HeldSnapshotPreservesClientQuickWheelAndRejectsMissingHeldIdentity()
+        public void HeldSnapshotUsesServerBeltAndRejectsMissingHeldIdentity()
         {
+            var usable = _source.Slots.First(s => QuickBeltRules.CanStore(s.Item));
+            Assert.IsTrue(_source.TryMove(usable.Index, _source.BeltCell(5), out string reason), reason);
             var state = NetworkLoadoutState.Capture(_source, _sourceGear);
-            var usable = _source.Slots.First(s => HotbarBindings.IsUsableDefinition(s.Item));
-            NetRole.Set(NetRoleKind.Client);
-            Assert.IsTrue(state.TryApply(_target, _targetGear, out string reason), reason);
-            Assert.IsTrue(_target.Hotbar.TryAssign(5, usable.StackId, out reason), reason);
-            state.Revision++;
             state.HeldStackId = usable.StackId;
+            NetRole.Set(NetRoleKind.Client);
             Assert.IsTrue(state.TryApply(_target, _targetGear, out reason), reason);
             Assert.AreEqual(usable.StackId, _target.HeldStackId);
             Assert.AreSame(usable.Item, _target.HeldItem);
             Assert.AreEqual(usable.StackId, _target.Hotbar.StackIdAt(5));
+            Assert.AreEqual(_source.UsedCells, _target.UsedCells);
             state.Revision++;
             state.HeldStackId = ulong.MaxValue;
             Assert.IsFalse(state.TryApply(_target, _targetGear, out _));
@@ -183,10 +186,43 @@ namespace Emberdelve.Tests.Combat
         }
 
         [Test]
+        public void LaterServerSnapshotMovesBeltItemBackToBagWithoutLocalRebinding()
+        {
+            var usable = _source.Slots.First(s => QuickBeltRules.CanStore(s.Item));
+            var oldCell = usable.Origin;
+            Assert.IsTrue(_source.TryMove(usable.Index, _source.BeltCell(2), out string reason), reason);
+            var state = NetworkLoadoutState.Capture(_source, _sourceGear);
+            NetRole.Set(NetRoleKind.Client);
+            Assert.IsTrue(state.TryApply(_target, _targetGear, out reason), reason);
+            Assert.AreEqual(usable.StackId, _target.Hotbar.StackIdAt(2));
+            NetRole.ResetToOffline();
+            Assert.IsTrue(_source.TryMove(_source.IndexOfStack(usable.StackId), oldCell, out reason), reason);
+            state = NetworkLoadoutState.Capture(_source, _sourceGear);
+            NetRole.Set(NetRoleKind.Client);
+            Assert.IsTrue(state.TryApply(_target, _targetGear, out reason), reason);
+            Assert.AreEqual(0, _target.Hotbar.StackIdAt(2));
+            Assert.AreEqual(oldCell, _target.Slots.Single(s => s.StackId == usable.StackId).Origin);
+            Assert.AreEqual(_source.TotalUnits, _target.TotalUnits);
+        }
+
+        [Test]
+        public void HeldUtilityOutsidePhysicalBeltCannotMutateClientLoadout()
+        {
+            var usable = _source.Slots.First(s => QuickBeltRules.CanStore(s.Item));
+            var state = NetworkLoadoutState.Capture(_source, _sourceGear);
+            state.HeldStackId = usable.StackId;
+            string before = LoadoutSnapshot.Capture(_target, _targetGear).ToJson();
+            NetRole.Set(NetRoleKind.Client);
+            Assert.IsFalse(state.TryApply(_target, _targetGear, out _));
+            Assert.AreEqual(before, LoadoutSnapshot.Capture(_target, _targetGear).ToJson());
+            Assert.AreEqual(0, _target.HeldStackId);
+        }
+
+        [Test]
         public void HotbarRebindsToServerStackId()
         {
-            var usable = _source.Slots.First(s => HotbarBindings.IsUsableDefinition(s.Item));
-            Assert.IsTrue(_source.Hotbar.TryAssign(0, usable.StackId, out string reason), reason);
+            var usable = _source.Slots.First(s => QuickBeltRules.CanStore(s.Item));
+            Assert.IsTrue(_source.TryMove(usable.Index, _source.BeltCell(0), out string reason), reason);
             var state = NetworkLoadoutState.Capture(_source, _sourceGear);
             for (int i = 0; i < state.Stacks.Length; i++) state.Stacks[i].Id += 1000;
             NetRole.Set(NetRoleKind.Client);

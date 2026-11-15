@@ -19,8 +19,8 @@ namespace Emberdelve.EditorTools
     ///   BuildMaterials(id)  one URP/Lit material per FBX material under ID/Materials: base colour + OpenGL normal map (Unity convention)
     ///                       + a packed _MaskMS (R metallic * 0.5, A smoothness = 1 - roughness; the project convention), the FBX is remapped to them.
     ///   RegisterGeneratedFiles()  adds the generated mask maps to PolyHaven/manifest.json (+ LICENSE_CC0.txt is written by Fetch).
-    /// Import settings (<see cref="EmberdelvePolyHavenPostprocessor"/>): textures Point filtered, 512 px max (same retro convention as the
-    /// ambientCG walls and the retro pass); models without rig / animation / cameras / lights / colliders.
+    /// Import settings (<see cref="EmberdelvePolyHavenPostprocessor"/>): textures retain the shipped 1k detail with
+    /// Trilinear filtering, anisotropy 8 and mipmaps; models without rig / animation / cameras / lights / colliders.
     /// </summary>
     internal static class EmberdelvePolyHavenImport
     {
@@ -578,9 +578,9 @@ namespace Emberdelve.EditorTools
     public sealed class EmberdelvePolyHavenPostprocessor : AssetPostprocessor
     {
         public const string Root = "Assets/Emberdelve/Art/ThirdParty/PolyHaven/";
-        public const int MaxTextureSize = 512;
+        public const int MaxTextureSize = 1024;
 
-        public override uint GetVersion() { return 2; }
+        public override uint GetVersion() { return 3; }
 
         /// <summary>V3c: the weapon models stay CPU readable (the editor measures their length axis and head end once to build the normalised weapon prefabs).</summary>
         public static bool KeepReadable(string path)
@@ -655,8 +655,8 @@ namespace Emberdelve.EditorTools
             }
 
             if (importer.wrapMode != TextureWrapMode.Repeat) { importer.wrapMode = TextureWrapMode.Repeat; changed = true; }
-            if (importer.filterMode != FilterMode.Point) { importer.filterMode = FilterMode.Point; changed = true; }
-            if (importer.anisoLevel != 1) { importer.anisoLevel = 1; changed = true; }
+            if (importer.filterMode != FilterMode.Trilinear) { importer.filterMode = FilterMode.Trilinear; changed = true; }
+            if (importer.anisoLevel != 8) { importer.anisoLevel = 8; changed = true; }
             if (!importer.mipmapEnabled) { importer.mipmapEnabled = true; changed = true; }
             if (importer.maxTextureSize != MaxTextureSize) { importer.maxTextureSize = MaxTextureSize; changed = true; }
             if (importer.isReadable) { importer.isReadable = false; changed = true; }

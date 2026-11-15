@@ -106,6 +106,44 @@ namespace Emberdelve.Combat.Tests
             Assert.That(after.Slot, Is.EqualTo(worn.Slot)); Assert.That(after.Uid, Is.EqualTo(worn.Uid));
         }
 
+        [Test]
+        public void ExactCellTransferKeepsChosenOriginAndRejectsOccupiedOrInvalidCellsWithoutLoss()
+        {
+            var entry = _model.CopyEntries().Single(e => e.IsGear);
+            var origin = new Vector2Int(4, 2);
+            Assert.That(_model.TryTransferToBag(entry.EntryId, 1, _model.Revision, _targetBag,
+                _targetBag.Revision, _profile, out string reason, origin), Is.True, reason);
+            var placed = _targetBag.Slots.Single(e => e.Instance != null);
+            Assert.That(placed.Origin, Is.EqualTo(origin));
+            Assert.That(placed.Instance.Uid, Is.EqualTo(_gear.Uid));
+            Assert.That(_model.TryTransferToBag(entry.EntryId, 1, _model.Revision, _targetBag,
+                _targetBag.Revision, _profile, out _, origin), Is.False);
+            var stack = _model.CopyEntries().Single(e => !e.IsGear);
+            string before = _targetBag.ToContainerSnapshot().ToJson();
+            ulong revision = _model.Revision;
+            foreach (var invalid in new[] { origin, new Vector2Int(-2, 0), new Vector2Int(16, 0), new Vector2Int(0, 6) })
+            {
+                Assert.That(_model.TryTransferToBag(stack.EntryId, 1, revision, _targetBag,
+                    _targetBag.Revision, _profile, out _, invalid), Is.False);
+                Assert.That(_targetBag.ToContainerSnapshot().ToJson(), Is.EqualTo(before));
+                Assert.That(_model.Revision, Is.EqualTo(revision));
+                Assert.That(_model.TryGetEntry(stack.EntryId, out var remaining), Is.True);
+                Assert.That(remaining.Quantity, Is.EqualTo(stack.Quantity));
+            }
+        }
+
+        [Test]
+        public void ExactCellStackDoesNotAutoMergeIntoAnotherPosition()
+        {
+            var entry = _model.CopyEntries().Single(e => !e.IsGear);
+            Assert.That(_targetBag.TryAdd(_stackable, 1, out string reason), Is.True, reason);
+            var origin = new Vector2Int(5, 3);
+            Assert.That(_model.TryTransferToBag(entry.EntryId, 1, _model.Revision, _targetBag,
+                _targetBag.Revision, _profile, out reason, origin), Is.True, reason);
+            Assert.That(_targetBag.Slots.Count, Is.EqualTo(2));
+            Assert.That(_targetBag.Slots.Single(e => e.Origin == origin).Count, Is.EqualTo(1));
+        }
+
         [TearDown]
         public void TearDown()
         {
@@ -247,6 +285,82 @@ namespace Emberdelve.Combat.Tests
             Assert.That(_reentrantBag.ToContainerSnapshot().entries, Is.Empty);
             Assert.That(_model.TryGetEntry(stack.EntryId, out CorpseItemView remainder), Is.True);
             Assert.That(remainder.Quantity, Is.EqualTo(_sourceStackQuantity - 1));
+        }
+
+        [Test]
+        public void PhysicalBeltItemsBecomeVisibleCorpseRowsAndLootWithoutLosingUnits()
+        {
+            var potion = _catalog.Items.First(i => i != null && i.healAmount > 0);
+            _sourceBag.Clear();
+            Assert.IsTrue(_sourceBag.TryAdd(potion, 5, out string reason), reason);
+            Assert.IsTrue(_sourceBag.TryMove(0, _sourceBag.BeltCell(5), out reason), reason);
+            Assert.AreEqual(0, _sourceBag.UsedCells);
+            Assert.IsTrue(CorpseLootManifest.TryCapture(37, Vector3.zero, _sourceBag, _sourceEquipment, out var manifest, out reason), reason);
+            Assert.IsTrue(CorpseContainerModel.TryCreate(manifest, out var corpse, out reason), reason);
+            var row = corpse.CopyEntries().Single();
+            Assert.AreEqual(5, row.Quantity);
+            Assert.That(row.X, Is.InRange(0, corpse.Width - potion.EffectiveFootprint.x));
+            Assert.That(row.Y, Is.GreaterThanOrEqualTo(_sourceBag.GridHeight));
+            Assert.That(row.Y + potion.EffectiveFootprint.y, Is.LessThanOrEqualTo(corpse.Height));
+            Assert.IsTrue(string.IsNullOrEmpty(row.Slot));
+
+            Assert.IsTrue(_targetBag.TryAdd(potion, 2, out reason), reason);
+            Assert.IsTrue(_targetBag.TryMove(0, _targetBag.BeltCell(0), out reason), reason);
+            Assert.IsTrue(corpse.TryTransferToBag(row.EntryId, 5, corpse.Revision, _targetBag, _targetBag.Revision, _profile, out reason), reason);
+            Assert.AreEqual(0, corpse.EntryCount);
+            Assert.AreEqual(7, _targetBag.Slots.Where(s => s.Item == potion).Sum(s => s.Count));
+            Assert.IsTrue(_targetBag.TryGetBeltStack(0, out var belt));
+            Assert.AreEqual(5, belt.Count);
+            Assert.AreEqual(2, _targetBag.Slots.Single(s => s.Item == potion && !_targetBag.IsBeltCell(s.Origin)).Count);
+            Assert.IsFalse(corpse.TryTransferToBag(row.EntryId, 5, corpse.Revision, _targetBag, _targetBag.Revision, _profile, out _));
+            Assert.AreEqual(7, _targetBag.TotalUnits);
+        }
+
+        [Test]
+        public void FullTorchBeltPacksActualFootprintsWithoutOverlappingBagOrPages()
+        {
+            var torch = _catalog.Items.First(i => QuickBeltRules.CanStore(i) && i.healAmount == 0);
+            var original = _sourceBag.Slots.ToArray();
+            for (int i = 0; i < QuickBeltRules.SlotCount; i++)
+            {
+                Assert.IsTrue(_sourceBag.TryAdd(torch, 1, out var addReason), addReason);
+                var incoming = _sourceBag.Slots.Single(s => s.Item == torch && !_sourceBag.IsBeltCell(s.Origin));
+                Assert.IsTrue(_sourceBag.TryMove(incoming.Index, _sourceBag.BeltCell(i), out var moveReason), moveReason);
+            }
+            Assert.IsTrue(CorpseLootManifest.TryCapture(37, Vector3.zero, _sourceBag, _sourceEquipment, out var manifest, out var reason), reason);
+            Assert.IsTrue(CorpseContainerModel.TryCreate(manifest, out var corpse, out reason), reason);
+            var entries = corpse.CopyEntries();
+            Assert.AreEqual(original.Length + 6, entries.Length);
+            foreach (var stack in original)
+                Assert.IsTrue(entries.Any(e => e.ItemId == stack.Item.itemId && e.X == stack.Origin.x && e.Y == stack.Origin.y));
+            var occupied = new System.Collections.Generic.HashSet<Vector2Int>();
+            foreach (var row in entries.Where(e => e.ItemId == torch.itemId))
+            {
+                Assert.That(row.Y, Is.GreaterThanOrEqualTo(_sourceBag.GridHeight));
+                Assert.That(row.Y % 5 + torch.EffectiveFootprint.y, Is.LessThanOrEqualTo(5));
+                for (int y = 0; y < torch.EffectiveFootprint.y; y++)
+                for (int x = 0; x < torch.EffectiveFootprint.x; x++)
+                    Assert.IsTrue(occupied.Add(new Vector2Int(row.X + x, row.Y + y)), "corpse utility items must not overlap");
+            }
+        }
+
+        [Test]
+        public void CorpseUtilityCanEnterEmptyBeltSlotButEquipmentCannot()
+        {
+            var potion = _catalog.Items.First(i => i != null && i.healAmount > 0);
+            Assert.IsTrue(CorpseContainerModel.TryCreateLoot("chest", "Supply", Vector3.zero,
+                new[] { new LootDrop(potion, 5), new LootDrop(_gear.Definition, 1, _gear) }, _catalog, out var corpse, out string reason), reason);
+            var gear = corpse.CopyEntries().Single(e => e.IsGear);
+            string before = _targetBag.ToContainerSnapshot().ToJson();
+            Assert.IsFalse(corpse.TryTransferToBag(gear.EntryId, 1, corpse.Revision, _targetBag, _targetBag.Revision, _profile, out _, _targetBag.BeltCell(3)));
+            Assert.AreEqual(before, _targetBag.ToContainerSnapshot().ToJson());
+            Assert.AreEqual(2, corpse.EntryCount);
+            var row = corpse.CopyEntries().Single(e => !e.IsGear);
+            Assert.IsTrue(corpse.TryTransferToBag(row.EntryId, 5, corpse.Revision, _targetBag, _targetBag.Revision, _profile, out reason, _targetBag.BeltCell(3)), reason);
+            Assert.IsTrue(_targetBag.TryGetBeltStack(3, out var belt));
+            Assert.AreEqual(5, belt.Count);
+            Assert.AreEqual(0, _targetBag.UsedCells);
+            Assert.AreEqual(1, corpse.EntryCount);
         }
 
         private CorpseItemView FindEntry(string itemId)

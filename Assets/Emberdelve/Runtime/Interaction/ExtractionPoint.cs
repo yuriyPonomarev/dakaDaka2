@@ -15,6 +15,15 @@ namespace Emberdelve.Interaction
         bool BeginExtraction(IInteractionActor actor, out string reason);
     }
 
+    public interface IExtractionFloorSource
+    {
+        int ExtractionFloorFor(IInteractionActor actor);
+    }
+    public interface IExtractionFloorAuthority
+    {
+        bool AcceptsExtractionFloor(int floor);
+    }
+
     /// <summary>Owner-side bridge for a server-authorized extraction hold.</summary>
     public interface IExtractionInteractionAuthority
     {
@@ -44,15 +53,50 @@ namespace Emberdelve.Interaction
         [SerializeField] private float maxIntensity = 5.5f;
 
         private IExtractionSink _sink;
+        public int Floor { get; private set; }
+        private float _finalHoldDuration = 3f;
+        public void BindFinalFloor(IExtractionSink sink)
+        {
+            Floor = 3;
+            _sink = sink;
+        }
+        public static ExtractionPoint CreateFinalView(Transform parent, Vector3 position, float holdDuration, IExtractionSink sink)
+        {
+            if (!float.IsFinite(holdDuration) || holdDuration <= 0 || holdDuration > 120) return null;
+            Material material = null;
+            foreach (var view in FindObjectsByType<MeshRenderer>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                if (view.name == "Gate_Portal") { material = view.sharedMaterial; break; }
+            if (material == null) return null;
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube); go.name = "Final_ExtractionPortal";
+            go.transform.SetParent(parent, false); go.transform.position = position;
+            go.transform.localScale = new Vector3(1.1f, 2.1f, .18f);
+            go.GetComponent<BoxCollider>().isTrigger = true;
+            int layer = LayerMask.NameToLayer(GameConfig.InteractLayerName); if (layer >= 0) go.layer = layer;
+            go.GetComponent<MeshRenderer>().sharedMaterial = material;
+            var point = go.AddComponent<ExtractionPoint>(); point.BindFinalFloor(sink); point._finalHoldDuration = holdDuration;
+            return point;
+        }
+        public static ExtractionPoint FindForFloor(int floor)
+        {
+            if (floor != 0 && floor != 3) return null;
+            ExtractionPoint found = null;
+            foreach (var point in FindObjectsByType<ExtractionPoint>(FindObjectsSortMode.None))
+            {
+                if (!point.isActiveAndEnabled || point.Floor != floor) continue;
+                if (found != null) return null; // Ambiguous authority target must never depend on Unity object ordering.
+                found = point;
+            }
+            return found;
+        }
         private float _pulse;
 
         public string PromptText => "Escape through the Ember Gate";
         public bool RequiresHold => true;
-        public float HoldDuration => config != null ? config.extractionHoldDuration : 3f;
+        public float HoldDuration => Floor == 3 ? _finalHoldDuration : config != null ? config.extractionHoldDuration : 3f;
 
         private void Awake()
         {
-            _sink = sinkBehaviour as IExtractionSink;
+            if (_sink == null) _sink = sinkBehaviour as IExtractionSink;
             if (_sink == null) _sink = GetComponentInParent<IExtractionSink>();
             if (glowLight == null) glowLight = GetComponentInChildren<Light>();
             if (portalRenderer == null) portalRenderer = GetComponentInChildren<Renderer>();
@@ -60,9 +104,11 @@ namespace Emberdelve.Interaction
 
         public bool CanInteract(IInteractionActor actor, out string reason)
         {
+            if (!isActiveAndEnabled) { reason = "Exit is unavailable"; return false; }
             if (NetRole.IsClientOnly)
             {
-                if (!TryGetNetworkAuthority(actor, out _))
+                if (!TryGetNetworkAuthority(actor, out var authority)
+                    || !(authority is IExtractionFloorAuthority floors) || !floors.AcceptsExtractionFloor(Floor))
                 {
                     reason = "Exit state is syncing";
                     return false;
@@ -76,6 +122,8 @@ namespace Emberdelve.Interaction
                 return false;
             }
 
+            if (_sink is IExtractionFloorSource floorsSource && floorsSource.ExtractionFloorFor(actor) != Floor)
+            { reason = "Exit belongs to another floor"; return false; }
             if (!InteractionRules.Validate(actor, this, InteractionRules.ReachOf(_sink), _sink, out reason)) return false;
 
             return _sink.ExtractionAllowed(actor, out reason);

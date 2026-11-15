@@ -121,7 +121,7 @@ namespace Emberdelve.EditorTools
             var data = new SerializedObject(_authority); data.FindProperty("config").objectReferenceValue = _config; data.ApplyModifiedPropertiesWithoutUndo();
             _authority.SetClock(() => _clock); _authority.AutoStepSwings = false; _authority.AdvanceKitsTo(0);
             OwnInput(); for (int i = 0; i < 6; i++) yield return null;
-            IEnumerator[] sections = { ClassDraw(_archer, _bow, true), ClassDraw(_warrior, _crossbow, false), FrozenRates(), CancellationPaths() };
+            IEnumerator[] sections = { ClassDraw(_archer, _bow, true), ClassDraw(_warrior, _crossbow, false), FrozenRates(), HeldBowReload(), CancellationPaths() };
             foreach (IEnumerator section in sections) while (section.MoveNext()) yield return section.Current;
             Check(before == SharedAssets(), "all shared class/weapon/profile/item assets unchanged");
             InputSettings original = _originalSettings; RestoreInput();
@@ -191,14 +191,31 @@ namespace Emberdelve.EditorTools
         private void Visual(PlayerRig rig, bool crossbow)
         {
             WeaponVisualRig visual = rig.Loadout.Visual; Check(visual != null, "actual ranged visual exists"); if (visual == null) return;
-            Transform line = visual.transform.Find(crossbow ? "Crossbow_String" : "Bow_String");
-            Transform arrow = visual.transform.Find(crossbow ? "Crossbow_Bolt" : "Bow_Arrow");
-            Check(line != null && arrow != null, "actual string and arrow exist"); if (line == null || arrow == null) return;
-            float charge = rig.GetComponent<RangedCombat>().Charge;
-            Close(line.localPosition.z, -.02f - .2f * charge, "string consumes same captured progress");
-            Close(crossbow ? line.localScale.x : line.localScale.y,
-                (crossbow ? .43f : .52f) + .06f * charge, "string stretch consumes same captured progress");
-            Close(arrow.localPosition.z, .12f - .22f * charge, "arrow consumes same captured progress");
+            if (!crossbow)
+            {
+                var bow = visual.GetComponentInChildren<BowPresentation>();
+                Check(bow != null, "actual recurve bow exists"); if (bow == null) return;
+                Transform upper = bow.transform.Find("UpperString"), lower = bow.transform.Find("LowerString");
+                Transform nocked = bow.transform.Find("NockedArrow");
+                Check(upper != null && lower != null && nocked != null, "actual two-piece string and nocked arrow exist");
+                if (upper == null || lower == null || nocked == null) return;
+                float progress = rig.GetComponent<RangedCombat>().Charge;
+                Close(visual.DrawProgress, progress, "viewmodel consumes captured draw progress");
+                Close(bow.Draw, progress, "limbs consume captured draw progress");
+                Close(nocked.localPosition.x, .024f + .15f * progress, "nock lateral draw");
+                Close(nocked.localPosition.z, -.16f - .22f * progress, "arrow consumes captured draw progress");
+                float tipZ = -.055f - .085f * progress;
+                float middleZ = (tipZ + (-.16f - .22f * progress)) * .5f;
+                Close(upper.localPosition.z, middleZ, "upper string joins limb to captured nock");
+                Close(lower.localPosition.z, middleZ, "lower string joins limb to captured nock");
+                return;
+            }
+            Transform line = visual.transform.Find("Crossbow_String/Left");
+            Transform arrow = visual.transform.Find("Crossbow_Bolt");
+            Check(line != null && arrow != null, "actual crossbow string and bolt exist"); if (line == null || arrow == null) return;
+            Check(arrow.gameObject.activeSelf, "loaded bolt remains visible while aiming");
+            Close(line.localPosition.z, -.1225f, "crossbow string remains cocked while aiming");
+            Close(arrow.localPosition.z, .03f, "seated crossbow bolt does not move with bow draw charge");
         }
         private IEnumerator HoldFractions(PlayerRig rig, float duration, bool crossbow)
         {
@@ -226,6 +243,34 @@ namespace Emberdelve.EditorTools
             Check(_shots == shots + 1, "release emits no repeated launch");
             Check(rig.CurrentHealth == hp, "release does not refill health: " + hp + " -> " + rig.CurrentHealth);
             Check(rig.Mana.CurrentMana == mana, "release does not refill mana: " + mana + " -> " + rig.Mana.CurrentMana);
+            if (!archer)
+            {
+                Check(weapon.magazineSize == 1 && !weapon.reloadWhileHeld && ranged.Magazine == 0,
+                    "single-shot crossbow is empty after one bolt and requires manual reload");
+                NextClock();
+                MouseLeft(true); yield return null;
+                MouseLeft(false); yield return null; yield return null;
+                Check(!ranged.IsDrawing && !ranged.IsReloading && ranged.Magazine == 0 && ranged.Reserve == reserve
+                    && _shots == shots + 1 && _authority.AcceptedCount == acceptedBefore + 1,
+                    "empty crossbow press/release cannot draw, shoot, reload, or spend reserve");
+                InputSystem.QueueStateEvent(_keyboard, new KeyboardState(Key.R));
+                yield return null; yield return null;
+                Check(ranged.IsReloading && ranged.Magazine == 0 && ranged.Reserve == reserve,
+                    "ordinary R starts manual reload without granting ammunition early");
+                float reloadStarted = _clock, reloadDuration = ranged.ReloadDuration;
+                InputSystem.QueueStateEvent(_keyboard, new KeyboardState()); yield return null;
+                _clock = reloadStarted + reloadDuration - .001f; _authority.AdvanceKitsTo(_clock);
+                Check(ranged.IsReloading && ranged.Magazine == 0 && ranged.Reserve == reserve,
+                    "crossbow remains empty immediately before reload completion");
+                _clock = reloadStarted + reloadDuration; _authority.AdvanceKitsTo(_clock);
+                yield return null;
+                Check(!ranged.IsReloading && ranged.Magazine == 1 && ranged.Reserve == reserve - 1,
+                    "manual reload transfers exactly one reserve bolt into the crossbow");
+                _clock += .1f; _authority.AdvanceKitsTo(_clock); yield return null;
+                Check(ranged.Magazine == 1 && ranged.Reserve == reserve - 1 && _shots == shots + 1
+                    && _authority.AcceptedCount == acceptedBefore + 1,
+                    "completed reload neither repeats its transfer nor fires another bolt");
+            }
             Check(rig.Inventory.TryAdd(_boots, 1) && rig.Equipment.TryEquipItem(_boots, out _), "actual boots equipped");
             press = Press(rig); while (press.MoveNext()) yield return press.Current;
             Close(ranged.ActiveDrawDuration, archer ? .75f : .2941176471f, "next press uses actual DEX17/11 rate");
@@ -266,6 +311,39 @@ namespace Emberdelve.EditorTools
             Check(_shots == shots && ranged.Magazine == magazine && ranged.Reserve == reserve, "too-early real release causes no launch or ammo spend");
             Cleared(rig, "too-early release");
         }
+        private IEnumerator HeldBowReload()
+        {
+            PlayerRig rig=Rig(_archer,_bow);
+            RangedCombat ranged=rig.GetComponent<RangedCombat>();
+            Check(_bow.reloadWhileHeld && !_crossbow.reloadWhileHeld,"held reload is authored for bow only");
+            IEnumerator press=Press(rig); while(press.MoveNext()) yield return press.Current;
+            int magazine=ranged.Magazine, reserve=ranged.Reserve, shots=_shots;
+            InputSystem.QueueStateEvent(_keyboard,new KeyboardState(Key.R));
+            yield return null; yield return null;
+            Check(rig.Input.ReloadHeld && ranged.IsDrawing && !ranged.IsReloading,
+                "R held during draw leaves the shot drawn, not cancelled");
+            float until=Time.time+ranged.ActiveDrawDuration;
+            while(Time.time<until) yield return null;
+            IEnumerator release=Release(); while(release.MoveNext()) yield return release.Current;
+            for(int i=0;i<4;i++) yield return null;
+            Check(_shots==shots+1 && ranged.Magazine==magazine-1 && ranged.IsReloading,
+                "unchanged held R begins reload after accepted mouse release");
+            Check(ranged.Reserve==reserve,"held reload grants no ammunition before authority timer");
+            _clock+=ranged.ReloadDuration+.01f; _authority.AdvanceKitsTo(_clock);
+            yield return null;
+            Check(!ranged.IsReloading && ranged.Magazine==magazine && ranged.Reserve==reserve-1,
+                "held reload transfers exactly the fired arrow once");
+            for(int i=0;i<4;i++) yield return null;
+            Check(ranged.Reserve==reserve-1 && !ranged.IsReloading,"continued R on full magazine does not reload twice");
+            InputSystem.QueueStateEvent(_keyboard,new KeyboardState()); yield return null;
+            press=Press(rig); while(press.MoveNext()) yield return press.Current;
+            InputSystem.QueueStateEvent(_keyboard,new KeyboardState(Key.R)); yield return null;
+            InputSystem.QueueStateEvent(_keyboard,new KeyboardState()); yield return null;
+            until=Time.time+ranged.ActiveDrawDuration; while(Time.time<until) yield return null;
+            release=Release(); while(release.MoveNext()) yield return release.Current;
+            Check(!ranged.IsReloading && ranged.Magazine==magazine-1,"releasing R before shot leaves no deferred reload request");
+        }
+
         private IEnumerator CancellationPaths()
         {
             PlayerRig rig = Rig(_archer, _bow); RangedCombat ranged = rig.GetComponent<RangedCombat>();
@@ -275,6 +353,20 @@ namespace Emberdelve.EditorTools
             press = Press(rig); while (press.MoveNext()) yield return press.Current;
             rig.Input.SetGameplayInputEnabled(false); yield return null; Cleared(rig, "direct gameplay map disable");
             rig.Input.SetGameplayInputEnabled(true); release = Release(); while (release.MoveNext()) yield return release.Current;
+            press = Press(rig); while (press.MoveNext()) yield return press.Current;
+            int modalShots=_shots, modalAmmo=ranged.Magazine;
+            rig.Input.QuickWheelCaptured=true; yield return null;
+            Cleared(rig,"quick-wheel capture");
+            release=Release(); while(release.MoveNext()) yield return release.Current;
+            rig.Input.QuickWheelCaptured=false; yield return null; yield return null;
+            Check(_shots==modalShots && ranged.Magazine==modalAmmo,"release inside wheel causes no delayed shot or ammo loss");
+            press=Press(rig); while(press.MoveNext()) yield return press.Current;
+            object panel=new object(); InventoryInputFocus.Open(panel); yield return null;
+            Cleared(rig,"inventory focus capture");
+            release=Release(); while(release.MoveNext()) yield return release.Current;
+            InventoryInputFocus.Close(panel); yield return null; yield return null;
+            Check(_shots==modalShots && ranged.Magazine==modalAmmo,"release inside panel causes no delayed shot or ammo loss");
+
             press = Press(rig); while (press.MoveNext()) yield return press.Current;
             ranged.enabled = false; Cleared(rig, "component disable"); ranged.enabled = true;
             release = Release(); while (release.MoveNext()) yield return release.Current;

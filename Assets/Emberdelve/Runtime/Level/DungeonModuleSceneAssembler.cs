@@ -7,6 +7,7 @@ using Emberdelve.Flow;
 using Emberdelve.Interaction;
 using Emberdelve.Items;
 using Emberdelve.Player;
+using Emberdelve.Rules;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -39,6 +40,139 @@ namespace Emberdelve.Level
         private NavGridData _runtimeNav;
         private string _appliedHash = string.Empty;
         private Coroutine _planRetryRoutine;
+        private bool _stagedFloor;
+        public bool RuntimeContentRetired { get; private set; }
+        private static readonly List<DungeonModuleSceneAssembler> RetiredMaps = new List<DungeonModuleSceneAssembler>();
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetRetiredMaps() => RetiredMaps.Clear();
+
+        /// <summary>Presentation query over retired live maps only; no scene search or actor mutation.</summary>
+        public static bool IsPositionOnRetiredFloor(Vector3 position)
+        {
+            for (int i = RetiredMaps.Count - 1; i >= 0; i--)
+            {
+                var map = RetiredMaps[i];
+                // EditMode/manual lifecycle teardown may not deliver OnDestroy.
+                if (map == null) { RetiredMaps.RemoveAt(i); continue; }
+                var layout = map.RuntimeLayout;
+                if (layout == null) continue;
+                var bounds = new Rect(layout.origin.x, layout.origin.z,
+                    layout.gridWidth * layout.CellSize, layout.gridHeight * layout.CellSize);
+                if (bounds.Contains(new Vector2(position.x, position.z))) return true;
+            }
+            return false;
+        }
+        private RoyalePartyMode? _royaleSpawnMode;
+        private HashSet<Vector2Int> _reachableNav;
+        private EnemyAgent[] _initialEnemies = Array.Empty<EnemyAgent>();
+        private LootPickup[] _initialLoot = Array.Empty<LootPickup>();
+        private DungeonModulePlan _appliedPlan;
+        public RoyalePartyMode? AppliedRoyaleMode => _royaleSpawnMode;
+        public DungeonModulePlan CopyAppliedPlan() => _appliedPlan?.WithRoyaleMode(_appliedPlan.RoyaleMode);
+
+        public bool EnsureInitialContentReady(out string reason)
+        {
+            reason = "Initial content is not ready";
+            if (RuntimeContentRetired || _stagedFloor || !RuntimeMapValidationComplete || _runtimeLayout.enemySpawns.Count != _initialEnemies.Length
+                || _runtimeLayout.lootSpawns.Count != _initialLoot.Length) return false;
+            foreach (var enemy in _initialEnemies)
+                if (enemy == null || !enemy.EnsureRuntimeInitialized()) return false;
+            foreach (var loot in _initialLoot) if (loot == null) return false;
+            reason = null; return true;
+        }
+        public bool AcceptsSessionPlan => !_stagedFloor;
+
+        /// <summary>Preserves layout/plan metadata used by subsequent floors. The initial assembler may
+        /// share its GameObject with run services, so only its owned content is disabled.</summary>
+        public void RetireRuntimeContent()
+        {
+            if (RuntimeContentRetired) return;
+            RuntimeContentRetired = true;
+            RetiredMaps.Add(this);
+            if (_stagedFloor) gameObject.SetActive(false);
+            else
+            {
+                if (generatedRoot != null) generatedRoot.gameObject.SetActive(false);
+                foreach (var enemy in _initialEnemies) if (enemy != null) enemy.gameObject.SetActive(false);
+                foreach (var loot in _initialLoot) if (loot != null) loot.gameObject.SetActive(false);
+            }
+        }
+
+        /// <summary>Builds an isolated floor without installing a director layout or moving any live actor.
+        /// The caller supplies a non-overlapping staging origin. Success returns an inactive map; activation
+        /// and participant transfer belong to the authority's later commit barrier.</summary>
+        public static bool TryStageFloor(DungeonLayoutData source, DungeonModuleCatalog modules,
+            DungeonModulePlan plan, Vector3 stagingOrigin, out DungeonModuleSceneAssembler staged, out string reason,
+            RoyalePartyMode? partyMode = null)
+        {
+            staged = null;
+            reason = "Invalid staging origin";
+            if (!float.IsFinite(stagingOrigin.x) || !float.IsFinite(stagingOrigin.y) || !float.IsFinite(stagingOrigin.z)) return false;
+            if (partyMode.HasValue && (partyMode.Value < RoyalePartyMode.Solo || partyMode.Value > RoyalePartyMode.Trio))
+            { reason = "Invalid party mode"; return false; }
+            if (plan == null) { reason = "Missing floor plan"; return false; }
+            if (!plan.Validate(out reason)) return false;
+            if (partyMode.HasValue && partyMode != plan.RoyaleMode)
+            { reason = "Floor party mode differs from the authoritative plan"; return false; }
+            var root = new GameObject("Staged_Dungeon_Floor");
+            root.SetActive(false);
+            var candidate = root.AddComponent<DungeonModuleSceneAssembler>();
+            candidate._stagedFloor = true;
+            candidate._royaleSpawnMode = plan.RoyaleMode;
+            candidate.Configure(source, modules);
+            candidate.mapOrigin = stagingOrigin;
+            root.SetActive(true); // Physics validation needs active colliders; Awake does not opt into the live run.
+            try
+            {
+                if (!candidate.ApplyDungeonModulePlan(plan, out reason)) return false;
+                root.SetActive(false);
+                staged = candidate;
+                return true;
+            }
+            finally
+            {
+                if (staged == null)
+                {
+                    candidate.DiscardStagedFloor();
+                }
+            }
+        }
+
+        public bool BindStagedFloorIdentity(int floor, out string reason)
+        {
+            reason = "Invalid staged floor identity";
+            if (!_stagedFloor || floor < 2 || floor > 3) return false;
+            foreach (var door in GetComponentsInChildren<Emberdelve.Interaction.DungeonDoorInteractable>(true))
+                if (!door.BindStagedFloor(floor)) return false;
+            foreach (var barrel in GetComponentsInChildren<Emberdelve.Interaction.BreakableBarrel>(true))
+                if (!barrel.BindStagedFloor(floor)) return false;
+            reason = null; return true;
+        }
+
+        private static void DestroyOwnedObject(UnityEngine.Object value)
+        {
+            if (value == null) return;
+            if (Application.isPlaying) Destroy(value); else DestroyImmediate(value);
+        }
+
+        /// <summary>Explicit ownership cleanup, including EditMode where MonoBehaviour.OnDestroy may not run.</summary>
+        public void DiscardStagedFloor()
+        {
+            if (!_stagedFloor) throw new InvalidOperationException("Only a staged floor can be discarded by this API");
+            RetiredMaps.Remove(this);
+            gameObject.SetActive(false);
+            ReleaseStagedAssets();
+            DestroyOwnedObject(gameObject);
+        }
+
+        private void ReleaseStagedAssets()
+        {
+            DestroyOwnedObject(_runtimeLayout);
+            DestroyOwnedObject(_runtimeNav);
+            _runtimeLayout = null;
+            _runtimeNav = null;
+        }
 
         public DungeonLayoutData RuntimeLayout => _runtimeLayout;
         public NavGridData RuntimeNavGrid => _runtimeNav;
@@ -163,7 +297,7 @@ namespace Emberdelve.Level
                 RunContext.SetNextRaidSeed(raidSeed);
                 int seed = unchecked((int)(raidSeed ^ (raidSeed >> 32)));
                 if (DungeonModulePlanner.TryCreate(seed, catalog.Modules, out DungeonModulePlan plan, out string reason))
-                    DungeonModulePlanSession.Install(plan);
+                    DungeonModulePlanSession.Install(plan.WithRoyaleMode(RunContext.SelectedRoyaleMode));
                 else Debug.LogError("[DungeonModuleSceneAssembler] Could not create offline map: " + reason, this);
             }
             else if (DungeonModulePlanSession.Current != null)
@@ -174,8 +308,13 @@ namespace Emberdelve.Level
 
         private void OnDestroy()
         {
+            RetiredMaps.Remove(this);
             DungeonModulePlanSession.Changed -= OnPlanChanged;
             if (_planRetryRoutine != null) StopCoroutine(_planRetryRoutine);
+            if (_stagedFloor)
+            {
+                ReleaseStagedAssets();
+            }
         }
 
         private void OnPlanChanged(DungeonModulePlan plan)
@@ -225,9 +364,21 @@ namespace Emberdelve.Level
         public bool ApplyDungeonModulePlan(DungeonModulePlan plan, out string reason)
         {
             reason = string.Empty;
+            if (RuntimeContentRetired) { reason = "Floor content is retired"; return false; }
             if (plan == null || !plan.Validate(out reason)) return false;
+            if (!string.Equals(plan.LayoutHash, DungeonModulePlanner.ComputeHashForWire(plan), StringComparison.OrdinalIgnoreCase))
+            { reason = "plan contains a stale layout hash"; return false; }
             if (catalog == null || catalog.Modules == null || catalog.Modules.Length == 0)
             { reason = "authored module catalog is missing"; return false; }
+            // Validate every reference before instantiation or destruction of any existing geometry.
+            foreach (DungeonModuleDefinition definition in catalog.Modules)
+                if (definition == null || !definition.HasValidSockets(out reason))
+                { reason = "module catalog contains a missing or invalid definition: " + reason; return false; }
+            if (plan.CatalogHash != DungeonModulePlanner.ComputeCatalogHash(catalog.Modules))
+            { reason = "plan catalog does not match the floor catalog"; return false; }
+            foreach (DungeonModulePlacement placement in plan.Placements)
+                if (placement.ModuleIndex < 0 || placement.ModuleIndex >= catalog.Modules.Length)
+                { reason = "module index is not available in the floor catalog"; return false; }
             DungeonModulePlacement centerPlacement = plan.At(1, 1);
             if (centerPlacement.ModuleIndex < 0 || centerPlacement.ModuleIndex >= catalog.Modules.Length ||
                 catalog.Modules[centerPlacement.ModuleIndex] == null ||
@@ -238,7 +389,18 @@ namespace Emberdelve.Level
             // A plan can be applied from this component's earlier Awake, before NetSceneRoles applies its role switches.
             // Revalidate the completed scene each time the network layer asks for readiness.
             if (plan.LayoutHash == _appliedHash) return ValidateAppliedRuntimeState(plan, out reason);
+            if (!string.IsNullOrEmpty(_appliedHash))
+            { reason = "an installed floor cannot be replaced in place; stage a separate floor"; return false; }
 
+            if (!_stagedFloor && !NetRole.IsClientOnly)
+            {
+                var authority = FindFirstObjectByType<RunDirector>(FindObjectsInactive.Include);
+                if (authority == null) { reason = "RunDirector is missing"; return false; }
+                if (authority.RoyaleMode != plan.RoyaleMode
+                    && (!plan.RoyaleMode.HasValue || !authority.ConfigureRoyale(plan.RoyaleMode.Value)))
+                { reason = "Royale mode must match the authoritative plan before the run starts"; return false; }
+            }
+            _royaleSpawnMode = plan.RoyaleMode;
             ClearGeneratedModules();
             if (generatedRoot == null)
             {
@@ -271,15 +433,23 @@ namespace Emberdelve.Level
             { ClearGeneratedModules(); return false; }
             if (!ValidateClosureState(plan, out reason)) { ClearGeneratedModules(); return false; }
             if (!PrepareGameplayLayout(plan, out reason)) { ClearGeneratedModules(); return false; }
+            if (_stagedFloor)
+            {
+                _appliedPlan = plan.WithRoyaleMode(plan.RoyaleMode);
+                _appliedHash = plan.LayoutHash;
+                return true;
+            }
             DisableLegacyGeometry();
             Emberdelve.Interaction.WorldLightInteractable.Install(generatedRoot);
             if (!PlaceExistingGameplayActors(out reason)) { ClearGeneratedModules(); return false; }
             if (!ValidateExtractionPlacement(out reason)) { ClearGeneratedModules(); return false; }
             RunDirector director = FindFirstObjectByType<RunDirector>(FindObjectsInactive.Include);
+            _appliedPlan = plan.WithRoyaleMode(plan.RoyaleMode);
             _appliedHash = plan.LayoutHash;
             if (director == null || director.Layout != _runtimeLayout || !director.CompleteRuntimeLayoutInstallation())
             {
                 _appliedHash = string.Empty;
+            _appliedPlan = null;
                 reason = "RunDirector did not accept completed modular layout before run start";
                 ClearGeneratedModules();
                 return false;
@@ -298,11 +468,16 @@ namespace Emberdelve.Level
             if (_runtimeLayout == null || _runtimeNav == null)
             { reason = "modular runtime layout or navigation grid is missing"; return false; }
             if (!DungeonDoorwaySpawner.ValidateBuilt(plan, _moduleRoots, out reason)) return false;
+            if (_stagedFloor)
+                return ValidateClosureState(plan, out reason) && ValidateNavConnectivity(_runtimeLayout, out reason);
             RunDirector director = FindFirstObjectByType<RunDirector>(FindObjectsInactive.Include);
             if (director == null || director.Layout != _runtimeLayout || !director.RuntimeLayoutInstallationComplete)
             { reason = "RunDirector has not committed the runtime modular layout"; return false; }
+            if (!NetRole.IsClientOnly && director.RoyaleMode != plan.RoyaleMode)
+            { reason = "RunDirector mode differs from the installed map"; return false; }
             if (!ValidateClosureState(plan, out reason)) return false;
             if (!ValidateNavConnectivity(_runtimeLayout, out reason)) return false;
+
             if (!ValidateExtractionPlacement(out reason)) return false;
             return true;
         }
@@ -343,13 +518,10 @@ namespace Emberdelve.Level
             }
 
             AddOpenCorridors(plan);
-            _runtimeLayout.playerStartCell = _runtimeLayout.CellFromWorld(ModuleCenter(0, 0, _runtimeLayout.CellSize));
+            // The authored entry anchor has already been resolved against geometry. The geometric room
+            // centre may contain a pillar/raised feature and is not a valid navigation origin.
+            _runtimeLayout.playerStartCell = _runtimeLayout.playerSpawns[0];
             _runtimeLayout.extractionCell = _runtimeLayout.CellFromWorld(ModuleCenter(DungeonModulePlan.Width - 1, DungeonModulePlan.Height - 1, _runtimeLayout.CellSize));
-            if (!RemapContent(_runtimeLayout, plan, out reason)) return false;
-
-            List<string> problems = _runtimeLayout.Validate();
-            if (problems.Count > 0) { reason = "generated gameplay layout is invalid: " + string.Join("; ", problems); return false; }
-
             _runtimeNav = ScriptableObject.CreateInstance<NavGridData>();
             _runtimeNav.name = "Runtime_Modular_Nav_" + plan.LayoutHash;
             _runtimeNav.hideFlags = HideFlags.DontSave;
@@ -359,7 +531,15 @@ namespace Emberdelve.Level
             _runtimeNav.origin = _runtimeLayout.origin;
             _runtimeNav.mask = _runtimeLayout.BuildNavMask();
             NavGridSurface.Bake(_runtimeNav, generatedRoot, LayerMask.GetMask(GameConfig.LevelLayerName));
+            _reachableNav = ReachableNavCells(_runtimeLayout.playerStartCell);
+            if (_reachableNav.Count == 0)
+            { reason = "resolved entry spawn is blocked in baked navigation: " + _runtimeLayout.playerStartCell; return false; }
+            if (_royaleSpawnMode.HasValue && !TryPlaceRoyaleParties(out reason)) return false;
+            if (!RemapContent(_runtimeLayout, plan, out reason)) return false;
+            List<string> problems = _runtimeLayout.Validate();
+            if (problems.Count > 0) { reason = "generated gameplay layout is invalid: " + string.Join("; ", problems); return false; }
             if (!ValidateNavConnectivity(_runtimeLayout, out reason)) return false;
+            if (_stagedFloor) return true;
 
             RunDirector director = FindFirstObjectByType<RunDirector>(FindObjectsInactive.Include);
             if (director == null) { reason = "RunDirector is missing"; return false; }
@@ -408,6 +588,100 @@ namespace Emberdelve.Level
                         result = cell;
                         return true;
                     }
+            return false;
+        }
+
+        // Ordered by party, then member. This runs before content remapping so chests avoid every arrival capsule.
+        private bool TryPlaceRoyaleParties(out string reason)
+        {
+            reason = "Not enough separated, supported party spawn positions";
+            var roster = new RoyaleRoster(_royaleSpawnMode.Value);
+            var candidates = new List<Vector2Int>();
+            var rooms = new List<int>();
+            for (int room = 0; room < _runtimeLayout.rooms.Count; room++)
+            {
+                RoomSpec bounds = _runtimeLayout.rooms[room];
+                for (int y = bounds.minCell.y; y <= bounds.maxCell.y; y++)
+                    for (int x = bounds.minCell.x; x <= bounds.maxCell.x; x++)
+                    {
+                        var cell = new Vector2Int(x, y);
+                        if (!IsReachableGroundCell(cell)) continue;
+                        if (!TryFindClearSpawnCell(_runtimeLayout, _moduleRoots[room], cell, cell, cell, out _)) continue;
+                        candidates.Add(cell); rooms.Add(room);
+                    }
+            }
+            var selected = new List<Vector2Int>();
+            var centers = new List<Vector2Int>();
+            var usedRooms = new HashSet<int>();
+            float cellSize = _runtimeLayout.CellSize;
+            for (int party = 0; party < roster.PartyCapacity; party++)
+            {
+                List<Vector2Int> best = null;
+                int bestRoom = -1;
+                float bestDistance = -1f;
+                for (int i = 0; i < candidates.Count; i++)
+                {
+                    if (roster.PartySize > 1 && usedRooms.Contains(rooms[i])) continue;
+                    Vector2Int center = candidates[i];
+                    float separation = float.MaxValue;
+                    foreach (var prior in centers) separation = Mathf.Min(separation, (center - prior).sqrMagnitude * cellSize * cellSize);
+                    if (separation < 64f || separation <= bestDistance) continue;
+                    var group = new List<Vector2Int> { center };
+                    var nearby = new List<Vector2Int>();
+                    for (int j = 0; j < candidates.Count; j++)
+                        if (rooms[j] == rooms[i] && candidates[j] != center
+                            && (candidates[j] - center).sqrMagnitude * cellSize * cellSize <= 36f)
+                            nearby.Add(candidates[j]);
+                    nearby.Sort((a, b) =>
+                    {
+                        int distance = (a - center).sqrMagnitude.CompareTo((b - center).sqrMagnitude);
+                        if (distance != 0) return distance;
+                        int row = a.y.CompareTo(b.y);
+                        return row != 0 ? row : a.x.CompareTo(b.x);
+                    });
+                    foreach (var cell in nearby)
+                    {
+                        if (group.Count == roster.PartySize) break;
+                        bool spaced = true;
+                        foreach (var member in group)
+                            if ((cell - member).sqrMagnitude < 4) spaced = false;
+                        if (!spaced) continue;
+                        group.Add(cell);
+                    }
+                    if (group.Count != roster.PartySize) continue;
+                    bool clear = true;
+                    foreach (var cell in group)
+                        foreach (var prior in selected)
+                            if ((cell - prior).sqrMagnitude * cellSize * cellSize < 64f
+                                || HasSpawnSightline(cell, prior)) clear = false;
+                    if (!clear) continue;
+                    best = group; bestRoom = rooms[i]; bestDistance = separation;
+                }
+                if (best == null) return false;
+                selected.AddRange(best); centers.Add(best[0]); usedRooms.Add(bestRoom);
+            }
+            _runtimeLayout.playerSpawns.Clear();
+            _runtimeLayout.playerSpawns.AddRange(selected);
+            reason = string.Empty;
+            return true;
+        }
+
+        private bool HasSpawnSightline(Vector2Int first, Vector2Int second)
+        {
+            Vector3 a = _runtimeLayout.CellCenterWorld(first), b = _runtimeLayout.CellCenterWorld(second);
+            // Bots can acquire opponents within24m. Nearby opposing parties need real map cover,
+            // not a damage grace period or a player-only exception. Check both torso and head height.
+            if ((a - b).sqrMagnitude > 24f * 24f) return false;
+            foreach (float height in new[] { 1.2f, 1.7f })
+            {
+                Vector3 start = a + Vector3.up * height, end = b + Vector3.up * height;
+                Vector3 delta = end - start;
+                bool covered = false;
+                foreach (var hit in Physics.RaycastAll(start, delta.normalized, delta.magnitude,
+                    Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                    if (hit.transform.IsChildOf(generatedRoot)) { covered = true; break; }
+                if (!covered) return true;
+            }
             return false;
         }
 
@@ -483,13 +757,41 @@ namespace Emberdelve.Level
             return true;
         }
 
+        private bool IsReachableGroundCell(Vector2Int cell) => _reachableNav != null && _reachableNav.Contains(cell)
+            && Mathf.Abs(_runtimeNav.CellCenter(cell.x, cell.y).y - _runtimeLayout.origin.y) <= .1f;
+
+        private HashSet<Vector2Int> ReachableNavCells(Vector2Int start)
+        {
+            var reached = new HashSet<Vector2Int>();
+            if (_runtimeNav == null || !_runtimeNav.IsWalkable(start.x, start.y)) return reached;
+            var queue = new Queue<Vector2Int>();
+            queue.Enqueue(start); reached.Add(start);
+            Vector2Int[] offsets = { Vector2Int.up, Vector2Int.right, Vector2Int.down, Vector2Int.left };
+            while (queue.Count > 0)
+            {
+                var cell = queue.Dequeue();
+                foreach (var offset in offsets)
+                {
+                    var next = cell + offset;
+                    if (reached.Contains(next) || !_runtimeNav.CanTraverse(cell.x, cell.y, next.x, next.y)) continue;
+                    reached.Add(next); queue.Enqueue(next);
+                }
+            }
+            return reached;
+        }
+
         private bool ValidateNavConnectivity(DungeonLayoutData layout, out string reason)
         {
             reason = string.Empty;
-            if (layout.playerSpawns == null || layout.playerSpawns.Count != DungeonModulePlan.Width * DungeonModulePlan.Height)
-            { reason = "modular layout must expose exactly nine player spawn cells"; return false; }
+            int expectedSpawns = _royaleSpawnMode.HasValue
+                ? new RoyaleRoster(_royaleSpawnMode.Value).Capacity : DungeonModulePlan.Width * DungeonModulePlan.Height;
+            if (layout.playerSpawns == null || layout.playerSpawns.Count != expectedSpawns)
+            { reason = "modular layout has an incorrect player spawn count"; return false; }
 
-            bool[,] walkable = layout.BuildWalkableGrid();
+            if (_runtimeNav == null) { reason = "baked navigation is missing"; return false; }
+            bool[,] walkable = new bool[_runtimeNav.width, _runtimeNav.height];
+            for (int y = 0; y < _runtimeNav.height; y++)
+                for (int x = 0; x < _runtimeNav.width; x++) walkable[x, y] = _runtimeNav.IsWalkable(x, y);
             Vector2Int start = layout.playerStartCell;
             if (!InsideAndWalkable(walkable, start)) { reason = "navigation start cell is blocked"; return false; }
             bool[,] reached = new bool[walkable.GetLength(0), walkable.GetLength(1)];
@@ -504,6 +806,7 @@ namespace Emberdelve.Level
                 {
                     Vector2Int next = cell + offsets[i];
                     if (!InsideAndWalkable(walkable, next) || reached[next.x, next.y]) continue;
+                    if (!_runtimeNav.CanTraverse(cell.x, cell.y, next.x, next.y)) continue;
                     reached[next.x, next.y] = true;
                     queue.Enqueue(next);
                 }
@@ -518,6 +821,13 @@ namespace Emberdelve.Level
             Vector2Int extraction = layout.extractionCell;
             if (!InsideAndWalkable(walkable, extraction) || !reached[extraction.x, extraction.y])
             { reason = "extraction cell is blocked or disconnected from navigation start"; return false; }
+            var contentCells = new List<Vector2Int>();
+            if (layout.enemySpawns != null) foreach (var spec in layout.enemySpawns) if (spec != null) contentCells.Add(spec.cell);
+            if (layout.lootSpawns != null) foreach (var spec in layout.lootSpawns) if (spec != null) contentCells.Add(spec.cell);
+            if (layout.chestSpawns != null) foreach (var spec in layout.chestSpawns) if (spec != null) contentCells.Add(spec.cell);
+            foreach (var cell in contentCells)
+                if (!InsideAndWalkable(walkable, cell) || !reached[cell.x, cell.y])
+                { reason = "content cell " + cell + " is blocked or disconnected in baked navigation"; return false; }
             return true;
         }
 
@@ -542,47 +852,70 @@ namespace Emberdelve.Level
         {
             reason = string.Empty;
             List<int> rooms = CombatRoomIndices(plan);
+            var occupied = new List<Bounds>();
             if (rooms.Count == 0) { reason = "no combat room for content"; return false; }
             if (layout.chestSpawns != null)
                 for (int i = 0; i < layout.chestSpawns.Count; i++)
                 {
                     var spec = layout.chestSpawns[i];
                     if (spec == null) continue;
-                    if (!TryContentCell(layout, plan, rooms, i, 0, ChestSpawner.SizeFor(spec.variant), out spec.cell))
-                    { reason = "no safe chest location for content " + i; return false; }
+                    if (!TryContentCell(layout, plan, rooms, i, 0, ChestSpawner.SizeFor(spec.variant), occupied, out spec.cell))
+                    { reason = ContentLocationFailure("chest", i, plan, rooms); return false; }
                 }
             if (layout.lootSpawns != null)
                 for (int i = 0; i < layout.lootSpawns.Count; i++)
                 {
                     var spec = layout.lootSpawns[i];
                     if (spec == null) continue;
-                    if (!TryContentCell(layout, plan, rooms, i, 2, Vector3.one * 0.3f, out spec.cell))
-                    { reason = "no safe loot location for content " + i; return false; }
+                    Vector3 size = spec.item != null ? Vector3.Max(Vector3.one * .12f, spec.item.worldSize) : Vector3.one * .3f;
+                    if (!TryContentCell(layout, plan, rooms, i, 2, size, occupied, out spec.cell))
+                    { reason = ContentLocationFailure("loot", i, plan, rooms); return false; }
                 }
             if (layout.enemySpawns != null)
                 for (int i = 0; i < layout.enemySpawns.Count; i++)
                 {
                     var spec = layout.enemySpawns[i];
                     if (spec == null) continue;
-                    if (!TryContentCell(layout, plan, rooms, i, 4, new Vector3(0.8f, 1.8f, 0.8f), out spec.cell))
-                    { reason = "no safe enemy location for content " + i; return false; }
+                    Vector3 size = new Vector3(1.1f, 2.1f, 1.1f) * (spec.enemy != null && spec.enemy.isElite ? 1.25f : 1f);
+                    if (!TryContentCell(layout, plan, rooms, i, 4, size, occupied, out spec.cell))
+                    { reason = ContentLocationFailure("enemy", i, plan, rooms); return false; }
                 }
             return true;
         }
 
+        private string ContentLocationFailure(string kind, int ordinal, DungeonModulePlan plan, List<int> rooms)
+        {
+            var placement = plan.Placements[rooms[ordinal % rooms.Count]];
+            int walkable = 0, reachable = 0, ground = 0;
+            for (int y = placement.Y * DungeonModulePlan.ModuleHeightCells + 1; y < (placement.Y + 1) * DungeonModulePlan.ModuleHeightCells - 1; y++)
+                for (int x = placement.X * DungeonModulePlan.ModuleWidthCells + 1; x < (placement.X + 1) * DungeonModulePlan.ModuleWidthCells - 1; x++)
+                {
+                    var cell = new Vector2Int(x, y);
+                    if (_runtimeNav.IsWalkable(x, y)) walkable++;
+                    if (_reachableNav.Contains(cell)) reachable++;
+                    if (IsReachableGroundCell(cell)) ground++;
+                }
+            return "no safe " + kind + " location for content " + ordinal + " module=" + catalog.Modules[placement.ModuleIndex].ModuleId
+                + " turn=" + placement.QuarterTurnsClockwise + " start=" + _runtimeLayout.playerStartCell
+                + " reachableTotal=" + _reachableNav.Count + " roomWalkable/Reachable/Ground=" + walkable + "/" + reachable + "/" + ground;
+        }
+
         private bool TryContentCell(DungeonLayoutData layout, DungeonModulePlan plan, List<int> rooms,
-            int ordinal, int offset, Vector3 size, out Vector2Int result)
+            int ordinal, int offset, Vector3 size, List<Bounds> occupied, out Vector2Int result)
         {
             int moduleIndex = rooms[ordinal % rooms.Count];
             DungeonModulePlacement p = plan.Placements[moduleIndex];
             Vector2Int min = new Vector2Int(p.X * DungeonModulePlan.ModuleWidthCells + 1, p.Y * DungeonModulePlan.ModuleHeightCells + 1);
             Vector2Int max = new Vector2Int((p.X + 1) * DungeonModulePlan.ModuleWidthCells - 2, (p.Y + 1) * DungeonModulePlan.ModuleHeightCells - 2);
-            return TryFindContentCell(layout, _moduleRoots[moduleIndex], ContentCell(plan, rooms, ordinal, offset), min, max, size, out result);
+            if (!TryFindContentCell(layout, _moduleRoots[moduleIndex], ContentCell(plan, rooms, ordinal, offset), min, max, size, out result, occupied, IsReachableGroundCell)) return false;
+            occupied.Add(new Bounds(layout.CellCenterWorld(result) + Vector3.up * (size.y * .5f + .05f), size));
+            return true;
         }
 
         /// <summary>Finds a deterministic supported content cell clear of module geometry and every player spawn.</summary>
         public static bool TryFindContentCell(DungeonLayoutData layout, Transform moduleRoot, Vector2Int preferred,
-            Vector2Int min, Vector2Int max, Vector3 size, out Vector2Int result)
+            Vector2Int min, Vector2Int max, Vector3 size, out Vector2Int result, IReadOnlyList<Bounds> occupied = null,
+            Func<Vector2Int, bool> allowed = null)
         {
             result = default;
             if (layout == null || moduleRoot == null || size.x <= 0f || size.y <= 0f || size.z <= 0f) return false;
@@ -594,6 +927,7 @@ namespace Emberdelve.Level
                         if (Mathf.Max(Mathf.Abs(x), Mathf.Abs(z)) != ring) continue;
                         Vector2Int cell = preferred + new Vector2Int(x, z);
                         if (cell.x < min.x || cell.x > max.x || cell.y < min.y || cell.y > max.y) continue;
+                        if (allowed != null && !allowed(cell)) continue;
                         Vector3 ground = layout.CellCenterWorld(cell);
                         bool nearSpawn = false;
                         foreach (Vector2Int spawn in layout.playerSpawns)
@@ -606,6 +940,11 @@ namespace Emberdelve.Level
                         if (nearSpawn) continue;
                         Vector3 half = size * .5f;
                         Vector3 centre = ground + Vector3.up * (half.y + .05f);
+                        bool reserved = false;
+                        if (occupied != null)
+                            foreach (var bounds in occupied)
+                                if (bounds.Intersects(new Bounds(centre, size))) { reserved = true; break; }
+                        if (reserved) continue;
                         Collider[] hits = Physics.OverlapBox(centre, half, Quaternion.identity, Physics.AllLayers, QueryTriggerInteraction.Ignore);
                         bool blocked = false;
                         foreach (Collider hit in hits)
@@ -667,6 +1006,7 @@ namespace Emberdelve.Level
             GameObject gate = GameObject.Find("Ember_Gate");
             if (gate != null) gate.transform.position = ModuleCenter(DungeonModulePlan.Width - 1, DungeonModulePlan.Height - 1, _runtimeLayout.CellSize);
             else if (exit != null) exit.transform.position = ModuleCenter(DungeonModulePlan.Width - 1, DungeonModulePlan.Height - 1, _runtimeLayout.CellSize);
+            _initialEnemies = enemies; _initialLoot = loot;
             return true;
         }
 
@@ -700,16 +1040,17 @@ namespace Emberdelve.Level
                 if (_moduleRoots[i] != null)
                 {
                     _moduleRoots[i].gameObject.SetActive(false);
-                    Destroy(_moduleRoots[i].gameObject);
+                    DestroyOwnedObject(_moduleRoots[i].gameObject);
                 }
                 _moduleRoots[i] = null;
                 _spawnAnchors[i] = null;
             }
-            if (_runtimeLayout != null) Destroy(_runtimeLayout);
-            if (_runtimeNav != null) Destroy(_runtimeNav);
+            DestroyOwnedObject(_runtimeLayout);
+            DestroyOwnedObject(_runtimeNav);
             _runtimeLayout = null;
             _runtimeNav = null;
             _appliedHash = string.Empty;
+            _appliedPlan = null;
         }
 
         private Vector3 ModuleCenter(int x, int y, int cellSize)

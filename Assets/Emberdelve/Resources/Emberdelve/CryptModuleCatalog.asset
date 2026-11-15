@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 752f8a4fcdf346ef87a2ff18236f7af4, type: 3}
+  m_Name: CryptModuleCatalog
+  m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Level.DungeonModuleCatalog
+  modules:
+  - {fileID: 4804765863951999378, guid: 806134254e24a68429e84576b0ad0a7c, type: 3}
+  - {fileID: 2548112127672254822, guid: 9ff4be030f2bfc64bbe628a364ae9c27, type: 3}
+  - {fileID: 3641508950393334765, guid: 92e3ba51f32e6604eba8e158659a1f6f, type: 3}
+  - {fileID: 4564270407529164370, guid: e7728b15afe15944fbb01f39f90f276e, type: 3}
+  - {fileID: 8421862843784951407, guid: 81e42c650f0171d439dd390e2ce327d8, type: 3}
+  - {fileID: 1600580040700588431, guid: 8685ef40a627dbf48bc24c1ac93a6f1b, type: 3}
+  - {fileID: 5090013679829849949, guid: 776bf0f4a4750f44a9d0f5d32bc1b9eb, type: 3}
+  - {fileID: 2736658069252612795, guid: a14d52f469688564795c85c828f177dd, type: 3}
+  - {fileID: 7609612325087164087, guid: c74e70f3c84934f4da0a0dd194bb2227, type: 3}
+  - {fileID: 3704853900008388017, guid: 7a80612f6cc119d4e8a4bca29e86d911, type: 3}

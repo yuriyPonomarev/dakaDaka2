@@ -28,17 +28,22 @@ namespace Emberdelve.Flow
         public CharacterClassData Class;
         public Inventory Inventory;
         public bool IsLocal;
+        public bool IsBot { get; internal set; }
+        internal bool AwaitingInitialFloor;
         public RunState State = RunState.Running;
         public int Kills;
         public float JoinedAt;
         public float EndedAt;
         public bool HasResult;
         public RunResult Result;
+        public int Floor { get; internal set; } = 1;
         internal bool DeathCustodyPending;
         internal float NextDeathCustodyAttemptAt;
+        internal bool ExtractionSettlementPending;
         internal System.Action DiedHandler;
 
-        public bool IsRunning => State == RunState.Running;
+        public bool IsRunning => State == RunState.Running && !ExtractionSettlementPending
+            && (Rig == null || !Rig.IsInFloorTransit);
     }
 
     /// <summary>
@@ -51,7 +56,7 @@ namespace Emberdelve.Flow
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class RunDirector : MonoBehaviour, IExtractionSink, ILootHost, ICountedLootHost, IInstanceLootHost,
-        IEnemyDropHost, IRaidSessionHost, ILocalPlayerSource, IInteractionRulesSource, IInteractionAdmissionSource, IGroundItemSink
+        IEnemyDropHost, IRaidSessionHost, ILocalPlayerSource, IExtractionFloorSource, IInteractionRulesSource, IInteractionAdmissionSource, IGroundItemSink, IGroundStackSink
     {
         [Header("Configuration")]
         [SerializeField] private GameConfig config;
@@ -90,6 +95,90 @@ namespace Emberdelve.Flow
         private int _spawnedCount;
         private int _networkSpawnCount;
         private string _runtimeDungeonSceneName;
+        private PlayerSession _pendingExtraction;
+        private float _nextExtractionSettlementAttemptAt;
+        public bool ExtractionSettlementPending => _pendingExtraction != null;
+        public RoyalePartyMode? RoyaleMode { get; private set; }
+        private RoyaleFloorCoordinator _floorCoordinator;
+        public RoyaleFloorCoordinator FloorCoordinator => _floorCoordinator ?? (_floorCoordinator = new RoyaleFloorCoordinator(this));
+        private readonly float[] _floorStartedAt = new float[4];
+        private readonly int[] _floorDuration = new int[4];
+        private readonly bool[] _floorExpired = new bool[4];
+
+        // The coordinator starts each clock once, after preparing that floor's population and map.
+        public bool TryStartRoyaleFloor(int floor, int durationSeconds, out string reason)
+        {
+            reason = "Floor cannot start";
+            if (NetRole.IsClientOnly || !RoyaleMode.HasValue || _state != RunState.Running
+                || floor < 1 || floor > 3 || durationSeconds <= 0 || _floorDuration[floor] != 0
+                || (floor > 1 && _floorDuration[floor - 1] == 0)) return false;
+            _floorStartedAt[floor] = Elapsed;
+            _floorDuration[floor] = durationSeconds;
+            reason = null;
+            return true;
+        }
+
+        public bool TryGetRoyaleFloorClock(int floor, out float elapsed, out float remaining)
+        {
+            elapsed = remaining = 0f;
+            if (!RoyaleMode.HasValue || floor < 1 || floor > 3 || _floorDuration[floor] == 0) return false;
+            elapsed = Mathf.Max(0f, Elapsed - _floorStartedAt[floor]);
+            remaining = Mathf.Max(0f, _floorDuration[floor] - elapsed);
+            return true;
+        }
+
+        public bool IsRoyaleFloorOpen(int floor) => TryGetRoyaleFloorClock(floor, out _, out float remaining)
+            && remaining > 0f && !_floorExpired[floor];
+
+        private void TickRoyaleFloors()
+        {
+            if (NetRole.IsClientOnly || !RoyaleMode.HasValue || _state != RunState.Running) return;
+            for (int floor = 1; floor <= 3; floor++)
+            {
+                if (_floorExpired[floor] || !TryGetRoyaleFloorClock(floor, out _, out float remaining) || remaining > 0f) continue;
+                _floorExpired[floor] = true;
+                ExpirePlayersOnFloor(floor);
+            }
+        }
+
+        public bool ConfigureRoyale(RoyalePartyMode mode)
+        {
+            if (_started || _floorDuration[1] != 0 || NetRole.IsClientOnly || mode < RoyalePartyMode.Solo || mode > RoyalePartyMode.Trio) return false;
+            RoyaleMode = mode;
+            SetPartySizeOverride((int)mode);
+            return true;
+        }
+
+        /// <summary>Called only after the authority validates the specific portal, its wave and remaining slots.</summary>
+        public bool TryQueueDescent(IInteractionActor actor, int sourceFloor, out string reason)
+        {
+            reason = "Descent is not available";
+            if (NetRole.IsClientOnly || !RoyaleMode.HasValue || sourceFloor < 1 || sourceFloor >= 3) return false;
+            if (!IsInteractionActorAdmitted(actor, out reason)) return false;
+            PlayerSession session = SessionOf(actor);
+            if (session.Floor != sourceFloor) { reason = "Portal belongs to a different floor"; return false; }
+            if (!session.Rig.TryBeginFloorTransit(out reason)) return false;
+            GameEvents.RaiseStatusLine(session.PlayerId, "Descending to floor " + (sourceFloor + 1));
+            return true;
+        }
+
+        /// <summary>Destination authority commits an already prepared spawn. No admission/class/kit initialization.
+        /// The coordinator must prepare the destination map and content before calling this.</summary>
+        public bool TryArriveAtNextFloor(IInteractionActor actor, int destinationFloor,
+            Vector3 position, Quaternion rotation, out string reason)
+        {
+            reason = "No pending floor transfer";
+            if (NetRole.IsClientOnly || !RoyaleMode.HasValue) return false;
+            PlayerSession session = SessionOf(actor);
+            if (session == null || session.State != RunState.Running || !session.Rig.IsInFloorTransit
+                || (destinationFloor != session.Floor + 1 && !(session.AwaitingInitialFloor && destinationFloor == session.Floor)) || destinationFloor > 3) return false;
+            if (!IsRoyaleFloorOpen(destinationFloor)) { reason = "Destination floor is not open"; return false; }
+            if (!session.Rig.TryEndFloorTransit(position, rotation, out reason)) return false;
+            session.Floor = destinationFloor;
+            session.AwaitingInitialFloor = false;
+            GameEvents.RaiseStatusLine(session.PlayerId, "Floor " + destinationFloor);
+            return true;
+        }
 
         /// <summary>The run-wide state: Briefing, Running, Paused, and the final outcome once no player is left in the run.</summary>
         public RunState State => _state;
@@ -166,10 +255,18 @@ namespace Emberdelve.Flow
         }
 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
+        public bool AdvanceRoyaleFloorForProof(int floor, float elapsed)
+        {
+            if (!IsServerMode || !_started || !RoyaleMode.HasValue || !float.IsFinite(elapsed)
+                || floor < 1 || floor > 3 || _floorDuration[floor] == 0 || elapsed > _floorDuration[floor]
+                || !TryGetRoyaleFloorClock(floor, out float current, out _) || elapsed < current) return false;
+            _floorStartedAt[floor] = Elapsed - elapsed; return true;
+        }
+
         /// <summary>Applies a process-local raid clock for a development proof without mutating the shared GameConfig asset.</summary>
         public bool ConfigureRaidCountdownForProof(int durationSeconds)
         {
-            if (!IsServerMode || !_started || durationSeconds <= 0 || _raidExpired) return false;
+            if (RoyaleMode.HasValue || !IsServerMode || !_started || durationSeconds <= 0 || _raidExpired) return false;
             _proofRaidDurationSeconds = durationSeconds;
             _proofRaidCountdownEnabled = true;
             _startedAt = Time.unscaledTime;
@@ -183,7 +280,7 @@ namespace Emberdelve.Flow
         /// Restart and return-to-lobby load a scene, which would unload a network-synchronised one. Only the offline game
         /// (NetRole Offline) may do it; online both calls are ignored until the network lifecycle (U3A5) owns them.
         /// </summary>
-        public bool SceneFlowAllowed => NetRole.IsOffline;
+        public bool SceneFlowAllowed => NetRole.IsOffline && !ExtractionSettlementPending;
 
         /// <summary>The local player's own run state (Running until they die or extract), not the run's.</summary>
         public RunState LocalPlayerState => _local != null ? _local.State : _state;
@@ -200,14 +297,34 @@ namespace Emberdelve.Flow
             _offlinePauseStartedAt,
             _paused && NetRole.IsOffline);
         public bool RaidCountdownEnabled =>
+            RoyaleMode.HasValue ||
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
             _proofRaidCountdownEnabled ||
 #endif
             config != null && config.enableRaidCountdown;
-        public float RaidSecondsRemaining => RaidCountdownEnabled
+        public float RaidSecondsRemaining => RoyaleMode.HasValue
+            ? (TryGetRoyaleFloorClock(_local != null ? _local.Floor : 1, out _, out float remaining) ? remaining : 0f)
+            : RaidCountdownEnabled
             ? RaidCountdownRules.RemainingSeconds(RaidDurationSeconds, Elapsed)
             : RaidDurationSeconds;
-        public bool RaidExpired => _raidExpired;
+        public bool RaidExpired => RoyaleMode.HasValue
+            ? TryGetRoyaleFloorClock(_local != null ? _local.Floor : 1, out _, out float remaining) && remaining <= 0f
+            : _raidExpired;
+
+        public PlayerRaidClock ClockFor(IInteractionActor actor)
+        {
+            if (!RoyaleMode.HasValue)
+                return new PlayerRaidClock(RaidCountdownEnabled, RaidCountdownEnabled ? Mathf.Max(0, RaidSecondsRemaining) : 0,
+                    RaidCountdownEnabled && RaidExpired);
+            var session = SessionOf(actor);
+            if (session?.Rig == null) return default;
+            bool held = session.Rig.IsInFloorTransit;
+            int floor = held && !session.AwaitingInitialFloor ? Mathf.Min(3, session.Floor + 1) : session.Floor;
+            bool started = TryGetRoyaleFloorClock(floor, out _, out float remaining);
+            bool waiting = held || !started;
+            return new PlayerRaidClock(!waiting, waiting ? 0 : remaining, !waiting && remaining <= 0,
+                (byte)floor, waiting, session.Rig.FloorMovementGeneration);
+        }
 
         private int RaidDurationSeconds => RaidCountdownRules.NormalizeDurationSeconds(
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -215,7 +332,7 @@ namespace Emberdelve.Flow
 #endif
             config != null ? config.raidDurationSeconds : RaidCountdownRules.DefaultDurationSeconds);
 
-        private bool RaidDeadlineReached => RaidCountdownEnabled &&
+        private bool RaidDeadlineReached => !RoyaleMode.HasValue && RaidCountdownEnabled &&
             !RaidCountdownRules.IsExtractionWindowOpen(RaidDurationSeconds, Elapsed, !NetRole.IsClientOnly);
 
         public float InteractionReach => config != null ? Mathf.Max(0.5f, config.interactionAuthorityRange) : InteractionRules.DefaultReach;
@@ -242,6 +359,11 @@ namespace Emberdelve.Flow
             if (actor == null || !actor.IsAlive)
             {
                 reason = "The dead cannot interact";
+                return false;
+            }
+            if (RoyaleMode.HasValue && !IsRoyaleFloorOpen(session.Floor))
+            {
+                reason = "Floor is not open";
                 return false;
             }
             if (_state != RunState.Running || !session.IsRunning)
@@ -403,6 +525,13 @@ namespace Emberdelve.Flow
         private void BeginRun()
         {
             if (_started) return;
+            if (RoyaleMode.HasValue)
+            {
+                Chests = ChestSpawner.Ensure(layout, config, this);
+                var initialMap = FindFirstObjectByType<DungeonModuleSceneAssembler>(FindObjectsInactive.Include);
+                if (!FloorCoordinator.TryAdoptInitialMap(initialMap, out string preparationReason))
+                { Debug.LogError("[RunDirector] Initial Royale map is not ready: " + preparationReason, this); return; }
+            }
             if (IsServerMode)
             {
                 StartServerRun();
@@ -522,8 +651,14 @@ namespace Emberdelve.Flow
         public bool TryJoin(PlayerRig rig, int requestedParty, bool locallyControlled,
             CharacterClassData selectedClass, out string reason)
         {
+            return TryJoinCore(rig, requestedParty, locallyControlled, selectedClass, 1, false, out reason);
+        }
+
+        private bool TryJoinCore(PlayerRig rig, int requestedParty, bool locallyControlled,
+            CharacterClassData selectedClass, int floor, bool bot, out string reason)
+        {
             reason = null;
-            if (_raidExpired || (_started && RaidDeadlineReached))
+            if (!bot && (_raidExpired || (_started && RaidDeadlineReached)))
             {
                 reason = "the raid timer has expired";
                 return false;
@@ -533,7 +668,10 @@ namespace Emberdelve.Flow
             if (_state == RunState.Dead || _state == RunState.Extracted) { reason = "the run already ended"; return false; }
             if (_byPlayerId.ContainsKey(rig.PlayerId)) { reason = "this player is already in the run"; return false; }
 
-            if (!TryResolveParty(requestedParty, out int party, out reason)) return false;
+            int party = requestedParty;
+            // Only the floor coordinator can call the bot factory after validating destination capacity.
+            if (!bot && !TryResolveParty(requestedParty, out party, out reason)) return false;
+            if (!bot && RoyaleMode.HasValue && !FloorCoordinator.CanAdmitInitialParty(party, out reason)) return false;
 
             // R1c1: the admitted player owns its rig's combat id as a command sender (sender id = the player id this
             // session is keyed by). Bound before anything else about the rig changes; a refusal leaves it untouched.
@@ -554,6 +692,9 @@ namespace Emberdelve.Flow
                 Class = selectedClass,
                 Inventory = rig.Inventory,
                 IsLocal = locallyControlled,
+                IsBot = bot,
+                Floor = floor,
+                AwaitingInitialFloor = bot,
                 JoinedAt = Time.unscaledTime
             };
 
@@ -567,6 +708,11 @@ namespace Emberdelve.Flow
 
             _sessions.Add(session);
             _byPlayerId[session.PlayerId] = session;
+            if (!bot && RoyaleMode.HasValue && !FloorCoordinator.TryHoldInitialPlayer(rig, out reason))
+            {
+                RemovePlayer(session.PlayerId, "Initial roster reservation failed");
+                return false;
+            }
             if (locallyControlled && _local == null)
             {
                 _local = session;
@@ -584,7 +730,8 @@ namespace Emberdelve.Flow
         private bool TryResolveParty(int requestedParty, out int party, out string reason)
         {
             reason = null;
-            int cap = config != null ? Mathf.Clamp(config.maxPartySize, 1, 3) : CombatTeams.DefaultMaxPartySize;
+            int cap = RoyaleMode.HasValue ? (int)RoyaleMode.Value
+                : config != null ? Mathf.Clamp(config.maxPartySize, 1, 3) : CombatTeams.DefaultMaxPartySize;
             if (_partySizeOverride > 0) cap = Mathf.Min(cap, _partySizeOverride); // U3B3 proof switch (-ember-net-party-size)
             party = requestedParty;
             if (party < 0)
@@ -763,6 +910,45 @@ namespace Emberdelve.Flow
             return true;
         }
 
+        internal bool TryCreateRoyaleBot(GameObject prefab, CharacterClassData selectedClass, int party,
+            int floor, Vector3 position, out PlayerRig rig, out string reason)
+        {
+            rig = null; reason = "Bot creation is unavailable";
+            if (NetRole.IsClientOnly || !RoyaleMode.HasValue || party < 0 || floor < 1 || floor > 3
+                || prefab == null || prefab.scene.IsValid() || selectedClass == null || config == null
+                || TryGetRoyaleFloorClock(floor, out _, out _)
+                || (NetRole.IsOffline && LocalSession == null)) return false;
+            var instance = Instantiate(prefab, position, Quaternion.identity);
+            bool committed = false;
+            var spawned = instance.GetComponent<PlayerRig>();
+            try
+            {
+                if (spawned == null) { reason = "Bot prefab has no PlayerRig"; return false; }
+                StripPresentation(instance);
+                spawned.WireRig();
+                spawned.Equipment?.Clear(); spawned.Inventory?.Clear();
+                if (!TryJoinCore(spawned, party, false, selectedClass, floor, true, out reason)) return false;
+                spawned.SetInputEnabled(false);
+                if (spawned.Movement != null) spawned.Movement.ExternalDriven = true;
+                var melee = spawned.GetComponent<MeleeCombat>(); if (melee != null) melee.RemoteDriven = true;
+                var ranged = spawned.GetComponent<RangedCombat>(); if (ranged != null) ranged.RemoteDriven = true;
+                if (!spawned.TryBeginFloorTransit(out reason)) return false;
+                rig = spawned; committed = true; return true;
+            }
+            finally
+            {
+                if (!committed)
+                {
+                    if (spawned != null)
+                    {
+                        RemovePlayer(spawned.PlayerId, "Bot creation failed");
+                        CombatRegistry.Unregister(spawned.CombatId, spawned);
+                    }
+                    if (Application.isPlaying) Destroy(instance); else DestroyImmediate(instance);
+                }
+            }
+        }
+
         private static void StripPresentation(GameObject instance)
         {
             Camera[] cameras = instance.GetComponentsInChildren<Camera>(true);
@@ -843,6 +1029,7 @@ namespace Emberdelve.Flow
             if (rig != null && rig.Health != null && session.DiedHandler != null) rig.Health.Died -= session.DiedHandler;
             session.DiedHandler = null;
 
+            _floorCoordinator?.ReleasePendingArrival(session);
             _byPlayerId.Remove(playerId);
             _sessions.Remove(session);
             if (_local == session) _local = null;
@@ -868,6 +1055,7 @@ namespace Emberdelve.Flow
 
         private void OnDestroy()
         {
+            _floorCoordinator?.ReleaseOwnedMaps();
             GameServices.Unregister<RunDirector>(this);
             GameServices.Unregister<ILocalPlayerSource>(this);
             GameEvents.DamageDealt -= HandleDamageDealt;
@@ -886,8 +1074,18 @@ namespace Emberdelve.Flow
 
         private void Update()
         {
+            if (ExtractionSettlementPending)
+            {
+                if (Time.unscaledTime >= _nextExtractionSettlementAttemptAt)
+                {
+                    _nextExtractionSettlementAttemptAt = Time.unscaledTime + 1f;
+                    RetryExtractionSettlement(out _);
+                }
+                return;
+            }
             if (_started && !_raidExpired && _state == RunState.Running && RaidDeadlineReached)
                 ExpireRaid();
+            if (_started) TickRoyaleFloors();
 
             RetryPendingDeathCustody();
 
@@ -917,10 +1115,16 @@ namespace Emberdelve.Flow
 
             InventoryOpen = open && _state == RunState.Running && LocalPlayerState == RunState.Running;
 
-            bool controlAllowed = !InventoryOpen && !_paused;
+            bool terminal = LocalPlayerState == RunState.Dead || LocalPlayerState == RunState.Extracted;
+            bool controlAllowed = !InventoryOpen && !_paused && !terminal && !ExtractionSettlementPending;
             rig.SetInputEnabled(controlAllowed);
 
-            if (!InventoryOpen && !_paused)
+            if (terminal)
+            {
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+            }
+            else if (controlAllowed)
             {
                 Cursor.lockState = CursorLockMode.Locked;
                 Cursor.visible = false;
@@ -929,6 +1133,8 @@ namespace Emberdelve.Flow
 
         internal void TogglePause()
         {
+            if (ExtractionSettlementPending) return;
+            if (LocalPlayerState == RunState.Dead || LocalPlayerState == RunState.Extracted) return;
             if (_state != RunState.Running && _state != RunState.Paused) return;
 
             // Online, pause is the local player's menu only: the clock and the run-wide state belong to everybody.
@@ -1028,6 +1234,11 @@ namespace Emberdelve.Flow
         {
             if (_raidExpired) return;
             _raidExpired = true;
+            ExpirePlayersOnFloor(0);
+        }
+
+        private void ExpirePlayersOnFloor(int floor)
+        {
 
             // Snapshot the count because completing the final session can end the run while this loop is executing.
             // HandlePlayerDeath applies the same custody and exact-once result rules as any other lethal event.
@@ -1036,6 +1247,7 @@ namespace Emberdelve.Flow
             {
                 PlayerSession session = _sessions[i];
                 if (session == null || !session.IsRunning || session.Rig == null || session.Rig.Health == null) continue;
+                if (floor != 0 && session.Floor != floor) continue;
 
                 PlayerRig rig = session.Rig;
                 DamageInfo timeoutDamage = new DamageInfo(
@@ -1054,12 +1266,25 @@ namespace Emberdelve.Flow
         }
 
         /// <summary>R2: the extraction rule for ONE actor: that player must still be in the run, alive, and (data) carrying value.</summary>
+        public int ExtractionFloorFor(IInteractionActor actor)
+        {
+            var session = SessionOf(actor);
+            if (session == null || !session.IsRunning || session.Rig == null || !session.Rig.IsInPlay || session.Rig.IsDead) return -1;
+            return RoyaleMode.HasValue ? (session.Floor == 3 && IsRoyaleFloorOpen(3) ? 3 : -1) : 0;
+        }
+
         public bool ExtractionAllowed(IInteractionActor actor, out string reason)
         {
             PlayerSession session = SessionOf(actor);
             if (session == null)
             {
                 reason = "Not a player of this run";
+                return false;
+            }
+
+            if (RoyaleMode.HasValue && (session.Floor != 3 || !IsRoyaleFloorOpen(session.Floor)))
+            {
+                reason = "Final extraction is only available on floor 3";
                 return false;
             }
 
@@ -1104,8 +1329,28 @@ namespace Emberdelve.Flow
                 return false;
             }
 
-            CompletePlayer(SessionOf(actor), RunState.Extracted);
-            return true;
+            PlayerSession session = SessionOf(actor);
+            CompletePlayer(session, RunState.Extracted);
+            if (session.ExtractionSettlementPending)
+            {
+                reason = OfflineProfileSession.LastError ?? "Waiting for loot to be saved";
+                return false;
+            }
+            return session.State == RunState.Extracted;
+        }
+
+        /// <summary>Retries the same immutable offline return snapshot; never reopens gameplay while it is pending.</summary>
+        public bool RetryExtractionSettlement(out string reason)
+        {
+            reason = null;
+            if (_pendingExtraction == null) return true;
+            if (!NetRole.IsOffline) { reason = "Offline settlement belongs to the offline authority"; return false; }
+            if (!OfflineProfileSession.RetrySettlement(out reason)) return false;
+            PlayerSession session = _pendingExtraction;
+            _pendingExtraction = null;
+            session.ExtractionSettlementPending = false;
+            CompletePlayer(session, RunState.Extracted);
+            return session.State == RunState.Extracted;
         }
 
         /// <summary>
@@ -1115,6 +1360,26 @@ namespace Emberdelve.Flow
         private void CompletePlayer(PlayerSession session, RunState outcome)
         {
             if (session == null || !session.IsRunning) return;
+
+            if (session.IsLocal && NetRole.IsOffline && !Emberdelve.Items.OfflineProfileSession.Complete(
+                    outcome == RunState.Extracted, session.Rig, out string saveReason))
+            {
+                Debug.LogError("[Emberdelve][Profile] " + saveReason);
+                GameEvents.RaiseToast(session.PlayerId, saveReason);
+                if (outcome == RunState.Extracted)
+                {
+                    session.ExtractionSettlementPending = true;
+                    _pendingExtraction = session;
+                    _nextExtractionSettlementAttemptAt = Time.unscaledTime + 1f;
+                    _offlinePauseStartedAt = Time.unscaledTime;
+                    _paused = true;
+                    Time.timeScale = 0f;
+                    session.Rig.SetInputEnabled(false);
+                    SetState(RunState.Paused);
+                    GameEvents.RaiseStatusLine(session.PlayerId, "Saving loot failed. Retrying; raid is paused.");
+                    return;
+                }
+            }
 
             session.State = outcome;
             session.EndedAt = Elapsed;
@@ -1139,7 +1404,8 @@ namespace Emberdelve.Flow
             session.HasResult = true;
 
             bool anyoneLeft = false;
-            for (int i = 0; i < _sessions.Count; i++) if (_sessions[i].IsRunning) { anyoneLeft = true; break; }
+            for (int i = 0; i < _sessions.Count; i++)
+                if (_sessions[i].State == RunState.Running) { anyoneLeft = true; break; }
 
             // The run-wide outcome is published first (as before), then the player's own state and result.
             if (!anyoneLeft) FinishRun(outcome);
@@ -1147,7 +1413,9 @@ namespace Emberdelve.Flow
             if (session.IsLocal)
             {
                 _paused = false;
+                InventoryOpen = false;
                 ResetTimeScale();
+                GameEvents.RaisePause(false);
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
                 RunContext.CompleteRun(session.Result);
@@ -1303,6 +1571,26 @@ namespace Emberdelve.Flow
             }
         }
 
+        public bool TryPrepareDroppedStack(ItemData item, int amount, Vector3 position, out IPreparedGroundDrop prepared, out string reason)
+        {
+            prepared = null;
+            if (_state != RunState.Running || item == null || item.IsEquippable || amount <= 0 ||
+                amount > item.EffectiveMaxStack || Config == null || Config.itemCatalog == null || !Config.itemCatalog.Contains(item))
+            { reason = "the run cannot stage this item stack"; return false; }
+            PreparedGroundDrop staged = null;
+            try
+            {
+                LootPickup pickup = BuildPickupBody(item, position, false);
+                if (pickup == null) { reason = "the ground refused the stack"; return false; }
+                staged = new PreparedGroundDrop(pickup, this);
+                pickup.Configure(item, amount, this);
+                prepared = staged;
+                reason = null;
+                return true;
+            }
+            catch { staged?.Cancel(); throw; }
+        }
+
         /// <summary>A staged pickup remains inactive until ownership is removed from its source.</summary>
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         public bool FailNextGroundDropPublicationForProof { get; set; }
@@ -1424,6 +1712,7 @@ namespace Emberdelve.Flow
             if (!activate) root.SetActive(false);
             root.name = $"Loot_{item.displayName}";
             root.transform.position = worldPosition;
+            _floorCoordinator?.ParentRuntimeDrop(root, worldPosition);
             root.transform.localScale = new Vector3(
                 Mathf.Max(0.12f, item.worldSize.x),
                 Mathf.Max(0.12f, item.worldSize.y),
@@ -1450,6 +1739,11 @@ namespace Emberdelve.Flow
                 return;
             }
 
+            if (Emberdelve.Items.OfflineProfileSession.Current != null)
+            {
+                ReturnToLobby();
+                return;
+            }
             Time.timeScale = 1f;
             SceneManager.LoadScene(!string.IsNullOrEmpty(_runtimeDungeonSceneName)
                 ? _runtimeDungeonSceneName
@@ -1464,6 +1758,11 @@ namespace Emberdelve.Flow
                 return;
             }
 
+            if (!Emberdelve.Items.OfflineProfileSession.Complete(false, _local?.Rig, out string saveReason))
+            {
+                GameEvents.RaiseToast(saveReason);
+                return;
+            }
             Time.timeScale = 1f;
             SceneManager.LoadScene(config != null ? config.lobbySceneName : "Lobby");
         }

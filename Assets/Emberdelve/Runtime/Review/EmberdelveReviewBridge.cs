@@ -90,6 +90,10 @@ namespace Emberdelve.Review
             /// MaxHoldSeconds; omitted or 0 keeps the exact 'frames' behaviour above. Negative, NaN or
             /// infinite values are rejected with a failed ack and no press.</summary>
             public float seconds;
+            /// <summary>Mouse only: release mouse, keep optional keys held for this bounded duration before capture.</summary>
+            public float afterReleaseSeconds;
+            /// <summary>Mouse only: optional key chord begins this many seconds after the mouse press.</summary>
+            public float keyDelaySeconds;
             /// <summary>Key name(s), comma separated. Alternative: the keys array.</summary>
             public string key;
             public string[] keys;
@@ -99,6 +103,9 @@ namespace Emberdelve.Review
             /// <summary>Optional pointer delta, applied with the first (moving) state event.</summary>
             public float dx;
             public float dy;
+            /// <summary>Optional held mouse drag through ordinary InputSystem events.</summary>
+            public bool drag;
+            public float endX, endY;
             /// <summary>left | right (default left).</summary>
             public string button;
             /// <summary>Optional snapshot file name; must stay inside snapshots/.</summary>
@@ -126,6 +133,28 @@ namespace Emberdelve.Review
             /// <summary>Read-only input/movement evidence for a 'key' command, null for every other
             /// action. It describes only the frames of THIS command; nothing is carried across commands.</summary>
             public MovementTelemetry telemetry;
+            public PerformanceTelemetry performance;
+            public FootstepTelemetry[] footsteps;
+        }
+
+        [Serializable]
+        public sealed class FootstepTelemetry
+        {
+            public int playerId, stepRequests;
+            public bool local, replicated, crouched;
+            public float gain, lastRequestedGain, stride;
+            public Vector3 position;
+        }
+
+        [Serializable]
+        public sealed class PerformanceTelemetry
+        {
+            public string label, device, graphicsApi, processor;
+            public int frames, width, height, vSyncCount, targetFrameRate, gcCollections;
+            public bool focusedAtStart, focusedAtEnd, truncated;
+            public float timeScale;
+            public double seconds, meanMs, p50Ms, p95Ms, p99Ms, maxMs;
+            public long unityAllocatedBefore, unityAllocatedAfter, monoUsedBefore, monoUsedAfter;
         }
 
         // ------------------------------------------------------------------ read-only hold telemetry
@@ -142,6 +171,8 @@ namespace Emberdelve.Review
         public sealed class MovementTelemetry
         {
             public bool rigFound;
+            public int localRigCandidates;
+            public bool rigLocallyControlled;
             public string rigName;
             public string rigNote;
             public bool rigActiveInHierarchy;
@@ -211,8 +242,18 @@ namespace Emberdelve.Review
                 _traceEveryFrames = traceEveryFrames;
                 _traceEverySeconds = traceEverySeconds;
 
-                _rig = UnityEngine.Object.FindFirstObjectByType<Emberdelve.Player.PlayerRig>();
+                // Network scenes contain both owner and remote rigs. Never sample an arbitrary
+                // disabled remote controller, or silently guess when local ownership is ambiguous.
+                Emberdelve.Player.PlayerRig local = null;
+                foreach (var candidate in UnityEngine.Object.FindObjectsByType<Emberdelve.Player.PlayerRig>(FindObjectsSortMode.None))
+                {
+                    if (!candidate.IsLocallyControlled) continue;
+                    local = candidate;
+                    _data.localRigCandidates++;
+                }
+                _rig = _data.localRigCandidates == 1 ? local : null;
                 _data.rigFound = _rig != null;
+                _data.rigLocallyControlled = _rig != null && _rig.IsLocallyControlled;
                 _data.keys = DescribeKeys(keys);
                 _data.collisionFlagsSummary = "none";
                 _data.deviceKeyFirstSample = -1;
@@ -230,7 +271,9 @@ namespace Emberdelve.Review
                 }
                 else
                 {
-                    _data.rigNote = "no PlayerRig in the active scene (a menu scene such as Lobby is a valid place for this)";
+                    _data.rigNote = _data.localRigCandidates == 0
+                        ? "no locally controlled PlayerRig in the active scene (a menu or pending spawn is valid)"
+                        : "multiple locally controlled PlayerRigs; movement telemetry unavailable rather than guessing";
                 }
 
                 if (_device != null && keys != null && keys.Count > 0)
@@ -731,12 +774,15 @@ namespace Emberdelve.Review
                 case "snapshot":
                     yield return RunSnapshot(command, command.id);
                     break;
+                case "performance":
+                    yield return RunPerformance(command);
+                    break;
                 case "quit":
                     yield return RunQuit(command);
                     break;
                 default:
                     Finish(command, false,
-                        "unknown action '" + command.action + "' (wait|key|mouse|snapshot|quit)", null, 0, 0);
+                        "unknown action '" + command.action + "' (wait|key|mouse|snapshot|performance|quit)", null, 0, 0);
                     break;
             }
         }
@@ -752,6 +798,58 @@ namespace Emberdelve.Review
                 : "advanced " + frames + " frames";
 
             Finish(command, true, note, null, 0, 0);
+        }
+
+        // Wall-clock intervals between ordinary frames, not GPU timings or displayed FPS.
+        // No captures, per-frame logging, scene mutation, or forced collection during sampling.
+        private IEnumerator RunPerformance(ReviewCommand command)
+        {
+            if (float.IsNaN(command.seconds) || float.IsInfinity(command.seconds) || command.seconds < 0f)
+            {
+                Finish(command, false, "performance seconds must be finite and nonnegative", null, 0, 0);
+                yield break;
+            }
+            double duration = command.seconds > 0f ? Math.Min(command.seconds, MaxHoldSeconds) : 5d;
+            var samples = new double[65536];
+            var data = new PerformanceTelemetry {
+                label = command.name ?? "", device = SystemInfo.graphicsDeviceName,
+                graphicsApi = SystemInfo.graphicsDeviceType.ToString(), processor = SystemInfo.processorType,
+                width = Screen.width, height = Screen.height, vSyncCount = QualitySettings.vSyncCount,
+                targetFrameRate = Application.targetFrameRate, timeScale = Time.timeScale
+            };
+            ReleaseHeldInput();
+            // Keep sampler allocation/startup out of the measured interval.
+            double warmup = Time.realtimeSinceStartupAsDouble + .5d;
+            while (Time.realtimeSinceStartupAsDouble < warmup) yield return null;
+            data.focusedAtStart = Application.isFocused;
+            data.unityAllocatedBefore = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong();
+            data.monoUsedBefore = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
+            int collections = GC.CollectionCount(0);
+            double start = Time.realtimeSinceStartupAsDouble, previous = start;
+            while (previous - start < duration && data.frames < samples.Length)
+            {
+                yield return null;
+                double now = Time.realtimeSinceStartupAsDouble;
+                samples[data.frames++] = (now - previous) * 1000d;
+                previous = now;
+            }
+            data.seconds = previous - start;
+            data.truncated = data.frames == samples.Length && data.seconds < duration;
+            data.focusedAtEnd = Application.isFocused;
+            data.unityAllocatedAfter = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong();
+            data.monoUsedAfter = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
+            data.gcCollections = GC.CollectionCount(0) - collections;
+            Array.Sort(samples, 0, data.frames);
+            if (data.frames > 0)
+            {
+                data.meanMs = data.seconds * 1000d / data.frames;
+                data.p50Ms = samples[(int)Math.Ceiling(data.frames * .50d) - 1];
+                data.p95Ms = samples[(int)Math.Ceiling(data.frames * .95d) - 1];
+                data.p99Ms = samples[(int)Math.Ceiling(data.frames * .99d) - 1];
+                data.maxMs = samples[data.frames - 1];
+            }
+            Finish(command, !data.truncated, data.truncated ? "performance sample capacity exceeded" :
+                "sampled wall-clock frame intervals; not GPU timings or displayed FPS", null, 0, 0, performance: data);
         }
 
         private IEnumerator RunKey(ReviewCommand command)
@@ -833,9 +931,11 @@ namespace Emberdelve.Review
             }
 
             // Capture held keyboard UI (for example a radial wheel) before releasing.
+            // Preserve the measured hold interval; screenshot rendering may advance extra frames.
             if (!string.IsNullOrWhiteSpace(command.name))
             {
-                yield return RunSnapshot(command, command.id);
+                probe.FinishProbe();
+                yield return RunSnapshot(command, command.id, probe.Build());
                 yield break;
             }
 
@@ -883,6 +983,33 @@ namespace Emberdelve.Review
                 yield break;
             }
 
+            if (command.drag && (float.IsNaN(command.endX) || float.IsInfinity(command.endX) ||
+                float.IsNaN(command.endY) || float.IsInfinity(command.endY) ||
+                command.endX < 0f || command.endX > width || command.endY < 0f || command.endY > height))
+            {
+                Finish(command, false, "drag endpoint is outside the screen", null, 0, 0);
+                yield break;
+            }
+
+            float afterRelease;
+            if (!TryResolveHoldSeconds(command.afterReleaseSeconds, out afterRelease, out string afterError))
+            {
+                Finish(command, false, afterError, null, 0, 0);
+                yield break;
+            }
+            float keyDelay;
+            if (!TryResolveHoldSeconds(command.keyDelaySeconds, out keyDelay, out string delayError))
+            {
+                Finish(command, false, delayError, null, 0, 0);
+                yield break;
+            }
+            var chord = new List<Key>();
+            if ((!string.IsNullOrWhiteSpace(command.key) || (command.keys != null && command.keys.Length > 0))
+                && !TryParseKeys(command, chord, out string chordError))
+            {
+                Finish(command, false, chordError, null, 0, 0);
+                yield break;
+            }
             int hold = ClampFrames(command.frames, DefaultHoldFrames, MaxHoldFrames);
             Vector2 position = new Vector2(command.x, command.y);
             Vector2 delta = new Vector2(command.dx, command.dy);
@@ -896,6 +1023,11 @@ namespace Emberdelve.Review
             }
             yield return null;
 
+            if (keyDelay <= 0f && chord.Count > 0 && !QueueKeyboard(chord, true))
+            {
+                Finish(command, false, "queueing mouse keyboard chord failed", null, 0, 0);
+                yield break;
+            }
             if (!QueueMouse(position, Vector2.zero, bit))
             {
                 Finish(command, false, "queueing the button press failed", null, 0, 0);
@@ -908,11 +1040,21 @@ namespace Emberdelve.Review
             string duration;
             string capNote;
 
+            bool chordPressed = keyDelay <= 0f;
             if (requestedSeconds > 0f)
             {
                 do
                 {
                     yield return null;
+                    if (!chordPressed && Time.realtimeSinceStartup - startedAt >= keyDelay)
+                    {
+                        if (chord.Count > 0 && !QueueKeyboard(chord, true))
+                        {
+                            Finish(command, false, "queueing delayed chord failed", null, 0, 0);
+                            yield break;
+                        }
+                        chordPressed = true;
+                    }
                 }
                 while (Time.realtimeSinceStartup - startedAt < requestedSeconds);
 
@@ -930,7 +1072,35 @@ namespace Emberdelve.Review
                     : string.Empty;
             }
 
-            // A named mouse command captures the held pose before releasing the button.
+            if (command.drag)
+            {
+                Vector2 start = position;
+                // Cross the ordinary uGUI drag threshold while the button remains held.
+                // No UI or inventory method is invoked by the review bridge.
+                for (int step = 1; step <= 24; step++)
+                {
+                    Vector2 next = Vector2.Lerp(start, new Vector2(command.endX, command.endY), step / 24f);
+                    if (!QueueMouse(next, next - position, bit))
+                    {
+                        Finish(command, false, "queueing drag movement failed", null, 0, 0);
+                        yield break;
+                    }
+                    position = next;
+                    yield return null;
+                }
+            }
+
+            if (afterRelease > 0f)
+            {
+                if (!QueueMouse(position, Vector2.zero, 0))
+                {
+                    Finish(command, false, "queueing mouse release failed", null, 0, 0);
+                    yield break;
+                }
+                float releasedAt = Time.realtimeSinceStartup;
+                do { yield return null; } while (Time.realtimeSinceStartup - releasedAt < afterRelease);
+            }
+            // Without afterReleaseSeconds a named mouse command captures the held pose before release.
             // RunSnapshot finishes through Finish, which releases input even on capture failure.
             if (!string.IsNullOrWhiteSpace(command.name))
             {
@@ -947,12 +1117,12 @@ namespace Emberdelve.Review
                 null, 0, 0);
         }
 
-        private IEnumerator RunSnapshot(ReviewCommand command, int ackId)
+        private IEnumerator RunSnapshot(ReviewCommand command, int ackId, MovementTelemetry telemetry = null)
         {
             string path = ResolveSnapshotPath(command.name, ackId);
             if (path == null)
             {
-                Finish(command, false, "snapshot name is not a safe file name inside " + _snapshotDir, null, 0, 0);
+                Finish(command, false, "snapshot name is not a safe file name inside " + _snapshotDir, null, 0, 0, telemetry);
                 yield break;
             }
 
@@ -967,7 +1137,7 @@ namespace Emberdelve.Review
             if (capture == null || !capture.ok)
             {
                 Finish(command, false, "no rendered frame could be captured: " +
-                                       (capture != null ? capture.error : "no attempt ran"), null, 0, 0);
+                                       (capture != null ? capture.error : "no attempt ran"), null, 0, 0, telemetry);
                 yield break;
             }
 
@@ -981,7 +1151,7 @@ namespace Emberdelve.Review
             if (!FileExistsSafe(path))
             {
                 Finish(command, false, "capture reported success but " + Path.GetFileName(path) +
-                                       " never appeared on disk", null, 0, 0);
+                                       " never appeared on disk", null, 0, 0, telemetry);
                 yield break;
             }
 
@@ -999,7 +1169,7 @@ namespace Emberdelve.Review
                 "captured " + Path.GetFileName(path) + " " + width + "x" + height + " " + FileLengthSafe(path) +
                 " bytes at frame " + Time.frameCount + " using " +
                 (capture.async ? "ScreenCapture.CaptureScreenshot" : "ScreenCapture.CaptureScreenshotAsTexture"),
-                path, width, height);
+                path, width, height, telemetry);
         }
 
         private IEnumerator RunQuit(ReviewCommand command)
@@ -1377,6 +1547,21 @@ namespace Emberdelve.Review
 
         // ------------------------------------------------------------------ ack
 
+        private static FootstepTelemetry[] ReadFootsteps()
+        {
+            var result = new List<FootstepTelemetry>();
+            foreach (var rig in UnityEngine.Object.FindObjectsByType<Emberdelve.Player.PlayerRig>(FindObjectsSortMode.None))
+            {
+                var steps = rig.GetComponent<Emberdelve.Feedback.WorldFootsteps>();
+                if (steps == null) continue;
+                result.Add(new FootstepTelemetry { playerId = rig.PlayerId, local = rig.IsLocallyControlled,
+                    replicated = steps.ReplicatedCrouched.HasValue, crouched = steps.IsCrouched,
+                    gain = steps.StepGain, lastRequestedGain = steps.LastRequestedGain, stride = steps.StepStride,
+                    stepRequests = steps.StepRequests, position = rig.transform.position });
+            }
+            return result.ToArray();
+        }
+
         private ReviewAck BuildAck(int id, string action, bool ok, string message, string error,
                                    string screenshot, int width, int height, MovementTelemetry telemetry = null)
         {
@@ -1396,19 +1581,21 @@ namespace Emberdelve.Review
                 height = height > 0 ? height : Screen.height,
                 reviewDir = _root ?? string.Empty,
                 utc = DateTime.UtcNow.ToString("o"),
-                telemetry = telemetry
+                telemetry = telemetry,
+                footsteps = ReadFootsteps()
             };
             return ack;
         }
 
         private void Finish(ReviewCommand command, bool ok, string message, string screenshot, int width, int height,
-                            MovementTelemetry telemetry = null)
+                            MovementTelemetry telemetry = null, PerformanceTelemetry performance = null)
         {
             ReleaseHeldInput();
 
             string action = (command.action ?? string.Empty).Trim().ToLowerInvariant();
             ReviewAck ack = BuildAck(command.id, action, ok, message, ok ? null : message, screenshot, width, height,
                 telemetry);
+            ack.performance = performance;
             WriteAck(ack);
 
             _busy = false;

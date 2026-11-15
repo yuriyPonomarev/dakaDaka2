@@ -120,6 +120,7 @@ namespace Emberdelve.InputLayer
         /// <summary>B1 test seams (same idea as the primary overrides): replace the real reload / swap edge for one frame. Never set in game code.</summary>
         internal bool? ReloadPressedOverride { get; set; }
         internal bool? SwapPressedOverride { get; set; }
+        public bool ReloadHeld => !QuickWheelCaptured && OverrideLive && _reload != null && _reload.IsPressed();
         public bool ReloadPressed => !QuickWheelCaptured && (ReloadPressedOverride.HasValue ? ReloadPressedOverride.Value && OverrideLive : _reload != null && _reload.WasPressedThisFrame());
         public bool SwapPressed => !QuickWheelCaptured && (SwapPressedOverride.HasValue ? SwapPressedOverride.Value && OverrideLive : _swap != null && _swap.WasPressedThisFrame());
         public bool Skill1Pressed => !QuickWheelCaptured && (_skill1 != null && _skill1.WasPressedThisFrame());

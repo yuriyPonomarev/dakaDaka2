@@ -17,6 +17,10 @@ namespace Emberdelve.Combat
     public sealed partial class LocalCombatAuthority
     {
         private readonly Dictionary<int, CombatKitState> _kits = new Dictionary<int, CombatKitState>();
+        // Kept when a holder dies/despawns: the UID may still be on the ground or in a corpse.
+        // This authority's lifetime bounds the registry to one raid.
+        private readonly Dictionary<string, CombatKitState.AmmoPool.LoadedRounds> _loadedRounds =
+            new Dictionary<string, CombatKitState.AmmoPool.LoadedRounds>();
         private readonly List<int> _kitScratch = new List<int>();
         private float _kitClockLast = float.NaN;
 
@@ -51,6 +55,7 @@ namespace Emberdelve.Combat
             }
 
             kit.ApplySeed(in seed, isNew);
+            kit.BindLoadedRounds(_loadedRounds);
             if (isNew || seed.Reason == KitSeedReason.ClassApply || seed.Reason == KitSeedReason.Respawn || seed.Reason == KitSeedReason.Death)
             {
                 _skillStamps.Remove(combatId);
@@ -71,6 +76,16 @@ namespace Emberdelve.Combat
 
             view = default;
             return false;
+        }
+
+        /// <summary>Trusted server-side capture of a currently owned item, including bag-only pickups.
+        /// No client RPC exposes the registry. The caller supplies items from its validated loadout snapshot.</summary>
+        internal bool TryGetLoadedRounds(string uid, string weaponId, out int count)
+        {
+            count = 0;
+            if (uid == null || !_loadedRounds.TryGetValue(uid, out var loaded) || loaded.WeaponId != weaponId) return false;
+            count = loaded.Count;
+            return true;
         }
 
         /// <summary>Seconds until the authority would accept this skill again from this entity (0 when ready, stale-epoch or unknown). False without a kit record.</summary>
@@ -101,6 +116,7 @@ namespace Emberdelve.Combat
         {
             if (!AuthorizeSender(sender, combatId, "reload", false, out reason)) return false;
             if (!CombatRegistry.TryGet(combatId, out ICombatEntity entity) || entity.IsDead) { reason = "instigator is dead or unknown"; return false; }
+            if (entity is Emberdelve.Player.PlayerRig guarding && guarding.IsGuarding) { reason = "guarding"; return false; }
             if (!_kits.TryGetValue(combatId, out CombatKitState kit)) { reason = "no kit record"; return false; }
             float rate = entity is IActionSpeedSource source ? source.ActionSpeedFactor : 1f;
             float duration = ActionSpeedRules.ReloadDuration(kit.Active != null ? kit.Active.ReloadTime : 0f, rate);
@@ -161,6 +177,7 @@ namespace Emberdelve.Combat
                     continue;
                 }
 
+                if (entity is Emberdelve.Player.PlayerRig rig && rig.IsInFloorTransit) continue;
                 kit.Tick(dt);
                 // Pushed every tick, changed or not: a rig whose displayed numbers were edited is put back.
                 PushKit(kit, entity);
@@ -234,6 +251,7 @@ namespace Emberdelve.Combat
             CombatKitState kit = new CombatKitState { CombatId = combatId };
             _kits[combatId] = kit;
             kit.ApplySeed(in seed, true);
+            kit.BindLoadedRounds(_loadedRounds);
             PushKit(kit, entity);
         }
 

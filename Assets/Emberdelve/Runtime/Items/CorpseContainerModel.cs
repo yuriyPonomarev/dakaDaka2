@@ -105,7 +105,7 @@ namespace Emberdelve.Items
 
             var created = new CorpseContainerModel(manifest.SourcePlayerId, manifest.WorldPosition)
             { Width = loadout.bag.width, Height = loadout.bag.height };
-            if (!AppendEntries(created, loadout.bag.entries, out reason) ||
+            if (!AppendPlayerBagEntries(created, manifest, loadout.bag, out reason) ||
                 !AppendEntries(created, loadout.equipment.entries, out reason)) return false;
 
             model = created;
@@ -161,7 +161,7 @@ namespace Emberdelve.Items
         /// UID registry all pass and Inventory commits the new bag atomically.
         /// </summary>
         public bool TryTransferToBag(ulong entryId, int amount, ulong expectedCorpseRevision,
-            Inventory recipient, ulong expectedBagRevision, ItemUidRegistry profileUidRegistry, out string reason)
+            Inventory recipient, ulong expectedBagRevision, ItemUidRegistry profileUidRegistry, out string reason, Vector2Int? destinationCell = null)
         {
             if (_busy)
             {
@@ -234,7 +234,7 @@ namespace Emberdelve.Items
             ContainerSnapshot nextDestination = destination.Clone();
             int remainingToPlace = amount;
             bool ordinaryStack = string.IsNullOrEmpty(offered.uid) && !definition.IsEquippable;
-            if (ordinaryStack)
+            if (ordinaryStack && !destinationCell.HasValue)
             {
                 int stackLimit = definition.StackLimitForFootprint;
                 for (int i = 0; i < nextDestination.entries.Length && remainingToPlace > 0; i++)
@@ -242,7 +242,10 @@ namespace Emberdelve.Items
                     ItemSnapshot existing = nextDestination.entries[i]?.item;
                     if (existing == null || !string.IsNullOrEmpty(existing.uid) ||
                         !string.Equals(existing.itemId, offered.itemId, StringComparison.Ordinal)) continue;
-                    int space = Math.Max(0, stackLimit - existing.quantity);
+                    var targetEntry = nextDestination.entries[i];
+                    int targetLimit = QuickBeltRules.TryGetSlot(new Vector2Int(targetEntry.x, targetEntry.y), destination.width, out _)
+                        ? QuickBeltRules.StackLimit(definition) : stackLimit;
+                    int space = Math.Max(0, targetLimit - existing.quantity);
                     int moved = Math.Min(space, remainingToPlace);
                     existing.quantity += moved;
                     remainingToPlace -= moved;
@@ -256,7 +259,19 @@ namespace Emberdelve.Items
                     reason = "recipient bag has reached its item-entry limit";
                     return false;
                 }
-                if (!TryFindFreeOrigin(destination, recipient.Catalog, definition, out Vector2Int origin, out reason)) return false;
+                Vector2Int origin;
+                if (destinationCell.HasValue)
+                {
+                    origin = destinationCell.Value;
+                    bool belt = recipient.IsBeltCell(origin);
+                    if ((belt && (!QuickBeltRules.CanStore(definition) || remainingToPlace > QuickBeltRules.StackLimit(definition))) ||
+                        !recipient.CanPlace(origin, belt ? Vector2Int.one : definition.EffectiveFootprint))
+                    {
+                        reason = "That item does not fit in the selected cells";
+                        return false;
+                    }
+                }
+                else if (!TryFindFreeOrigin(destination, recipient.Catalog, definition, out origin, out reason)) return false;
 
                 Array.Resize(ref nextDestination.entries, nextDestination.entries.Length + 1);
                 ItemSnapshot delivered = offered.Clone();
@@ -313,6 +328,45 @@ namespace Emberdelve.Items
             return -1;
         }
 
+        // Player belt slots are not bag cells. Repack them after the original bag pages so they
+        // remain visible and lootable without moving or overlapping the deceased player's bag items.
+        private static bool AppendPlayerBagEntries(CorpseContainerModel model, CorpseLootManifest manifest,
+            ContainerSnapshot bag, out string reason)
+        {
+            var rows = new List<ContainerEntry>();
+            var utility = new List<ContainerEntry>();
+            foreach (var entry in bag.entries)
+            {
+                if (entry == null || entry.item == null) { reason = "corpse bag has an empty row"; return false; }
+                if (QuickBeltRules.TryGetSlot(new Vector2Int(entry.x, entry.y), bag.width, out _)) utility.Add(entry);
+                else rows.Add(entry);
+            }
+            if (utility.Count > 0)
+            {
+                int firstRow = ((bag.height + 4) / 5) * 5;
+                var occupied = new bool[bag.width, ContainerSnapshot.MaxGridDimension];
+                foreach (var entry in utility)
+                {
+                    if (!manifest.TryGetCapturedFootprint(entry.x, entry.y, out var size) ||
+                        size.x < 1 || size.x > bag.width || size.y < 1 || size.y > 5)
+                    { reason = "corpse belt item has no displayable footprint"; return false; }
+                    bool placed = false;
+                    for (int y = firstRow; y + size.y <= occupied.GetLength(1) && !placed; y++)
+                    {
+                        if (y % 5 + size.y > 5) continue; // Never split a visible item across UI pages.
+                        for (int x = 0; x + size.x <= bag.width; x++)
+                        {
+                            if (!MarkFootprint(occupied, x, y, size)) continue;
+                            var packed = entry.Clone(); packed.x = x; packed.y = y; packed.slot = string.Empty;
+                            rows.Add(packed); model.Height = Math.Max(model.Height, y + size.y); placed = true; break;
+                        }
+                    }
+                    if (!placed) { reason = "corpse utility display exceeds container bounds"; return false; }
+                }
+            }
+            return AppendEntries(model, rows.ToArray(), out reason);
+        }
+
         private static bool AppendEntries(CorpseContainerModel model, ContainerEntry[] entries, out string reason)
         {
             for (int i = 0; i < entries.Length; i++)
@@ -353,6 +407,12 @@ namespace Emberdelve.Items
                 if (!catalog.TryResolveItem(entry.item.itemId, out ItemData existing, out reason))
                 {
                     return false;
+                }
+                if (QuickBeltRules.TryGetSlot(new Vector2Int(entry.x, entry.y), bag.width, out _))
+                {
+                    if (!QuickBeltRules.CanStore(existing) || entry.item.quantity > QuickBeltRules.StackLimit(existing))
+                    { reason = "recipient belt contains an invalid utility stack"; return false; }
+                    continue;
                 }
                 Vector2Int size = existing.EffectiveFootprint;
                 if (!MarkFootprint(occupied, entry.x, entry.y, size))

@@ -118,6 +118,11 @@ namespace Emberdelve.Net
                 argv.Add("-ember-listen");
                 argv.Add("any");
             }
+            if (host)
+            {
+                argv.Add("-ember-royale-mode");
+                argv.Add((RunContext.SelectedRoyaleMode ?? Emberdelve.Rules.RoyalePartyMode.Solo).ToString().ToLowerInvariant());
+            }
             argv.AddRange(Environment.GetCommandLineArgs());
             NetLaunchArgs args = NetLaunchArgs.Parse(argv.ToArray());
             if (!args.IsValid) return "invalid arguments: " + string.Join("; ", args.Errors);
@@ -164,7 +169,11 @@ namespace Emberdelve.Net
             }
 
             // Proof switch: no enemies in a simulating process. Set before the first scene loads (NetSceneRoles reads it in Awake).
-            if (_isServerSide) NetRole.SetEnemiesDisabled(args.NoEnemies);
+            if (_isServerSide)
+            {
+                NetRole.SetEnemiesDisabled(args.NoEnemies);
+                if (args.RoyalePartySize > 0) RunContext.SelectRoyaleMode((Emberdelve.Rules.RoyalePartyMode)args.RoyalePartySize);
+            }
         }
 
         private void Log(string message) { Debug.Log(NetTuning.LogPrefix + "[" + _tag + "] " + message); }
@@ -259,6 +268,7 @@ namespace Emberdelve.Net
             Log("connecting address=" + _args.Address + " port=" + _args.Port + " timeout=" + _args.ConnectTimeoutSeconds + "s");
             gameObject.AddComponent<NetClientProbe>().Configure(_args);
             gameObject.AddComponent<NetDungeonModulePlanClient>().Configure(_nm);
+            gameObject.AddComponent<NetRoyaleMapClient>().Configure(_nm);
             bool started = _nm.StartClient();
             if (started) StartUdpResetFix(false);
             return started;
@@ -565,6 +575,7 @@ namespace Emberdelve.Net
             if (_server != null)
             {
                 Log("shutdown " + _server.CountsText());
+                Log("shutdown registeredAdventurers=" + _server.RegisteredAdventurerCount + " bots=" + _server.BotCount);
                 _server.Dispose();
             }
             Log("shutdown complete clean=" + clean + " players=" + _remoteClients.Count + " exit=" + _exitCode);

@@ -167,7 +167,8 @@ namespace Emberdelve.Items
             empty.bag.entries = Array.Empty<ContainerEntry>();
             empty.equipment.entries = Array.Empty<ContainerEntry>();
             empty.weaponSet = 0;
-            empty.belt = new[] { "", "", "", "" };
+            empty.belt = new string[LoadoutSnapshot.BeltSlotCount];
+            Array.Fill(empty.belt, string.Empty);
             return empty.Seal();
         }
     }

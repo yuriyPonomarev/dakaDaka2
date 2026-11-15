@@ -17,6 +17,7 @@ namespace Emberdelve.Interaction
         private Transform _identityModule;
         private string _identityModuleName;
         private ulong _stableId;
+        private int _boundFloor;
         public bool IsBroken { get; private set; }
         public float RemainingHealth => _initialized ? _remaining : health;
         public static readonly List<BreakableBarrel> Active = new List<BreakableBarrel>();
@@ -26,6 +27,13 @@ namespace Emberdelve.Interaction
             intactVisual = intact; brokenVisual = broken;
             health = Mathf.Max(1f, hitPoints);
             if (brokenVisual != null) brokenVisual.SetActive(false);
+        }
+
+        public bool BindStagedFloor(int floor)
+        {
+            if (floor < 2 || floor > 3) return false;
+            if (_boundFloor != 0) return _boundFloor == floor;
+            _boundFloor = floor; _identityModule = null; return true;
         }
 
         // Computed after module assembly: Awake occurs before the assembler gives the module
@@ -45,6 +53,7 @@ namespace Emberdelve.Interaction
                         break;
                     }
                 }
+                if (_boundFloor != 0) path.Insert(0, "floor" + _boundFloor + ":");
                 unchecked
                 {
                     ulong hash=14695981039346656037UL;

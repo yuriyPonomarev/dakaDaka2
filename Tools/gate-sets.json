@@ -71,6 +71,7 @@
       "NetInventory",
       "Emberdelve.EditorTools.EmberdelveNetInventoryGate.RunInventoryDropProofOnly",
       "NetMovement",
+      "NetRoyale",
       "NetProof",
       "NetSkill"
     ],
@@ -147,6 +148,7 @@
       "NetInventory",
       "Emberdelve.EditorTools.EmberdelveNetInventoryGate.RunInventoryDropProofOnly",
       "NetMovement",
+      "NetRoyale",
       "NetProof",
       "NetSkill",
       "RetroVisual",

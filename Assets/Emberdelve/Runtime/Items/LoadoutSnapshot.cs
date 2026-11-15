@@ -151,10 +151,11 @@ namespace Emberdelve.Items
             {
                 if (!StrictJson.TryInt(map["weaponSet"], "loadout weaponSet", out parsed.weaponSet, out reason)) return false;
                 if (parsed.weaponSet < 0 || parsed.weaponSet > 1) { reason = "invalid legacy weapon set"; return false; }
-                if (!StrictJson.TryArray(map["belt"], "legacy belt", 4, out List<JsonNode> entries, out reason)) return false;
-                if (entries.Count != 4) { reason = "a version 4 belt has exactly four entries"; return false; }
-                parsed.belt = new string[4];
-                for (int i = 0; i < 4; i++)
+                int legacySlots = version >= 5 ? BeltSlotCount : 4;
+                if (!StrictJson.TryArray(map["belt"], "legacy belt", legacySlots, out List<JsonNode> entries, out reason)) return false;
+                if (entries.Count != legacySlots) { reason = $"a version {version} belt has exactly {legacySlots} entries"; return false; }
+                parsed.belt = new string[legacySlots];
+                for (int i = 0; i < legacySlots; i++)
                     if (!StrictJson.TryString(entries[i], "legacy belt entry", out parsed.belt[i], out reason)
                         || !TryParseBeltText(parsed.belt[i], null, out _, out reason)) return false;
             }

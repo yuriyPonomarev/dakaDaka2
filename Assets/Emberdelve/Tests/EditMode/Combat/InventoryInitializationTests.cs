@@ -67,7 +67,7 @@ namespace Emberdelve.Combat.Tests
             _inventory.GiveStartingItems(startingClass.startingItems);
 
             int expectedSlots = startingClass.startingItems.Distinct().Count();
-            int expectedCells = startingClass.startingItems.Where(item => item != null)
+            int expectedCells = startingClass.startingItems.Where(item => item != null && !QuickBeltRules.CanStore(item))
                 .GroupBy(item => item).Sum(group => group.Key.EffectiveFootprint.x * group.Key.EffectiveFootprint.y);
             Assert.That(_inventory.UsedSlots, Is.EqualTo(expectedSlots),
                 "every distinct shipped starting item is represented by a placed stack");
@@ -77,6 +77,13 @@ namespace Emberdelve.Combat.Tests
                 Assert.That(_inventory.Slots.Any(slot => slot.Item == item), Is.True, item.itemId);
             foreach (InventorySlot slot in _inventory.Slots)
             {
+                if (QuickBeltRules.CanStore(slot.Item))
+                {
+                    Assert.That(QuickBeltRules.TryGetSlot(slot.Origin, _inventory.GridWidth, out int pocket), Is.True, "starting utility must free the bag");
+                    Assert.That(_inventory.Hotbar.StackIdAt(pocket), Is.EqualTo(slot.StackId));
+                    Assert.That(slot.Count, Is.LessThanOrEqualTo(QuickBeltRules.StackLimit(slot.Item)));
+                    continue;
+                }
                 Assert.That(slot.Origin.x, Is.InRange(0, _inventory.GridWidth - slot.Size.x));
                 Assert.That(slot.Origin.y, Is.InRange(0, _inventory.GridHeight - slot.Size.y));
             }

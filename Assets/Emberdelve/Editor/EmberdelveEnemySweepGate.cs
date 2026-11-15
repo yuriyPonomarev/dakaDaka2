@@ -245,7 +245,15 @@ namespace Emberdelve.EditorTools
             Physics.SyncTransforms();
             yield return null;
             yield return null;
-            if (frozen) agent.enabled = false;
+            if (frozen)
+            {
+                // These fixtures isolate an already-awake attack. Live end-to-end flows still exercise natural waking.
+                agent.Brain.NotifyDamaged(DamageInfo.Invalid);
+                agent.Brain.Tick(EnemyBrain.WakeSeconds, Time.time, agent.transform.position, agent.transform.forward, null);
+                agent.RefreshDormantHitPose(null);
+                agent.enabled = false;
+                Physics.SyncTransforms();
+            }
             _registered.Add(agent);
             done(agent);
         }

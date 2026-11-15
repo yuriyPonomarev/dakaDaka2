@@ -30,6 +30,8 @@ namespace Emberdelve.Items
         public static void DressPickup(GameObject root,ItemData item)
         {
             if(item==null || !item.IsRecoveredAmmo || root.transform.Find("RecoveredShaft")!=null)return;
+            var catalog = ItemVisualCatalog.Load();
+            if (catalog != null && catalog.TryGet(item.itemId, out var authored) && authored.worldPrefab != null) return;
             var cube=root.GetComponent<Renderer>();if(cube!=null)cube.enabled=false;
             // Relative to the generic loot proxy dimensions, on server and every client.
             Part(root,"RecoveredShaft",new Vector3(0,0,0),new Vector3(.12f,.12f,.9f),item.worldMaterial);

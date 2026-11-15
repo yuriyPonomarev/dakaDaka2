@@ -79,6 +79,7 @@ namespace Emberdelve.Net
         public bool IsReady => _ready;
         public bool IsOwnerReady => _owner != null && _owner.IsOwner && _owner.IsSpawned && _ready;
         public bool ChestStateReady => _chestStateReady;
+        public bool HasChestState(string id) => _chestStateReady && id != null && _chestStates.ContainsKey(id);
         public bool DoorStateReady => _doorStateReady;
         public uint DoorRevision => _doorRevision;
         public ulong FloorLootRevision => _floorLootRevision;
@@ -329,7 +330,7 @@ namespace Emberdelve.Net
         }
 
         public bool RequestCorpseTransfer(ulong corpseId, ulong entryId, int amount,
-            ulong corpseRevision, ulong bagRevision, System.Func<uint, bool> beforeSend, out uint sequence)
+            ulong corpseRevision, ulong bagRevision, System.Func<uint, bool> beforeSend, out uint sequence, Vector2Int? destinationCell = null)
         {
             sequence = 0;
             if (corpseId == 0 || entryId == 0 || amount <= 0 || _owner == null || !_owner.IsSpawned ||
@@ -340,7 +341,7 @@ namespace Emberdelve.Net
                 sequence = 0;
                 return false;
             }
-            _owner.CorpseTransferIntentRpc(corpseId, entryId, amount, corpseRevision, bagRevision, sequence);
+            _owner.CorpseTransferIntentRpc(corpseId, entryId, amount, corpseRevision, bagRevision, sequence, destinationCell?.x ?? -1, destinationCell?.y ?? -1);
             return true;
         }
 
@@ -361,7 +362,7 @@ namespace Emberdelve.Net
             if (removed && _corpsePresenter != null && _corpsePresenter.IsContainerUiOpenFor(corpseId))
             {
                 _corpsePresenter.CloseContainerUi();
-                if (_rig != null) GameEvents.RaiseToast(_rig.PlayerId, "This corpse is no longer available");
+                if (_rig != null) GameEvents.RaiseToast(_rig.PlayerId, "Loot container closed");
             }
         }
 
@@ -680,7 +681,7 @@ namespace Emberdelve.Net
 
         public bool TryCreateLocalCommand(InventoryCommandKind kind, ulong sourceStackId, ulong targetStackId,
             Vector2Int destinationCell, EquipmentSlot destinationSlot, Guid expectedSourceGearUid,
-            Guid expectedTargetGearUid, out InventoryCommand command, out string reason)
+            Guid expectedTargetGearUid, out InventoryCommand command, out string reason, int amount = 0)
         {
             command = default;
             if (!_ready || _owner == null || !_owner.IsSpawned || _rig == null || _bag == null)
@@ -689,7 +690,7 @@ namespace Emberdelve.Net
             if (_nextSequence == 0 || _nextSequence > Rules.InventoryIntentGate.SequenceCeiling)
             { reason = "Inventory session sequence exhausted"; return false; }
             var candidate = new InventoryCommand(kind, _rig.PlayerId, _nextSequence, _bag.Revision,
-                sourceStackId, targetStackId, destinationCell, destinationSlot, expectedSourceGearUid, expectedTargetGearUid);
+                sourceStackId, targetStackId, destinationCell, destinationSlot, expectedSourceGearUid, expectedTargetGearUid, amount);
             if (!candidate.IsStructurallyValid(out reason)) return false;
             command = candidate;
             return true;

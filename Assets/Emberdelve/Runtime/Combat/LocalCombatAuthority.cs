@@ -8,6 +8,7 @@ using Emberdelve.Stats;
 
 [assembly: InternalsVisibleTo("Assembly-CSharp-Editor")]
 [assembly: InternalsVisibleTo("Emberdelve.Editor")]
+[assembly: InternalsVisibleTo("Emberdelve.Combat.Tests.EditMode")]
 
 namespace Emberdelve.Combat
 {

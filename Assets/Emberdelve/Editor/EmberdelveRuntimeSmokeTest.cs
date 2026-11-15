@@ -169,6 +169,18 @@ namespace Emberdelve.EditorTools
             private LocalCombatAuthority _localAuthority;
             private DungeonLayoutData _layout;
             private NavGridData _grid;
+            private OfflineProfile _smokeProfile;
+
+            private void OnDestroy()
+            {
+                if (_smokeProfile == null) return;
+                // The same isolated-session seam as OfflineProfileTests; never dispose another session.
+                if (ReferenceEquals(OfflineProfileSession.Current, _smokeProfile))
+                    typeof(OfflineProfileSession).GetMethod("Reset", System.Reflection.BindingFlags.Static |
+                        System.Reflection.BindingFlags.NonPublic).Invoke(null, null);
+                else _smokeProfile.Dispose();
+                _smokeProfile = null;
+            }
 
             /// <summary>
             /// Every command sequence the real combat components actually claimed, in order. The shared
@@ -209,11 +221,20 @@ namespace Emberdelve.EditorTools
                 }
             }
 
+            private static PlayerRig FindLocalSmokeRig()
+            {
+                var director = FindFirstObjectByType<RunDirector>();
+                if (director != null && director.Player != null && director.Player.IsLocallyControlled) return director.Player;
+                foreach (var candidate in FindObjectsByType<PlayerRig>(FindObjectsSortMode.None))
+                    if (candidate.IsLocallyControlled) return candidate;
+                return null;
+            }
+
             private IEnumerator Run()
             {
                 yield return WaitFrames(25);
 
-                _rig = FindFirstObjectByType<PlayerRig>();
+                _rig = FindLocalSmokeRig();
                 _director = FindFirstObjectByType<RunDirector>();
                 // The active modular level owns its runtime layout and navigation grid. The authored
                 // Ashen Halls assets describe a different map and are not a valid geometry oracle here.
@@ -242,7 +263,7 @@ namespace Emberdelve.EditorTools
                 else if (Mode == "realcombatarcher")
                 {
                     yield return LobbyFlow();
-                    _rig = FindFirstObjectByType<PlayerRig>();
+                    _rig = FindLocalSmokeRig();
                     _director = FindFirstObjectByType<RunDirector>();
                     yield return RealCombatArcherFlow();
                 }
@@ -258,7 +279,7 @@ namespace Emberdelve.EditorTools
                     // fixtures can click it. Same lobby route as the item tests: the pointer fixtures measure
                     // equipment transfers as well, and the archer carries no shield to get in the way.
                     yield return LobbyFlow();
-                    _rig = FindFirstObjectByType<PlayerRig>();
+                    _rig = FindLocalSmokeRig();
                     _director = FindFirstObjectByType<RunDirector>();
                     yield return EmberdelveInventoryUiChecks.Run(_rig, _director, Check, Mode == "quickaccessui");
                 }
@@ -642,7 +663,9 @@ namespace Emberdelve.EditorTools
                 Check(ranged.enabled && ranged.Weapon != null && ranged.Weapon.weaponId == "ember_crossbow",
                     "ranged component activated for the crossbow");
                 Check(!melee.enabled, "melee component deactivated for the crossbow");
-                Check(!_rig.CanGuard && !_rig.Defense.CanBlock, $"crossbow main hand carries no block capability ({_rig.Defense})");
+                Check(_rig.ActiveWeapon != null && _rig.ActiveWeapon.CanCrossbowGuard && _rig.ActiveWeapon.CanImpactGuard
+                    && _rig.CanGuard && _rig.Defense.CanBlock && !_rig.Defense.HasShield && !_rig.CanParry && !_rig.Defense.CanParry,
+                    $"crossbow owns physical and Impact Guard without shield or parry ({_rig.Defense})");
 
                 ClassLoadout.RangedAmmoState bolts = loadout.GetAmmoState(loadout.Secondary);
                 Check(bolts != null && bolts.reserve > 0, $"crossbow starts with reserve bolts ({bolts})");
@@ -654,6 +677,12 @@ namespace Emberdelve.EditorTools
                 {
                     if (TryPlaceEnemyBesideSpawn(target, _rig.transform.position, 2, DominantAxis(_rig.transform.forward), out Vector3 spot))
                     {
+                        // This fixture measures a shot against a standing target, not waking motion.
+                        bool targetWasEnabled = target.enabled;
+                        target.Brain.NotifyDamaged(DamageInfo.Invalid);
+                        target.Brain.Tick(EnemyBrain.WakeSeconds, Time.time, target.transform.position, target.transform.forward, null);
+                        target.RefreshDormantHitPose(null);
+                        target.enabled = false;
                         target.transform.position = spot;
                         _rig.transform.rotation = Quaternion.LookRotation(target.CombatCenter - _rig.GetMuzzlePosition());
                         Physics.SyncTransforms();
@@ -671,6 +700,7 @@ namespace Emberdelve.EditorTools
                             $"crossbow damaged the enemy ({enemyHealthBefore:F0} -> {target.CurrentHealth:F0})");
                         Check(_localAuthority != null && _localAuthority.AcceptedCount > acceptedBefore,
                             "authority accepted the crossbow attack");
+                        if (!target.IsDead) target.enabled = targetWasEnabled;
                     }
                     else
                     {
@@ -744,6 +774,9 @@ namespace Emberdelve.EditorTools
                 Check(enemy != null, "an alive enemy is available for the defense tests");
                 if (enemy == null) yield break;
 
+                // Standing-lane LOS must use the standing center, not a dormant bone offset.
+                WakeStandingTarget(enemy);
+                Check(!enemy.IsDormant && !enemy.IsWaking, "telegraph placement uses the awake enemy hit pose");
                 if (!PlacePlayerInClearLane(3f, 0.5f, "defense telegraph", out _, out _) ||
                     !TryPlaceEnemyBesideSpawn(enemy, _rig.transform.position, 1, DominantAxis(_rig.transform.forward), out Vector3 enemySpot))
                 {
@@ -751,9 +784,14 @@ namespace Emberdelve.EditorTools
                     yield break;
                 }
 
-                enemy.enabled = true;
                 enemy.transform.position = enemySpot;
+                AimAtPoint(enemy.CombatCenter);
                 Physics.SyncTransforms();
+                int telegraphMask = LayerMask.GetMask(GameConfig.LevelLayerName);
+                Check(HitScanner.HasLineOfSight(_rig.AimOrigin, enemy.CombatCenter, telegraphMask, 0.3f) &&
+                    HitScanner.HasLineOfSight(_rig.GetMuzzlePosition(), enemy.CombatCenter, telegraphMask, 0.3f),
+                    "placed standing telegraph target is visible from both eye and muzzle");
+                enemy.enabled = true;
                 yield return WaitFrames(3);
 
                 // Let the real brain start a real windup.
@@ -832,80 +870,167 @@ namespace Emberdelve.EditorTools
             {
                 if (enemy == null || enemy.IsDead || _localAuthority == null || _rig == null) yield break;
                 MeleeCombat melee = _rig.GetComponent<MeleeCombat>();
-                WeaponData mainHand = _rig.Class != null ? _rig.Class.primaryWeapon : null;
-                if (melee == null || mainHand == null || !mainHand.CanRiposteWeapon) yield break;
+                WeaponData mainHand = _rig.ActiveWeapon;
+                Check(melee != null && mainHand != null && mainHand.CanRiposteWeapon && !_rig.IsDead,
+                    "riposte real path: a living player holds a response-capable weapon");
+                if (melee == null || mainHand == null || !mainHand.CanRiposteWeapon || _rig.IsDead) yield break;
 
                 PlayerMovement movement = _rig.GetComponent<PlayerMovement>();
+                PlayerLook look = _rig.Look;
                 bool movementWas = movement != null && movement.enabled;
-                if (movement != null) movement.enabled = false;
                 bool remoteWas = melee.RemoteDriven;
-                melee.RemoteDriven = true;
-                melee.enabled = true;
-                melee.SetRemoteGuard(false);
-                System.Collections.Generic.List<int> strikes = new System.Collections.Generic.List<int>();
+                bool meleeWas = melee.enabled;
+                Vector3 enemyPosition = enemy.transform.position;
+                Quaternion enemyRotation = enemy.transform.rotation;
+                float playerHealth = _rig.CurrentHealth;
+                float enemyHealth = enemy.CurrentHealth;
+                int enemyMaxOriginal = Mathf.RoundToInt(enemy.MaxHealth);
+                float originalYaw = _rig.transform.eulerAngles.y;
+                float originalPitch = look != null ? look.Pitch : 0f;
+                ItemInstance shield = _rig.Equipment.EquippedInstance(EquipmentSlot.OffHand);
+                EnemyAgent[] agents = FindObjectsByType<EnemyAgent>(FindObjectsSortMode.None);
+                bool[] enabledStates = new bool[agents.Length];
+                for (int i = 0; i < agents.Length; i++) { enabledStates[i] = agents[i].enabled; agents[i].enabled = false; }
+                List<int> strikes = new List<int>();
                 System.Action<int> onStrike = n => strikes.Add(n);
                 melee.RiposteStrikeStarted += onStrike;
-
-                Vector3 toEnemy = enemy.CombatCenter - _rig.transform.position;
-                toEnemy.y = 0f;
-                if (toEnemy.sqrMagnitude > 1e-4f) _rig.transform.rotation = Quaternion.LookRotation(toEnemy.normalized);
-                Physics.SyncTransforms();
-                yield return WaitFrames(2);
-
-                melee.SetRemoteGuard(true);
-                yield return WaitFrames(3);
-                Check(_rig.IsGuarding, "riposte real path: the server-side guard intent raised the rig's guard");
-
-                // the two strikes would kill a minion: give the enemy a deep health pool for the proof, put it back after
-                int enemyMaxOriginal = Mathf.RoundToInt(enemy.MaxHealth);
-                if (enemy.Health != null) { enemy.Health.SetMax(enemyMaxOriginal * 50); enemy.Health.SetHealth(enemyMaxOriginal * 50); }
-                Emberdelve.BladeDefense.RiposteTracker tracker = _localAuthority.Riposte;
-                int blocksBefore = tracker.BlocksRecorded;
-                int ripostesBefore = tracker.RipostesStarted;
-                int continuedBefore = tracker.StrikesContinued;
-                int meleeRipostesBefore = melee.RipostesStarted;
-                float hpBefore = _rig.CurrentHealth;
-                float enemyHpBefore = enemy.CurrentHealth;
-
-                enemy.enabled = true;
-                float deadline = Time.unscaledTime + 14f;
-                while (!tracker.HasLiveParry(_rig.CombatId) && Time.unscaledTime < deadline) yield return null;
-                bool parried = tracker.HasLiveParry(_rig.CombatId);
-                enemy.enabled = false;
-                Check(parried, "riposte real path: a real enemy swing blocked by the player's sword guard is recorded as a parry by the server");
-                Check(tracker.BlocksRecorded > blocksBefore, "riposte real path: the tracker counted the block");
-
-                if (parried)
+                try
                 {
-                    Check(tracker.ParriedAttacker(_rig.CombatId) == enemy.CombatId, "riposte real path: the parry is against the enemy that swung");
-                    Check(_rig.CurrentHealth >= hpBefore - 1e-3f, $"riposte real path: the held block took zero HP ({hpBefore:F1} -> {_rig.CurrentHealth:F1})");
-
-                    // release and press again: the second press is the riposte
+                    if (movement != null) movement.enabled = false;
+                    melee.RemoteDriven = true;
+                    melee.enabled = true;
                     melee.SetRemoteGuard(false);
-                    yield return WaitFrames(2);
+                    // Let any earlier real swing finish before changing the authoritative kit/positions.
+                    yield return WaitUntil(() => !enemy.IsSwinging && !melee.IsSwinging, enemy.AttackSwingSeconds + 2f);
+                    Check(!enemy.IsSwinging && !melee.IsSwinging, "riposte fixture starts after prior swings finish");
+                    if (enemy.IsSwinging || melee.IsSwinging) yield break;
+                    if (shield != null)
+                        Check(_rig.Equipment.TryUnequip(EquipmentSlot.OffHand, out string unequip),
+                            $"riposte fixture unequips the shield through equipment ({unequip})");
+                    Check(!_rig.Defense.HasShield, "riposte fixture has no shield contribution");
+                    if (_rig.Defense.HasShield) yield break;
+                    WakeStandingTarget(enemy);
+                    _rig.Health.SetHealth(_rig.MaxHealth);
+                    if (enemy.Health != null) { enemy.Health.SetMax(enemyMaxOriginal * 50); enemy.Health.SetHealth(enemyMaxOriginal * 50); }
                     melee.SetRemoteGuard(true);
-                    float until = Time.unscaledTime + 4f;
-                    while (melee.RipostesStarted == meleeRipostesBefore && Time.unscaledTime < until) yield return null;
-                    until = Time.unscaledTime + 6f;
-                    while ((melee.RiposteActive || melee.IsSwinging) && Time.unscaledTime < until) yield return null;
+                    yield return WaitFrames(3);
+                    Check(_rig.IsGuarding, "riposte real path: the server-side guard intent raised the rig's guard");
 
-                    Check(melee.RipostesStarted == meleeRipostesBefore + 1, "riposte real path: the block press started exactly one riposte");
-                    Check(tracker.RipostesStarted == ripostesBefore + 1, "riposte real path: the authority accepted it");
-                    Check(tracker.StrikesContinued == continuedBefore + (mainHand.RiposteStrikeCount - 1), "riposte real path: the follow-up strikes were accepted (data count)");
-                    Check(strikes.Count == mainHand.RiposteStrikeCount, $"riposte real path: {strikes.Count} strikes started, data says {mainHand.RiposteStrikeCount}");
-                    for (int i = 0; i < strikes.Count; i++) Check(strikes[i] == i + 1, "riposte real path: strike numbers run 1, 2, ...");
-                    Check(enemy.IsDead || enemy.CurrentHealth < enemyHpBefore, $"riposte real path: the riposte hurt the enemy ({enemyHpBefore:F1} -> {enemy.CurrentHealth:F1})");
+                    bool placed = TryPlaceRiposteIntercept(enemy, out Vector3 attackDirection, out string geometry);
+                    Check(placed, $"riposte fixture authored sweep reaches the real blade before the body ({geometry})");
+                    if (!placed) yield break;
+                    Debug.Log($"[Emberdelve][Smoke:{Mode}] riposte geometry: {geometry}");
+                    Physics.SyncTransforms();
+                    yield return WaitForWeaponReady(enemy.CombatId, enemy.ActiveWeapon);
+                    Emberdelve.BladeDefense.RiposteTracker tracker = _localAuthority.Riposte;
+                    int blocksBefore = tracker.BlocksRecorded;
+                    int ripostesBefore = tracker.RipostesStarted;
+                    int continuedBefore = tracker.StrikesContinued;
+                    int meleeRipostesBefore = melee.RipostesStarted;
+                    float hpBefore = _rig.CurrentHealth;
+                    float enemyHpBefore = enemy.CurrentHealth;
+                    int enemySwingsBefore = enemy.SwingsBegun;
+                    bool began = enemy.TryBeginAttack(attackDirection, out string beginReason);
+                    Check(began, $"riposte fixture starts exactly one real enemy attack ({beginReason})");
+                    if (!began) yield break;
+                    float deadline = Time.unscaledTime + enemy.AttackSwingSeconds + 0.5f;
+                    while (!tracker.HasLiveParry(_rig.CombatId) && Time.unscaledTime < deadline) yield return null;
+                    bool parried = tracker.HasLiveParry(_rig.CombatId);
+                    Check(enemy.SwingsBegun == enemySwingsBefore + 1, "riposte fixture submitted exactly one enemy swing");
+                    Check(parried, "riposte real path: a real enemy swing blocked by the player's sword guard is recorded as a parry by the server");
+                    Check(tracker.BlocksRecorded > blocksBefore, "riposte real path: the tracker counted the block");
+                    if (parried)
+                    {
+                        Check(tracker.ParriedAttacker(_rig.CombatId) == enemy.CombatId, "riposte real path: the parry is against the enemy that swung");
+                        Check(_rig.CurrentHealth >= hpBefore - 1e-3f, $"riposte real path: the held block took zero HP ({hpBefore:F1} -> {_rig.CurrentHealth:F1})");
+                        melee.SetRemoteGuard(false);
+                        AimAtPoint(enemy.CombatCenter);
+                        yield return WaitFrames(2);
+                        melee.SetRemoteGuard(true);
+                        float until = Time.unscaledTime + 4f;
+                        while (melee.RipostesStarted == meleeRipostesBefore && Time.unscaledTime < until) yield return null;
+                        until = Time.unscaledTime + 6f;
+                        while ((melee.RiposteActive || melee.IsSwinging) && Time.unscaledTime < until) yield return null;
+                        Check(melee.RipostesStarted == meleeRipostesBefore + 1, "riposte real path: the block press started exactly one riposte");
+                        Check(tracker.RipostesStarted == ripostesBefore + 1, "riposte real path: the authority accepted it");
+                        Check(tracker.StrikesContinued == continuedBefore + (mainHand.RiposteStrikeCount - 1), "riposte real path: the follow-up strikes were accepted (data count)");
+                        Check(strikes.Count == mainHand.RiposteStrikeCount, $"riposte real path: {strikes.Count} strikes started, data says {mainHand.RiposteStrikeCount}");
+                        for (int i = 0; i < strikes.Count; i++) Check(strikes[i] == i + 1, "riposte real path: strike numbers run 1, 2, ...");
+                        Check(enemy.IsDead || enemy.CurrentHealth < enemyHpBefore, $"riposte real path: the riposte hurt the enemy ({enemyHpBefore:F1} -> {enemy.CurrentHealth:F1})");
+                    }
+
                 }
+                finally
+                {
+                    melee.RiposteStrikeStarted -= onStrike;
+                    melee.SetRemoteGuard(false);
+                    _rig.SetGuardHeld(false);
+                    melee.RemoteDriven = remoteWas;
+                    melee.enabled = meleeWas;
+                    if (look != null) look.ApplyAimPose(originalYaw, originalPitch);
+                    if (movement != null) movement.enabled = movementWas;
+                    enemy.transform.SetPositionAndRotation(enemyPosition, enemyRotation);
+                    if (enemy.Health != null && !enemy.IsDead) { enemy.Health.SetMax(enemyMaxOriginal); enemy.Health.SetHealth(enemyHealth); }
+                    if (!_rig.IsDead) _rig.Health.SetHealth(playerHealth);
+                    if (shield != null && _rig.Equipment.EquippedInstance(EquipmentSlot.OffHand)?.Uid != shield.Uid)
+                        Check(_rig.Equipment.TryEquipFromInventory(_rig.Inventory.IndexOfInstance(shield.Uid), EquipmentSlot.OffHand, out string restoreShield),
+                            $"riposte fixture restores the same shield identity ({restoreShield})");
+                    for (int i = 0; i < agents.Length; i++) if (agents[i] != null) agents[i].enabled = enabledStates[i];
+                    Physics.SyncTransforms();
+                }
+                yield return WaitFrames(2);
+            }
 
-                melee.RiposteStrikeStarted -= onStrike;
-                melee.SetRemoteGuard(false);
-                yield return WaitFrames(2);
-                melee.RemoteDriven = remoteWas;
-                _rig.SetGuardHeld(false);
-                if (movement != null) movement.enabled = movementWas;
-                if (enemy.Health != null && !enemy.IsDead) { enemy.Health.SetMax(enemyMaxOriginal); enemy.Health.SetHealth(enemyMaxOriginal); }
-                Physics.SyncTransforms();
-                yield return WaitFrames(2);
+            private bool TryPlaceRiposteIntercept(EnemyAgent enemy, out Vector3 direction, out string diagnostic)
+            {
+                direction = Vector3.zero;
+                diagnostic = "no unobstructed blade-first candidate in bounded search";
+                SwingPatternData pattern = enemy.AttackPattern;
+                WeaponData weapon = enemy.ActiveWeapon;
+                if (pattern == null || weapon == null || _rig.Look == null) return false;
+                float length = pattern.BladeLength(weapon);
+                CombatFlowTuning flow = _director.Config.flow ?? CombatFlowTuning.Default;
+                int samples = SwingGeometry.SampleCount(pattern, weapon, flow.GridSwingTurnCeiling,
+                    weapon.ComboTiming(0, pattern).Active);
+                Vector3 forward = FlatForward(_rig.transform).normalized;
+                Vector3 right = Vector3.Cross(Vector3.up, forward);
+                float yaw = Mathf.Atan2(forward.x, forward.z) * Mathf.Rad2Deg;
+                List<HitShape> body = new List<HitShape>();
+                // Search ordinary ground-level placements, not a teleported weapon/forged contact.
+                // Conservatively reject any sample touching the player's body before the blade.
+                for (int pitch = 10; pitch <= 65; pitch += 5)
+                {
+                    _rig.Look.ApplyAimPose(yaw, pitch);
+                    if (!_rig.TryGetProjectileGuardBlade(out GuardBladeBox blade)) continue;
+                    body.Clear(); _rig.CollectHitShapes(body);
+                    for (int distanceStep = 0; distanceStep <= 8; distanceStep++)
+                    for (int sideStep = -3; sideStep <= 3; sideStep++)
+                    {
+                        Vector3 root = _rig.transform.position + forward * (1.4f + distanceStep * 0.1f) + right * (sideStep * 0.15f);
+                        root.y = _rig.transform.position.y + 0.1f;
+                        Vector3 towardPlayer = _rig.transform.position - root; towardPlayer.y = 0f; towardPlayer.Normalize();
+                        SwingFrame frame = new SwingFrame(root + Vector3.up * EnemyAgent.AttackEyeHeight,
+                            Quaternion.LookRotation(towardPlayer));
+                        for (int sample = 0; sample <= samples; sample++)
+                        {
+                            SwingGeometry.PathSegment(frame, pattern, length, sample / (float)samples, out Vector3 start, out Vector3 end);
+                            bool bodyContact = false;
+                            for (int j = 0; j < body.Count; j++)
+                                if (SwingGeometry.SweepDepth(start, end, body[j].A, body[j].B, body[j].Radius, pattern.sweepRadius, out _) >= 0f)
+                                { bodyContact = true; break; }
+                            if (bodyContact) break;
+                            Vector3 delta = end - start;
+                            if (Physics.SphereCast(start, pattern.sweepRadius, delta.normalized, out _, delta.magnitude,
+                                    _director.Config.levelMask, QueryTriggerInteraction.Ignore)) break;
+                            if (!blade.TrySweep(start, end, pattern.sweepRadius, out float contactDistance)) continue;
+                            enemy.transform.SetPositionAndRotation(root, Quaternion.LookRotation(towardPlayer));
+                            direction = towardPlayer;
+                            diagnostic = $"pattern={pattern.patternId} pitch={pitch} enemy={root} blade={blade.Center} sample={sample}/{samples} entry={contactDistance:F3}";
+                            return true;
+                        }
+                    }
+                }
+                return false;
             }
 
             /// <summary>
@@ -1838,7 +1963,60 @@ namespace Emberdelve.EditorTools
                     "selection recorded in RunContext");
 
                 CharacterClassData chosen = lobby.Selected;
+                Check(OfflineProfileSession.Current == null && !OfflineProfileSession.HasRaid,
+                    "lobby fixture starts without an existing profile or raid");
+                if (OfflineProfileSession.Current != null || OfflineProfileSession.HasRaid || chosen == null) yield break;
+                GameConfig config = AssetDatabase.LoadAssetAtPath<GameConfig>("Assets/Emberdelve/Data/EmberdelveGameConfig.asset");
+                Check(config != null && config.itemCatalog != null, "preparation has the authored item catalog");
+                if (config == null || config.itemCatalog == null) yield break;
+                string profilePath = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath,
+                    "../Logs/harness/smoke-profiles", Mode + "-" + System.Guid.NewGuid().ToString("N"), "archer.json"));
+                bool opened = OfflineProfile.TryOpen(profilePath, config.itemCatalog, chosen, out _smokeProfile, out string profileReason);
+                Check(opened, $"isolated preparation profile opened ({profileReason})");
+                if (!opened) yield break;
+                typeof(OfflineProfileSession).GetField("<Current>k__BackingField", System.Reflection.BindingFlags.Static |
+                    System.Reflection.BindingFlags.NonPublic).SetValue(null, _smokeProfile);
+                var preparedEquipment = _smokeProfile.Snapshot.Ready.equipment;
+                string lobbyScene = SceneManager.GetActiveScene().name;
                 descend.onClick.Invoke();
+                yield return WaitFrames(2);
+                Emberdelve.UI.RaidPreparationScreen preparation = FindFirstObjectByType<Emberdelve.UI.RaidPreparationScreen>();
+                Check(preparation != null && preparation.IsOpen && SceneManager.GetActiveScene().name == lobbyScene,
+                    "descend opens preparation before loading the dungeon");
+                bool ownsProfile = ReferenceEquals(OfflineProfileSession.Current, _smokeProfile);
+                Check(ownsProfile, "preparation uses only the fixture's isolated profile");
+                if (!ownsProfile || preparation == null || !preparation.IsOpen) yield break;
+                GameObject preparationCanvas = GameObject.Find("Emberdelve_Preparation");
+                Button enterRaid = null;
+                if (preparationCanvas != null)
+                    foreach (Button button in preparationCanvas.GetComponentsInChildren<Button>(true))
+                        if (button.name == "EnterRaid") enterRaid = button;
+                Check(enterRaid != null && enterRaid.isActiveAndEnabled && enterRaid.interactable,
+                    "prepared raid has an enabled departure button");
+                if (enterRaid == null || !enterRaid.isActiveAndEnabled || !enterRaid.interactable) yield break;
+                enterRaid.onClick.Invoke();
+                // Royale issues a new base kit and parks owned preparation in stash. Check the actual
+                // departure snapshot identities, not the deliberately replaced pre-Royale kit.
+                var departingKit = typeof(OfflineProfileSession).GetField("_departing", System.Reflection.BindingFlags.Static |
+                    System.Reflection.BindingFlags.NonPublic).GetValue(null) as LoadoutSnapshot;
+                Check(departingKit != null, "departure captured its authoritative equipment snapshot");
+                if (departingKit == null) yield break;
+                if (RunContext.SelectedRoyaleMode.HasValue)
+                {
+                    bool preserved = true;
+                    foreach (var entry in preparedEquipment.entries)
+                    {
+                        bool found = false;
+                        foreach (var stored in _smokeProfile.Snapshot.Stash.entries)
+                            if (JsonUtility.ToJson(stored.item) == JsonUtility.ToJson(entry.item)) { found = true; break; }
+                        preserved &= found;
+                    }
+                    Check(preserved, "Royale preserves every previously prepared weapon identity and stats in the stash");
+                    Check(departingKit.equipment.entries.Length == preparedEquipment.entries.Length &&
+                        departingKit.equipment.ToJson() != preparedEquipment.ToJson(), "Royale issues fresh base equipment identities");
+                }
+                Check(OfflineProfileSession.HasRaid && !string.IsNullOrEmpty(_smokeProfile.ActiveRaid),
+                    "departure reserves the isolated prepared kit as an active raid");
 
                 yield return WaitUntil(() => SceneManager.GetActiveScene().name == GameConfig.DefaultDungeonSceneName, 15f);
                 Check(SceneManager.GetActiveScene().name == GameConfig.DefaultDungeonSceneName,
@@ -1846,12 +2024,14 @@ namespace Emberdelve.EditorTools
 
                 yield return WaitFrames(30);
 
-                PlayerRig rig = FindFirstObjectByType<PlayerRig>();
+                PlayerRig rig = FindLocalSmokeRig();
                 RunDirector director = FindFirstObjectByType<RunDirector>();
                 Check(rig != null && director != null, "dungeon scene bootstrapped a run");
                 if (rig == null || director == null) yield break;
 
                 Check(rig.Class == chosen, "dungeon run uses the class chosen in the lobby");
+                Check(LoadoutSnapshot.Capture(rig.Inventory, rig.Equipment).equipment.ToJson() == departingKit.equipment.ToJson(),
+                    "dungeon restores the authoritative departing equipment with the same item identities");
                 Check(director.State == RunState.Running, $"run started (state {director.State})");
                 // U2A8 fixture migration. Old assumption: the live ceiling equals the class asset's
                 // maxHealth field. Since U2A3 that field is the pristine BASE and the ceiling a run start
@@ -1869,7 +2049,10 @@ namespace Emberdelve.EditorTools
                 Check(ranged != null && ranged.Magazine > 0, $"archer starts with arrows (magazine {(ranged != null ? ranged.Magazine : 0)})");
                 Check(ranged != null && ranged.Reserve >= 0, $"archer reserve ammo tracked ({(ranged != null ? ranged.Reserve : 0)})");
                 Check(melee != null && !melee.enabled, "archer melee combat disabled");
-                Check(!rig.CanGuard, "archer cannot guard");
+                Check(rig.ActiveWeapon != null && rig.ActiveWeapon.CanBowGuard && rig.ActiveWeapon.CanImpactGuard
+                    && rig.CanGuard && rig.Defense.CanBlock && !rig.Defense.HasShield && !rig.CanParry && !rig.Defense.CanParry,
+                    "archer bow owns physical and Impact Guard without shield or parry");
+                Check(Mathf.Approximately(rig.Defense.BlockReduction, 1f), "archer bow supplies its own full held-block mitigation");
                 Check(GameObject.Find("Emberdelve_Hud") != null, "HUD built for the dungeon run");
             }
 
@@ -1881,7 +2064,7 @@ namespace Emberdelve.EditorTools
             /// </summary>
             private IEnumerator ArcherFlow()
             {
-                _rig = FindFirstObjectByType<PlayerRig>();
+                _rig = FindLocalSmokeRig();
                 _director = FindFirstObjectByType<RunDirector>();
                 if (_rig == null || _director == null) { Check(false, "archer flow found rig and director"); yield break; }
 
@@ -1906,14 +2089,17 @@ namespace Emberdelve.EditorTools
                     Check(false, "no walkable cell two cells ahead of the spawn");
                     yield break;
                 }
+                bool targetWasEnabled = target.enabled;
+                WakeStandingTarget(target);
                 target.transform.position = spot;
 
                 // Aim from the muzzle, not from the rig origin: the bow muzzle sits at eye height, so aiming
                 // at the target's centre from the feet would send the arrow over its head.
-                Vector3 fromMuzzle = target.CombatCenter - _rig.GetMuzzlePosition();
-                _rig.transform.rotation = Quaternion.LookRotation(fromMuzzle);
-                Physics.SyncTransforms();
+                AimAtPoint(target.CombatCenter);
                 yield return WaitFrames(2);
+                // Settle the actual eye/muzzle pose before measuring or launching the shot.
+                AimAtPoint(target.CombatCenter);
+                Physics.SyncTransforms();
 
                 Mouse mouse = Mouse.current;
                 Keyboard keyboard = Keyboard.current;
@@ -1964,6 +2150,7 @@ namespace Emberdelve.EditorTools
                 Check(_localAuthority != null && _localAuthority.AcceptedCount > acceptedBefore,
                     "authority accepted the ranged attack");
 
+                target.enabled = targetWasEnabled;
                 yield return ArcherLoadoutFlow();
                 yield return ArcherSkillFlow();
 
@@ -2008,7 +2195,7 @@ namespace Emberdelve.EditorTools
                 Check(loadout.Secondary.CanParry, "rapier weapon data declares a parry capability");
                 Check(_rig.CanParry && _rig.Defense.CanParry, $"rapier main hand reports that capability on the rig ({_rig.Defense})");
                 Check(_rig.CanGuard && _rig.Defense.CanBlock && Mathf.Abs(_rig.Defense.BlockReduction - 0.7f) < 0.001f,
-                    $"the rapier's authored 0.7 block override works for the Archer without granting the bow a guard ({_rig.Defense})");
+                    $"the rapier's authored 0.7 block override replaces the bow's own block profile ({_rig.Defense})");
 
                 EnemyAgent target = PickAliveEnemy();
                 Check(target != null, "an enemy is available for the rapier thrust");
@@ -2766,7 +2953,7 @@ namespace Emberdelve.EditorTools
                                              && FindFirstObjectByType<RunDirector>().State == RunState.Running, 20f);
 
                 _director = FindFirstObjectByType<RunDirector>();
-                _rig = FindFirstObjectByType<PlayerRig>();
+                _rig = FindLocalSmokeRig();
                 Check(_director != null && _director.State == RunState.Running, "descend again started a fresh run");
                 if (_director == null || _rig == null) yield break;
 
@@ -2854,7 +3041,7 @@ namespace Emberdelve.EditorTools
             /// </summary>
             private IEnumerator ItemFlow()
             {
-                _rig = FindFirstObjectByType<PlayerRig>();
+                _rig = FindLocalSmokeRig();
                 _director = FindFirstObjectByType<RunDirector>();
 
                 Check(_rig != null && _director != null, "item flow found a rig and a director");
@@ -3259,6 +3446,12 @@ namespace Emberdelve.EditorTools
                 float healthBase = _rig.MaxHealth;
                 float speedBase = _rig.Movement != null ? _rig.Movement.ResolveGroundSpeed(false, false) : 0f;
                 WeaponData bowBase = _rig.MainHandWeapon;
+                ItemInstance preparedBow = equipment.EquippedInstance(EquipmentSlot.Weapon);
+                ItemInstance preparedSecondary = equipment.EquippedInstance(EquipmentSlot.AltWeapon);
+                int preparedCount = equipment.FilledCount;
+                Check(preparedBow != null && preparedSecondary != null && preparedCount == 2 && equipment.KitIsItems,
+                    "prepared archer owns two real weapon instances and no worn armor");
+                if (preparedBow == null || preparedSecondary == null || preparedCount != 2) yield break;
 
                 // U2A8 fixture migration. Old assumption: the unworn archer's ceiling is the class asset's
                 // maxHealth field. That field is the pristine base (80); the ceiling the run start filled is
@@ -3269,12 +3462,14 @@ namespace Emberdelve.EditorTools
                 Check(Mathf.Approximately(healthBase, 90f),
                     $"baseline unworn health is the derived 80 + 10*1 (got {healthBase}, expected 90)");
                 Check(_rig.Defense.HasShield == false, "baseline archer carries no shield");
-                Check(_rig.Defense.CanBlock == false, "baseline archer cannot block");
+                Check(_rig.ActiveWeapon == bowBase && bowBase != null && bowBase.CanBowGuard && bowBase.CanImpactGuard
+                    && _rig.CanGuard && _rig.Defense.CanBlock, "baseline archer holds the physical guard-capable bow");
+                Check(Mathf.Approximately(_rig.Defense.BlockReduction, 1f), "baseline bow supplies its own full held-block mitigation");
                 Check(_rig.Defense.CanParry == false, "baseline archer cannot parry");
                 Check(bowBase != null && bowBase.IsRanged, $"baseline main hand is a ranged weapon ({bowBase.displayName})");
                 Check(ranged != null && ranged.enabled, "ranged combat is live for the baseline weapon");
                 Check(melee != null && !melee.enabled, "melee combat is off for the baseline weapon");
-                Check(equipment.FilledCount == 0, $"nothing worn at the start ({equipment.FilledCount})");
+                Check(equipment.FilledCount == preparedCount, $"only the prepared weapons are equipped ({equipment.FilledCount})");
 
                 // ---- wearing armor changes the pools and the defense numbers
                 Check(inventory.TryAdd(cuirass, 1, out string addCuirass), $"cuirass put in the bag ({addCuirass})");
@@ -3354,19 +3549,25 @@ namespace Emberdelve.EditorTools
                 // measures.
                 yield return GuardWithGearFlow(inventory, equipment, cuirass);
 
-                // A two-handed main hand must cancel the off hand again.
+                // Restore the real prepared bow; an empty item-backed hand correctly falls back to fists.
                 Check(equipment.TryUnequip(EquipmentSlot.Weapon, out string unequipBladeReason),
                     $"blade unequipped ({unequipBladeReason})");
+                Check(_rig.MainHandWeapon == _rig.Loadout.Unarmed, "empty item-backed main hand holds fists");
+                Check(equipment.TryEquipFromInventory(inventory.IndexOfInstance(preparedBow.Uid), out string restoreBowReason),
+                    $"the same prepared bow is re-equipped ({restoreBowReason})");
                 Check(_rig.MainHandWeapon == bowBase, $"the class weapon went back into the main hand ({(_rig.MainHandWeapon != null ? _rig.MainHandWeapon.displayName : "none")})");
-                Check(_rig.Defense.CanBlock == false,
-                    "the shield contributes nothing while a two-handed weapon is held");
+                Check(_rig.ActiveWeapon == bowBase && bowBase != null && bowBase.CanBowGuard && bowBase.CanImpactGuard
+                    && _rig.CanGuard && _rig.Defense.CanBlock && !_rig.Defense.HasShield,
+                    "restored two-handed bow blocks with its own geometry while the off-hand shield contributes nothing");
+                Check(Mathf.Approximately(_rig.Defense.BlockReduction, 1f), "restored bow uses its own mitigation rather than the shield profile");
                 Check(_rig.Defense.CanParry == false, "the parry capability left with the blade");
                 Check(ranged != null && ranged.enabled, "ranged combat came back for the ranged main hand");
-                Check(equipment.Equipped(EquipmentSlot.Weapon) == null, "the weapon slot is empty again");
+                Check(equipment.EquippedInstance(EquipmentSlot.Weapon)?.Uid == preparedBow.Uid,
+                    "the weapon slot holds the original prepared bow identity");
 
                 // ---- unequipping puts everything back
-                Check(equipment.TryUnequip(EquipmentSlot.OffHand, out string unequipShieldReason),
-                    $"shield unequipped ({unequipShieldReason})");
+                Check(equipment.EquippedInstance(EquipmentSlot.OffHand) == null && inventory.IndexOfItem(shieldItem) >= 0,
+                    "equipping the two-handed bow returned the shield to the bag");
                 Check(_rig.OffhandWeapon == null, "the archer's off hand is empty again");
                 Check(_rig.Defense.HasShield == false, "no shield in the defense profile");
 
@@ -3381,9 +3582,11 @@ namespace Emberdelve.EditorTools
                     $"cuirass unequipped ({unequipCuirassReason})");
                 Check(Mathf.Approximately(_rig.MaxHealth, healthBase) || _rig.MaxHealth <= healthBase + 0.5f,
                     $"max health returned to the class number ({_rig.MaxHealth})");
-                Check(_rig.Defense.BlockReduction <= 0.001f,
-                    $"no block reduction left from gear ({_rig.Defense.BlockReduction:F2})");
-                Check(equipment.FilledCount == 0, $"nothing worn ({equipment.FilledCount})");
+                Check(Mathf.Approximately(_rig.Defense.BlockReduction, 1f),
+                    $"the bow retains its own mitigation after armor removal ({_rig.Defense.BlockReduction:F2})");
+                Check(equipment.FilledCount == preparedCount &&
+                    equipment.EquippedInstance(EquipmentSlot.AltWeapon)?.Uid == preparedSecondary.Uid,
+                    "only the original prepared weapons remain equipped");
                 Check(inventory.IndexOfItem(cuirass) >= 0 && inventory.IndexOfItem(boots) >= 0 &&
                       inventory.IndexOfItem(blade) >= 0 && inventory.IndexOfItem(shieldItem) >= 0,
                     "every unequipped item went back into the bag");
@@ -3514,17 +3717,23 @@ namespace Emberdelve.EditorTools
                 Check(inventory.IndexOfItem(blade) < 0, "the blade left the bag on the second equip too");
                 Check(equipment.TryUnequip(EquipmentSlot.Weapon, out string unequipBladeAgain),
                     $"and was taken off again ({unequipBladeAgain})");
-                Check(_rig.MainHandWeapon == bowBase, "the class weapon is back in the main hand after the cycle");
+                Check(_rig.MainHandWeapon == _rig.Loadout.Unarmed, "second unequip leaves the item-backed hand empty");
+                Check(equipment.TryEquipFromInventory(inventory.IndexOfInstance(preparedBow.Uid), out string restoreBowAgain),
+                    $"the original prepared bow returns after the cycle ({restoreBowAgain})");
+                Check(_rig.MainHandWeapon == bowBase && equipment.EquippedInstance(EquipmentSlot.Weapon)?.Uid == preparedBow.Uid,
+                    "the same prepared bow is back in the main hand after the cycle");
                 Check(inventory.IndexOfItem(blade) >= 0, "the blade went back into the bag on the second unequip too");
                 Check(inventory.TotalUnits == unitsBeforeCycle && inventory.CarriedValue == valueBeforeCycle,
                     $"the cycle conserved the bag ({inventory.TotalUnits} units, {inventory.CarriedValue} value)");
                 Check(inventory.LifetimeCollected == collectedBeforeCycle && inventory.RecoveredValue == recoveredBeforeCycle,
                     $"the cycle farmed no extraction credit ({inventory.LifetimeCollected} collected, {inventory.RecoveredValue} recovered)");
 
-                equipment.Clear();
                 inventory.Clear();
                 yield return WaitFrames(2);
-                Check(equipment.FilledCount == 0 && inventory.UsedCells == 0, "gear and bag cleared for the container tests");
+                Check(equipment.FilledCount == preparedCount && inventory.UsedCells == 0 &&
+                    equipment.EquippedInstance(EquipmentSlot.Weapon)?.Uid == preparedBow.Uid &&
+                    equipment.EquippedInstance(EquipmentSlot.AltWeapon)?.Uid == preparedSecondary.Uid,
+                    "test bag cleared for container tests while both prepared weapon identities remain equipped");
                 Check(_rig.MaxHealth <= healthBase + 0.5f, $"pools back at the class numbers ({_rig.MaxHealth})");
             }
 
@@ -3541,8 +3750,13 @@ namespace Emberdelve.EditorTools
                 inventory.Clear();
                 yield return WaitFrames(2);
 
-                Check(equipment.FilledCount == 0 && inventory.Slots.Count == 0 && inventory.UsedCells == 0,
-                    "gear and bag are empty for the transfer tests");
+                ItemInstance baselineBow = equipment.EquippedInstance(EquipmentSlot.Weapon);
+                ItemInstance baselineSecondary = equipment.EquippedInstance(EquipmentSlot.AltWeapon);
+                int baselineCount = equipment.FilledCount;
+                Check(baselineCount == 2 && baselineBow != null && baselineSecondary != null &&
+                    inventory.Slots.Count == 0 && inventory.UsedCells == 0,
+                    "reset seeded two real weapons and an empty bag for transfer tests");
+                if (baselineBow == null || baselineSecondary == null || baselineCount != 2) yield break;
 
                 // A 1x1 chest plate cloned from the cuirass so the impossible-swap geometry is real without
                 // editing a shipped asset. It is destroyed before this flow returns.
@@ -3657,7 +3871,7 @@ namespace Emberdelve.EditorTools
                     Check(inventory.TotalUnits == unitsStart && inventory.CarriedValue == valueStart &&
                           inventory.UsedSlots == stacksStart && inventory.UsedCells == cellsStart,
                           $"the refusals left the bag exactly as it was ({inventory.UsedSlots} stacks, {inventory.UsedCells} cells)");
-                    Check(equipment.FilledCount == 0 && _rig.MaxHealth == maxHealthStart &&
+                    Check(equipment.FilledCount == baselineCount && _rig.MaxHealth == maxHealthStart &&
                           Mathf.Abs(_rig.Defense.BlockReduction - reductionStart) < 0.0001f,
                           "the refusals changed no slot, pool or defense number");
                     Check(ReferenceEquals(_rig.MainHandWeapon, mainHandStart) && ReferenceEquals(_rig.OffhandWeapon, offhandStart),
@@ -3679,7 +3893,7 @@ namespace Emberdelve.EditorTools
                         "equipping a definition the bag does not hold is refused");
                     Check(!string.IsNullOrEmpty(unownedReason) && unownedReason.Contains("not in the bag"),
                         $"the refusal says the item is not carried ({unownedReason})");
-                    Check(equipment.Equipped(EquipmentSlot.Chest) == null && equipment.FilledCount == 0,
+                    Check(equipment.Equipped(EquipmentSlot.Chest) == null && equipment.FilledCount == baselineCount,
                         "no item appeared in a slot");
                     Check(inventory.TotalUnits == unitsStart && inventory.CarriedValue == valueStart &&
                           inventory.UsedSlots == stacksStart && inventory.UsedCells == cellsStart,
@@ -3709,7 +3923,7 @@ namespace Emberdelve.EditorTools
                     int unitsBeforeSelected = inventory.TotalUnits;
                     int valueBeforeSelected = inventory.CarriedValue;
                     float wornHealthExpected = maxHealthStart + cuirass.StatTotal(SkillStat.MaxHealth);
-                    float wornReductionExpected = reductionStart + cuirass.StatTotal(SkillStat.BlockReduction);
+                    float wornReductionExpected = Mathf.Clamp01(reductionStart + cuirass.StatTotal(SkillStat.BlockReduction));
 
                     ArmProbe();
                     bool equippedSelected = equipment.TryEquipFromInventory(1, out string equipSecond);
@@ -3724,7 +3938,7 @@ namespace Emberdelve.EditorTools
                     // equipped copy gone only when the slot, the filled count and the stat source already agree
                     // that it is being worn. A notification raised from the bag helper would fail all of these.
                     Check(seenAtNotification != null && seenAtNotification.Slot(EquipmentSlot.Chest) == cuirass &&
-                          seenAtNotification.FilledCount == 1,
+                          seenAtNotification.FilledCount == baselineCount + 1,
                           "from inside the notification the chest slot already held the cuirass");
                     Check(seenAtNotification != null && seenAtNotification.CountOf(cuirass) == 1 &&
                           seenAtNotification.StacksOf(cuirass) == 1 &&
@@ -3803,7 +4017,7 @@ namespace Emberdelve.EditorTools
                     Check(transferNotifications == 1,
                         $"one committed replacement raised exactly one inventory notification ({transferNotifications})");
                     Check(seenAtNotification != null && seenAtNotification.Slot(EquipmentSlot.Chest) == cuirass &&
-                          seenAtNotification.FilledCount == 1,
+                          seenAtNotification.FilledCount == baselineCount + 1,
                           "from inside the notification the chest slot already held the incoming copy");
                     Check(seenAtNotification != null && seenAtNotification.CountOf(cuirass) == 1 &&
                           seenAtNotification.StacksOf(cuirass) == 1,
@@ -3914,7 +4128,7 @@ namespace Emberdelve.EditorTools
                         $"totals are untouched ({inventory.TotalUnits} units, {inventory.CarriedValue} value)");
                     Check(inventory.LifetimeCollected == collectedBefore && inventory.RecoveredValue == recoveredBefore,
                         $"collection counters are untouched ({inventory.LifetimeCollected} collected, {inventory.RecoveredValue} recovered)");
-                    Check(equipment.Equipped(EquipmentSlot.Chest) == cuirass && equipment.FilledCount == 1,
+                    Check(equipment.Equipped(EquipmentSlot.Chest) == cuirass && equipment.FilledCount == baselineCount + 1,
                         "the chest slot still holds the cuirass it held before the refusal");
                     Check(collectedEvents == 0 && equipNotifications == 2 && unequipNotifications == 0,
                         $"the refused replacement raised no collection and no equipment notification ({collectedEvents} collected, {equipNotifications} up, {unequipNotifications} down)");
@@ -3960,7 +4174,7 @@ namespace Emberdelve.EditorTools
                     Check(transferNotifications == 1,
                         $"one committed unequip raised exactly one inventory notification ({transferNotifications})");
                     Check(seenAtNotification != null && seenAtNotification.Slot(EquipmentSlot.Chest) == null &&
-                          seenAtNotification.FilledCount == 0,
+                          seenAtNotification.FilledCount == baselineCount,
                           "from inside the notification the chest slot was already empty, so the item was not simultaneously worn and carried");
                     Check(seenAtNotification != null && seenAtNotification.CountOf(cuirass) == 1 &&
                           seenAtNotification.StacksOf(cuirass) == 1 &&
@@ -3974,7 +4188,7 @@ namespace Emberdelve.EditorTools
                     Check(seenAtNotification != null && Mathf.Abs(seenAtNotification.MaxHealth - maxHealthStart) < 0.01f &&
                           Mathf.Abs(seenAtNotification.BlockReduction - reductionStart) < 0.0001f,
                           $"from inside the notification the worn contribution was already out of the pools and the defense profile ({(seenAtNotification != null ? seenAtNotification.MaxHealth : 0f):F0} HP, {(seenAtNotification != null ? seenAtNotification.BlockReduction : 0f):F2} block)");
-                    Check(equipment.Equipped(EquipmentSlot.Chest) == null && equipment.FilledCount == 0,
+                    Check(equipment.Equipped(EquipmentSlot.Chest) == null && equipment.FilledCount == baselineCount,
                         "the chest slot is empty");
                     Check(inventory.IndexOfItem(cuirass) >= 0, "the cuirass is in the bag");
                     Check(inventory.TotalUnits == unitsBeforeUnequip + 1 &&
@@ -4002,8 +4216,8 @@ namespace Emberdelve.EditorTools
 
                     float maxHealthWorn = _rig.MaxHealth;
                     float reductionWorn = _rig.Defense.BlockReduction;
-                    Check(maxHealthWorn > maxHealthStart && reductionWorn > reductionStart,
-                        $"wearing it raised the numbers once ({maxHealthStart:F0} -> {maxHealthWorn:F0} HP, {reductionStart:F2} -> {reductionWorn:F2} block)");
+                    Check(maxHealthWorn > maxHealthStart && Mathf.Abs(reductionWorn - wornReductionExpected) < 0.0001f,
+                        $"wearing it raises health once and respects the guard cap ({maxHealthStart:F0} -> {maxHealthWorn:F0} HP, {reductionStart:F2} -> {reductionWorn:F2} block)");
 
                     equipment.RefreshStats();
                     equipment.RefreshStats();
@@ -4055,11 +4269,18 @@ namespace Emberdelve.EditorTools
                     Check(bladeUnequipped,
                         $"the blade unequipped ({unequipBladeTransfer})");
                     Check(transferNotifications == 1 && seenAtNotification != null &&
-                          ReferenceEquals(seenAtNotification.MainHand, classWeapon) &&
+                          ReferenceEquals(seenAtNotification.MainHand, _rig.Loadout.Unarmed) &&
                           seenAtNotification.Holds(blade) && seenAtNotification.Slot(EquipmentSlot.Weapon) == null,
-                          $"from inside the notification the class weapon was already back in the hand and the blade was already back in the bag ({transferNotifications})");
-                    Check(ReferenceEquals(_rig.MainHandWeapon, classWeapon),
-                        $"the class weapon is back in the main hand ({(_rig.MainHandWeapon != null ? _rig.MainHandWeapon.displayName : "none")})");
+                          $"from inside the notification the empty hand held fists and the blade was back in the bag ({transferNotifications})");
+                    Check(ReferenceEquals(_rig.MainHandWeapon, _rig.Loadout.Unarmed), "the empty item-backed hand holds fists");
+                    ArmProbe();
+                    bool bowRestored = equipment.TryEquipFromInventory(inventory.IndexOfInstance(baselineBow.Uid), out string restoreBow);
+                    DisarmProbe();
+                    Check(bowRestored && transferNotifications == 1 && seenAtNotification != null &&
+                        ReferenceEquals(seenAtNotification.MainHand, classWeapon) && !inventory.HoldsInstanceUid(baselineBow.Uid) &&
+                        equipment.EquippedInstance(EquipmentSlot.Weapon)?.Uid == baselineBow.Uid &&
+                        equipment.EquippedInstance(EquipmentSlot.AltWeapon)?.Uid == baselineSecondary.Uid,
+                        $"one committed transfer restores the same bow and preserves the secondary identity ({restoreBow})");
                     Check(inventory.IndexOfItem(blade) >= 0, "the blade is in the bag, not duplicated");
 
                     int bladeStacks = 0;
@@ -4079,7 +4300,6 @@ namespace Emberdelve.EditorTools
                     GameEvents.EquipmentChanged -= onEquipment;
                     GameEvents.InventoryChanged -= onInventoryChanged;
 
-                    equipment.Clear();
                     inventory.Clear();
                     inventory.SetCatalog(productionCatalog);
                     UnityEngine.Object.Destroy(probeCatalog);
@@ -4257,7 +4477,7 @@ namespace Emberdelve.EditorTools
                     // the same anchor, with only the facing and the worn armor changing between submissions.
                     Vector3 anchor = _rig.transform.position;
                     Vector3 initialFacing = FlatForward(_rig.transform);
-                    enemy.enabled = false;
+                    WakeStandingTarget(enemy);
                     enemy.transform.position = anchor + initialFacing * MeasuredStandoffDistance + Vector3.up * 0.1f;
                     Physics.SyncTransforms();
                     yield return WaitFrames(2);
@@ -4282,13 +4502,14 @@ namespace Emberdelve.EditorTools
                         $"the rapier and equipped shield still let the naked kit block ({_rig.Defense})");
 
                     yield return SubmitMeasuredGuardHit(enemy, claw, 0, 0f, anchor, nakedFront);
-                    CheckMeasurement("naked front", nakedFront, enemy);
+                    CheckMeasurement("naked front", nakedFront, enemy, true);
                     Check(nakedFront.blocked, "the naked rapier-and-shield kit blocks a hit inside its guard arc");
-                    CheckClose("naked DamageInfo reduction matches the authored kit", authoredNakedReduction,
-                        nakedFront.infoReduction, "0.70 is the held rapier's block override");
-                    CheckClose("naked front HP loss is authored claw damage after 70% guard reduction",
-                        claw.baseDamage * (1f - authoredNakedReduction), nakedFront.damage,
-                        $"{claw.baseDamage:F1} * (1 - {authoredNakedReduction:F2})", 0.75f);
+                    // A successful held block prevents all damage (BladeGuardRules.HeldGuardReduction).
+                    // Authored mitigation remains independently checked above and matters to guard breaks.
+                    CheckClose("naked DamageInfo reports a full held block", 1f,
+                        nakedFront.infoReduction, "held block reduction is 1 despite the authored .70 profile");
+                    CheckClose("naked held block loses no HP", 0f, nakedFront.damage,
+                        "a successful held block has no chip damage", 0.001f);
 
                     // ---- same attack, same geometry, one more piece worn, put back through the bag
                     int cuirassIndex = inventory.IndexOfItem(cuirass);
@@ -4309,19 +4530,18 @@ namespace Emberdelve.EditorTools
                     Check(_rig.Defense.CanBlock, $"wearing cuirass preserves the block capability ({_rig.Defense})");
 
                     yield return SubmitMeasuredGuardHit(enemy, claw, 1, 0f, anchor, wornFront);
-                    CheckMeasurement("worn front", wornFront, enemy);
+                    CheckMeasurement("worn front", wornFront, enemy, true);
                     Check(wornFront.blocked, "worn armor blocks a hit that arrives inside the guard arc");
-                    CheckClose("worn DamageInfo reduction matches the authored 0.70 + 0.08 kit", authoredWornReduction,
-                        wornFront.infoReduction, "the cuirass contributes its declared BlockReduction modifier");
-                    CheckClose("worn front HP loss is authored claw damage after 78% guard reduction",
-                        claw.baseDamage * (1f - authoredWornReduction), wornFront.damage,
-                        $"{claw.baseDamage:F1} * (1 - {authoredWornReduction:F2})", 0.75f);
-                    Check(wornFront.damage < nakedFront.damage - 0.25f,
-                        $"the same attack lands softer behind the cuirass ({nakedFront.damage:F1} -> {wornFront.damage:F1})");
-                    CheckClose("worn DamageInfo reports the authored total 0.70 + 0.08 reduction",
-                        authoredWornReduction, wornFront.infoReduction, "the cuirass contribution stacks over the held kit");
-                    Check(Mathf.Abs(wornFront.damage - claw.baseDamage * (1f - authoredWornReduction)) < 0.75f,
-                        $"the health delta is the authored 0.78 total reduction applied once ({wornFront.damage:F1} vs {claw.baseDamage * (1f - authoredWornReduction):F1})");
+                    CheckClose("worn DamageInfo reports a full held block", 1f,
+                        wornFront.infoReduction, "the independently checked .78 profile does not add chip to a held block");
+                    CheckClose("worn held block loses no HP", 0f, wornFront.damage,
+                        "a successful held block prevents the entire incoming hit", 0.001f);
+                    Check(Mathf.Abs(wornFront.damage - nakedFront.damage) < 0.001f,
+                        $"adding the cuirass preserves zero-damage held blocks ({nakedFront.damage:F1} -> {wornFront.damage:F1})");
+                    CheckClose("adding armor preserves full effective held-block reduction",
+                        nakedFront.infoReduction, wornFront.infoReduction, "both accepted hits report reduction 1");
+                    Check(Mathf.Abs(authoredWornReduction - authoredNakedReduction - declaredReduction) < 0.001f,
+                        "the cuirass still contributes its authored .08 to the gear profile exactly once");
                     Check(Mathf.Abs(wornFront.travelDistance - nakedFront.travelDistance) < 0.05f,
                         $"both hits travelled the same distance ({nakedFront.travelDistance:F2} vs {wornFront.travelDistance:F2})");
                     Check(wornFront.facingError <= _rig.Defense.BlockArcDegrees * 0.5f,
@@ -4477,7 +4697,7 @@ namespace Emberdelve.EditorTools
             }
 
             /// <summary>The facts every measured submission has to satisfy, whoever is wearing what.</summary>
-            private void CheckMeasurement(string label, GearHitMeasurement m, EnemyAgent enemy)
+            private void CheckMeasurement(string label, GearHitMeasurement m, EnemyAgent enemy, bool expectFullBlock = false)
             {
                 Check(m.reason == null, $"{label}: the submission was set up ({m.reason ?? "ok"})");
                 Check(m.accepted, $"{label}: the authority accepted the attack");
@@ -4486,7 +4706,8 @@ namespace Emberdelve.EditorTools
                 Check(m.captured, $"{label}: the hit arrived on the rig as a DamageInfo");
                 Check(m.sourceCombatId == enemy.CombatId && m.sourceKind == EntityKind.Enemy,
                     $"{label}: the capture names this enemy as its source (#{m.sourceCombatId} vs #{enemy.CombatId})");
-                Check(m.damage > 0f, $"{label}: real health left the pool ({m.damage:F1})");
+                Check(expectFullBlock ? Mathf.Abs(m.damage) < 0.001f : m.damage > 0f,
+                    $"{label}: health loss matches the expected {(expectFullBlock ? "full held block" : "uncovered hit")} ({m.damage:F1})");
                 Debug.Log($"[Emberdelve][Smoke:items] measurement {label}: turn={m.turnFromSource:F0}deg travel={m.travelDistance:F2}m range={m.maxRange:F2}m facing={m.facingError:F1}deg guarding={m.guarding} canBlock={m.canBlock} rigReduction={m.rigReduction:F2} blocked={m.blocked} infoReduction={m.infoReduction:F2} damage={m.damage:F1}");
             }
 
@@ -4858,12 +5079,15 @@ namespace Emberdelve.EditorTools
                         Check(false, "a physically clear lane exists for the Ashen Might swing");
                         yield break;
                     }
-                    mightTarget.enabled = false;
+                    WakeStandingTarget(mightTarget);
                     PlaceCombatCenterInRange(mightTarget, _rig.AimOrigin, _rig.transform.position,
                         _rig.transform.position + FlatForward(_rig.transform) * 2f, 1.9f);
-                    _rig.transform.rotation = Quaternion.LookRotation(mightTarget.CombatCenter - _rig.AimOrigin);
-                    Physics.SyncTransforms();
+                    AimAtPoint(mightTarget.CombatCenter);
                     yield return WaitFrames(2);
+                    AimAtPoint(mightTarget.CombatCenter);
+                    Check(!mightTarget.IsDormant && !mightTarget.IsWaking &&
+                        Vector3.Angle(_rig.AimDirection, mightTarget.CombatCenter - _rig.AimOrigin) < 1f,
+                        "Ashen Might measures a standing target along the settled aim");
 
                     // The authority records the last accepted attack per combat id on its own clock, so a
                     // real-time swing fired too soon after the validation attacks is correctly refused as faster
@@ -5033,9 +5257,16 @@ namespace Emberdelve.EditorTools
                     if (TryFindWalkableCellFacingAWall(out Vector2Int wallCell, out Vector2Int blockedDirection))
                     {
                         _rig.transform.position = _layout.CellCenterWorld(wallCell) + Vector3.up * 0.15f;
-                        _rig.transform.rotation = Quaternion.LookRotation(new Vector3(blockedDirection.x, 0f, blockedDirection.y));
+                        Vector3 wallDirection = new Vector3(blockedDirection.x, 0f, blockedDirection.y);
+                        _rig.Look.ApplyAimPose(Mathf.Atan2(wallDirection.x, wallDirection.z) * Mathf.Rad2Deg, 0f);
                         Physics.SyncTransforms();
                         yield return WaitFrames(4);
+                        Check(Vector3.Angle(_rig.AimDirection, wallDirection) < 1f,
+                            "wall dash retains the selected obstacle-facing aim after settling");
+                        Check(Physics.SphereCast(_rig.transform.position + Vector3.up * 0.9f, 0.35f,
+                            wallDirection, out RaycastHit wallProbe, 2.3f, LayerMask.GetMask(GameConfig.LevelLayerName),
+                            QueryTriggerInteraction.Ignore), "wall dash has a real level obstacle in its settled forward path");
+                        Debug.Log($"[Emberdelve][Smoke:{Mode}] wall dash setup: origin={_rig.transform.position} aim={_rig.AimDirection} selected={wallDirection} obstacle={(wallProbe.collider != null ? wallProbe.collider.name : "none")} distance={wallProbe.distance:F3}");
 
                         Vector3 wallBefore = _rig.transform.position;
                         float manaBeforeWall = mana.CurrentMana;
@@ -5340,20 +5571,13 @@ namespace Emberdelve.EditorTools
                 Check(Mathf.Abs(outgoingMelee - 1.12f) < 0.03f,
                     $"Farshot adds nothing to the finesse rapier: max(STR 0, DEX 3) gives 1.12, not 1.18 or 1.3216 ({outgoingMelee:F4})");
 
-                // ---- the per-activation ability scale both actives carry
-                // Accepted rule (Docs/Design/ATTRIBUTES.md, proven live in U2A5): ability effect_scale =
-                // clamp(1 + 0.04 * CHA modifier, 0.6, 1.4) rides on a skill activation's damage magnitude.
-                // It never scales mana cost, cooldown or the number of projectiles, and an ordinary arrow
-                // never carries it. The expectation below is fixture arithmetic from the authored class
-                // score - floor((8-10)/2) = -1 -> 1 - 0.04 = 0.96 - not a call into the resolver whose
-                // resolved DamageInfo.Amount is what it asserts.
-                int authoredCha = classData != null ? classData.charisma : 0;
-                Check(classData != null && authoredCha == 8,
-                    $"the archer class asset authors CHA 8 ({authoredCha})");
-                int chaModifier = Mathf.FloorToInt((authoredCha - 10) / 2f);
-                float abilityScale = Mathf.Clamp(1f + 0.04f * chaModifier, 0.6f, 1.4f);
-                Check(chaModifier == -1 && Mathf.Abs(abilityScale - 0.96f) < 0.0001f,
-                    $"CHA 8 -> modifier {chaModifier} -> effect scale {abilityScale:F4} (clamp(1 + 0.04 * -1, 0.6, 1.4))");
+                // Skill power uses the authored WIS curve, independently of measured damage.
+                int authoredWis = classData != null ? classData.wisdom : 0;
+                Check(classData != null && authoredWis == 14, $"the archer class authors WIS 14 ({authoredWis})");
+                float abilityScale = Emberdelve.Stats.SkillPowerRules.SanitizeFactor(
+                    AttributeCurveProfile.CaptureSkillPower(classData != null ? classData.attributeCurveProfile : null).Evaluate(authoredWis));
+                Check(Mathf.Abs(abilityScale - 1.08f) < 0.0001f,
+                    $"authored WIS 14 interpolates skill power 1.08 ({abilityScale:F4})");
 
                 // ---- ammo refusal: a skill cannot fire without the rounds the weapon actually holds
                 int magazineStart = ranged.Magazine;
@@ -5414,7 +5638,7 @@ namespace Emberdelve.EditorTools
                     $"three live enemies are available for the volley ({(shotA != null ? 1 : 0) + (shotB != null ? 1 : 0) + (shotC != null ? 1 : 0)})");
                 if (shotA == null || shotB == null || shotC == null) yield break;
 
-                foreach (EnemyAgent target in new[] { shotA, shotB, shotC }) target.enabled = false;
+                foreach (EnemyAgent target in new[] { shotA, shotB, shotC }) WakeStandingTarget(target);
                 AimAtPoint(_rig.transform.position + FlatForward(_rig.transform) * volleyDepth + Vector3.up * 1.15f);
                 yield return WaitFrames(3);
 
@@ -5549,8 +5773,8 @@ namespace Emberdelve.EditorTools
                         hitTargets++;
                         Debug.Log($"[Emberdelve][Smoke:{Mode}] volley damage recipient={pair.Key.name} combatId=#{pair.Key.CombatId} amount={pair.Value.Amount:F1} point={pair.Value.Point}");
                         // Weapon falloff x the skill's own authored multiplier x the archer's outgoing ranged
-                        // factor (DEX 1.12 x Farshot 1.18) x the CHA 8 activation scale 0.96 x the hit-location
-                        // factor of the volume the arrow touched (D1c3; was a binary headshot x1.8). 34 * 0.7 * 1.3216 * 0.96 = 30.1959168 on a body hit.
+                        // factor (DEX 1.12 x Farshot 1.18) x the WIS 14 activation scale 1.08 x the hit-location
+                        // factor of the volume the arrow touched (D1c3; was a binary headshot x1.8). 34 * 0.7 * 1.3216 * 1.08 = 33.9704064 on a body hit.
                         float expected = bow.DamageAtRange(Vector3.Distance(pair.Value.SourcePosition, pair.Value.Point))
                                          * multi.damageMultiplier * outgoingRanged * abilityScale
                                          * RangedLocationFactor(pair.Value.Location);
@@ -5589,7 +5813,7 @@ namespace Emberdelve.EditorTools
                 Check(lineA != null && lineB != null && lineC != null, "three live enemies are available for the piercing line");
                 if (lineA == null || lineB == null || lineC == null) yield break;
 
-                foreach (EnemyAgent target in new[] { lineA, lineB, lineC }) target.enabled = false;
+                foreach (EnemyAgent target in new[] { lineA, lineB, lineC }) WakeStandingTarget(target);
                 PlaceEnemyAhead(lineA, 3.0f, 0f);
                 PlaceEnemyAhead(lineB, 5.0f, 0f);
                 PlaceEnemyAhead(lineC, 7.0f, 0f);
@@ -5680,13 +5904,13 @@ namespace Emberdelve.EditorTools
                 if (pierceDamageA.IsValid)
                 {
                     // Same chain as the volley arrow, with Piercing Shot's authored 1.35 instead of 0.7 and the
-                    // same CHA 8 activation scale: 34 * 1.35 * 1.3216 * 0.96 = 58.2349824 on a body hit, which
-                    // is the number the accepted U2A5 gate measures for this same class at this same CHA.
+                    // same authored WIS 14 activation scale: 34 * 1.35 * 1.3216 * 1.08 = 65.5143552 on a body hit.
+                    // The expectation comes from the class curve, not from the measured damage.
                     float expected = bow.DamageAtRange(Vector3.Distance(pierceDamageA.SourcePosition, pierceDamageA.Point))
                                      * pierce.damageMultiplier * outgoingRanged * abilityScale
                                      * RangedLocationFactor(pierceDamageA.Location);
                     Check(Mathf.Abs(pierceDamageA.Amount - expected) < 0.9f,
-                        $"the piercing arrow's damage is weapon falloff x skill multiplier x Farshot x CHA effect scale ({pierceDamageA.Amount:F1} vs expected {expected:F1})");
+                        $"the piercing arrow's damage is weapon falloff x skill multiplier x Farshot x WIS effect scale ({pierceDamageA.Amount:F1} vs expected {expected:F1})");
                     // D1c3: the arrow lands on a location (feet x0.5 is the lowest), so "heavy" is judged against the base scaled
                     // by the location factor of the volume this arrow touched (was a flat 0.9 x base, true only for x1.0/x1.8).
                     Check(pierceDamageA.Amount > bow.baseDamage * 0.9f * RangedLocationFactor(pierceDamageA.Location),
@@ -5739,8 +5963,23 @@ namespace Emberdelve.EditorTools
             {
                 Vector3 direction = point - _rig.AimOrigin;
                 if (direction.sqrMagnitude < 0.0001f) direction = _rig.transform.forward;
-                _rig.transform.rotation = Quaternion.LookRotation(direction);
+                Quaternion aim = Quaternion.LookRotation(direction);
+                PlayerLook look = _rig.GetComponent<PlayerLook>();
+                if (look != null)
+                {
+                    float pitch = -Mathf.Asin(Mathf.Clamp(direction.normalized.y, -1f, 1f)) * Mathf.Rad2Deg;
+                    look.ApplyAimPose(aim.eulerAngles.y, pitch);
+                }
+                else _rig.transform.rotation = aim;
                 Physics.SyncTransforms();
+            }
+
+            private static void WakeStandingTarget(EnemyAgent target)
+            {
+                target.Brain.NotifyDamaged(DamageInfo.Invalid);
+                target.Brain.Tick(EnemyBrain.WakeSeconds, Time.time, target.transform.position, target.transform.forward, null);
+                target.RefreshDormantHitPose(null);
+                target.enabled = false;
             }
 
             /// <summary>Places an enemy at a chosen distance ahead of, and beside, the player.</summary>
@@ -5947,7 +6186,14 @@ namespace Emberdelve.EditorTools
                 walkableCell = Vector2Int.zero;
                 blockedDirection = Vector2Int.zero;
 
-                if (_layout == null || _grid == null) return false;
+                if (_layout == null || _grid == null || _rig == null) return false;
+                CharacterController controller = _rig.GetComponent<CharacterController>();
+                if (controller == null) return false;
+                Vector3 scale = _rig.transform.lossyScale;
+                float radius = controller.radius * Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.z));
+                float height = Mathf.Max(radius * 2f, controller.height * Mathf.Abs(scale.y));
+                float skin = Mathf.Max(0.01f, controller.skinWidth * Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z)));
+                Vector3 localCenter = Vector3.Scale(controller.center, scale);
 
                 Vector2Int reference = _layout.CellFromWorld(_rig != null ? _rig.transform.position : Vector3.zero);
                 float best = float.MaxValue;
@@ -5972,11 +6218,25 @@ namespace Emberdelve.EditorTools
                             Vector3 forward = new Vector3(directions[d].x, 0f, directions[d].y);
                             int levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
                             if (!StandingSpotIsFree(candidate)) continue;
-                            // The test needs a real obstacle within the original 60% dash threshold,
-                            // not merely a blocked cell in a logical navigation map.
-                            if (!Physics.SphereCast(candidate + Vector3.up * 0.9f, 0.35f, forward,
-                                    out RaycastHit hit, 2.3f, levelMask, QueryTriggerInteraction.Ignore)) continue;
-                            if (hit.distance < 0.1f) continue;
+                            // A traversable stair can shorten a dash without CollisionFlags.Sides.
+                            // Require a vertical face across the actual controller's torso and head,
+                            // within the original distance bound, rather than any mid-height obstacle.
+                            Vector3 center = candidate + Quaternion.LookRotation(forward) * localCenter;
+                            Vector3 head = center + Vector3.up * (height * 0.5f - radius);
+                            if (!Physics.SphereCast(center, radius, forward, out RaycastHit hit, 2.3f,
+                                    levelMask, QueryTriggerInteraction.Ignore) ||
+                                !Physics.SphereCast(head, radius, forward, out RaycastHit headHit, 2.3f,
+                                    levelMask, QueryTriggerInteraction.Ignore)) continue;
+                            if (hit.distance < 0.1f || headHit.distance < 0.1f) continue;
+                            if (Mathf.Abs(hit.normal.y) > 0.1f || Mathf.Abs(headHit.normal.y) > 0.1f ||
+                                Vector3.Dot(hit.normal, -forward) < 0.9f || Vector3.Dot(headHit.normal, -forward) < 0.9f) continue;
+                            if (Mathf.Abs(hit.distance - headHit.distance) > skin + 0.05f) continue;
+                            float feetY = center.y - height * 0.5f;
+                            float crownY = center.y + height * 0.5f;
+                            Bounds middleBounds = hit.collider.bounds;
+                            Bounds headBounds = headHit.collider.bounds;
+                            if (middleBounds.min.y > feetY + skin || middleBounds.max.y < crownY - skin ||
+                                headBounds.min.y > feetY + skin || headBounds.max.y < crownY - skin) continue;
                             // The controller stops with its centre short of this cast hit. Require a
                             // walkable cell beyond the hit with extra margin so the existing landing
                             // assertion remains meaningful even at a logical module boundary.
@@ -5986,6 +6246,7 @@ namespace Emberdelve.EditorTools
                             best = distance;
                             walkableCell = new Vector2Int(x, y);
                             blockedDirection = directions[d];
+                            Debug.Log($"[Emberdelve][Smoke:{Mode}] full-height wall candidate: cell={walkableCell} facing={blockedDirection} middle={hit.collider.name}@{hit.distance:F3} head={headHit.collider.name}@{headHit.distance:F3} normals={hit.normal}/{headHit.normal} controllerHeight={height:F3} radius={radius:F3}");
                             break;
                         }
                     }

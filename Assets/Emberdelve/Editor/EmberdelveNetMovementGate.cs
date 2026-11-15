@@ -751,6 +751,39 @@ namespace Emberdelve.EditorTools
                 }
             }
 
+            // The same owner/observer then pass through an actual three-second transition wait.
+            // Delayed source-floor input/ack are injected after release, while the connection remains alive.
+            File.WriteAllText(_movementProofPath + ".floor", "go");
+            Check(WaitForRegex(clientLogs[1], @"floor movement applied id=" + idA + @" generation=1 transit=True", 20, clients[1]) != null,
+                "owner received reliable transit hold");
+            Match arrival = WaitForRegex(serverLog, @"floor-proof arrived id=" + idA + @" generation=2 pos=" + Vec, 20, server);
+            Check(arrival != null, "server released the same actor with a new movement generation");
+            Check(WaitForRegex(clientLogs[1], @"floor movement applied id=" + idA + @" generation=2 transit=False", 20, clients[1]) != null,
+                "owner received reliable arrival position and generation");
+            Check(WaitForRegex(clientLogs[0], @"floor movement applied id=" + idA + @" generation=2 transit=False", 20, clients[0]) != null,
+                "observer received the same arrival generation");
+            Check(WaitForRegex(serverLog, @"floor-proof stale input and ack injected id=" + idA, 20, server) != null,
+                "delayed old input and ack travelled through the real server and owner paths");
+            Check(Regex.IsMatch(ReadShared(serverLog), @"REJECT floor-generation count=\d+ id=" + idA + @" received=0 current=2"),
+                "server rejects delayed source-floor movement");
+            Check(WaitForRegex(clientLogs[1], @"discarded movement ack generation=0 current=2", 20, clients[1]) != null,
+                "owner actually received and discarded the delayed source-floor ack");
+            if (arrival != null)
+            {
+                Vector3 destination = V3(arrival, 1);
+                bool converged = false;
+                var limit = Stopwatch.StartNew();
+                while (limit.Elapsed.TotalSeconds < 15 && !server.HasExited && !clients[1].HasExited)
+                {
+                    if (TryLastPredict(ReadShared(clientLogs[1]), out var ownerPos)
+                        && TryLastView(ReadShared(clientLogs[0]), idA, out var observerPos)
+                        && Vector3.Distance(ownerPos, destination) <= .15f && Vector3.Distance(observerPos, destination) <= .15f)
+                    { converged = true; break; }
+                    Thread.Sleep(100);
+                }
+                Check(converged, "owner and observer stay at the destination after delayed source packets");
+            }
+
             // ---- 9. graceful end --------------------------------------------------------------------
             for (int i = 0; i < 4; i++) File.WriteAllText(quit[i], "quit");
             for (int i = 0; i < 4; i++)

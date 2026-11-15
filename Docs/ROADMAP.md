@@ -1,6 +1,6 @@
 # DakaDaka — roadmap
 
-Updated 11 November 2026. Live handoff: CURRENT_WORK.md. Rules: ../AGENTS.md.
+Updated 13 November 2026. Live handoff: CURRENT_WORK.md. Rules: ../AGENTS.md.
 Status vocabulary: implemented / automated proof / visual proof / accepted.
 A passing historical test is evidence for that version, not acceptance of the current tree.
 
@@ -14,14 +14,15 @@ A passing historical test is evidence for that version, not acceptance of the cu
 | MAP-01 — accepted | Crypt architecture and room content | Ten saved modules rebuilt with vaults, arches, tomb alcoves, colonnades, pews, reliquaries and local lighting. Two layouts traversed live;29 level tests +5 wall-fixture tests; NetMovement190/0, NetFinal172/0, NetDoor37/0, NetInventory146/0 | Readable first-person spaces, intact door/bridge routes on two layouts, clear spawns and network agreement; Tasks/CRYPT_CONTENT_20261109.md |
 | MAP-03 — accepted | Distinct ruined rooms | Fractured masonry crowns, themed wall landmarks, route paving and supported courtyard arches;10 saved modules |40 clear door approaches,18 reachable terraces,43 level tests, four network scenarios and live traversal on two layouts passed; Tasks/MAP_IDENTITY_20261111.md |
 | LOOT-01 — accepted | Paired inventory and server-owned loot | Own equipment/bag left; chest/enemy grid or dead-player paper doll right. Exact server transfers, retained corpse layout, tooltips and modal input;21 focused tests, NetInventory148/0, NetExtraction136/0, two-window visual acceptance | Tasks/LOOT_UI_20261109.md |
-| 5 | Persistent server stash (U4C) | Not implemented | Atomic versioned save, exact UID/affix restore after restart, rejected corrupt data, no item loss/duplication |
-| 6 | Content, sound, balance and release (U7/U6) | Deferred | Licensed assets, measured performance, repeatable packaged two-client release acceptance |
+| 5 — offline functional acceptance | Offline persistent stash and preparation (STASH-01); server persistence remains separate | Automated transactional proof and live trade/death/crash/extraction/stash/restart/re-equip verified; report PERSISTENT_STASH_20261111 | Atomic versioned save, exact UID/affix restore after restart, rejected corrupt data, no item loss/duplication |
+| 5R - deferred behind combat | Squire Royale as the sole raid mode | Three-floor flow, solo16/duo16/trio15 full parties, seeded zone/portal waves, bot refill and carried UID transitions implemented; bounded automated/rendered evidence in Tasks/SQUIRE_ROYALE_20261113.md. Full mode remains unfinished | Distinct ruins/crypts/infernal maps; ordinary full offline and network matches; exact carried loot through both descents and final extraction; bot combat/loot/survival/exit behavior; full destination rosters; source/corpse cleanup; visual and integrated acceptance. Cross-session human merging is future work; bots fill missing seats now as authorized |
+| 6 — current user priority | Reference combat, then textures/models/environment/light; content and release (U7/U6) | User authorized 12 November, after STASH-01 acceptance; finish existing work without claiming exact original parity | Licensed assets, measured performance, repeatable packaged two-client release acceptance |
 
 ## Existing foundation
 
 U0–U2: local rules, attributes, item UIDs/affixes. U3A/B: server movement, admission, combat and skills.
 U3C1/3: blade defense/riposte implemented; shields never parry. U5A/B: hand equipment and swords implemented.
-U4A/B: network inventory, corpse, extraction and timer have real two-client UI acceptance. Integrated milestone accepted using full and focused evidence; persistent stash is separate future scope.
+U4A/B: network inventory, corpse, extraction and timer have real two-client UI acceptance. Integrated milestone accepted using full and focused evidence; offline persistent stash is covered by stage5; server-persistent economy remains separate.
 Do not rebuild these systems from scratch. Consult linked task reports only for the next concrete slice.
 
 ## Scope control

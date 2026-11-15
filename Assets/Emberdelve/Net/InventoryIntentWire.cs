@@ -30,6 +30,7 @@ namespace Emberdelve.Net
     public struct InventoryIntentWire : INetworkSerializable
     {
         public int Kind;
+        public int Amount;
         public ulong Sequence;
         public ulong ExpectedRevision;
         public ulong SourceStackId;
@@ -45,6 +46,7 @@ namespace Emberdelve.Net
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
             serializer.SerializeValue(ref Kind);
+            serializer.SerializeValue(ref Amount);
             serializer.SerializeValue(ref Sequence);
             serializer.SerializeValue(ref ExpectedRevision);
             serializer.SerializeValue(ref SourceStackId);
@@ -63,7 +65,7 @@ namespace Emberdelve.Net
         {
             var wire = new InventoryIntentWire
             {
-                Kind = (int)command.Kind, Sequence = command.Sequence, ExpectedRevision = command.ExpectedRevision,
+                Kind = (int)command.Kind, Amount = command.Amount, Sequence = command.Sequence, ExpectedRevision = command.ExpectedRevision,
                 SourceStackId = command.SourceStackId, TargetStackId = command.TargetStackId,
                 CellX = command.DestinationCell.x, CellY = command.DestinationCell.y, Slot = (int)command.DestinationSlot
             };
@@ -83,7 +85,7 @@ namespace Emberdelve.Net
             }
             var candidate = new InventoryCommand((InventoryCommandKind)Kind, serverPlayerId, Sequence,
                 ExpectedRevision, SourceStackId, TargetStackId, new Vector2Int(CellX, CellY), (EquipmentSlot)Slot,
-                DecodeGuid(SourceUidLow, SourceUidHigh), DecodeGuid(TargetUidLow, TargetUidHigh));
+                DecodeGuid(SourceUidLow, SourceUidHigh), DecodeGuid(TargetUidLow, TargetUidHigh), Amount);
             if (!candidate.IsStructurallyValid(out reason)) return false;
             command = candidate;
             return true;

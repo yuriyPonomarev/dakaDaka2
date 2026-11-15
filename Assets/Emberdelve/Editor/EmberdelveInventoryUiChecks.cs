@@ -86,6 +86,9 @@ namespace Emberdelve.EditorTools
             check(rig != null && director != null, "the inventory UI flow found a rig and a director");
             if (rig == null || director == null) yield break;
 
+            check(ReferenceEquals(director.Player, rig) && rig.IsLocallyControlled,
+                "the pointer fixture targets the same local player as the HUD, never a Royale bot");
+            if (!ReferenceEquals(director.Player, rig) || !rig.IsLocallyControlled) yield break;
             Inventory inventory = rig.Inventory;
             Equipment equipment = rig.Equipment;
             check(inventory != null && equipment != null, "the rig carries an inventory and equipment slots");
@@ -127,6 +130,13 @@ namespace Emberdelve.EditorTools
             GameEvents.HotbarChanged += fixture.OnHotbarChanged;
             GameEvents.ToastRaised += fixture.OnToast;
 
+            // These fixtures test pointer/keyboard inventory and healing, not concurrent enemy or zone combat.
+            // Restore the exact enabled state afterwards; real combat/zone gates cover those systems separately.
+            var suspended = new List<Behaviour>();
+            foreach (var behaviour in UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
+                if (behaviour.enabled && (behaviour is Emberdelve.AI.EnemyAgent || behaviour is Emberdelve.AI.RoyaleBotController ||
+                    behaviour is RoyaleFloorEncounter))
+                { suspended.Add(behaviour); behaviour.enabled = false; }
             try
             {
                 // R6c2: the raid loadout the run just established must have bound the first usable stacks.
@@ -165,6 +175,7 @@ namespace Emberdelve.EditorTools
             }
             finally
             {
+                foreach (var behaviour in suspended) if (behaviour != null) behaviour.enabled = true;
                 // Observers and screen state are the fixture's to clean up, not the run's to inherit.
                 GameEvents.ItemCollected -= fixture.OnItemCollected;
                 GameEvents.InventoryChanged -= fixture.OnInventoryChanged;
@@ -860,6 +871,10 @@ namespace Emberdelve.EditorTools
             f.Check(draught != null && draught.healAmount > 0, "the healing consumable is loadable for the UI use command");
             if (draught == null || draught.healAmount <= 0) yield break;
 
+            bool healthWasEnabled = f.Rig.Health.enabled;
+            f.Rig.Health.enabled = false;
+            try
+            {
             ResetBag(f);
             yield return WaitFrames(2);
             OpenScreen(f);
@@ -883,20 +898,29 @@ namespace Emberdelve.EditorTools
             f.Screen.HandleClick(ScreenPoint(f, cellRect), true);
 
             f.Check(Mathf.Abs(f.Rig.CurrentHealth - healthBefore) < 0.01f &&
-                    f.Inventory.IndexOfStack(stackId) >= 0 && f.Inventory.HeldStackId == stackId,
-                 $"right-click holds without consuming/healing: held={f.Inventory.HeldStackId}, expected={stackId}, index={f.Inventory.IndexOfStack(stackId)}, HP={healthBefore}/{f.Rig.CurrentHealth}");
+                    f.Inventory.Hotbar.StackIdAt(0) == stackId && f.Inventory.IndexAtCell(cell) < 0 && f.Inventory.HeldStackId == 0,
+                 "right-click moves the potion into the belt, frees its bag cell and neither holds nor consumes it");
             f.Check(f.Inventory.Revision == revisionBefore + 1 && f.InventoryEvents == 1,
-                "taking in hand commits one authoritative inventory change");
-            f.Check(!f.Screen.IsOpen && !f.Director.InventoryOpen && !f.Screen.HasSelection,
-                "taking in hand closes the bag and clears its selection");
+                "moving into the belt commits one authoritative inventory change");
+            f.Check(f.Screen.IsOpen && f.Director.InventoryOpen && !f.Screen.HasSelection,
+                "belt transfer keeps inventory open and clears selection");
+            yield return WaitFrames(2);
+            var beltRect = FindChildRect(f.UiRoot, "BeltCell_0");
+            f.Check(beltRect != null, "the occupied physical belt slot renders");
+            if (beltRect == null) yield break;
+            f.Screen.HandleClick(ScreenPoint(f, beltRect), true);
+            f.Check(f.Inventory.Hotbar.StackIdAt(0) == 0 && f.Inventory.TryGetStack(stackId, out var returned) &&
+                    !f.Inventory.IsBeltCell(returned.Origin) && returned.Count == 1 && f.Inventory.Revision == revisionBefore + 2 &&
+                    f.InventoryEvents == 2 && f.Screen.IsOpen && Mathf.Abs(f.Rig.CurrentHealth - healthBefore) < 0.01f,
+                $"right-click belt return: belt={f.Inventory.Hotbar.StackIdAt(0)}, index={f.Inventory.IndexOfStack(stackId)}, revision={f.Inventory.Revision}/{revisionBefore + 2}, events={f.InventoryEvents}/2, open={f.Screen.IsOpen}, HP={f.Rig.CurrentHealth}/{healthBefore}");
+            }
+            finally { f.Rig.Health.enabled = healthWasEnabled; }
         }
 
         // ------------------------------------------------------------------ R6c2 hotbar scenarios
         //
-        // Key N is read by HotbarController.Update, which needs a keyboard device that batch mode does not
-        // expose (see the archer smoke note). It calls exactly Inventory.Hotbar.TryUse(N - 1, ...), so these
-        // scenarios call that same public method. Assignment from the open screen calls
-        // InventoryScreenController.TryAssignHotbarSlot, which is what the screen's 1-4 key handler calls.
+        // Keys 3/4 open two three-slot wheels. Focused checks use the same physical placement adapter;
+        // HotbarRealKeyboardPath also drives the actual wheel and held-item use with input events.
 
         private static readonly Vector2 OffGrid = new Vector2(-4000f, -4000f);
 
@@ -934,7 +958,7 @@ namespace Emberdelve.EditorTools
             for (int i = 0; i < f.Inventory.Slots.Count && expected.Count < HotbarBindings.SlotCount; i++)
             {
                 InventorySlot slot = f.Inventory.Slots[i];
-                if (HotbarBindings.IsUsableDefinition(slot.Item)) expected.Add(slot.StackId);
+                if (QuickBeltRules.CanStore(slot.Item)) expected.Add(slot.StackId);
             }
 
             bool match = true;
@@ -955,8 +979,8 @@ namespace Emberdelve.EditorTools
                 if (stack.Item == authoredDraught || stack.Item == authoredArrows) hasNamedAuthoredConsumable = true;
             }
             f.Check(hasNamedAuthoredConsumable,
-                "the authored starting kit includes a Blood Draught or Arrow Bundle consumable");
-            f.Check(match, $"the established raid loadout bound its first {expected.Count} usable stack(s) in bag order to keys 1-4 ({BoundIds(f)})");
+                "the authored starting kit includes a healing utility");
+            f.Check(match, $"the established raid loadout bound its first {expected.Count} utility stack(s) in kit order into the six physical belt slots ({BoundIds(f)})");
         }
 
         private static IEnumerator HotbarDefaultsAtLoadoutAndRestore(Fixture f)
@@ -965,9 +989,9 @@ namespace Emberdelve.EditorTools
             ItemData draught = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_BloodDraught.asset");
             ItemData arrows = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_ArrowBundle.asset");
             f.Check(draught != null && arrows != null && HotbarBindings.IsUsableDefinition(draught) &&
-                    HotbarBindings.IsUsableDefinition(arrows) && !HotbarBindings.IsUsableDefinition(f.Coin) &&
+                    HotbarBindings.IsUsableDefinition(arrows) && QuickBeltRules.CanStore(draught) && !QuickBeltRules.CanStore(arrows) && !HotbarBindings.IsUsableDefinition(f.Coin) &&
                     !HotbarBindings.IsUsableDefinition(f.Blade),
-                "the draught and the arrow bundle are usable hotbar definitions; the coin and the blade are not");
+                "draught and arrows are usable; only draught fits the utility belt; coin and blade are not usable");
             if (draught == null || arrows == null) yield break;
 
             ResetBag(f);
@@ -982,9 +1006,9 @@ namespace Emberdelve.EditorTools
             ulong arrowsId = StackIdOfDefinition(f, arrows);
             f.Check(draughtId != 0 && arrowsId != 0 && draughtId != arrowsId,
                 "the starting kit holds a draught stack and an arrow stack with their own StackIds");
-            f.Check(f.Inventory.Hotbar.StackIdAt(0) == draughtId && f.Inventory.Hotbar.StackIdAt(1) == arrowsId &&
+            f.Check(f.Inventory.Hotbar.StackIdAt(0) == draughtId && f.Inventory.Hotbar.StackIdAt(1) == 0 &&
                     f.Inventory.Hotbar.StackIdAt(2) == 0 && f.Inventory.Hotbar.StackIdAt(3) == 0,
-                $"the starting kit binds the first usable stacks in bag order and skips the coin and the blade ({BoundIds(f)})");
+                $"the starting kit places utilities on the belt and skips ammunition, coin and blade ({BoundIds(f)})");
 
             // No auto-refill: a usable stack that appears later does not take an empty slot.
             f.Check(f.Inventory.TryAddAt(draught, 1, new Vector2Int(8, 3), out string addLate),
@@ -995,7 +1019,7 @@ namespace Emberdelve.EditorTools
                     f.Inventory.Hotbar.StackIdAt(2) == 0 && f.Inventory.Hotbar.StackIdAt(0) == draughtId,
                 $"a stack that appears mid-raid is never auto-bound ({BoundIds(f)})");
 
-            // Restore: retire all old identities, bind defaults for the restored loadout.
+            // Restore uses saved physical positions, never old local binding metadata.
             ResetBag(f);
             yield return WaitFrames(2);
             f.Check(f.Inventory.TryAddAt(f.Coin, 1, new Vector2Int(0, 0), out string a1) &&
@@ -1014,12 +1038,16 @@ namespace Emberdelve.EditorTools
             f.Check(restored, "the bag snapshot restores: " + restoreReason);
             f.Check(newDraughtId != 0 && newDraughtId != oldDraughtId,
                 "the restored draught stack has a fresh StackId");
-            // D3c (old -> new): the restore used to retire every binding and bind the first usable stacks by default (key 1 = the draught).
-            // The belt now survives a restore by ITEM IDENTITY: key 4 was bound to the draught, so it is bound to the restored draught
-            // stack (a fresh StackId), the old StackId is retired, and no default fills key 1. A belt that held nothing still gets the defaults.
-            f.Check(f.Inventory.Hotbar.StackIdAt(3) == newDraughtId && f.Inventory.Hotbar.SlotOf(oldDraughtId) < 0 &&
-                    f.Inventory.Hotbar.StackIdAt(0) == 0 && BoundCount(f, newDraughtId) == 1,
-                $"restore keeps the belt by item identity: key 4 follows the draught to its restored stack, nothing is auto-bound to key 1 ({BoundIds(f)})");
+            // Snapshot cells are authoritative; the old local identity metadata cannot move restored bag items.
+            f.Check(BoundCount(f, 0) == HotbarBindings.SlotCount &&
+                    f.Inventory.Slots[f.Inventory.IndexOfStack(newDraughtId)].Origin == new Vector2Int(2, 0),
+                $"restoring an earlier bag snapshot leaves the potion in its bag cell, never auto-rebinding it ({BoundIds(f)})");
+            f.Check(f.Inventory.Hotbar.TryAssign(5, newDraughtId, out _), "the restored potion moves into the sixth physical slot");
+            var physicalSnapshot = f.Inventory.ToContainerSnapshot();
+            f.Check(f.Inventory.TryRestore(physicalSnapshot, out restoreReason), "physical belt snapshot restores: " + restoreReason);
+            f.Check(f.Inventory.Hotbar.TryGetStack(5, out var restoredBelt) && restoredBelt.Item == draught &&
+                    restoredBelt.Count == 2 && f.Inventory.IndexAtCell(new Vector2Int(2, 0)) < 0 && BoundCount(f, 0) == 5,
+                "a saved physical belt position survives restore and occupies no bag cell");
         }
 
         private static IEnumerator HotbarKeyUsesBoundStackIdentity(Fixture f)
@@ -1135,108 +1163,74 @@ namespace Emberdelve.EditorTools
 
             // The index-based adapter is kept for existing callers: it still addresses the list position.
             f.Check(!f.Inventory.TryUseSlot(0), "the legacy adapter also rejects an unheld item");
-            f.Check(f.Inventory.RequestHoldStack(lookalikeId, out _), "the remaining stack is taken in hand");
+            f.Check(f.Inventory.Hotbar.TryAssign(0, lookalikeId, out _) && f.Inventory.RequestHoldStack(lookalikeId, out _), "the remaining stack is placed in the belt and taken in hand");
             f.Check(CompleteAuthoredDrink(f, f.Inventory.TryUseSlot(0)) && f.Inventory.Slots[f.Inventory.IndexOfStack(lookalikeId)].Count == 1,
                 "the legacy index-based TryUseSlot adapter still works for existing callers");
         }
 
         private static IEnumerator HotbarAssignFromOpenScreen(Fixture f)
         {
-            Debug.Log("[Emberdelve][Smoke:inventoryui] ---- assign hotbar slots from the open satchel");
+            Debug.Log("[Emberdelve][Smoke:inventoryui] ---- physical belt assignment from the open satchel");
             ItemData draught = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_BloodDraught.asset");
             ItemData arrows = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_ArrowBundle.asset");
-            if (draught == null || arrows == null) { f.Check(false, "the draught and arrow bundle are loadable"); yield break; }
-
+            ItemData bandage = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_LinenBandage.asset");
+            if (draught == null || arrows == null || bandage == null) { f.Check(false, "utility fixtures are loadable"); yield break; }
             ResetBag(f);
             yield return WaitFrames(2);
             OpenScreen(f);
             yield return WaitFrames(2);
-
-            Vector2Int coinCell = new Vector2Int(0, 0);
-            Vector2Int draughtCell = new Vector2Int(2, 0);
-            Vector2Int arrowCell = new Vector2Int(4, 0);
-            Vector2Int bladeCell = new Vector2Int(6, 0);
-            f.Check(f.Inventory.TryAddAt(f.Coin, 1, coinCell, out _) &&
-                    f.Inventory.TryAddAt(draught, 2, draughtCell, out _) &&
-                    f.Inventory.TryAddAt(arrows, 2, arrowCell, out _) &&
-                    f.Inventory.TryAddAt(f.Blade, 1, bladeCell, out _),
-                "a coin, draughts, arrows and a blade are placed in the open satchel");
+            Vector2Int coinCell = new Vector2Int(0, 0), draughtCell = new Vector2Int(2, 0),
+                arrowCell = new Vector2Int(4, 0), bladeCell = new Vector2Int(6, 0), bandageCell = new Vector2Int(8, 0);
+            f.Check(f.Inventory.TryAddAt(f.Coin, 1, coinCell, out _) && f.Inventory.TryAddAt(draught, 2, draughtCell, out _) &&
+                    f.Inventory.TryAddAt(arrows, 2, arrowCell, out _) && f.Inventory.TryAddAt(f.Blade, 1, bladeCell, out _) &&
+                    f.Inventory.TryAddAt(bandage, 2, bandageCell, out _), "five distinct item stacks are placed in the open satchel");
             yield return WaitFrames(2);
-            ulong coinId = StackIdAtCell(f, coinCell);
-            ulong draughtId = StackIdAtCell(f, draughtCell);
-            ulong arrowId = StackIdAtCell(f, arrowCell);
-            ulong bladeId = StackIdAtCell(f, bladeCell);
-            f.Check(coinId != 0 && draughtId != 0 && arrowId != 0 && bladeId != 0 && BoundIds(f) == "0,0,0,0,0,0",
-                "all four stacks are live and the hotbar starts empty");
-
-            ulong revisionBefore = f.Inventory.Revision;
-            f.HotbarEvents = 0;
-
-            // Selection path: select the draught by click, then press 2 with the pointer over no stack.
+            ulong draughtId = StackIdAtCell(f, draughtCell), bandageId = StackIdAtCell(f, bandageCell);
+            int units = f.Inventory.TotalUnits;
+            ulong revision = f.Inventory.Revision;
             yield return ClickCell(f, draughtCell);
-            f.Check(f.Screen.SelectedStackId == draughtId, "the draught stack is selected by StackId");
-            bool bound = f.Screen.TryAssignHotbarSlot(1, OffGrid);
-            f.Check(bound && f.Inventory.Hotbar.StackIdAt(1) == draughtId && f.HotbarEvents == 1,
-                $"key 2 with a selected stack binds that StackId to slot 2 and raises one hotbar event ({BoundIds(f)}, {f.HotbarEvents})");
-
-            // Hover path: the stack under the pointer wins over the selection.
-            RectTransform arrowRect = FindChildRect(f.UiRoot, "Cell_" + arrowCell.x + "_" + arrowCell.y);
-            f.Check(arrowRect != null, "the arrow cell rectangle is rendered");
-            if (arrowRect == null) yield break;
-            bound = f.Screen.TryAssignHotbarSlot(2, ScreenPoint(f, arrowRect));
-            f.Check(bound && f.Inventory.Hotbar.StackIdAt(2) == arrowId && f.Inventory.Hotbar.StackIdAt(1) == draughtId &&
-                    f.Screen.SelectedStackId == draughtId,
-                $"key 3 over the arrow stack binds the hovered stack to slot 3 and leaves the selection alone ({BoundIds(f)})");
-
-            // Reassignment moves the binding: no duplicate.
-            f.HotbarEvents = 0;
-            bound = f.Screen.TryAssignHotbarSlot(3, OffGrid);
-            f.Check(bound && f.Inventory.Hotbar.StackIdAt(3) == draughtId && f.Inventory.Hotbar.StackIdAt(1) == 0 &&
-                    BoundCount(f, draughtId) == 1 && f.HotbarEvents == 1,
-                $"binding the selected draught to slot 4 moves it off slot 2 ({BoundIds(f)})");
-            bound = f.Screen.TryAssignHotbarSlot(3, ScreenPoint(f, arrowRect));
-            f.Check(bound && f.Inventory.Hotbar.StackIdAt(3) == arrowId && f.Inventory.Hotbar.StackIdAt(2) == 0 &&
-                    BoundCount(f, arrowId) == 1 && BoundCount(f, draughtId) == 0,
-                $"binding the arrows over an occupied slot replaces it and still holds no duplicate ({BoundIds(f)})");
-            f.HotbarEvents = 0;
-            bound = f.Screen.TryAssignHotbarSlot(3, ScreenPoint(f, arrowRect));
-            f.Check(bound && f.Inventory.Hotbar.StackIdAt(3) == arrowId && f.HotbarEvents == 0,
-                "re-binding the same stack to the same slot is a no-op without an event");
-
-            // Unusable items are refused with a toast, and nothing changes.
-            string bindingsBefore = BoundIds(f);
+            f.Check(f.Screen.SelectedStackId == draughtId, "the draught is selected by StackId");
+            f.InventoryEvents = 0;
+            bool moved = f.Screen.TryAssignHotbarSlot(1, OffGrid);
+            f.Check(moved && f.Inventory.Hotbar.StackIdAt(1) == draughtId && f.Inventory.IndexAtCell(draughtCell) < 0 &&
+                    f.Inventory.Revision == revision + 1 && f.InventoryEvents == 1 && f.Inventory.TotalUnits == units,
+                "selection assignment moves the stack physically, frees its bag cell and commits one inventory change");
+            yield return WaitFrames(2);
+            RectTransform bandageRect = FindChildRect(f.UiRoot, "Cell_8_0");
+            if (bandageRect == null) { f.Check(false, "the bandage cell renders"); yield break; }
+            moved = f.Screen.TryAssignHotbarSlot(2, ScreenPoint(f, bandageRect));
+            f.Check(moved && f.Inventory.Hotbar.StackIdAt(2) == bandageId && f.Inventory.Hotbar.StackIdAt(1) == draughtId &&
+                    f.Screen.SelectedStackId == draughtId && f.Inventory.IndexAtCell(bandageCell) < 0,
+                "hover takes priority over selection and moves the bandage into a separate physical pocket");
+            f.Check(f.Screen.TryAssignHotbarSlot(3, OffGrid) && f.Inventory.Hotbar.StackIdAt(3) == draughtId &&
+                    f.Inventory.Hotbar.StackIdAt(1) == 0 && BoundCount(f, draughtId) == 1,
+                "moving the selected potion between pockets leaves no duplicate");
+            f.Check(f.Screen.TryAssignHotbarSlot(2, OffGrid) && f.Inventory.Hotbar.StackIdAt(2) == draughtId &&
+                    f.Inventory.Hotbar.StackIdAt(3) == bandageId && f.Inventory.TotalUnits == units,
+                "moving onto a different utility swaps the two physical pockets without losing either stack");
+            revision = f.Inventory.Revision; f.InventoryEvents = 0;
+            f.Check(f.Screen.TryAssignHotbarSlot(2, OffGrid) && f.Inventory.Revision == revision && f.InventoryEvents == 0,
+                "placing an item in its existing pocket is a no-op");
+            yield return WaitFrames(2);
+            string before = BoundIds(f);
             f.Toasts.Clear();
-            f.HotbarEvents = 0;
-            RectTransform coinRect = FindChildRect(f.UiRoot, "Cell_" + coinCell.x + "_" + coinCell.y);
-            RectTransform bladeRect = FindChildRect(f.UiRoot, "Cell_" + bladeCell.x + "_" + bladeCell.y);
-            f.Check(coinRect != null && bladeRect != null, "the coin and blade cell rectangles are rendered");
-            if (coinRect == null || bladeRect == null) yield break;
-            bool coinBound = f.Screen.TryAssignHotbarSlot(0, ScreenPoint(f, coinRect));
-            bool bladeBound = f.Screen.TryAssignHotbarSlot(1, ScreenPoint(f, bladeRect));
-            f.Check(!coinBound && !bladeBound && BoundIds(f) == bindingsBefore && f.HotbarEvents == 0,
-                $"a coin and a blade cannot be put on the hotbar ({BoundIds(f)})");
-            f.Check(f.Toasts.Count == 2 && f.Toasts[0].Contains(f.Coin.displayName) && f.Toasts[1].Contains(f.Blade.displayName),
-                "each refusal uses the screen's toast feedback and names the item");
-
-            // Nothing under the pointer and nothing selected: refused.
-            f.Screen.Close();
-            OpenScreen(f);
+            foreach (var cell in new[] { arrowCell, coinCell, bladeCell })
+            {
+                var rect = FindChildRect(f.UiRoot, "Cell_" + cell.x + "_" + cell.y);
+                f.Check(rect != null && !f.Screen.TryAssignHotbarSlot(0, ScreenPoint(f, rect)),
+                    "ammunition, treasure and equipment cannot enter utility pockets");
+            }
+            f.Check(BoundIds(f) == before && f.Inventory.Revision == revision && f.Inventory.TotalUnits == units &&
+                    f.InventoryEvents == 0 && f.Toasts.Count == 3,
+                "all three rejected placements leave inventory unchanged and give feedback");
+            f.Screen.Close(); OpenScreen(f);
             yield return WaitFrames(2);
             f.Toasts.Clear();
-            bool nothing = f.Screen.TryAssignHotbarSlot(0, OffGrid);
-            f.Check(!nothing && f.Toasts.Count == 1 && BoundIds(f) == bindingsBefore,
-                "with no stack under the pointer and no selection, the key is refused with a toast");
-
-            f.Check(f.Inventory.Revision == revisionBefore,
-                "assigning hotbar slots never touches the shared inventory revision");
-            RectTransform currentArrowRect = FindChildRect(f.UiRoot, "Cell_" + arrowCell.x + "_" + arrowCell.y);
-            f.Check(currentArrowRect != null, "the arrow cell is still rendered after the satchel rebuild");
-            Vector2 arrowPoint = ScreenPoint(f, currentArrowRect);
-
-            // A closed screen assigns nothing.
+            f.Check(!f.Screen.TryAssignHotbarSlot(0, OffGrid) && f.Toasts.Count == 1 && BoundIds(f) == before,
+                "no hovered or selected stack refuses placement with feedback");
             f.Screen.Close();
-            f.Check(!f.Screen.TryAssignHotbarSlot(0, arrowPoint) && BoundIds(f) == bindingsBefore,
-                "a closed satchel ignores hotbar assignment");
+            f.Check(!f.Screen.TryAssignHotbarSlot(0, OffGrid) && BoundIds(f) == before,
+                "closed inventory ignores belt assignment");
         }
 
         private static void LogHotbarInputDiagnostic(Fixture f, Keyboard testKeyboard, string stage)
@@ -1376,9 +1370,9 @@ namespace Emberdelve.EditorTools
                     yield return WaitFrames(1);
                     f.Check(f.Inventory.Hotbar.StackIdAt(i) == draughtId && f.Inventory.Hotbar.SlotOf(draughtId) == i,
                         $"wheel release assigns sector {i + 1} to the selected stack ({BoundIds(f)})");
-                    f.Check(f.Inventory.TotalUnits == unitsBeforeAssignment && f.Inventory.Revision == revisionBeforeAssignment && f.InventoryEvents == 0,
-                        "assignment does not consume an item or mutate inventory authority");
-                    f.Check(f.HotbarEvents == i + 1, "one binding-change event per assignment");
+                    f.Check(f.Inventory.TotalUnits == unitsBeforeAssignment && f.Inventory.Revision == revisionBeforeAssignment + (ulong)i + 1 && f.InventoryEvents == i + 1,
+                        "each physical assignment preserves units and commits one authoritative inventory change");
+                    f.Check(f.Inventory.IndexAtCell(draughtCell) < 0, "physical assignment leaves the original bag cell empty");
                 }
 
                 InputSystem.QueueStateEvent(mouse, new MouseState { position = new Vector2(-1000f, -1000f) });
@@ -1455,29 +1449,29 @@ namespace Emberdelve.EditorTools
         {
             Debug.Log("[Emberdelve][Smoke:inventoryui] ---- HUD hotbar chips follow the bindings");
             ItemData draught = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_BloodDraught.asset");
-            ItemData arrows = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_ArrowBundle.asset");
-            if (draught == null || arrows == null) { f.Check(false, "the draught and arrow bundle are loadable"); yield break; }
+            ItemData bandages = AssetDatabase.LoadAssetAtPath<ItemData>(EmberdelvePaths.Data + "/Item_LinenBandage.asset");
+            if (draught == null || bandages == null) { f.Check(false, "the draught and linen bandage are loadable"); yield break; }
 
             ResetBag(f);
             yield return WaitFrames(2);
             Vector2Int coinCell = new Vector2Int(0, 0);
             Vector2Int draughtCell = new Vector2Int(2, 0);
-            Vector2Int arrowCell = new Vector2Int(4, 0);
+            Vector2Int bandageCell = new Vector2Int(4, 0);
             f.Check(f.Inventory.TryAddAt(f.Coin, 1, coinCell, out _) &&
                     f.Inventory.TryAddAt(draught, 2, draughtCell, out _) &&
-                    f.Inventory.TryAddAt(arrows, 3, arrowCell, out _),
-                "a coin, two draughts and three arrow bundles are placed for the HUD check");
+                    f.Inventory.TryAddAt(bandages, 3, bandageCell, out _),
+                "a coin, two draughts and three linen bandages are placed for the HUD check");
             ulong draughtId = StackIdAtCell(f, draughtCell);
-            ulong arrowId = StackIdAtCell(f, arrowCell);
-            f.Check(f.Inventory.Hotbar.TryAssign(0, arrowId, out _) && f.Inventory.Hotbar.TryAssign(1, draughtId, out _),
-                "arrows are bound to key 1 and draughts to key 2");
+            ulong bandageId = StackIdAtCell(f, bandageCell);
+            f.Check(f.Inventory.Hotbar.TryAssign(0, bandageId, out _) && f.Inventory.Hotbar.TryAssign(1, draughtId, out _),
+                "bandages are bound to key 1 and draughts to key 2");
             yield return WaitFrames(3);
 
             RectTransform row = FindHudHotbarRow();
             f.Check(row != null, "the HUD built its hotbar row");
             if (row == null) yield break;
 
-            f.Check(ChipText(row, 1) == "Arrow Bundle x3" && ChipText(row, 2) == "Blood Draught x2" &&
+            f.Check(ChipText(row, 1) == "Linen Bandage x3" && ChipText(row, 2) == "Blood Draught x2" &&
                     ChipText(row, 3) == null && ChipText(row, 4) == null,
                 $"chips show the bound stacks' names and counts and empty slots as empty ('{ChipText(row, 1)}', '{ChipText(row, 2)}', '{ChipText(row, 3)}', '{ChipText(row, 4)}')");
 
@@ -1485,7 +1479,7 @@ namespace Emberdelve.EditorTools
             f.Check(f.Inventory.TryRemoveAt(f.Inventory.IndexAtCell(coinCell), 1) == 1, "the earlier coin is removed");
             yield return WaitFrames(3);
             row = FindHudHotbarRow();
-            f.Check(row != null && ChipText(row, 1) == "Arrow Bundle x3" && ChipText(row, 2) == "Blood Draught x2",
+            f.Check(row != null && ChipText(row, 1) == "Linen Bandage x3" && ChipText(row, 2) == "Blood Draught x2",
                 "after list compaction the chips still show the same bound stacks");
 
             // A partial use updates the count and keeps the chip.
@@ -1496,16 +1490,16 @@ namespace Emberdelve.EditorTools
             row = FindHudHotbarRow();
             f.Check(row != null && ChipText(row, 2) == "Blood Draught", $"the chip count follows a partial use ('{ChipText(row, 2)}')");
 
-            // An explicit assignment refreshes the strip through the hotbar event.
+            // A physical move refreshes the strip through the inventory event.
             f.Check(f.Inventory.Hotbar.TryAssign(3, draughtId, out _), "the draught moves to key 4");
             yield return WaitFrames(3);
             row = FindHudHotbarRow();
             f.Check(row != null && ChipText(row, 2) == null && ChipText(row, 4) == "Blood Draught" &&
-                    ChipText(row, 1) == "Arrow Bundle x3",
+                    ChipText(row, 1) == "Linen Bandage x3",
                 $"moving a binding refreshes the strip ('{ChipText(row, 2)}', '{ChipText(row, 4)}')");
 
             // A retired binding empties its chip.
-            f.Check(f.Inventory.TryRemoveAt(f.Inventory.IndexOfStack(arrowId), 3) == 3, "the bound arrows leave the bag");
+            f.Check(f.Inventory.TryRemoveAt(f.Inventory.IndexOfStack(bandageId), 3) == 3, "the bound bandages leave the bag");
             yield return WaitFrames(3);
             row = FindHudHotbarRow();
             f.Check(row != null && ChipText(row, 1) == null && ChipText(row, 4) == "Blood Draught",
@@ -1582,17 +1576,19 @@ namespace Emberdelve.EditorTools
                          EquipmentSlot.AltWeapon, EquipmentSlot.AltOffHand })
             {
                 RectTransform rect = FindChildRect(f.UiRoot, "Equip_" + slot);
-                RectTransform label = FindChildRect(f.UiRoot, "EquipLabel_" + slot);
-                f.Check(rect != null && label != null, $"worn slot {slot} rendered with its label");
-                if (rect == null || label == null) continue;
+                RectTransform icon = rect != null ? (FindChildRect(rect, "ItemIcon") ?? FindChildRect(rect, "SlotEtching")) : null;
+                Image iconImage = icon != null ? icon.GetComponent<Image>() : null;
+                f.Check(rect != null && iconImage != null && iconImage.sprite != null && iconImage.color.a > 0f,
+                    $"paperdoll slot {slot} renders an item icon or empty-slot etching");
+                if (rect == null || icon == null) continue;
                 slotRows++;
 
                 rect.GetWorldCorners(corners);
                 f.Check(Contains(panelCorners, corners, 0.5f), $"the {slot} slot lies inside the satchel panel");
-                label.GetWorldCorners(corners);
-                f.Check(Contains(panelCorners, corners, 0.5f), $"the {slot} label rectangle lies inside the satchel panel");
+                icon.GetWorldCorners(corners);
+                f.Check(Contains(panelCorners, corners, 0.5f), $"the {slot} icon lies inside the satchel panel");
             }
-            f.Check(slotRows == 13, "the equipment column has thirteen rows (eleven before D3c appended AltWeapon and AltOffHand, six before D3b)");
+            f.Check(slotRows == 13, "the paperdoll has all thirteen equipment slots including gloves and both weapon sets");
 
             // ---- two rolled drops of one base cloak
             List<AffixDefinition> affixes = new List<AffixDefinition>();
@@ -1778,10 +1774,20 @@ namespace Emberdelve.EditorTools
                     f.Check(f.Equipment.Equipped(item.equipSlot) == item && f.Inventory.IndexOfItem(item) < 0,
                         $"right click wore {item.displayName} into {item.equipSlot}{(withSelection ? " (with a selection pending)" : "")}");
                     f.Check(f.Screen.SelectedItem == null, "the right click leaves no selection behind");
-                    RectTransform gearNameRect = FindChildRect(f.UiRoot, "EquipLabel_" + item.equipSlot);
-                    Text gearNameText = gearNameRect != null ? gearNameRect.GetComponent<Text>() : null;
-                    f.Check(gearNameText != null && gearNameText.preferredHeight <= gearNameRect.rect.height + 0.5f,
-                        $"the worn {item.displayName} name fits its compact equipment row without clipping");
+                    RectTransform wornSlot = FindChildRect(f.UiRoot, "Equip_" + item.equipSlot);
+                    RectTransform icon = wornSlot != null ? FindChildRect(wornSlot, "ItemIcon") : null;
+                    Image iconImage = icon != null ? icon.GetComponent<Image>() : null;
+                    Vector3[] itemBounds = new Vector3[4], slotBounds = new Vector3[4];
+                    if (icon != null) icon.GetWorldCorners(itemBounds);
+                    if (wornSlot != null) wornSlot.GetWorldCorners(slotBounds);
+                    f.Check(iconImage != null && iconImage.sprite != null && iconImage.color.a > 0f &&
+                            Contains(slotBounds, itemBounds, .5f),
+                        $"the worn {item.displayName} has a visible icon contained in its paperdoll slot");
+                    if (wornSlot != null) f.Screen.ShowTooltipAt(ScreenPoint(f, wornSlot));
+                    RectTransform wornBody = FindChildRect(f.UiRoot, "TooltipBody");
+                    Text bodyText = wornBody != null ? wornBody.GetComponent<Text>() : null;
+                    f.Check(bodyText != null && bodyText.text.Contains(item.displayName),
+                        $"hovering the {item.equipSlot} icon identifies {item.displayName}");
                 }
             }
 
@@ -1792,14 +1798,13 @@ namespace Emberdelve.EditorTools
             f.Check(f.Inventory.TryAddAt(cloak, 1, new Vector2Int(0, 0), out string cloakWhy), "cloak placed: " + cloakWhy);
             yield return WaitFrames(2);
             yield return ClickCell(f, new Vector2Int(0, 0), true);
-            RectTransform backLabel = FindChildRect(f.UiRoot, "EquipLabel_Back");
-            Text backText = backLabel != null ? backLabel.GetComponent<Text>() : null;
-            f.Check(backText != null && backText.text.Contains("Back") && backText.text.Contains(cloak.displayName),
-                "the Back label names both the slot and the worn item: " + (backText != null ? backText.text.Replace("\n", " / ") : "missing"));
-            RectTransform emptyLabel = FindChildRect(f.UiRoot, "EquipLabel_Head");
-            Text emptyText = emptyLabel != null ? emptyLabel.GetComponent<Text>() : null;
-            f.Check(emptyText != null && emptyText.text == "Head", "an empty slot shows only its slot name");
-
+            RectTransform backIcon = FindChildRect(FindChildRect(f.UiRoot, "Equip_Back"), "ItemIcon");
+            f.Check(backIcon != null && backIcon.GetComponent<Image>()?.sprite != null,
+                "the worn Back slot displays its cloak icon");
+            RectTransform headSlot = FindChildRect(f.UiRoot, "Equip_Head");
+            RectTransform emptyEtching = headSlot != null ? FindChildRect(headSlot, "SlotEtching") : null;
+            f.Check(emptyEtching != null && emptyEtching.GetComponent<Image>()?.sprite != null && FindChildRect(headSlot, "ItemIcon") == null,
+                "an empty Head slot displays an equipment etching without a phantom item icon");
             // ---- the worn-slot tooltip sits beside the column, not over the other slot rows
             RectTransform backSlot = FindChildRect(f.UiRoot, "Equip_Back");
             RectTransform tipRect = FindChildRect(f.UiRoot, "TooltipPanel");
@@ -1811,8 +1816,14 @@ namespace Emberdelve.EditorTools
                 Vector3[] slotCorners = new Vector3[4];
                 tipRect.GetWorldCorners(tipCorners);
                 backSlot.GetWorldCorners(slotCorners);
-                f.Check(tipRect.gameObject.activeInHierarchy && tipCorners[2].x <= slotCorners[0].x + 0.5f,
-                    $"the worn-slot tooltip ends left of the equipment column (tip right {tipCorners[2].x:F0}, slot left {slotCorners[0].x:F0})");
+                var panel = FindChildRect(f.UiRoot, "SatchelPanel");
+                Vector3[] panelCorners = new Vector3[4];
+                if (panel != null) panel.GetWorldCorners(panelCorners);
+                var backTipBody = FindChildRect(tipRect, "TooltipBody");
+                var bodyText = backTipBody != null ? backTipBody.GetComponent<Text>() : null;
+                f.Check(tipRect.gameObject.activeInHierarchy && panel != null && Contains(panelCorners, tipCorners, .5f) &&
+                        bodyText != null && bodyText.text.Contains(cloak.displayName),
+                    "hovering the worn Back icon shows the correct cloak tooltip entirely inside the inventory panel");
                 Image tipImage = tipRect.GetComponent<Image>();
                 f.Check(tipImage != null && tipImage.color.a >= 0.999f, "the tooltip background is fully opaque");
             }
@@ -1977,6 +1988,7 @@ namespace Emberdelve.EditorTools
             // Closing goes through the production path, so any selection left by the previous scenario is
             // cleared the way a player's close would clear it.
             f.Screen.Close();
+            f.Director.SetInventoryOpen(false);
             f.Equipment.ClearToBare();
             f.Inventory.Clear();
         }
@@ -1984,6 +1996,7 @@ namespace Emberdelve.EditorTools
         private static void OpenScreen(Fixture f)
         {
             if (!f.Screen.IsOpen) f.Screen.Open();
+            f.Director.SetInventoryOpen(f.Screen.IsOpen);
             Canvas.ForceUpdateCanvases();
         }
 

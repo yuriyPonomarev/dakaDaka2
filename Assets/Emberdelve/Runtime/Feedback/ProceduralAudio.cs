@@ -11,8 +11,8 @@ namespace Emberdelve.Feedback
     {
         private const int SampleRate = 44100;
 
-        public static AudioClip SwordSwing() => Build("sfx_swing", 0.18f, 1100f, 240f, 0.55f, 0.05f, 0.18f);
-        public static AudioClip Impact() => Build("sfx_impact", 0.14f, 420f, 90f, 0.75f, 0.02f, 0.55f);
+        public static AudioClip SwordSwing() => Noise("sfx_swing", .24f, .22f, 0f);
+        public static AudioClip Impact() => Noise("sfx_impact", .18f, .07f, 95f);
         public static AudioClip Block() => Build("sfx_block", 0.2f, 1800f, 700f, 0.35f, 0.01f, 0.4f);
         public static AudioClip BowDraw() => Build("sfx_draw", 0.12f, 300f, 900f, 0.15f, 0.4f, 0.3f);
         public static AudioClip BowRelease() => Build("sfx_bow", 0.24f, 1400f, 320f, 0.25f, 0.02f, 0.5f);
@@ -21,6 +21,32 @@ namespace Emberdelve.Feedback
         public static AudioClip DryFire() => Build("sfx_dry", 0.08f, 1600f, 1200f, 0.4f, 0.01f, 0.2f);
         public static AudioClip Extract() => Build("sfx_extract", 1.1f, 320f, 880f, 0.08f, 0.25f, 0.85f);
         public static AudioClip Death() => Build("sfx_death", 1.4f, 240f, 55f, 0.35f, 0.05f, 0.95f);
+
+        public static AudioClip RuinWind() => Noise("sfx_ruin_wind", 8f, .005f, 0f);
+        public static AudioClip StoneStep() => Noise("sfx_stone_step", .16f, .12f, 72f);
+        public static AudioClip FireCrackle() => Noise("sfx_fire", .28f, .25f, 0f);
+
+        private static AudioClip Noise(string name, float duration, float smoothing, float bodyFrequency)
+        {
+            int count = Mathf.RoundToInt(duration * SampleRate);
+            var samples = new float[count];
+            uint seed = 0x31A7B29u;
+            float filtered = 0f;
+            for (int i = 0; i < count; i++)
+            {
+                seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+                float noise = (seed & 65535) / 32767.5f - 1f;
+                filtered += (noise - filtered) * smoothing;
+                float t = i / (float)count;
+                float envelope = Mathf.Min(1f, t * 45f) * Mathf.Pow(1f - t, 2f);
+                float body = bodyFrequency > 0f ? Mathf.Sin(2f * Mathf.PI * bodyFrequency * i / SampleRate) * .22f : 0f;
+                samples[i] = Mathf.Clamp((filtered * 2.2f + body) * envelope, -.9f, .9f);
+            }
+            var clip = AudioClip.Create(name, count, 1, SampleRate, false);
+            clip.SetData(samples, 0);
+            clip.hideFlags = HideFlags.HideAndDontSave;
+            return clip;
+        }
 
         private static AudioClip Build(string name, float duration, float startFrequency, float endFrequency,
             float noiseMix, float attackFraction, float sustainFraction)

@@ -6,6 +6,7 @@ using Emberdelve.AI;
 using Emberdelve.Combat;
 using Emberdelve.Core;
 using Emberdelve.Data;
+using Emberdelve.Level;
 using Emberdelve.Net.Rules;
 using Emberdelve.Player;
 using Unity.Netcode;
@@ -69,6 +70,7 @@ namespace Emberdelve.Net
             public bool Published;
             public CombatVitalsData LastVitals;
             public bool EnemiesSynced;
+            public bool Bot;
         }
 
         public static NetCombatServer Current { get; private set; }
@@ -83,8 +85,9 @@ namespace Emberdelve.Net
         private readonly Dictionary<int, CombatVitalsData> _enemyVitals = new Dictionary<int, CombatVitalsData>();
         private readonly Dictionary<int, EnemyPresentationWire> _enemyPresentation = new Dictionary<int, EnemyPresentationWire>();
         private readonly HashSet<int> _enemyPresentationChanges = new HashSet<int>();
-        private readonly List<ulong> _scratch = new List<ulong>();
+        private readonly List<int> _scratch = new List<int>();
         private readonly List<int> _scratchIds = new List<int>();
+        private readonly List<Rect> _retiredEnemyFloors = new List<Rect>();
         private LocalCombatAuthority _subscribed;
         private float _nextPublish;
         private float _nextEnemyPose;
@@ -106,10 +109,12 @@ namespace Emberdelve.Net
         private static double Now => Time.realtimeSinceStartupAsDouble;
 
         public int ConnectionCount => _conns.Count;
+        public int ActorCount => _byCombatId.Count;
 
         public void Dispose()
         {
             Unsubscribe();
+            foreach (var actor in _byCombatId.Values) DetachActor(actor);
             _conns.Clear();
             _byCombatId.Clear();
             _enemyVitals.Clear();
@@ -166,7 +171,7 @@ namespace Emberdelve.Net
             if (!_conns.TryGetValue(clientId, out Conn conn)) return;
             _conns.Remove(clientId);
             if (conn.Rig != null) _byCombatId.Remove(conn.Rig.CombatId);
-            if (conn.Melee != null && conn.SwingHandler != null) conn.Melee.AttackStarted -= conn.SwingHandler;
+            DetachActor(conn);
 
             CombatIntentGate g = conn.Gate;
             _log("combat-conn final client=" + clientId + " id=" + conn.PlayerId + " accepted=" + conn.Accepted + " refused=" + conn.Refused +
@@ -174,6 +179,44 @@ namespace Emberdelve.Net
         }
 
         // ---- receive ---------------------------------------------------------------------------
+        /// <summary>Registers a server-controlled actor without inventing a client connection or identity row.</summary>
+        public bool OnBotAdmitted(PlayerRig rig, NetPlayerRig netRig)
+        {
+            if (NetRole.IsClientOnly || rig == null || netRig == null || netRig.Rig != rig || rig.IsLocallyControlled
+                || !CombatSenders.Owns(CombatSenderId.ForPlayer(rig.PlayerId), rig.CombatId)
+                || _byCombatId.ContainsKey(rig.CombatId)) return false;
+            var actor = new Conn { Bot = true, PlayerId = rig.PlayerId, Rig = rig, NetRig = netRig,
+                Melee = rig.GetComponent<MeleeCombat>(), Ranged = rig.GetComponent<RangedCombat>() };
+            if (actor.Melee != null)
+            {
+                actor.Melee.RemoteDriven = true;
+                actor.SwingHandler = intent => OnSwingStarted(actor, intent);
+                actor.Melee.AttackStarted += actor.SwingHandler;
+            }
+            if (actor.Ranged != null) actor.Ranged.RemoteDriven = true;
+            if (rig.Movement != null) rig.Movement.ExternalDriven = true;
+            rig.SetInputEnabled(false);
+            _byCombatId.Add(rig.CombatId, actor);
+            return true;
+        }
+
+        public bool OnBotRemoved(int combatId)
+        {
+            if (!_byCombatId.TryGetValue(combatId, out var actor) || !actor.Bot) return false;
+            DetachActor(actor);
+            _byCombatId.Remove(combatId);
+            return true;
+        }
+
+        private static void DetachActor(Conn actor)
+        {
+            if (actor.Melee != null)
+            {
+                actor.Melee.SetRemoteAttack(false);
+                if (actor.SwingHandler != null) actor.Melee.AttackStarted -= actor.SwingHandler;
+            }
+            if (actor.Ranged != null) actor.Ranged.CancelDraw();
+        }
 
         public void Receive(NetPlayerRig target, ulong sender, int kind, uint sequence)
         {
@@ -251,16 +294,29 @@ namespace Emberdelve.Net
             authorityReason = "";
             if (rig == null) return CombatRefusalCode.NoKit;
             if (rig.IsDead) return CombatRefusalCode.Dead;
+            if (rig.IsInFloorTransit) { authorityReason = "floor transfer pending"; return CombatRefusalCode.Authority; }
 
             MeleeCombat melee = conn.Melee;
             RangedCombat ranged = conn.Ranged;
-            if (rig.IsHoldingUtility && intent != CombatIntentKind.GuardUp && intent != CombatIntentKind.SwapWeapon)
+            rig.Loadout?.RefreshHeldCombat();
+            bool heldMeleeAttack = rig.HeldMeleeWeapon != null &&
+                (intent == CombatIntentKind.AttackPress || intent == CombatIntentKind.AttackHold);
+            if (rig.IsHoldingUtility && !heldMeleeAttack && intent != CombatIntentKind.GuardUp && intent != CombatIntentKind.AttackRelease && intent != CombatIntentKind.DrawCancel && intent != CombatIntentKind.SwapWeapon)
                 return CombatRefusalCode.WrongWeapon;
-            bool meleeActive = melee != null && melee.isActiveAndEnabled && melee.Weapon != null && !melee.Weapon.IsRanged;
+            bool meleeActive = melee != null && melee.isActiveAndEnabled && melee.Weapon != null && !melee.Weapon.IsRanged && melee.Weapon == rig.ActiveWeapon;
             bool rangedActive = ranged != null && ranged.isActiveAndEnabled && ranged.Weapon != null && ranged.Weapon.IsRanged;
 
             switch (intent)
             {
+                case CombatIntentKind.AttackHold:
+                    if (!meleeActive) return rangedActive ? CombatRefusalCode.WrongWeapon : CombatRefusalCode.NoKit;
+                    melee.SetRemoteAttack(true);
+                    return CombatRefusalCode.None;
+
+                case CombatIntentKind.AttackRelease:
+                    if (melee != null) melee.SetRemoteAttack(false);
+                    return CombatRefusalCode.None;
+
                 case CombatIntentKind.AttackPress:
                     if (!meleeActive) return rangedActive ? CombatRefusalCode.WrongWeapon : CombatRefusalCode.NoKit;
                     if (melee.RemoteGuardWanted || rig.IsGuarding) return CombatRefusalCode.Guarding;
@@ -268,14 +324,23 @@ namespace Emberdelve.Net
                     return melee.TryBeginSwing() ? CombatRefusalCode.None : CombatRefusalCode.Authority;
 
                 case CombatIntentKind.GuardDown:
+                    if (rangedActive) return ranged.SetRemoteGuard(true);
                     if (!meleeActive) return CombatRefusalCode.WrongWeapon;
                     if (!rig.CanGuard) return CombatRefusalCode.CannotGuard;
                     melee.SetRemoteGuard(true);
                     return CombatRefusalCode.None;
 
                 case CombatIntentKind.GuardUp:
+                    if (ranged != null) ranged.SetRemoteGuard(false);
                     if (melee != null) melee.SetRemoteGuard(false);
                     return CombatRefusalCode.None;
+
+                case CombatIntentKind.DrawCancel:
+                    if (ranged != null) ranged.CancelDraw();
+                    return CombatRefusalCode.None;
+
+                case CombatIntentKind.Reload:
+                    return rangedActive ? ranged.ServerRequestReload() : CombatRefusalCode.WrongWeapon;
 
                 case CombatIntentKind.DrawStart:
                     if (!rangedActive) return meleeActive ? CombatRefusalCode.WrongWeapon : CombatRefusalCode.NoKit;
@@ -292,7 +357,9 @@ namespace Emberdelve.Net
                     }
 
                 case CombatIntentKind.SwapWeapon:
+                    if (ranged != null) ranged.SetRemoteGuard(false);
                     if (rig.Loadout == null) return CombatRefusalCode.NoKit;
+                    if (melee != null) melee.SetRemoteAttack(false);
                     if (melee != null) melee.SetRemoteGuard(false);
                     return rig.Loadout.RequestWeaponSetSwap() ? CombatRefusalCode.None : CombatRefusalCode.SwapRefused;
 
@@ -493,10 +560,10 @@ namespace Emberdelve.Net
             _nextPublish = now + PublishSeconds;
 
             _scratch.Clear();
-            foreach (KeyValuePair<ulong, Conn> pair in _conns) _scratch.Add(pair.Key);
+            foreach (KeyValuePair<int, Conn> pair in _byCombatId) _scratch.Add(pair.Key);
             for (int i = 0; i < _scratch.Count; i++)
             {
-                if (!_conns.TryGetValue(_scratch[i], out Conn conn)) continue;
+                if (!_byCombatId.TryGetValue(_scratch[i], out Conn conn)) continue;
                 if (conn.Rig == null) continue;
 
                 RangedCombat ranged = conn.Ranged;
@@ -517,10 +584,12 @@ namespace Emberdelve.Net
             if (conn.NetRig == null || !conn.NetRig.IsSpawned) return;
             var rig=conn.Rig;
             var pose=new AvatarCombatWire {
-                Utility=rig.Inventory != null && rig.Inventory.HeldItem != null ? rig.Inventory.HeldItem.itemId : "",
+                Utility=rig.Inventory != null && rig.Inventory.HeldItem != null && rig.HeldMeleeWeapon == null ? rig.Inventory.HeldItem.itemId : "",
                 Main=rig.ActiveWeapon!=null ? rig.ActiveWeapon.weaponId : "",
                 Off=!rig.IsHoldingUtility && rig.OffhandWeapon!=null && (rig.ActiveWeapon==null || !rig.ActiveWeapon.twoHanded) ? rig.OffhandWeapon.weaponId : "",
                 Guard=rig.IsGuarding,
+                Crouched=rig.Movement != null && rig.Movement.IsCrouched,
+                InFloorTransit=rig.IsInFloorTransit,
                 EyeOffset=rig.AimOrigin-rig.transform.position,
                 Aim=Quaternion.LookRotation(rig.AimDirection,Vector3.up)
             };
@@ -533,15 +602,36 @@ namespace Emberdelve.Net
                 pose.DrinkDuration = channel.ChannelDuration;
             }
             var melee=conn.Melee;
+            var ranged = conn.Ranged;
+            pose.CrossbowLoaded = !rig.IsDead && !rig.IsExtracted && !rig.IsHoldingUtility
+                && rig.ActiveWeapon != null && rig.ActiveWeapon.CanCrossbowGuard
+                && ranged != null && ranged.HasAuthoritativeAmmo && ranged.Magazine > 0 && !ranged.IsReloading;
+            if (ranged != null && ranged.isActiveAndEnabled && ranged.IsReloading
+                && !rig.IsDead && !rig.IsExtracted && !rig.IsHoldingUtility)
+            {
+                pose.Reloading = true;
+                pose.ReloadProgress = ranged.ReloadProgress;
+                pose.ReloadDuration = ranged.ReloadDuration;
+            }
             if (melee!=null && melee.IsSwinging && melee.ActivePattern!=null && !rig.IsDead
                 && GameServices.TryGet<ICombatAuthority>(out var authority)
                 && authority.TryGetMeleeSwingStatus(melee.LastSwingId,out var status)
-                && !status.Finished && !status.WallStopped && !melee.RecoilStarted && status.EndReason==SwingEndReason.None)
+                && !status.Finished && (status.EndReason==SwingEndReason.None || status.Recoiled))
             {
-                pose.Swing=true; pose.SwingId=status.SwingId; pose.Pattern=melee.ActivePattern.patternId;
+                pose.Swing=!status.Recoiled; pose.Recoil=status.Recoiled;
+                pose.StopFraction=Mathf.Clamp01((float)status.WallContactSample/Mathf.Max(1,status.SampleCount));
+                pose.RecoilDuration=status.Timing.WallRecoil;
+                pose.SwingId=status.SwingId; pose.Pattern=melee.ActivePattern.patternId;
                 pose.Elapsed=status.Elapsed; pose.Windup=status.Timing.Windup; pose.Active=status.Timing.Active; pose.Recovery=status.Timing.Recovery;
                 pose.EyeOffset=status.PresentationFrame.Eye-rig.transform.position; pose.Aim=status.PresentationFrame.Rotation;
                 pose.SampleTime=conn.NetRig.NetworkManager.ServerTime.Time;
+            }
+            if (ranged != null && ranged.isActiveAndEnabled && ranged.IsDrawing
+                && !rig.IsDead && !rig.IsExtracted && !rig.IsHoldingUtility
+                && !pose.Guard && !pose.Reloading && !pose.Drinking && !pose.Swing && !pose.Recoil)
+            {
+                pose.Drawing = true;
+                pose.DrawProgress = ranged.Charge;
             }
             if (!pose.Equals(conn.NetRig.AvatarCombat.Value)) conn.NetRig.AvatarCombat.Value=pose;
         }
@@ -554,6 +644,18 @@ namespace Emberdelve.Net
             PublishAvatar(conn);
             // Guard can change without any health change (release, stagger recovery, equipment swap).
             netRig.GuardRaised.Value = conn.Rig.IsGuarding;
+            netRig.ImpactGuardRemaining.Value = Mathf.Round(conn.Rig.ImpactGuardRemaining * 100f) / 100f;
+            var ranged = conn.Ranged;
+            RangedAmmoWire ammo = default;
+            if (ranged != null && ranged.isActiveAndEnabled && ranged.Weapon != null && ranged.Weapon.IsRanged
+                && !conn.Rig.IsDead && !conn.Rig.IsExtracted && !conn.Rig.IsHoldingUtility)
+                ammo = new RangedAmmoWire { Weapon = ranged.Weapon.weaponId, Magazine = ranged.Magazine, Reserve = ranged.Reserve };
+            if (!ammo.Equals(netRig.RangedAmmo.Value))
+            {
+                netRig.RangedAmmo.Value = ammo;
+                _log("combat-ammo id=" + conn.PlayerId + " weapon=" + ammo.Weapon
+                    + " magazine=" + ammo.Magazine + " reserve=" + ammo.Reserve);
+            }
             CombatVitalsData vitals = new CombatVitalsData(conn.Rig.CurrentHealth, conn.Rig.MaxHealth, conn.Rig.IsDead).Quantized();
             if (conn.Published && vitals.Equals(conn.LastVitals)) return;
             conn.Published = true;
@@ -570,6 +672,14 @@ namespace Emberdelve.Net
         private void PublishEnemies()
         {
             if (NetRole.EnemiesDisabled) return;
+            _retiredEnemyFloors.Clear();
+            foreach (var map in UnityEngine.Object.FindObjectsByType<DungeonModuleSceneAssembler>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (!map.RuntimeContentRetired || map.RuntimeLayout == null) continue;
+                var layout = map.RuntimeLayout;
+                _retiredEnemyFloors.Add(new Rect(layout.origin.x, layout.origin.z,
+                    layout.gridWidth * layout.CellSize, layout.gridHeight * layout.CellSize));
+            }
             IReadOnlyList<ICombatEntity> all = CombatRegistry.All;
 
             _scratchIds.Clear();
@@ -578,6 +688,14 @@ namespace Emberdelve.Net
             {
                 ICombatEntity entity = all[i];
                 if (entity == null || entity.Kind != EntityKind.Enemy) continue;
+                // Retirement is permanent and explicit. Ordinary inactive/dormant enemies keep their
+                // existing publication behavior; no fake death or damage is applied to either kind.
+                Vector3 position = entity is Component component ? component.transform.position : entity.CombatCenter;
+                if (_retiredEnemyFloors.Exists(bounds => bounds.Contains(new Vector2(position.x, position.z))))
+                {
+                    _enemyVitals.Remove(entity.CombatId); _enemyPresentation.Remove(entity.CombatId);
+                    continue;
+                }
                 CombatVitalsData current = new CombatVitalsData(entity.CurrentHealth, entity.MaxHealth, entity.IsDead).Quantized();
                 int id = entity.CombatId;
                 _scratchIds.Add(id);

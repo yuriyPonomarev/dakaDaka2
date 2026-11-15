@@ -279,6 +279,13 @@ namespace Emberdelve.Skills
             reason = null;
             code = SkillRefusalCode.None;
 
+            if (rig != null && rig.IsInFloorTransit)
+            {
+                reason = "Cannot cast while descending";
+                code = SkillRefusalCode.Requirement;
+                return false;
+            }
+
             if (slot < 0 || slot >= ActiveSlotCapacity)
             {
                 reason = "no such skill slot";

@@ -56,6 +56,7 @@ namespace Emberdelve.Net
     {
         public const int MaxFrames = 3;
 
+        public uint Generation;
         public byte Count;
         public MoveFrameWire F0;
         public MoveFrameWire F1;
@@ -63,6 +64,7 @@ namespace Emberdelve.Net
 
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
+            serializer.SerializeValue(ref Generation);
             serializer.SerializeValue(ref Count);
             F0.NetworkSerialize(serializer);
             F1.NetworkSerialize(serializer);
@@ -79,12 +81,12 @@ namespace Emberdelve.Net
             }
         }
 
-        public static MoveBatchWire From(MoveInputFrame[] frames, int count)
+        public static MoveBatchWire From(MoveInputFrame[] frames, int count, uint generation = 0)
         {
             if (count > MaxFrames) count = MaxFrames;
             if (count < 0) count = 0;
 
-            MoveBatchWire batch = new MoveBatchWire { Count = (byte)count };
+            MoveBatchWire batch = new MoveBatchWire { Count = (byte)count, Generation = generation };
             if (count > 0) batch.F0 = MoveFrameWire.From(in frames[0]);
             if (count > 1) batch.F1 = MoveFrameWire.From(in frames[1]);
             if (count > 2) batch.F2 = MoveFrameWire.From(in frames[2]);
@@ -100,6 +102,7 @@ namespace Emberdelve.Net
     /// </summary>
     public struct MoveAckWire : INetworkSerializable
     {
+        public uint Generation;
         public uint LastProcessedSeq;
         public uint ServerTick;
         public float X;
@@ -116,6 +119,7 @@ namespace Emberdelve.Net
 
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
+            serializer.SerializeValue(ref Generation);
             serializer.SerializeValue(ref LastProcessedSeq);
             serializer.SerializeValue(ref ServerTick);
             serializer.SerializeValue(ref X);
@@ -129,10 +133,11 @@ namespace Emberdelve.Net
             serializer.SerializeValue(ref StateFlags);
         }
 
-        public static MoveAckWire From(uint seq, uint serverTick, in PredictedState state)
+        public static MoveAckWire From(uint seq, uint serverTick, in PredictedState state, uint generation = 0)
         {
             return new MoveAckWire
             {
+                Generation = generation,
                 LastProcessedSeq = seq,
                 ServerTick = serverTick,
                 X = state.X,

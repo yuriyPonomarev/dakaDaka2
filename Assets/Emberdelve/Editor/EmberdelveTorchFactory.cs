@@ -43,7 +43,192 @@ namespace Emberdelve.EditorTools
             if (flicker != null) WireFlicker(flicker, flame);
         }
 
+        /// <summary>Reuse the authored soft flame without adding a sconce or another light.</summary>
+        public static Transform BuildHandheldFlame(Transform parent, Vector3 localPosition)
+        {
+            return EmberdelveHandTorchFlame.Build(parent, localPosition);
+        }
+
         public const string ModelName = "Torch_Model";
+        public static Transform BuildBrazierFlame(Transform light, bool blue)
+        {
+            var material = AssetDatabase.LoadAssetAtPath<Material>(EmberdelvePaths.Materials + "/Torch_Flame.mat");
+            if (material == null) throw new System.InvalidOperationException("Authored particle flame material missing");
+            if (blue)
+            {
+                const string path = "Assets/Emberdelve/Art/Generated/CryptFlame_BlueParticle.mat";
+                var cold = AssetDatabase.LoadAssetAtPath<Material>(path);
+                if (cold == null) { cold = new Material(material); AssetDatabase.CreateAsset(cold, path); }
+                cold.SetColor("_BaseColor", new Color(.5f, 1.15f, 1.8f, 1f));
+                cold.SetColor("_Color", new Color(.5f, 1.15f, 1.8f, 1f));
+                EditorUtility.SetDirty(cold);
+                material = cold;
+            }
+            var flame = BuildFlame(light, material, new Vector3(0f, -.24f, 0f));
+            flame.name = "Brazier_ParticleFlame";
+            flame.localScale = Vector3.one * 1.6f;
+            foreach (var particles in flame.GetComponentsInChildren<ParticleSystem>())
+            {
+                var main = particles.main;
+                main.scalingMode = ParticleSystemScalingMode.Hierarchy;
+                if (!blue) continue;
+                main.startColor = new Color(.75f, .9f, 1f, .6f);
+                var colour = particles.colorOverLifetime;
+                var gradient = new Gradient();
+                gradient.SetKeys(new[] { new GradientColorKey(new Color(.7f,.95f,1f),0f),
+                    new GradientColorKey(new Color(.15f,.45f,1f),1f) },
+                    new[] { new GradientAlphaKey(0f,0f), new GradientAlphaKey(.9f,.12f),
+                        new GradientAlphaKey(.5f,.55f), new GradientAlphaKey(0f,1f) });
+                colour.enabled = true;
+                colour.color = gradient;
+            }
+            BuildBrazierLayers(flame, material, blue);
+            return flame;
+        }
+
+        // Brazier-only pass: handheld flames remain small enough not to obscure melee.
+        private static void BuildBrazierLayers(Transform flame, Material material, bool blue)
+        {
+            var core = flame.GetComponent<ParticleSystem>();
+            var main = core.main;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(.4f, .75f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(.3f, .65f);
+            main.startSize = new ParticleSystem.MinMaxCurve(.10f, .19f);
+            main.maxParticles = 80;
+            main.cullingMode = ParticleSystemCullingMode.PauseAndCatchup;
+            var emission = core.emission; emission.rateOverTime = 90f;
+            var shape = core.shape; shape.radius = .085f; shape.angle = 12f;
+
+            var embers = flame.Find(EmbersName).GetComponent<ParticleSystem>();
+            main = embers.main;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(1f, 2.2f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(.5f, 1.1f);
+            main.startSize = new ParticleSystem.MinMaxCurve(.012f, .03f);
+            main.maxParticles = 40;
+            main.cullingMode = ParticleSystemCullingMode.PauseAndCatchup;
+            emission = embers.emission; emission.rateOverTime = 14f;
+            emission.SetBursts(new[] { new ParticleSystem.Burst(.3f, 4, 8, 1, 0f) });
+            var emberNoise = embers.noise;
+            emberNoise.strength = .25f; emberNoise.scrollSpeed = .8f;
+
+            var tongues = CreateBrazierLayer(flame, "FlameTongues", material);
+            main = tongues.main;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(.35f, .65f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(.65f, 1f);
+            main.startSize = new ParticleSystem.MinMaxCurve(.065f, .12f);
+            main.startColor = blue ? new Color(.5f,.8f,1f,.55f) : new Color(1f,.75f,.32f,.5f);
+            main.maxParticles = 36;
+            emission = tongues.emission; emission.rateOverTime = 34f;
+            shape = tongues.shape; shape.radius = .07f; shape.angle = 8f;
+            var colour = tongues.colorOverLifetime;
+            colour.enabled = true;
+            colour.color = FadeGradient(blue ? new Color(.18f,.5f,1f) : new Color(1f,.4f,.08f), .85f);
+            var size = tongues.sizeOverLifetime;
+            size.enabled = true;
+            size.size = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(new Keyframe(0,.65f), new Keyframe(.2f,1), new Keyframe(1,0)));
+            var noise = tongues.noise;
+            noise.enabled = true; noise.strength = .16f; noise.frequency = 2f; noise.scrollSpeed = 1.2f;
+            var renderer = tongues.GetComponent<ParticleSystemRenderer>();
+            renderer.renderMode = ParticleSystemRenderMode.Stretch;
+            renderer.velocityScale = .12f;
+            renderer.lengthScale = 2.3f;
+
+            var smoke = CreateBrazierLayer(flame, "BrazierSmoke", SmokeMaterial());
+            // Parent's +Z is vertical; smoke begins just above the fire and dissolves before ceiling height.
+            smoke.transform.localPosition = new Vector3(0,0,.38f);
+            main = smoke.main;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(1.3f, 2f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(.25f, .45f);
+            main.startSize = new ParticleSystem.MinMaxCurve(.22f, .38f);
+            main.startRotation = new ParticleSystem.MinMaxCurve(0, Mathf.PI*2);
+            main.startColor = Color.white;
+            main.maxParticles = 16;
+            emission = smoke.emission; emission.rateOverTime = 6f;
+            shape = smoke.shape; shape.radius = .09f; shape.angle = 15f;
+            colour = smoke.colorOverLifetime;
+            colour.enabled = true; colour.color = FadeGradient(new Color(.24f,.23f,.22f), .18f);
+            size = smoke.sizeOverLifetime; size.enabled = true;
+            size.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0,.55f,1,2.2f));
+            noise = smoke.noise; noise.enabled = true; noise.strength = .12f; noise.frequency = .7f;
+            var rotation = smoke.rotationOverLifetime; rotation.enabled = true; rotation.z = .25f;
+        }
+
+        private static ParticleSystem CreateBrazierLayer(Transform parent, string name, Material material)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            var particles = go.AddComponent<ParticleSystem>();
+            particles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            var main = particles.main;
+            main.loop = true; main.playOnAwake = true; main.duration = 1f;
+            main.scalingMode = ParticleSystemScalingMode.Hierarchy;
+            main.simulationSpace = ParticleSystemSimulationSpace.Local;
+            main.cullingMode = ParticleSystemCullingMode.PauseAndCatchup;
+            var shape = particles.shape; shape.enabled = true; shape.shapeType = ParticleSystemShapeType.Cone;
+            ConfigureRenderer(go.GetComponent<ParticleSystemRenderer>(), material);
+            return particles;
+        }
+
+        private static Gradient FadeGradient(Color colour, float alpha)
+        {
+            var gradient = new Gradient();
+            gradient.SetKeys(new[] { new GradientColorKey(colour,0), new GradientColorKey(colour,1) },
+                new[] { new GradientAlphaKey(0,0), new GradientAlphaKey(alpha,.2f), new GradientAlphaKey(alpha*.5f,.6f), new GradientAlphaKey(0,1) });
+            return gradient;
+        }
+
+        private static Material SmokeMaterial()
+        {
+            const string path = "Assets/Emberdelve/Art/Generated/Brazier_Smoke.mat";
+            var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (material == null)
+            {
+                material = new Material(AssetDatabase.LoadAssetAtPath<Material>(EmberdelvePaths.Materials + "/Torch_Flame.mat"));
+                material.name = "Brazier_Smoke";
+                AssetDatabase.CreateAsset(material, path);
+            }
+            material.SetColor("_BaseColor", Color.white);
+            material.SetColor("_Color", Color.white);
+            material.SetFloat("_Blend", 0f);
+            material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            material.SetFloat("_SrcBlendAlpha", (float)UnityEngine.Rendering.BlendMode.One);
+            material.SetFloat("_DstBlendAlpha", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            material.DisableKeyword("_ALPHAMODULATE_ON");
+            EditorUtility.SetDirty(material);
+            return material;
+        }
+
+        // Targeted migration preserves every room transform/collider and light setting.
+        public static void RefreshSavedBrazierFlames()
+        {
+            int count = 0;
+            foreach (string guid in AssetDatabase.FindAssets("t:Prefab", new[] { "Assets/Emberdelve/Prefabs/DungeonModules" }))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                var root = PrefabUtility.LoadPrefabContents(path);
+                try
+                {
+                    bool changed = false;
+                    foreach (var light in root.GetComponentsInChildren<Light>(true))
+                    {
+                        var flame = light.transform.Find("Brazier_ParticleFlame");
+                        if (flame == null) continue;
+                        var renderer = flame.GetComponent<ParticleSystemRenderer>();
+                        bool blue = renderer != null && renderer.sharedMaterial != null && renderer.sharedMaterial.name.Contains("Blue");
+                        Object.DestroyImmediate(flame.gameObject);
+                        BuildBrazierFlame(light.transform, blue);
+                        changed = true; count++;
+                    }
+                    if (changed) PrefabUtility.SaveAsPrefabAsset(root, path);
+                }
+                finally { PrefabUtility.UnloadPrefabContents(root); }
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("[BrazierParticles] Refreshed " + count + " authored braziers (core, tongues, embers, smoke).");
+        }
+
         private const float ModelHeight = 0.62f;
 
         /// <summary>The V1 sconce: wall plate, arm, collar, wooden handle, iron band, glowing coal.</summary>

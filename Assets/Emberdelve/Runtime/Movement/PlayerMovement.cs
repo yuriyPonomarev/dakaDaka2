@@ -258,6 +258,7 @@ namespace Emberdelve.Movement
         /// </summary>
         public bool TryStartDash(Vector3 direction, float distance, float duration, int activationId = 0)
         {
+            if (_flow is Emberdelve.Player.PlayerRig rig && rig.IsInFloorTransit) return false;
             if (controller == null || _class == null) return false;
             _dashActivationId = activationId;
 
@@ -488,6 +489,12 @@ namespace Emberdelve.Movement
 
         private void StepCore(in MoveInputFrame f, float dt, bool relativeToViewTransform)
         {
+            if (_flow is Emberdelve.Player.PlayerRig rig && rig.IsInFloorTransit)
+            {
+                IsMoving = false;
+                DesiredMoveIntent = Vector3.zero;
+                return;
+            }
             // U3A4b: the Step path records how far it actually moved over THIS dt; the next Step seeds its ramp from it. The offline
             // Update path (relativeToViewTransform) skips this entirely and keeps seeding from controller.velocity.
             Vector3 before = relativeToViewTransform ? Vector3.zero : transform.position;

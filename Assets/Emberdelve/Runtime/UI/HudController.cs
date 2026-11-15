@@ -35,12 +35,19 @@ namespace Emberdelve.UI
         private RectTransform _inventoryRow;
         private Text _bagSummaryLabel;
 
+        private UnityEngine.UI.Text _roomLabel;
+        private UnityEngine.UI.Image _roomBack;
+        private float _nextWayfinding;
         private Text _classLabel;
         private Text _weaponLabel;
         private Text _objectiveLabel;
         private Text _raidCountdownLabel;
         private Image _raidCountdownBack;
         private Text _statusLabel;
+        private UnityEngine.UI.Image _impactGuardBuff;
+        private UnityEngine.UI.Text _impactGuardLabel;
+        private PlayerRig _impactGuardPlayer;
+        private float _nextImpactGuardPlayerSearch;
         private Text _healthLabel;
         private Image _healthFill;
         private RectTransform _healthFillRect;
@@ -209,6 +216,29 @@ namespace Emberdelve.UI
             UpdateInventoryScreen();
             UpdateComboPips();
             UpdateRaidCountdown();
+            UpdateWayfinding();
+            UpdateImpactGuardBuff();
+        }
+
+        private void UpdateImpactGuardBuff()
+        {
+            if (_impactGuardBuff == null) return;
+            int localId = PlayerView.LocalPlayerId;
+            if (_impactGuardPlayer != null && (_impactGuardPlayer.PlayerId != localId || !_impactGuardPlayer.IsLocallyControlled))
+                _impactGuardPlayer = null;
+            if (_impactGuardPlayer == null && Time.unscaledTime >= _nextImpactGuardPlayerSearch)
+            {
+                _nextImpactGuardPlayerSearch = Time.unscaledTime + .5f;
+                // Network owners are runtime PlayerRig views too; avoid depending on the Net assembly.
+                foreach (PlayerRig candidate in FindObjectsByType<PlayerRig>(FindObjectsSortMode.None))
+                    if (candidate.IsLocallyControlled && candidate.PlayerId == localId)
+                    { _impactGuardPlayer = candidate; break; }
+            }
+            PlayerRig local = _impactGuardPlayer;
+            float remaining = local != null && !local.IsDead && !local.IsExtracted ? local.ImpactGuardRemaining : 0f;
+            bool visible = _root != null && _root.gameObject.activeInHierarchy && remaining > 0f && !float.IsInfinity(remaining);
+            if (_impactGuardBuff.gameObject.activeSelf != visible) _impactGuardBuff.gameObject.SetActive(visible);
+            if (visible) _impactGuardLabel.text = "IMPACT GUARD  " + remaining.ToString("0.0") + "s";
         }
 
         /// <summary>
@@ -315,6 +345,26 @@ namespace Emberdelve.UI
             _inventoryScreen.HandlePointer();
         }
 
+        private void UpdateWayfinding()
+        {
+            if (_roomLabel == null || Time.unscaledTime < _nextWayfinding) return;
+            _nextWayfinding = Time.unscaledTime + .12f;
+            if (_director == null) GameServices.TryGet<RunDirector>(out _director);
+            PlayerRig player = _director != null ? _director.Player : null;
+            bool visible = player != null && !player.IsDead && _director.Layout != null &&
+                _director.State == RunState.Running && _director.LocalPlayerState == RunState.Running &&
+                !_paused && (_inventoryScreen == null || !_inventoryScreen.IsOpen);
+            _roomLabel.gameObject.SetActive(visible);
+            _roomBack.gameObject.SetActive(visible);
+            if (!visible) return;
+            Vector2 offset = new Vector2(0f, _root.rect.width >= 1280f ? -28f : -170f);
+            _roomLabel.rectTransform.anchoredPosition = offset;
+            _roomBack.rectTransform.anchoredPosition = offset;
+            float yaw = player.Look != null ? player.Look.AimTransform.eulerAngles.y : player.transform.eulerAngles.y;
+            string label = Emberdelve.Level.DungeonWayfinding.Heading(yaw) + "  |  " + Emberdelve.Level.DungeonWayfinding.RoomAt(_director.Layout, player.transform.position);
+            if (_roomLabel.text != label) _roomLabel.text = label;
+        }
+
         private void BuildHud()
         {
             _canvas = UiFactory.EnsureCanvas("Emberdelve_Hud", 10);
@@ -323,6 +373,16 @@ namespace Emberdelve.UI
 
             Color ink = new Color(0.92f, 0.88f, 0.8f, 1f);
             Color dim = new Color(0.75f, 0.7f, 0.62f, 0.75f);
+
+            _roomBack = UiFactory.CreateImage(_root, "RoomWayfindingBack", new Color(.055f, .05f, .04f, .8f),
+                new Vector2(290f, 30f), new Vector2(0f, -28f), new Vector2(.5f, 1f), new Vector2(.5f, 1f));
+            _roomLabel = UiFactory.CreateText(_root, "RoomWayfinding", "", 15, ink, TextAnchor.MiddleCenter);
+            UiFactory.SetRect(_roomLabel.rectTransform, new Vector2(.5f, 1f), new Vector2(.5f, 1f),
+                new Vector2(282f, 28f), new Vector2(0f, -28f), new Vector2(.5f, .5f));
+            _roomLabel.raycastTarget = false;
+            _roomBack.raycastTarget = false;
+            _roomLabel.gameObject.SetActive(false);
+            _roomBack.gameObject.SetActive(false);
 
             _classLabel = UiFactory.CreateText(_root, "ClassLabel", "Class", 26, ink, TextAnchor.UpperLeft);
             UiFactory.SetRect(_classLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
@@ -335,6 +395,7 @@ namespace Emberdelve.UI
             _raidCountdownBack = UiFactory.CreateImage(_root, "RaidCountdownBack", new Color(0.07f, 0.06f, 0.05f, 0.88f),
                 new Vector2(236f, 48f), new Vector2(-24f, -24f), Vector2.one, Vector2.one);
             _raidCountdownBack.rectTransform.pivot = Vector2.one;
+            DungeonUiStyle.Surface(_raidCountdownBack);
             _raidCountdownLabel = UiFactory.CreateText(_root, "RaidCountdownLabel", "RAID  10:00", 20, ink,
                 TextAnchor.MiddleCenter, FontStyle.Bold);
             UiFactory.SetRect(_raidCountdownLabel.rectTransform, Vector2.one, Vector2.one,
@@ -350,7 +411,7 @@ namespace Emberdelve.UI
                 new Vector2(BarWidth, BarHeight), new Vector2(24f + BarWidth * 0.5f, 44f),
                 new Vector2(0f, 0f), new Vector2(0f, 0f));
 
-            _healthFill = UiFactory.CreateImage(_root, "HealthFill", new Color(0.72f, 0.16f, 0.14f, 1f),
+            _healthFill = UiFactory.CreateImage(_root, "HealthFill", new Color(0.52f, 0.09f, 0.075f, 1f),
                 new Vector2(BarWidth, BarHeight), new Vector2(24f, 44f), new Vector2(0f, 0f), new Vector2(0f, 0f));
             _healthFill.rectTransform.pivot = new Vector2(0f, 0.5f);
             _healthFillRect = _healthFill.rectTransform;
@@ -387,6 +448,20 @@ namespace Emberdelve.UI
 
             BuildSkillBar(ink, dim);
             BuildPassiveReadout(dim);
+
+            // Temporary defensive buff above the existing skill row, away from aim and interaction prompts.
+            _impactGuardBuff = UiFactory.CreateImage(_root, "ImpactGuardBuff", new Color(.06f, .13f, .17f, .95f),
+                new Vector2(220f, 30f), new Vector2(-138f, 232f), Vector2.right, Vector2.right);
+            _impactGuardBuff.raycastTarget = false;
+            UnityEngine.UI.Image buffAccent = UiFactory.CreateImage(_impactGuardBuff.transform, "GuardAccent", new Color(.48f, .85f, 1f, 1f),
+                new Vector2(4f, 22f), new Vector2(-101f, 0f), new Vector2(.5f, .5f), new Vector2(.5f, .5f));
+            buffAccent.raycastTarget = false;
+            _impactGuardLabel = UiFactory.CreateText(_impactGuardBuff.transform, "ImpactGuardLabel", "", 15,
+                new Color(.85f, .96f, 1f, 1f), TextAnchor.MiddleCenter, FontStyle.Bold);
+            UiFactory.SetRect(_impactGuardLabel.rectTransform, new Vector2(.5f, .5f), new Vector2(.5f, .5f),
+                new Vector2(206f, 28f), new Vector2(4f, 0f));
+            _impactGuardLabel.raycastTarget = false;
+            _impactGuardBuff.gameObject.SetActive(false);
 
             _promptLabel = UiFactory.CreateText(_root, "PromptLabel", "", 20, ink, TextAnchor.MiddleCenter);
             UiFactory.SetRect(_promptLabel.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
@@ -433,12 +508,20 @@ namespace Emberdelve.UI
 
             float remaining = _director.RaidSecondsRemaining;
             bool expired = _director.RaidExpired;
-            bool urgent = expired || remaining <= 10f;
-            bool warning = remaining <= 60f;
-            _raidCountdownLabel.text = expired ? "RAID EXPIRED" :
+            bool royale = _director.RoyaleMode.HasValue;
+            PlayerRaidClock clock = royale ? _director.ClockFor(_director.Player) : default;
+            bool waiting = royale && clock.Waiting;
+            bool descend = royale && clock.Floor < 3;
+            if (royale && _objectiveLabel != null)
+                _objectiveLabel.text = waiting ? "Preparing the next floor. Your carried loot stays with you."
+                    : descend ? "Stay inside the zone. Find a descent portal to the next floor.\nThe final escape is on floor 3."
+                    : "Recover loot, then hold [F] at the final escape.\nStay inside the zone until you leave.";
+            bool urgent = !waiting && (expired || remaining <= 10f);
+            bool warning = !waiting && remaining <= 60f;
+            _raidCountdownLabel.text = waiting ? "PREPARING FLOOR " + clock.Floor : expired ? "RAID EXPIRED" :
                 urgent ? "FINAL SECONDS  " + FormatRaidClock(remaining) :
-                warning ? "EXTRACT SOON  " + FormatRaidClock(remaining) :
-                "RAID  " + FormatRaidClock(remaining);
+                warning ? (descend ? "DESCEND  " : "EXTRACT  ") + FormatRaidClock(remaining) :
+                (royale ? "FLOOR " + clock.Floor + "  " : "RAID  ") + FormatRaidClock(remaining);
             _raidCountdownLabel.color = urgent ? new Color(1f, 0.72f, 0.58f, 1f) :
                 warning ? new Color(1f, 0.87f, 0.56f, 1f) : new Color(0.92f, 0.88f, 0.8f, 1f);
             _raidCountdownBack.color = urgent ? new Color(0.28f, 0.06f, 0.04f, 0.94f) :
@@ -540,6 +623,7 @@ namespace Emberdelve.UI
                     new Vector2(chipWidth, chipHeight), new Vector2(x, chipHeight * 0.5f),
                     new Vector2(0.5f, 0f), new Vector2(0.5f, 0f));
 
+                DungeonUiStyle.Surface(background);
                 SkillSlotWidget widget = new SkillSlotWidget { Background = background };
 
                 UiFactory.CreateImage(background.transform, "Accent", new Color(0.5f, 0.45f, 0.38f, 1f),
@@ -1020,9 +1104,12 @@ namespace Emberdelve.UI
             if (_root == null) return;
 
             bool gameplay = state == RunState.Running || state == RunState.Paused || state == RunState.Briefing;
+            if (_director == null) GameServices.TryGet<RunDirector>(out _director);
+            if (_director != null && (_director.LocalPlayerState == RunState.Dead || _director.LocalPlayerState == RunState.Extracted))
+                gameplay = false;
             _root.gameObject.SetActive(gameplay);
 
-            if (state == RunState.Running)
+            if (gameplay && state == RunState.Running)
             {
                 if (_director == null) GameServices.TryGet<RunDirector>(out _director);
                 if (_director != null && _director.Player != null)

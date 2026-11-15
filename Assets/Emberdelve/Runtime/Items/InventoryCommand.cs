@@ -35,13 +35,18 @@ namespace Emberdelve.Items
         /// </summary>
         Drop = 8,
         HoldQuickItem = 9,
-        SelectWeaponSet = 10
+        SelectWeaponSet = 10,
+        // Definition-only bag stacks. Quantity is resolved from authoritative state, never supplied by the client.
+        DropStack = 11,
+        DropOne = 12,
+        Split = 13
     }
 
     /// <summary>A client intent containing identities and preconditions, never item data or effect amounts.</summary>
     public readonly struct InventoryCommand
     {
         public readonly InventoryCommandKind Kind;
+        public readonly int Amount;
         public readonly int OwnerPlayerId;
         public readonly ulong Sequence;
         public readonly ulong ExpectedRevision;
@@ -54,9 +59,10 @@ namespace Emberdelve.Items
 
         public InventoryCommand(InventoryCommandKind kind, int ownerPlayerId, ulong sequence,
             ulong expectedRevision, ulong sourceStackId, ulong targetStackId, Vector2Int destinationCell,
-            EquipmentSlot destinationSlot, Guid expectedSourceGearUid, Guid expectedTargetGearUid)
+            EquipmentSlot destinationSlot, Guid expectedSourceGearUid, Guid expectedTargetGearUid, int amount = 0)
         {
             Kind = kind;
+            Amount = amount;
             OwnerPlayerId = ownerPlayerId;
             Sequence = sequence;
             ExpectedRevision = expectedRevision;
@@ -76,10 +82,19 @@ namespace Emberdelve.Items
                 return false;
             }
 
+            if (Kind != InventoryCommandKind.Split && Amount != 0)
+            { reason = "amount is only valid for a split command"; return false; }
+
             bool cellIsZero = DestinationCell == Vector2Int.zero;
             bool slotIsNone = DestinationSlot == EquipmentSlot.None;
             switch (Kind)
             {
+                case InventoryCommandKind.Split:
+                    if (Amount > 0 && SourceStackId != 0 && TargetStackId == 0 &&
+                        DestinationCell.x >= 0 && DestinationCell.y >= 0 && slotIsNone &&
+                        ExpectedSourceGearUid == Guid.Empty && ExpectedTargetGearUid == Guid.Empty)
+                    { reason = null; return true; }
+                    break;
                 case InventoryCommandKind.Move:
                     if (SourceStackId != 0 && TargetStackId == 0 && DestinationCell.x >= 0 && DestinationCell.y >= 0 &&
                         slotIsNone && ExpectedTargetGearUid == Guid.Empty)
@@ -141,6 +156,12 @@ namespace Emberdelve.Items
                         return true;
                     }
                     break;
+                case InventoryCommandKind.DropStack:
+                case InventoryCommandKind.DropOne:
+                    if (SourceStackId != 0 && TargetStackId == 0 && cellIsZero && slotIsNone &&
+                        ExpectedSourceGearUid == Guid.Empty && ExpectedTargetGearUid == Guid.Empty)
+                    { reason = null; return true; }
+                    break;
                 case InventoryCommandKind.HoldQuickItem:
                 case InventoryCommandKind.Use:
                     if (SourceStackId != 0 && TargetStackId == 0 && cellIsZero && slotIsNone &&
@@ -180,7 +201,7 @@ namespace Emberdelve.Items
     {
         bool TryCreateLocalCommand(InventoryCommandKind kind, ulong sourceStackId, ulong targetStackId,
             Vector2Int destinationCell, EquipmentSlot destinationSlot, Guid expectedSourceGearUid,
-            Guid expectedTargetGearUid, out InventoryCommand command, out string reason);
+            Guid expectedTargetGearUid, out InventoryCommand command, out string reason, int amount = 0);
 
         InventoryCommandResult Submit(PlayerRig requester, InventoryCommand command);
     }

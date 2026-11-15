@@ -26,8 +26,7 @@ namespace Emberdelve.AI
                 int index=y*grid.width+x;
                 if(!grid.IsWalkable(x,y)) continue;
                 Vector3 point=grid.origin+new Vector3((x+.5f)*grid.cellSize,0,(y+.5f)*grid.cellSize);
-                if(!TryGround(point,grid.origin.y+4.25f,grid.origin.y-.25f,mask,geometry,out float height) ||
-                    !BodyClear(new Vector3(point.x,height,point.z),mask,geometry))
+                if(!TryBakeGround(point,grid.origin.y+4.25f,grid.origin.y-.25f,mask,geometry,out float height))
                 { walkable[index]='#'; continue; }
                 grid.surfaceHeights[index]=height-grid.origin.y;
             }
@@ -85,6 +84,22 @@ namespace Emberdelve.AI
         {
             return collider!=null && (geometry==null || collider.transform.IsChildOf(geometry)) &&
                 collider.GetComponentInParent<DungeonDoorInteractable>()==null;
+        }
+
+        // A doorway lintel is an overhead obstacle, not the walking surface below it. Select the
+        // lowest standing-clear support; a solid terrace blocks its underlying floor and keeps its top.
+        private static bool TryBakeGround(Vector3 point, float top, float bottom, int mask, Transform geometry, out float height)
+        {
+            int count = Physics.RaycastNonAlloc(new Vector3(point.x, top, point.z), Vector3.down, GroundHits, top-bottom, mask, QueryTriggerInteraction.Ignore);
+            height = float.PositiveInfinity;
+            if (count == GroundHits.Length) return false;
+            for (int i = 0; i < count; i++)
+            {
+                var hit = GroundHits[i];
+                if (!Relevant(hit.collider, geometry) || hit.normal.y < .65f || hit.point.y >= height) continue;
+                if (BodyClear(new Vector3(point.x, hit.point.y, point.z), mask, geometry)) height = hit.point.y;
+            }
+            return !float.IsPositiveInfinity(height);
         }
 
         private static bool TryGround(Vector3 point,float top,float bottom,int mask,Transform geometry,out float height)

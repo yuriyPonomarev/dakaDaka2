@@ -4,8 +4,7 @@ using UnityEngine;
 namespace Emberdelve.Feedback
 {
     /// <summary>
-    /// Short-lived hit marker in the world, built from a primitive. Placeholder for a particle/VFX
-    /// Graph effect; nothing else in the codebase needs to change when one replaces it.
+    /// Short-lived camera-facing contact spark. A transparent procedural quad replaces the old solid cube.
     /// </summary>
     public sealed class ImpactFlash : MonoBehaviour
     {
@@ -18,7 +17,7 @@ namespace Emberdelve.Feedback
 
         public static void Spawn(Vector3 point, Color color, float size, float duration = 0.18f)
         {
-            GameObject root = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            GameObject root = GameObject.CreatePrimitive(PrimitiveType.Quad);
             root.name = "ImpactFlash";
 
             Collider collider = root.GetComponent<Collider>();
@@ -31,7 +30,13 @@ namespace Emberdelve.Feedback
             root.transform.localScale = Vector3.one * Mathf.Max(0.02f, size);
 
             Renderer renderer = root.GetComponent<Renderer>();
-            if (renderer != null) renderer.material = UnityEngine.Object.Instantiate(MaterialFor(color));
+            if (renderer != null)
+            {
+                renderer.material = UnityEngine.Object.Instantiate(MaterialFor(color));
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+            }
+            if (Camera.main != null) root.transform.rotation = Camera.main.transform.rotation;
 
             ImpactFlash flash = root.AddComponent<ImpactFlash>();
             flash.Configure(duration, size);
@@ -64,6 +69,11 @@ namespace Emberdelve.Feedback
             if (t >= 1f) Destroy(gameObject);
         }
 
+        private void LateUpdate()
+        {
+            if (Camera.main != null) transform.rotation = Camera.main.transform.rotation;
+        }
+
         private void OnDestroy()
         {
             if (_renderer != null && _renderer.material != null) Destroy(_renderer.material);
@@ -73,7 +83,9 @@ namespace Emberdelve.Feedback
         {
             if (_materials.TryGetValue(color, out Material existing) && existing != null) return existing;
 
-            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            // Resources inclusion retains this tiny URP pass in players; Shader.Find-only fallbacks can be stripped.
+            Shader shader = Resources.Load<Shader>("Emberdelve/ImpactFlash");
+            if (shader == null) shader = Shader.Find("Universal Render Pipeline/Unlit");
             if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
             if (shader == null) shader = Shader.Find("Sprites/Default");
 

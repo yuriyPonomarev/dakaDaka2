@@ -66,15 +66,15 @@ namespace Emberdelve.Data
             float passiveBlockBonus = 0f)
         {
             // A two-handed main hand occupies both hands, so an off-hand shield contributes nothing for as
-            // long as that weapon is held. This is why a Warrior on the crossbow cannot block, and why the
-            // same Warrior on the sword can.
+            // long as that weapon is held. A guard-capable crossbow blocks with its own geometry,
+            // never with the shield stored in the other weapon set.
             bool shieldContributes = shield != null && !(primary != null && primary.twoHanded);
 
             DefenseCapability capabilities = DefenseCapability.None;
             if (primary != null) capabilities |= primary.EffectiveCapabilities;
             if (shieldContributes) capabilities |= shield.EffectiveCapabilities;
 
-            bool hasShield = shield != null && shield.IsShield;
+            bool hasShield = shieldContributes && shield.IsShield;
             float reduction = data != null ? data.blockReduction : 0f;
             float arc = data != null ? data.blockArc : 120f;
 

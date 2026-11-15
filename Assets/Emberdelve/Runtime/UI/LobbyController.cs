@@ -5,6 +5,7 @@ using Emberdelve.Data;
 using Emberdelve.Net.Rules;
 using Emberdelve.Level;
 using Emberdelve.UI;
+using Emberdelve.Rules;
 
 namespace Emberdelve.Flow
 {
@@ -46,7 +47,8 @@ namespace Emberdelve.Flow
             Time.timeScale = 1f;
 
             Canvas canvas = UiFactory.EnsureCanvas("Emberdelve_Lobby", 20);
-            _view.Build(canvas, classes, HandleSelect, HandleStart, RunContext.LastResult, RunContext.HasResult);
+            RunContext.SelectRoyaleMode(RunContext.SelectedRoyaleMode ?? RoyalePartyMode.Solo);
+            _view.Build(canvas, classes, HandleSelect, HandleStart, RunContext.LastResult, RunContext.HasResult, HandleMode);
 
             if (classes != null && classes.Length > 0) HandleSelect(classes[0]);
 
@@ -63,6 +65,12 @@ namespace Emberdelve.Flow
             Debug.Log("[Emberdelve][Lobby] ready classes=" + (classes != null ? classes.Length : 0) + " online=" + NetLobbyBridge.IsAvailable);
         }
 
+        private void HandleMode(RoyalePartyMode mode)
+        {
+            if (NetLobbyBridge.Phase == NetLobbyPhase.Connecting || NetLobbyBridge.Phase == NetLobbyPhase.Connected) return;
+            RunContext.SelectRoyaleMode(mode); _view.SetMode(mode);
+        }
+
         private void HandleSelect(CharacterClassData classData)
         {
             if (classData == null) return;
@@ -75,7 +83,9 @@ namespace Emberdelve.Flow
 
         private void HandleStart()
         {
-            StartOfflineRun();
+            RaidPreparationScreen preparation = GetComponent<RaidPreparationScreen>();
+            if (preparation == null) preparation = gameObject.AddComponent<RaidPreparationScreen>();
+            preparation.Open(config, _selected, StartOfflineRun);
         }
 
         private void StartOfflineRun()
@@ -110,9 +120,21 @@ namespace Emberdelve.Flow
             }
 
             RunContext.SelectClass(_selected);
+            RunContext.SelectRoyaleMode(RunContext.SelectedRoyaleMode ?? RoyalePartyMode.Solo);
             RunContext.ClearNextRaidSeed();
-            Debug.Log("[Emberdelve][Lobby] starting modular crypt raid offline");
-            SceneManager.LoadScene(NetTuning.ModularDungeonSceneName);
+            if (!Emberdelve.Items.OfflineProfileSession.Depart(out string reason))
+            {
+                GameEvents.RaiseToast(reason);
+                GetComponent<RaidPreparationScreen>()?.ShowFailure(reason);
+                return;
+            }
+            Debug.Log("[Emberdelve][Lobby] starting Squire Royale offline mode=" + RunContext.SelectedRoyaleMode);
+            try { SceneManager.LoadScene(NetTuning.ModularDungeonSceneName); }
+            catch (System.Exception)
+            {
+                Emberdelve.Items.OfflineProfileSession.CancelDeparture(out _);
+                throw;
+            }
         }
     }
 }

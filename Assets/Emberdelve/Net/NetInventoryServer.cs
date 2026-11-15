@@ -20,7 +20,7 @@ namespace Emberdelve.Net
     /// life state and all mutations. Only requests passing identity and admission receive a response.
     /// One instance belongs to one server session; OnClosed must be called on every disconnect.
     /// </summary>
-    public sealed class NetInventoryServer : ICorpseDeathCustodian, IDoorAiAuthority, IWorldLootContainerHost
+    public sealed class NetInventoryServer : ICorpseDeathCustodian, IDoorAiAuthority, IWorldLootContainerHost, IRetiredFloorLootSink
     {
         public static NetInventoryServer Current { get; private set; }
         public int RegisteredCorpseCount => _corpseContainers.Count;
@@ -36,6 +36,7 @@ namespace Emberdelve.Net
         private readonly Dictionary<ulong, double> _lastDoorIntent = new Dictionary<ulong, double>();
         private readonly Dictionary<ulong, double> _lastDoorSnapshotRequest = new Dictionary<ulong, double>();
         private uint _doorRevision;
+        private readonly Dictionary<ulong, double> _lastDescentIntent = new Dictionary<ulong, double>();
         private readonly Dictionary<ulong, uint> _lastChestHoldSequence = new Dictionary<ulong, uint>();
         private readonly Dictionary<ulong, uint> _lastChestHeartbeatRefusalSequence = new Dictionary<ulong, uint>();
         private readonly Dictionary<ulong, double> _lastChestHoldStart = new Dictionary<ulong, double>();
@@ -44,6 +45,7 @@ namespace Emberdelve.Net
         private readonly Dictionary<ulong, CorpseContainerModel> _corpseContainers = new Dictionary<ulong, CorpseContainerModel>();
         private readonly HashSet<int> _committedDeathPlayers = new HashSet<int>();
         private readonly HashSet<int> _committingDeathPlayers = new HashSet<int>();
+        private readonly List<Rect> _retiredFloorBounds = new List<Rect>();
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
         private bool _proofRejectDeathCustody;
 #endif
@@ -92,10 +94,52 @@ namespace Emberdelve.Net
             GameServices.Register<ICorpseDeathCustodian>(this);
             GameServices.Register<IWorldLootContainerHost>(this);
             GameServices.Register<IDoorAiAuthority>(this);
+            GameServices.Register<IRetiredFloorLootSink>(this);
         }
 
-        public void OnClosed(ulong clientId) { _gates.Remove(clientId); _lastSnapshotRequest.Remove(clientId); _lastChestIntent.Remove(clientId); _lastDoorIntent.Remove(clientId); _lastDoorSnapshotRequest.Remove(clientId); _lastChestHoldSequence.Remove(clientId); _lastChestHeartbeatRefusalSequence.Remove(clientId); _lastChestHoldStart.Remove(clientId); _corpseSequences.Remove(clientId); _corpseStateRates.Remove(clientId); _corpseTransferRates.Remove(clientId); _floorLootGates.Remove(clientId); RemoveChestHold(clientId); }
-        public void Dispose() { GameServices.Unregister<IWorldLootContainerHost>(this); GameServices.Unregister<ICorpseDeathCustodian>(this); GameServices.Unregister<IDoorAiAuthority>(this); GameEvents.InventoryChanged -= OnInventoryChanged; _gates.Clear(); _lastSnapshotRequest.Clear(); _lastChestIntent.Clear(); _lastDoorIntent.Clear(); _lastDoorSnapshotRequest.Clear(); _lastChestHoldSequence.Clear(); _lastChestHeartbeatRefusalSequence.Clear(); _lastChestHoldStart.Clear(); _corpseContainers.Clear(); _committedDeathPlayers.Clear(); _committingDeathPlayers.Clear(); _corpseSequences.Clear(); _corpseStateRates.Clear(); _corpseTransferRates.Clear(); _floorLootGates.Clear(); _floorLoot.Clear(); _floorLootObjectIds.Clear(); _chestHoldScratch.Clear(); foreach (ulong sender in new List<ulong>(_chestHolds.Keys)) RemoveChestHold(sender); if (ReferenceEquals(Current, this)) Current = null; }
+        private bool IsRetiredPosition(Vector3 position)
+        {
+            foreach (var bounds in _retiredFloorBounds)
+                if (bounds.Contains(new Vector2(position.x, position.z))) return true;
+            return false;
+        }
+
+        public void RetireFloorLoot(Rect bounds)
+        {
+            if (NetRole.IsClientOnly || _retiredFloorBounds.Contains(bounds)) return;
+            _retiredFloorBounds.Add(bounds);
+            var corpses = new List<ulong>();
+            foreach (var pair in _corpseContainers)
+                if (IsRetiredPosition(pair.Value.WorldPosition)) corpses.Add(pair.Key);
+            foreach (ulong id in corpses)
+            {
+                var model = _corpseContainers[id];
+                _corpseContainers.Remove(id);
+                // A terminal tombstone must be newer than the last published content revision.
+                BroadcastCorpsePresence(id, model, true, ulong.MaxValue);
+            }
+            foreach (ulong sender in new List<ulong>(_chestHolds.Keys))
+                if (_chestHolds[sender]?.Chest == null || IsRetiredPosition(_chestHolds[sender].Chest.transform.position))
+                    RemoveChestHold(sender);
+            foreach (ulong id in new List<ulong>(_floorLoot.Keys))
+            {
+                var pickup = _floorLoot[id];
+                if (pickup != null && !IsRetiredPosition(pickup.HomePosition)) continue;
+                if (pickup != null)
+                {
+                    _floorLootObjectIds.Remove(pickup.GetInstanceID());
+                    pickup.gameObject.SetActive(false);
+                }
+                _floorLoot.Remove(id);
+            }
+            // Keep committed death identities: retirement must never authorize a repeated transfer.
+            SyncFloorLoot();
+            if (_identities != null)
+                foreach (var row in _identities.All) { SendChestSnapshot(row); SendDoorSnapshot(row); }
+        }
+
+        public void OnClosed(ulong clientId) { _lastDescentIntent.Remove(clientId); _gates.Remove(clientId); _lastSnapshotRequest.Remove(clientId); _lastChestIntent.Remove(clientId); _lastDoorIntent.Remove(clientId); _lastDoorSnapshotRequest.Remove(clientId); _lastChestHoldSequence.Remove(clientId); _lastChestHeartbeatRefusalSequence.Remove(clientId); _lastChestHoldStart.Remove(clientId); _corpseSequences.Remove(clientId); _corpseStateRates.Remove(clientId); _corpseTransferRates.Remove(clientId); _floorLootGates.Remove(clientId); RemoveChestHold(clientId); }
+        public void Dispose() { GameServices.Unregister<IRetiredFloorLootSink>(this); _retiredFloorBounds.Clear(); _lastDescentIntent.Clear(); GameServices.Unregister<IWorldLootContainerHost>(this); GameServices.Unregister<ICorpseDeathCustodian>(this); GameServices.Unregister<IDoorAiAuthority>(this); GameEvents.InventoryChanged -= OnInventoryChanged; _gates.Clear(); _lastSnapshotRequest.Clear(); _lastChestIntent.Clear(); _lastDoorIntent.Clear(); _lastDoorSnapshotRequest.Clear(); _lastChestHoldSequence.Clear(); _lastChestHeartbeatRefusalSequence.Clear(); _lastChestHoldStart.Clear(); _corpseContainers.Clear(); _committedDeathPlayers.Clear(); _committingDeathPlayers.Clear(); _corpseSequences.Clear(); _corpseStateRates.Clear(); _corpseTransferRates.Clear(); _floorLootGates.Clear(); _floorLoot.Clear(); _floorLootObjectIds.Clear(); _chestHoldScratch.Clear(); foreach (ulong sender in new List<ulong>(_chestHolds.Keys)) RemoveChestHold(sender); if (ReferenceEquals(Current, this)) Current = null; }
 
         /// <summary>
         /// Atomically moves a real server actor's loadout into the network corpse table. All fallible capture,
@@ -125,6 +169,8 @@ namespace Emberdelve.Net
                 reason = "death was already committed but source loadout is no longer empty";
                 return false;
             }
+            if (IsRetiredPosition(position))
+            { reason = "source floor has retired"; return false; }
             if (_committingDeathPlayers.Contains(playerId))
             { reason = "this player's death custody transaction is already in progress"; return false; }
             if (!CorpseLootManifest.TryCapture(playerId, position, bag, equipment, out CorpseLootManifest manifest, out reason)) return false;
@@ -219,6 +265,8 @@ namespace Emberdelve.Net
                 reason = "corpse registration requires a non-empty model on the server";
                 return false;
             }
+            if (IsRetiredPosition(model.WorldPosition))
+            { reason = "source floor has retired"; return false; }
             if (_corpseContainers.Count >= MaxNetworkCorpses || _nextCorpseId == 0 || _nextCorpseId == ulong.MaxValue)
             {
                 reason = "server corpse registry is full";
@@ -291,6 +339,29 @@ namespace Emberdelve.Net
                 _identities.TryGetByClient(sender, out row) && row != null && row.ClientId == sender &&
                 target != null && target.IsSpawned && target.OwnerClientId == sender && ReferenceEquals(target, row.Object) &&
                 row.Rig != null && row.PlayerId == row.Rig.PlayerId && ReferenceEquals(target.GetComponent<Emberdelve.Player.PlayerRig>(), row.Rig);
+        }
+
+        public bool RequestDescent(ulong sender, NetworkObject target, int floor, int group, int slot)
+        {
+            if (!TryResolve(sender, target, out var row)) { _log?.Invoke("descent rejected=identity sender=" + sender); return false; }
+            var director = Object.FindFirstObjectByType<RunDirector>();
+            if (director == null || !director.RoyaleMode.HasValue || floor < 1 || floor > 2 || group < 0 || group > 2
+                || slot < 0 || slot >= (int)director.RoyaleMode.Value || director.SessionOf(row.Rig)?.Floor != floor)
+            { _log?.Invoke("descent rejected=floor-or-slot sender=" + sender); return false; }
+            double now = Time.realtimeSinceStartupAsDouble;
+            if (_lastDescentIntent.TryGetValue(sender, out double last) && now - last < .15) return false;
+            _lastDescentIntent[sender] = now;
+            var encounter = director.FloorCoordinator.EncounterFor(floor);
+            string reason = "Missing portal group";
+            bool accepted = encounter != null && group < encounter.Groups.Count && encounter.Groups[group].TryEnter(row.Rig, slot, out reason);
+            _log?.Invoke("descent intent sender=" + sender + " floor=" + floor + " group=" + group + " slot=" + slot + " accepted=" + accepted + " reason=" + reason);
+            return accepted;
+        }
+
+        internal void PublishDestinationWorld(ulong client)
+        {
+            if (_network == null || !_network.IsServer || !_identities.TryGetByClient(client, out var row)) return;
+            SendChestSnapshot(row); SendDoorSnapshot(row); SyncFloorLoot(); SendFloorLootSnapshot(row);
         }
 
         public void RequestSnapshot(ulong sender, NetworkObject target)
@@ -386,7 +457,7 @@ namespace Emberdelve.Net
         }
 
         public void RequestCorpseTransfer(ulong sender, NetworkObject target, ulong corpseId, ulong entryId,
-            int amount, ulong expectedCorpseRevision, ulong expectedBagRevision, uint sequence)
+            int amount, ulong expectedCorpseRevision, ulong expectedBagRevision, uint sequence, int destinationX = -1, int destinationY = -1)
         {
             if (_skills != null && _skills.DropIfDisconnecting(sender)) return;
             if (!TryResolve(sender, target, out NetIdentity row))
@@ -423,7 +494,8 @@ namespace Emberdelve.Net
             }
 
             bool accepted = model.TryTransferToBag(entryId, amount, expectedCorpseRevision,
-                row.Rig.Inventory, expectedBagRevision, profileUids, out reason);
+                row.Rig.Inventory, expectedBagRevision, profileUids, out reason,
+                destinationX == -1 && destinationY == -1 ? (Vector2Int?)null : new Vector2Int(destinationX, destinationY));
             if (accepted)
             {
                 SendCorpseResult(row, corpseId, sequence, true, model.Revision, CurrentBagRevision(row), string.Empty);
@@ -842,7 +914,7 @@ namespace Emberdelve.Net
             for (int i = 0; i < pickups.Length; i++)
             {
                 LootPickup pickup = pickups[i];
-                if (pickup == null || pickup.IsSpent || pickup.Item == null) continue;
+                if (pickup == null || pickup.IsSpent || pickup.Item == null || IsRetiredPosition(pickup.HomePosition)) continue;
                 int objectId = pickup.GetInstanceID();
                 seenObjects.Add(objectId);
                 if (!_floorLootObjectIds.TryGetValue(objectId, out ulong id))
@@ -945,7 +1017,7 @@ namespace Emberdelve.Net
             foreach (var pair in _floorLoot)
             {
                 LootPickup pickup = pair.Value;
-                if (pickup == null || pickup.IsSpent || pickup.Item == null) continue;
+                if (pickup == null || pickup.IsSpent || pickup.Item == null || IsRetiredPosition(pickup.HomePosition)) continue;
                 ItemSnapshot item = pickup.Instance != null ? pickup.Instance.ToSnapshot() :
                     new ItemSnapshot { itemId = pickup.Item.itemId, quantity = pickup.Amount, rarity = 0, affixes = Array.Empty<AffixSnapshot>() };
                 Array.Resize(ref document.entries, document.entries.Length + 1);
@@ -1154,22 +1226,22 @@ namespace Emberdelve.Net
             }
         }
 
-        private void BroadcastCorpsePresence(ulong corpseId, CorpseContainerModel model, bool removed)
+        private void BroadcastCorpsePresence(ulong corpseId, CorpseContainerModel model, bool removed, ulong? revisionOverride = null)
         {
             if (_identities == null) return;
-            foreach (NetIdentity row in _identities.All) SendCorpsePresence(row, corpseId, model, removed);
+            foreach (NetIdentity row in _identities.All) SendCorpsePresence(row, corpseId, model, removed, revisionOverride);
         }
 
-        private static void SendCorpsePresence(NetIdentity row, ulong corpseId, CorpseContainerModel model, bool removed)
+        private static void SendCorpsePresence(NetIdentity row, ulong corpseId, CorpseContainerModel model, bool removed, ulong? revisionOverride = null)
         {
             if (model.Kind == "chest" && !removed) return;
             if (row?.Object == null || !row.Object.IsSpawned || model == null) return;
             if (IsHostOwner(row))
             {
-                row.Object.GetComponent<CorpseLootWorldPresenter>()?.OnPresence(corpseId, model.WorldPosition, model.Revision, removed);
+                row.Object.GetComponent<CorpseLootWorldPresenter>()?.OnPresence(corpseId, model.WorldPosition, revisionOverride ?? model.Revision, removed);
                 return;
             }
-            row.Object.GetComponent<NetPlayerRig>()?.CorpsePresenceRpc(corpseId, model.WorldPosition, model.Revision, removed);
+            row.Object.GetComponent<NetPlayerRig>()?.CorpsePresenceRpc(corpseId, model.WorldPosition, revisionOverride ?? model.Revision, removed);
         }
 
         private static bool IsHostOwner(NetIdentity row) => row != null && NetRole.Current == NetRoleKind.Host &&
@@ -1323,15 +1395,19 @@ namespace Emberdelve.Net
             // share the bag authority but not that wire channel, so allocate its own sequence on the server.
             if (!inventory.CommandAuthority.TryCreateLocalCommand(command.Kind, command.SourceStackId, command.TargetStackId,
                     command.DestinationCell, command.DestinationSlot, command.ExpectedSourceGearUid, command.ExpectedTargetGearUid,
-                    out InventoryCommand stamped, out reason))
+                    out InventoryCommand stamped, out reason, command.Amount))
             {
                 result = Refused(reason);
                 return true;
             }
             var serverCommand = new InventoryCommand(command.Kind, row.PlayerId, stamped.Sequence, command.ExpectedRevision,
                 command.SourceStackId, command.TargetStackId, command.DestinationCell, command.DestinationSlot,
-                command.ExpectedSourceGearUid, command.ExpectedTargetGearUid);
+                command.ExpectedSourceGearUid, command.ExpectedTargetGearUid, command.Amount);
             result = inventory.CommandAuthority.Submit(row.Rig, serverCommand);
+            if (command.Kind == InventoryCommandKind.DropOne || command.Kind == InventoryCommandKind.DropStack)
+                _log?.Invoke("inventory-stack-drop sender=" + sender + " id=" + row.PlayerId +
+                    " stack=" + command.SourceStackId + " kind=" + command.Kind + " accepted=" + result.Accepted +
+                    " changed=" + result.Changed + " revision=" + result.Revision);
             if (command.Kind == InventoryCommandKind.Drop)
                 _log?.Invoke("inventory-drop-command sender=" + sender + " id=" + row.PlayerId +
                     " uid=" + command.ExpectedSourceGearUid.ToString("N") + " slot=" + command.DestinationSlot +

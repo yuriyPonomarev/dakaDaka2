@@ -13,9 +13,9 @@ MonoBehaviour:
   m_Name: Item_BoiledCuirass
   m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.ItemData
   itemId: boiled_cuirass
-  displayName: Boiled Cuirass
-  description: Leather boiled hard enough to keep a claw out of the ribs. Right click
-    to wear.
+  displayName: Steel Cuirass
+  description: Fitted steel breastplate and backplate with overlapping waist lames.
+    Right click to wear.
   gridFootprint: {x: 2, y: 3}
   maxStack: 1
   equipSlot: 4
@@ -34,6 +34,11 @@ MonoBehaviour:
   value: 40
   healAmount: 0
   ammoGrant: 0
+  ammoWeaponId: 
+  moveSpeedPenalty: 0
+  consumableUseKind: 0
+  useChannelSeconds: 0
+  healOverTimeSeconds: 0
   iconColor: {r: 0.42, g: 0.3, b: 0.16, a: 1}
   worldMaterial: {fileID: 2100000, guid: 6ec4327473fcff1409e3aba30ecdf15a, type: 2}
   worldSize: {x: 0.4, y: 0.5, z: 0.28}

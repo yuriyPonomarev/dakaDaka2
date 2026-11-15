@@ -108,7 +108,7 @@ namespace Emberdelve.Net
             if (request.CorpseId == 0 || request.EntryId == 0 || request.Amount <= 0) return false;
             if (_client != null)
                 return _client.RequestCorpseTransfer(request.CorpseId, request.EntryId, request.Amount,
-                    request.CorpseRevision, request.BagRevision, beforeSend, out sequence);
+                    request.CorpseRevision, request.BagRevision, beforeSend, out sequence, request.DestinationCell);
             if (_hostOwner == null || !_hostOwner.IsServer || !_hostOwner.IsOwner || !_hostOwner.IsSpawned ||
                 _nextHostSequence == 0 || _nextHostSequence > Rules.CorpseRequestSequenceGate.MaximumSequence) return false;
             NetInventoryServer server = NetInventoryServer.Current;
@@ -121,7 +121,7 @@ namespace Emberdelve.Net
                 return false;
             }
             server.RequestCorpseTransfer(_hostOwner.OwnerClientId, _hostOwner.NetworkObject, request.CorpseId,
-                request.EntryId, request.Amount, request.CorpseRevision, request.BagRevision, sequence);
+                request.EntryId, request.Amount, request.CorpseRevision, request.BagRevision, sequence, request.DestinationCell?.x ?? -1, request.DestinationCell?.y ?? -1);
             return true;
         }
 

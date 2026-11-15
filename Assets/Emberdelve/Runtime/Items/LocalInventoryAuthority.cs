@@ -30,7 +30,7 @@ namespace Emberdelve.Items
 
         public bool TryCreateLocalCommand(InventoryCommandKind kind, ulong sourceStackId, ulong targetStackId,
             Vector2Int destinationCell, EquipmentSlot destinationSlot, Guid expectedSourceGearUid,
-            Guid expectedTargetGearUid, out InventoryCommand command, out string reason)
+            Guid expectedTargetGearUid, out InventoryCommand command, out string reason, int amount = 0)
         {
             command = default;
             if (_rig == null || _inventory == null)
@@ -49,7 +49,7 @@ namespace Emberdelve.Items
             if (sequence <= _lastSequence) sequence = _lastSequence + 1;
             command = new InventoryCommand(kind, _rig.PlayerId, sequence, _inventory.Revision,
                 sourceStackId, targetStackId, destinationCell, destinationSlot,
-                expectedSourceGearUid, expectedTargetGearUid);
+                expectedSourceGearUid, expectedTargetGearUid, amount);
             if (!command.IsStructurallyValid(out reason))
             {
                 command = default;
@@ -132,7 +132,7 @@ namespace Emberdelve.Items
             {
                 case InventoryCommandKind.HoldQuickItem:
                     if (!ResolveBagStack(command.SourceStackId, command.ExpectedSourceGearUid, out var quick, out _, out reason)) return false;
-                    if (!HotbarBindings.IsUsableDefinition(quick.Item)) { reason = "item cannot be held in quick access"; return false; }
+                    if (!_inventory.IsBeltCell(quick.Origin) || !QuickBeltRules.CanStore(quick.Item)) { reason = "item cannot be held in quick access"; return false; }
                     if (_rig.Loadout != null && _rig.Loadout.IsActionLocked) { reason = "cannot change held item during an attack"; return false; }
                     if (!_inventory.CanCommitRevision(out reason)) return false;
                     _inventory.SetHeldStack(command.SourceStackId);
@@ -241,8 +241,14 @@ namespace Emberdelve.Items
                     }
                 }
 
+                case InventoryCommandKind.Split:
+                    if (!ResolveBagStack(command.SourceStackId, command.ExpectedSourceGearUid, out _, out _, out reason)) return false;
+                    return _inventory.TrySplitStack(command.SourceStackId, command.Amount, command.DestinationCell, out reason);
                 case InventoryCommandKind.Drop:
                     return ExecuteDrop(command, out reason);
+                case InventoryCommandKind.DropStack:
+                case InventoryCommandKind.DropOne:
+                    return ExecuteStackDrop(command, out reason);
 
                 default:
                     reason = "unknown inventory command";
@@ -252,6 +258,54 @@ namespace Emberdelve.Items
 
         /// <summary>U5A test seam: the ground that receives dropped items when no RunDirector is in the scene.</summary>
         internal static IGroundItemSink GroundSinkOverride;
+
+        private bool ExecuteStackDrop(InventoryCommand command, out string reason)
+        {
+            using (GameEventTransaction.Defer())
+            {
+                IGroundItemSink sink = GroundSinkOverride;
+                if (sink == null && GameServices.TryGet<RunDirector>(out var director)) sink = director;
+                if (!(sink is IGroundStackSink stackSink))
+                { reason = "there is no ground for this stack"; return false; }
+                if (!_inventory.TryBeginDropMutation(out var lease, out reason)) return false;
+                using (lease)
+                {
+                    if (!_inventory.TryGetStack(command.SourceStackId, out var source) || source.Instance != null ||
+                        source.Item == null || source.Item.IsEquippable || source.Count <= 0)
+                    { reason = "source stack is no longer available for dropping"; return false; }
+                    int amount = command.Kind == InventoryCommandKind.DropOne ? 1 : source.Count;
+                    ulong revision = _inventory.Revision;
+                    IPreparedGroundDrop prepared = null;
+                    Inventory.StackDropState state = null;
+                    bool committed = false;
+                    try
+                    {
+                        Vector3 at = _rig.transform.position + _rig.transform.forward * 1.1f + Vector3.up * .5f;
+                        if (!stackSink.TryPrepareDroppedStack(source.Item, amount, at, out prepared, out reason) || prepared == null)
+                            return false;
+                        if (!_inventory.TryDetachStackForDrop(lease, source.StackId, amount, out state, out reason)) return false;
+                        prepared.Publish();
+                        if (!_inventory.CommitDroppedInstance(lease, revision, out reason)) return false;
+                        committed = true;
+                        AttemptNotification(() => GameEvents.RaiseToast(_rig.PlayerId, $"Dropped {amount} x {source.Item.displayName}"));
+                        reason = null;
+                        return true;
+                    }
+                    catch (Exception exception)
+                    { reason = "the ground could not complete the stack drop: " + exception.Message; return false; }
+                    finally
+                    {
+                        if (!committed)
+                        {
+                            SafeCancelPrepared(prepared);
+                            if (state != null && !_inventory.TryRestoreStackAfterDropRefusal(lease, state, out var rollbackReason))
+                                Debug.LogError("Stack drop rollback failed: " + rollbackReason);
+                        }
+                        SafeDisposePrepared(prepared);
+                    }
+                }
+            }
+        }
 
         private bool ExecuteDrop(InventoryCommand command, out string reason)
         {
@@ -472,7 +526,7 @@ namespace Emberdelve.Items
                 reason = item == null ? "the requested stack has no item definition" :
                     (item.healAmount > 0 && health != null && !health.IsDead && health.CurrentHealth >= health.MaxHealth
                         ? "already at full health"
-                        : (item.ammoGrant > 0 ? "ammunition is full or no ranged weapon can receive it" :
+                        : (item.ammoGrant > 0 ? "not enough reserve space for the whole pack, or wrong weapon" :
                             item.displayName + " cannot be used"));
                 if (item != null)
                 {

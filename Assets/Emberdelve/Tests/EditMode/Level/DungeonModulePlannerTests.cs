@@ -279,6 +279,32 @@ namespace Emberdelve.Level.Tests
             Assert.That(director.RuntimeLayoutInstallationComplete, Is.False);
         }
 
+        [TestCase(Emberdelve.Rules.RoyalePartyMode.Solo)]
+        [TestCase(Emberdelve.Rules.RoyalePartyMode.Duo)]
+        [TestCase(Emberdelve.Rules.RoyalePartyMode.Trio)]
+        public void RoyaleModeRoundTripsAndBindsMapAcknowledgement(Emberdelve.Rules.RoyalePartyMode mode)
+        {
+            Assert.True(DungeonModulePlanner.TryCreate(11, _modules, out var legacy, out var reason), reason);
+            var plan = legacy.WithRoyaleMode(mode);
+            Assert.IsNull(legacy.RoyaleMode);
+            Assert.AreNotSame(legacy.Placements, plan.Placements);
+            Assert.That(plan.LayoutHash, Is.Not.EqualTo(legacy.LayoutHash));
+            foreach (var other in new[] { Emberdelve.Rules.RoyalePartyMode.Solo, Emberdelve.Rules.RoyalePartyMode.Duo, Emberdelve.Rules.RoyalePartyMode.Trio })
+                if (other != mode) Assert.That(plan.LayoutHash, Is.Not.EqualTo(legacy.WithRoyaleMode(other).LayoutHash));
+            byte[] payload = DungeonModulePlanCodec.Encode(plan);
+            Assert.That(payload.Length, Is.EqualTo(DungeonModulePlanCodec.PayloadBytes));
+            Assert.True(DungeonModulePlanCodec.TryDecode(payload, _modules, out var decoded, out reason), reason);
+            Assert.That(decoded.RoyaleMode, Is.EqualTo(mode));
+            Assert.That(decoded.LayoutHash, Is.EqualTo(plan.LayoutHash));
+            Assert.That(decoded.Placements, Is.EqualTo(plan.Placements));
+            payload[1] = (byte)(mode == Emberdelve.Rules.RoyalePartyMode.Solo ? 2 : 1);
+            Assert.False(DungeonModulePlanCodec.TryDecode(payload, _modules, out _, out reason));
+            Assert.That(reason, Does.Contain("hash"));
+            payload[1] = 255;
+            AssertDecodeRejected(payload);
+            Assert.Throws<ArgumentOutOfRangeException>(() => legacy.WithRoyaleMode((Emberdelve.Rules.RoyalePartyMode)4));
+        }
+
         [Test]
         public void CodecRejectsTruncatedWrongVersionAndTamperedSnapshots()
         {

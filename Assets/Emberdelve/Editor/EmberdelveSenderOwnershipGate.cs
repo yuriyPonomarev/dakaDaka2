@@ -550,6 +550,10 @@ namespace Emberdelve.EditorTools
         private IEnumerator EnemyCommands()
         {
             Refresh();
+            _enemy.Brain.NotifyDamaged(DamageInfo.Invalid);
+            _enemy.Brain.Tick(EnemyBrain.WakeSeconds, Time.time, _enemy.transform.position, _enemy.transform.forward, null);
+            _enemy.RefreshDormantHitPose(null);
+            Physics.SyncTransforms();
             WeaponData claw = _enemy.ActiveWeapon;
             Check(claw != null && claw.UsesSweptMelee, "the enemy holds a swept melee weapon");
             if (claw == null) yield break;

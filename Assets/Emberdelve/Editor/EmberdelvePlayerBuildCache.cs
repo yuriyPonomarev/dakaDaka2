@@ -172,9 +172,15 @@ namespace Emberdelve.EditorTools
                 string prepared = destination + ".next-" + Guid.NewGuid().ToString("N");
                 string previous = destination + ".old-" + Guid.NewGuid().ToString("N");
                 CopyPayload(source, prepared);
-                Directory.Move(destination, previous);
-                try { Directory.Move(prepared, destination); }
-                catch { Directory.Move(previous, destination); throw; }
+                MoveDirectoryWhenReleased(destination, previous);
+                try { MoveDirectoryWhenReleased(prepared, destination); }
+                catch (Exception publishError)
+                {
+                    try { MoveDirectoryWhenReleased(previous, destination); }
+                    catch (Exception rollbackError)
+                    { throw new AggregateException("Player publication and rollback both failed; prepared and prior payloads retained", publishError, rollbackError); }
+                    throw;
+                }
                 // Retain the old generated payload for diagnosis; no recursive cleanup here.
                 return;
             }
@@ -184,6 +190,20 @@ namespace Emberdelve.EditorTools
                 string target = Path.Combine(destination, file.Substring(root.Length));
                 Directory.CreateDirectory(Path.GetDirectoryName(target));
                 File.Copy(file, target, false);
+            }
+        }
+
+        static void MoveDirectoryWhenReleased(string source, string destination)
+        {
+            // Windows indexing/sync can briefly retain a just-copied or renamed directory.
+            // Retry only the same rename, never delete/overlay either verified payload.
+            for (int attempt = 0; ; attempt++)
+            {
+                try { Directory.Move(source, destination); return; }
+                catch (IOException) when (attempt < 40)
+                { System.Threading.Thread.Sleep(250); }
+                catch (UnauthorizedAccessException) when (attempt < 40)
+                { System.Threading.Thread.Sleep(250); }
             }
         }
 

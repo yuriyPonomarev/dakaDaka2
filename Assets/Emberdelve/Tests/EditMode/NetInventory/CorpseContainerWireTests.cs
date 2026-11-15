@@ -5,6 +5,8 @@ using Emberdelve.Net;
 using Emberdelve.Net.Rules;
 using NUnit.Framework;
 using UnityEditor;
+using Unity.Collections;
+using Unity.Netcode;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -55,6 +57,42 @@ namespace Emberdelve.Net.Tests
             Assert.That(read.entries.Length, Is.EqualTo(1));
             Assert.That(read.entries[0].item.uid, Is.EqualTo(_gear.UidText));
             Assert.That(read.entries[0].item.ToJson(), Is.EqualTo(_gear.ToSnapshot().ToJson()));
+        }
+
+        [Test]
+        public void BeltLoadoutKeepsPhysicalSlotOverNgoAndBecomesVisibleCorpseLoot()
+        {
+            var potion = _catalog.Items.First(i => i != null && i.healAmount > 0);
+            Assert.IsTrue(_bag.TryAdd(potion, 5, out string reason), reason);
+            var stack = _bag.Slots.Single(s => s.Item == potion);
+            Assert.IsTrue(_bag.TryMove(stack.Index, _bag.BeltCell(5), out reason), reason);
+            var state = NetworkLoadoutState.Capture(_bag, _equipment);
+            state.HeldStackId = stack.StackId;
+            using (var writer = new FastBufferWriter(32768, Allocator.Temp))
+            {
+                writer.WriteValueSafe(NetworkLoadoutWire.FromState(state));
+                using (var reader = new FastBufferReader(writer, Allocator.Temp))
+                {
+                    reader.ReadValueSafe(out NetworkLoadoutWire wire);
+                    Assert.IsTrue(wire.TryToState(out var decoded, out reason), reason);
+                    Assert.AreEqual(state.Revision, decoded.Revision);
+                    Assert.AreEqual(stack.StackId, decoded.HeldStackId);
+                    var identity = decoded.Stacks.Single(s => s.Id == stack.StackId);
+                    Assert.AreEqual(_bag.BeltCell(5), new Vector2Int(identity.X, identity.Y));
+                    var row = decoded.Loadout.bag.entries.Single(e => e.item.itemId == potion.itemId);
+                    Assert.AreEqual(5, row.item.quantity);
+                    Assert.AreEqual(_bag.BeltCell(5), new Vector2Int(row.x, row.y));
+                }
+            }
+            Assert.IsTrue(CorpseLootManifest.TryCapture(25, Vector3.zero, _bag, _equipment, out var manifest, out reason), reason);
+            Assert.IsTrue(CorpseContainerModel.TryCreate(manifest, out var corpse, out reason), reason);
+            Assert.IsTrue(CorpseContainerWire.TryCreate(9, corpse, out var corpseWire, out reason), reason);
+            Assert.IsTrue(corpseWire.TryRead(out var document, out reason), reason);
+            var utility = document.entries.Single(e => e.item.itemId == potion.itemId);
+            Assert.AreEqual(5, utility.item.quantity);
+            Assert.That(utility.x, Is.InRange(0, corpse.Width - potion.EffectiveFootprint.x));
+            Assert.That(utility.y, Is.GreaterThanOrEqualTo(_bag.GridHeight));
+            Assert.AreEqual(_gear.UidText, document.entries.Single(e => !string.IsNullOrEmpty(e.item.uid)).item.uid);
         }
 
         [Test]

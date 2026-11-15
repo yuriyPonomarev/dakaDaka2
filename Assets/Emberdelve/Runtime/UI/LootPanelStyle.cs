@@ -10,6 +10,10 @@ namespace Emberdelve.UI
     public static class LootPanelStyle
     {
         public const float Width = 520f, Height = 650f, Step = 48f, Cell = 46f;
+        // Fit the full instruction band, with space for the raid summary and window edges.
+        public static float InventoryScale(bool paired) => Mathf.Min(1f,
+            Screen.width / (paired ? 1480f : 940f), Mathf.Max(1f, Screen.height - 64f) / 790f);
+
         public static readonly Color Gold = new Color(.61f, .49f, .29f);
         public static readonly Color Ink = new Color(.045f, .047f, .049f);
         private static readonly Dictionary<string, Sprite> Icons = new Dictionary<string, Sprite>();
@@ -50,8 +54,9 @@ namespace Emberdelve.UI
         // Fixed decorative children stay behind the interactive content. No extra canvases or input targets.
         public static void Panel(Image panel)
         {
-            panel.color = new Color(.065f, .066f, .063f);
-            Frame(panel, new Color(.48f, .47f, .42f));
+            panel.color = new Color(.078f, .073f, .062f);
+            DungeonUiStyle.Surface(panel);
+            Frame(panel, DungeonUiStyle.Brass);
             for (int i = 0; i < 4; i++)
             {
                 float y = i < 2 ? Height / 2 - 5 : -Height / 2 + 5;
@@ -86,7 +91,7 @@ namespace Emberdelve.UI
 
         public static void Frame(Image image, Color color)
         {
-            var outline = image.gameObject.AddComponent<Outline>();
+            var outline = image.GetComponent<Outline>() ?? image.gameObject.AddComponent<Outline>();
             outline.effectColor = color; outline.effectDistance = new Vector2(1, -1);
             outline.useGraphicAlpha = false;
         }
@@ -99,7 +104,12 @@ namespace Emberdelve.UI
             Frame(image, Color.Lerp(Ink, rarity, .65f));
             Image icon = UiFactory.CreateImage(image.transform, "ItemIcon", Color.Lerp(item.iconColor, Color.white, .38f),
                 Vector2.zero, Vector2.zero, new Vector2(.5f, .5f), new Vector2(.5f, .5f));
-            icon.sprite = Icon(item); icon.preserveAspect = showName || image.rectTransform.sizeDelta.y < 100f; icon.raycastTarget = false;
+            var catalog = ItemVisualCatalog.Load();
+            ItemVisualCatalog.Entry model = null;
+            bool authored = catalog != null && catalog.TryGet(item.itemId, out model) && model.icon != null;
+            icon.sprite = authored ? model.icon : Icon(item);
+            if (authored) icon.color = Color.white;
+            icon.preserveAspect = authored || showName || image.rectTransform.sizeDelta.y < 100f; icon.raycastTarget = false;
             icon.rectTransform.anchorMin = Vector2.zero; icon.rectTransform.anchorMax = Vector2.one;
             icon.rectTransform.offsetMin = new Vector2(5, 5); icon.rectTransform.offsetMax = new Vector2(-7, -5);
             // Item names belong in the tooltip; tiny labels obscure small inventory footprints.

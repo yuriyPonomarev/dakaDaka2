@@ -95,6 +95,22 @@ namespace Emberdelve.EditorTools
             public void ApplyDamage(DamageInfo damage) { }
         }
 
+        private sealed class MeleeBystander : ICombatEntity, IHitShapeProvider
+        {
+            public int CombatId { get; set; }
+            public int TeamId { get; set; }
+            public EntityKind Kind => EntityKind.LocalPlayer;
+            public Vector3 CombatCenter { get; set; }
+            public Collider HeadCollider => null;
+            public bool IsDead => false;
+            public float CurrentHealth => 1000f;
+            public float MaxHealth => 1000f;
+            public int Hits;
+            public void ApplyDamage(DamageInfo damage) { Hits++; }
+            public void CollectHitShapes(List<HitShape> shapes) =>
+                shapes.Add(new HitShape(HitLocation.Body, CombatCenter, CombatCenter, 0.04f));
+        }
+
         private sealed class AimlessShooter : ICombatEntity, IActiveWeaponProvider
         {
             public int CombatId { get; set; }
@@ -338,6 +354,11 @@ namespace Emberdelve.EditorTools
             DamageInfo armoredProbe = DamageResolver.ApplyArmorRating(armorProbe, 50f);
             Check(armoredProbe.RangedProjectile && armoredProbe.GuardBladeContact && armoredProbe.GuardBroken,
                 "armor mitigation preserves projectile blade-contact and guardbreak provenance");
+            DamageInfo meleeProbe = armorProbe.WithMeleeGuardContact(true).WithAttackHeight(Emberdelve.BladeDefense.BladeHeight.High)
+                .WithImpactPower(2f).WithReduction(0.4f, out _);
+            meleeProbe = DamageResolver.ApplyArmorRating(meleeProbe, 50f);
+            Check(meleeProbe.MeleeGuardChecked && meleeProbe.GuardBladeContact && !meleeProbe.RangedProjectile,
+                "damage transforms preserve melee blade contact without classifying it as a projectile");
 
             // D1c3: the binary head-collider classifier (x1.8, "head collider contact") is gone from the projectile path. It was
             // replaced by the authority's hit-volume location (same table as melee); these two checks replaced the old
@@ -354,6 +375,8 @@ namespace Emberdelve.EditorTools
             if (!headlessBladeAvailable)
                 liveBlade = GuardBladePose.Resolve(_defender.AimOrigin,
                     Quaternion.LookRotation(_defender.AimDirection.normalized, Vector3.up), true);
+
+            VerifyMeleeBladeInterception(liveBlade);
             ResetHealth();
 
             ProjectileVisual geometryArrow = ProjectileVisual.SpawnArrow(Vector3.zero, Vector3.forward * 10f, _bow, true);
@@ -535,10 +558,16 @@ namespace Emberdelve.EditorTools
             else Check(false, "visible guard pose is available after rebuilding the weapon visual");
 
             _defender.SetGuardHeld(false);
-            Check(_defender.Loadout.ForceSwitchToSlot(1), "weapon swap to non-guardable crossbow succeeds outside an attack");
+            _defender.SetOffhandWeapon(_originalOffhand); // Keep the actual warrior shield stored during the ranged-set check.
+            Check(_defender.Loadout.ForceSwitchToSlot(1), "weapon swap to crossbow succeeds outside an attack");
             _defender.SetGuardHeld(true);
-            Check(!_defender.TryGetProjectileGuardBlade(out _), "ranged/non-guardable weapon has no blade interception shape");
+            Check(!_defender.Defense.HasShield && !_defender.TryGetGuardShield(out _),
+                "stored shield contributes no invisible guard to the two-handed crossbow");
+            Check(!_defender.TryGetProjectileGuardBlade(out _), "crossbow guard is never classified as a parrying blade");
+            VerifyCrossbowGuard();
+            VerifyCrossbowMuzzleClearance(config);
             _defender.Loadout.ForceSwitchToSlot(0);
+            _defender.SetOffhandWeapon(_rapier);
             _defender.SetGuardHeld(true);
 
             // The guard pose is unavailable throughout an authority-owned swing, regardless of visual flags.
@@ -566,11 +595,12 @@ namespace Emberdelve.EditorTools
             _defender.SetOffhandWeapon(_originalOffhand);
             Check(_defender.Defense.HasShield && !_defender.CanParry, "restored offhand shield keeps block without enabling parry");
             _defender.SetGuardHeld(true);
+            VerifyPhysicalShield();
             Vector3 shieldFront = _defender.transform.position + _defender.transform.forward * 3f;
             DamageInfo shieldFrontHit = new DamageInfo(10f, _defender.CombatCenter, -_defender.transform.forward,
                 shieldFront, 9001, EntityKind.Enemy, DamageType.Pierce, false, false, 0f, rangedProjectile: true);
-            Check(_defender.TryResolveGuard(shieldFrontHit, CombatFlowTuning.Default, out _),
-                "shield retains its existing directional projectile block semantics");
+            Check(!_defender.TryResolveGuard(shieldFrontHit, CombatFlowTuning.Default, out _),
+                "facing a projectile is insufficient without physical shield contact");
             DamageInfo shieldRearHit = new DamageInfo(10f, _defender.CombatCenter, _defender.transform.forward,
                 _defender.transform.position - _defender.transform.forward * 3f, 9001, EntityKind.Enemy,
                 DamageType.Pierce, false, false, 0f, rangedProjectile: true);
@@ -583,7 +613,7 @@ namespace Emberdelve.EditorTools
             _authority.StepSwings();
 
             // Equip the Archer's actual secondary rapier to verify its authored weapon mitigation works
-            // even though the Archer class has no passive block reduction and the bow cannot block.
+            // even though the Archer class has no passive block reduction.
             CharacterClassData archerKit = AssetDatabase.LoadAssetAtPath<CharacterClassData>(EmberdelvePaths.Data + "/Class_Archer.asset");
             Check(archerKit != null, "Archer class data is available for rapier guard coverage");
             if (archerKit != null)
@@ -592,7 +622,7 @@ namespace Emberdelve.EditorTools
                 _defender.SetOffhandWeapon(_rapier);
                 bool rapierEquipped = _defender.Loadout.ForceSwitchToSlot(1) && _defender.ActiveWeapon == _rapier;
                 Check(rapierEquipped && _rapier.CanBlock && _defender.Defense.CanBlock,
-                    "Archer rapier primary override enables its guard without enabling bow block");
+                    "Archer rapier primary override enables its own guard");
                 if (rapierEquipped)
                 {
                     _defender.SetGuardHeld(true);
@@ -610,7 +640,9 @@ namespace Emberdelve.EditorTools
 
                 _defender.SetGuardHeld(false);
                 _defender.Loadout.ForceSwitchToSlot(0);
-                Check(!_defender.Defense.CanBlock, "switching back to Archer bow does not inherit rapier block override");
+                Check(_defender.Defense.CanBlock && Mathf.Abs(_defender.Defense.BlockReduction-1f)<.001f,
+                    "Archer bow uses its own physical block mitigation, not the rapier override");
+                VerifyBowGuard();
                 SkillData multiShot = AssetDatabase.LoadAssetAtPath<SkillData>(EmberdelvePaths.Data + "/Skill_ArcherMultiShot.asset");
                 bool castBegan = false;
                 int activationId = 0;
@@ -681,6 +713,520 @@ namespace Emberdelve.EditorTools
             AttackIntent intent = new AttackIntent(shooter.CombatId, shooter.Kind, shooter.ActiveWeapon, 1f,
                 shooter.AimOrigin, shooter.AimDirection, shooter.ActiveWeapon.rangedRange, sequence, _clock);
             return _authority.LaunchProjectileAsOwner(intent);
+        }
+
+        private void VerifyMeleeBladeInterception(GuardBladeBox blade)
+        {
+            // A controlled thrust isolates contact ordering through the real authority and real rig.
+            // Only cloned test data is changed; the authored sword and its visuals remain untouched.
+            WeaponData weapon = Instantiate(_sword);
+            SwingPatternData pattern = ScriptableObject.CreateInstance<SwingPatternData>();
+            _cleanup.Add(weapon); _cleanup.Add(pattern);
+            weapon.weaponId = "gate_melee_blade_contact";
+            weapon.comboSteps = new ComboStep[0];
+            weapon.swingPatterns = new[] { pattern };
+            weapon.reach = 1.6f;
+            weapon.impactPower = 0.1f;
+            pattern.patternId = "blade_contact_thrust";
+            pattern.kind = SwingKind.Thrust;
+            pattern.windupTime = 0.02f; pattern.activeTime = 0.1f; pattern.recoveryTime = 0.1f;
+            pattern.reachInset = 0f; pattern.sweepRadius = 0.02f;
+            pattern.maxTargets = 4;
+            pattern.keys = new[] { new SwingKey(0f, Vector3.zero, 0f, 0f), new SwingKey(1f, Vector3.zero, 0f, 0f) };
+            Vector3 inward = (_defender.CombatCenter - blade.Center).normalized;
+            Vector3 front = _defender.CombatCenter + _defender.transform.forward * 0.8f;
+            Probe(blade.Center - inward * 0.8f, inward, true, true, 0.5f, "coarse blade interception");
+            Probe(blade.Center - inward * 0.8f, inward, true, true, 0.002f, "fine blade interception");
+            Probe(blade.Center - inward * 0.8f, inward, true, true, 0.5f, "single target coarse", 1);
+            Probe(blade.Center - inward * 0.8f, inward, true, true, 0.002f, "single target reversed registry", 1);
+            Probe(blade.Center - inward * 0.8f, inward, true, true, 0.5f, "broken guard continuation", 4, true);
+            Probe(front, -_defender.transform.forward, true, false, 0.5f, "body strike misses raised blade");
+            Probe(_defender.CombatCenter, -inward, true, false, 0.5f, "body reached before blade");
+            Probe(blade.Center - inward * 0.8f, inward, false, false, 0.5f, "lowered blade cannot block");
+            ProbeEarlierWound();
+            Check(_sword.parryBladeRegion == new Vector2(0f, 1f), "user-requested full-length parry is authored on the live sword");
+            ProbePlayerRiposte(0.05f, true);
+            ProbePlayerRiposte(0.5f, true);
+            ProbePlayerRiposte(0.95f, true);
+            ProbeGrip(.5f);
+            ProbeGrip(.002f);
+            ProbeGrip(.5f, true);
+            ProbeGrip(.002f, true);
+            ProbeGripProjectile();
+            _defender.SetGuardHeld(true);
+
+            void ProbeGrip(float dt, bool throughBody = false)
+            {
+                _clock += 10f; _authority.StepSwings(); ResetHealth(); _defender.SetGuardHeld(true);
+                var grip = GuardBladePose.ResolveGripHitShape(_defender.AimOrigin,
+                    Quaternion.LookRotation(_defender.AimDirection, Vector3.up));
+                Vector3 center = (grip.A + grip.B) * .5f;
+                Vector3 direction = throughBody ? (_defender.AimOrigin - center).normalized : -(blade.Rotation * Vector3.right);
+                weapon.reach = throughBody ? 1.2f : .3f; pattern.reachInset = 0f; pattern.contactWindow = .02f;
+                Shooter attacker = MakeShooter(center - direction * .15f, direction, weapon);
+                try
+                {
+                    Check(!blade.TrySweep(attacker.AimOrigin, attacker.AimOrigin + direction * weapon.reach,
+                        pattern.sweepRadius, out _), "grip probe misses defensive blade " + dt);
+                    attacker.TryGetAimPose(out _, out float yaw, out float pitch);
+                    Check(_authority.TryBeginMeleeSwingAsOwner(new MeleeSwingIntent(attacker.CombatId, weapon.weaponId,
+                        0, 0, yaw, pitch, 1), out int id, out _), "grip melee starts " + dt);
+                    for (float elapsed = 0; elapsed < 1f; elapsed += dt) { _clock += dt; _authority.StepSwings(); }
+                    Check(_authority.TryGetMeleeSwingStatus(id, out var status) && status.Hits.Count == 1
+                        && status.Hits[0].Location == HitLocation.Arms && status.Hits[0].Amount > 0
+                        && !status.Hits[0].Blocked && !status.GuardStopped,
+                        "grip is one unblocked Arms wound, never a parry or guard recoil " + dt);
+                    Check(!_authority.Riposte.HasLiveParry(_defender.CombatId) && !_authority.Riposte.HasGrant(_defender.CombatId),
+                        "grip wound cancels parry/response " + dt);
+                }
+                finally { CombatRegistry.Unregister(attacker.CombatId, attacker); _shooters.Remove(attacker); weapon.reach = 1.6f; }
+            }
+
+            void ProbeGripProjectile()
+            {
+                _clock += 10f; ResetHealth(); _defender.SetGuardHeld(true);
+                var grip = GuardBladePose.ResolveGripHitShape(_defender.AimOrigin,
+                    Quaternion.LookRotation(_defender.AimDirection, Vector3.up));
+                Vector3 direction = -(blade.Rotation * Vector3.right);
+                Shooter shooter = MakeShooter((grip.A + grip.B) * .5f - direction * .15f, direction);
+                try
+                {
+                    Check(Launch(shooter, 1), "projectile toward grip launches");
+                    DamageInfo damage = ResolveDamage(shooter, .2f);
+                    Check(damage.Amount > 0 && damage.Location == HitLocation.Arms && !damage.Blocked && !damage.GuardBladeContact,
+                        "projectile hits grip as Arms instead of sword metal");
+                }
+                finally { CombatRegistry.Unregister(shooter.CombatId, shooter); _shooters.Remove(shooter); }
+            }
+
+            void ProbePlayerRiposte(float bladeFraction, bool expectedBonus, bool leaveUnspent = false, float advance = 10f)
+            {
+                // Cross the actual guarding player's blade sideways at a known hilt-to-tip position.
+                // No synthetic NoteBlock call: the sweep must earn the grant on the authority.
+                pattern.reachInset = 0f;
+                pattern.contactWindow = 0.02f;
+                pattern.keys = new[] { new SwingKey(0f, Vector3.zero, 0f, 0f), new SwingKey(1f, Vector3.zero, 0f, 0f) };
+                _clock += advance; _authority.StepSwings();
+                ResetHealth(); _defender.SetGuardHeld(true);
+                Vector3 contact = blade.Center + blade.Rotation * Vector3.forward * ((bladeFraction - 0.5f) * blade.HalfExtents.z * 2f);
+                Vector3 direction = blade.Rotation * Vector3.right;
+                Shooter attacker = MakeShooter(contact - direction * 0.8f, direction, weapon);
+                try
+                {
+                    attacker.TryGetAimPose(out _, out float yaw, out float pitch);
+                    bool began = _authority.TryBeginMeleeSwingAsOwner(
+                        new MeleeSwingIntent(attacker.CombatId, weapon.weaponId, 0, 0, yaw, pitch, 1), out int id, out string why);
+                    Check(began, "real-player region " + bladeFraction + " attack accepted: " + why);
+                    if (!began) return;
+                    _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus attack);
+                    _clock += attack.Timing.Windup + attack.Timing.Active * 0.1f;
+                    _authority.StepSwings();
+                    _authority.TryGetMeleeSwingStatus(id, out attack);
+                    Check(attack.GuardStopped && attack.Hits.Count == 1 && attack.Hits[0].Blocked,
+                        "real-player region " + bladeFraction + " physical blade stops the attack");
+                    Check(_authority.Riposte.HasLiveParry(_defender.CombatId) == expectedBonus
+                        && _authority.Riposte.HasParryBonus(_defender.CombatId) == expectedBonus,
+                        "real-player region " + bladeFraction + " grants riposte only for a confirmed parry region");
+                    if (leaveUnspent) return;
+                    _defender.SetGuardHeld(false);
+                    SwingGeometry.TryAimAngles(_defender.AimDirection, out yaw, out pitch);
+                    var intent = new MeleeSwingIntent(_defender.CombatId, _sword.weaponId, 0, 0, yaw, pitch,
+                        CombatRegistry.NextSequence(_defender.CombatId));
+                    bool started = _authority.TryBeginRiposte(EmberdelveKitFixtures.SenderFor(_defender), intent,
+                        out int riposteId, out int strikes, out why);
+                    Check(started == expectedBonus, "real-player region " + bladeFraction + " riposte eligibility: " + why);
+                    if (!expectedBonus) Check(!started && strikes == 0 && !_authority.Riposte.HasGrant(_defender.CombatId),
+                        "ordinary sword block cannot spend a stale parry or create a response chain");
+                    if (!started) return;
+                    for (int strike = 0; strike < strikes; strike++)
+                    {
+                        _authority.TryGetMeleeSwingStatus(riposteId, out MeleeSwingStatus reply);
+                        float expected = expectedBonus ? _sword.riposteDamageMultiplier : 1f;
+                        Check(Mathf.Approximately(reply.StepMultiplier, expected),
+                            "real-player region " + bladeFraction + " strike " + (strike + 1) + " multiplier=" + expected);
+                        _clock += reply.Timing.Total + _sword.riposteStrikeGap + 0.01f;
+                        _authority.StepSwings();
+                        if (strike + 1 < strikes)
+                        {
+                            intent = new MeleeSwingIntent(_defender.CombatId, _sword.weaponId, 0, 0, yaw, pitch,
+                                CombatRegistry.NextSequence(_defender.CombatId));
+                            bool continued = _authority.TryContinueRiposte(EmberdelveKitFixtures.SenderFor(_defender), intent,
+                                out riposteId, out why) == RiposteResult.Started;
+                            Check(continued, "real-player follow-up accepted: " + why);
+                            if (!continued) break;
+                        }
+                    }
+                }
+                finally { CombatRegistry.Unregister(attacker.CombatId, attacker); _shooters.Remove(attacker); }
+            }
+
+            void ProbeEarlierWound()
+            {
+                // The short segment touches flesh first, then advances into the raised blade.
+                // Keep the first wound pending across samples so the later stop must flush it.
+                pattern.maxTargets = 4;
+                pattern.reachInset = pattern.EffectiveReach(weapon) - pattern.sweepRadius - 0.3f;
+                pattern.contactWindow = 0.1f;
+                pattern.keys = new[] { new SwingKey(0f, Vector3.zero, 0f, 0f),
+                    new SwingKey(1f, Vector3.forward * 0.7f, 0f, 0f) };
+                weapon.impactPower = 0.1f;
+                _clock += 10f;
+                ResetHealth(); _defender.SetGuardHeld(true);
+                Shooter attacker = MakeShooter(blade.Center - inward * 0.8f, inward, weapon);
+                var earlier = new MeleeBystander { CombatId = CombatRegistry.AllocateId(), TeamId = _defender.TeamId,
+                    CombatCenter = blade.Center - inward * 0.65f };
+                CombatRegistry.Register(earlier.CombatId, earlier);
+                attacker.TryGetAimPose(out _, out float yaw, out float pitch);
+                bool began = _authority.TryBeginMeleeSwingAsOwner(
+                    new MeleeSwingIntent(attacker.CombatId, weapon.weaponId, 0, 0, yaw, pitch, 1), out int id, out string why);
+                Check(began, "earlier-sample wound thrust accepted: " + why);
+                if (began && _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus initial))
+                {
+                    _clock += initial.Timing.Windup + initial.Timing.Active * 0.05f;
+                    _authority.StepSwings();
+                    _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus early);
+                    Check(!early.GuardStopped && earlier.Hits == 0 && early.Hits.Count == 0,
+                        "first wound remains pending before later blade contact: stopped=" + early.GuardStopped
+                        + " applied=" + earlier.Hits + " resolved=" + early.Hits.Count);
+                    // Move out of every subsequent sample: a final hit can only come from
+                    // the contact already reserved above, not another same-sample overlap.
+                    earlier.CombatCenter += Vector3.up * 20f;
+                    for (int i = 0; i < 100; i++) { _clock += 0.002f; _authority.StepSwings(); }
+                    _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus final);
+                    Check(final.GuardStopped && final.Hits.Count == 2 && earlier.Hits == 1,
+                        "later blade stop preserves exactly one earlier-sample wound");
+                }
+                CombatRegistry.Unregister(earlier.CombatId, earlier);
+                CombatRegistry.Unregister(attacker.CombatId, attacker); _shooters.Remove(attacker);
+            }
+
+            void Probe(Vector3 origin, Vector3 direction, bool raised, bool expectedBlock, float dt, string label,
+                int targetLimit = 4, bool broken = false)
+            {
+                pattern.maxTargets = targetLimit;
+                weapon.impactPower = broken ? 1000f : 0.1f;
+                _clock += 10f;
+                ResetHealth(); _defender.SetGuardHeld(raised);
+                Shooter attacker = MakeShooter(origin, direction, weapon);
+                MeleeBystander before = null, behind = null;
+                if (expectedBlock)
+                {
+                    before = new MeleeBystander { CombatId = CombatRegistry.AllocateId(), TeamId = _defender.TeamId,
+                        CombatCenter = blade.Center - direction * 0.3f };
+                    behind = new MeleeBystander { CombatId = CombatRegistry.AllocateId(), TeamId = _defender.TeamId,
+                        CombatCenter = blade.Center + direction * 0.3f };
+                    CombatRegistry.Register(before.CombatId, before);
+                    CombatRegistry.Register(behind.CombatId, behind);
+                    if (dt < 0.01f)
+                    {
+                        // Reverse the relative registration order: the farther body must not win.
+                        CombatRegistry.Unregister(_defender.CombatId, _defender);
+                        CombatRegistry.Register(_defender.CombatId, _defender);
+                    }
+                }
+                attacker.TryGetAimPose(out _, out float yaw, out float pitch);
+                var intent = new MeleeSwingIntent(attacker.CombatId, weapon.weaponId, 0, 0, yaw, pitch, 1);
+                bool accepted = _authority.TryBeginMeleeSwingAsOwner(intent, out int id, out string why);
+                Check(accepted, label + " accepted: " + why);
+                if (accepted)
+                {
+                    for (float elapsed = 0f; elapsed < 1f; elapsed += dt) { _clock += dt; _authority.StepSwings(); }
+                    bool found = _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus status);
+                    int expectedHits = targetLimit == 1 ? 1 : broken ? 3 : expectedBlock ? 2 : 1;
+                    Check(found && status.Hits.Count == expectedHits, label + " resolves only reachable contacts within the limit");
+                    if (found && status.Hits.Count > 0 && targetLimit != 1)
+                    {
+                        Check(status.Hits[0].Blocked == expectedBlock, label + " block outcome");
+                        if (expectedBlock) Check(status.Hits[0].Location == HitLocation.Unspecified,
+                            label + " stops at blade before assigning body location");
+                    }
+                    if (expectedBlock && targetLimit == 1)
+                    {
+                        Check(before.Hits == 1 && behind.Hits == 0 && status.Hits[0].TargetCombatId == before.CombatId,
+                            label + " nearer body receives the only hit; farther guard cannot steal its slot");
+                    }
+                    else if (broken)
+                    {
+                        Check(!status.GuardStopped && status.Hits[0].GuardBroken && before.Hits == 1 && behind.Hits == 1,
+                            label + " broken guard permits the remaining sweep to reach the farther body");
+                    }
+                    else if (expectedBlock)
+                    {
+                        Check(status.GuardStopped && !status.WallStopped && status.Finished,
+                            label + " finishes with guard recoil, not wall impact");
+                        Check(before.Hits == 1 && behind.Hits == 0,
+                            label + " preserves contact before guard and prevents damage behind it");
+                        Check(Emberdelve.AI.EnemyAttackPhase.Recovery(status).Phase == 4,
+                            label + " enemy presentation uses the recoil phase");
+                    }
+                }
+                if (before != null) CombatRegistry.Unregister(before.CombatId, before);
+                if (behind != null) CombatRegistry.Unregister(behind.CombatId, behind);
+                CombatRegistry.Unregister(attacker.CombatId, attacker); _shooters.Remove(attacker);
+            }
+        }
+
+        private void VerifyBowGuard()
+        {
+            WeaponData weapon = _defender.ActiveWeapon;
+            Check(weapon != null && weapon.CanBowGuard && weapon.CanImpactGuard, "bow authors physical and impact guard");
+            _defender.SetGuardHeld(false);
+            _defender.SetGuardHeld(true);
+            Check(_defender.TryGetBowGuard(out BowGuardShape shape), "bow exposes wood guard geometry");
+            Check(!_defender.TryGetGuardBlade(out _) && !_defender.TryGetGuardShield(out _), "bow cannot borrow blade or shield provenance");
+            Check(_defender.ImpactGuardRemaining>0f, "fresh bow raise starts impact window");
+            if (_defender.Loadout.Visual != null)
+                Check(Vector3.Distance(_defender.Loadout.Visual.transform.position,shape.Position)<.001f
+                    && Quaternion.Angle(_defender.Loadout.Visual.transform.rotation,shape.Rotation)<.1f,
+                    "visible bow guard agrees with authoritative wood pose");
+            int records=_authority.Riposte.BlocksRecorded;
+            Vector3 grip=shape.Position+shape.Rotation*BowGuardPose.LeftGrip;
+            Vector3 flight=(_defender.CombatCenter-grip).normalized;
+            Shooter shot=MakeShooter(grip-flight*2f,flight);
+            ResetHealth();
+            Check(Launch(shot,1), "bow guard projectile launch accepted");
+            DamageInfo hit=ResolveDamage(shot,.3f);
+            Check(hit.IsValid && hit.Blocked && hit.GuardWeaponContact && !hit.GuardBladeContact && !hit.GuardShieldContact,
+                "actual projectile hits bow wood with weapon contact provenance");
+            Check(_authority.Riposte.BlocksRecorded==records,"bow block never grants riposte");
+            var ranged=_defender.GetComponent<RangedCombat>();
+            bool remote=ranged.RemoteDriven;
+            ranged.RemoteDriven=true;
+            ranged.SetRemoteGuard(false);
+            int ammo=ranged.Magazine;
+            Check(ranged.ServerBeginDraw(out _),"bow can draw before raising guard");
+            Check(ranged.SetRemoteGuard(true)==Emberdelve.Net.Rules.CombatRefusalCode.None && !ranged.IsDrawing && ranged.Magazine==ammo,
+                "bow guard cancels draw without spending arrow");
+            Check(!ranged.ServerReleaseDraw(out _,out _,out _) && ranged.Magazine==ammo,"cancelled bow release cannot launch or spend ammo");
+            Check(ranged.ServerRequestReload()==Emberdelve.Net.Rules.CombatRefusalCode.Guarding,"bow guard refuses reload");
+            ranged.SetRemoteGuard(false);
+            ranged.RemoteDriven=remote;
+        }
+
+        private void VerifyCrossbowMuzzleClearance(GameConfig config)
+        {
+            _defender.SetGuardHeld(false);
+            var weapon = _defender.ActiveWeapon;
+            var visual = _defender.Loadout.Visual;
+            var ranged = _defender.GetComponent<RangedCombat>();
+            bool ready = weapon == _crossbow && visual != null && visual.Muzzle != null && ranged != null;
+            Check(ready, "real crossbow ready rig exposes its physical muzzle");
+            if (!ready) return;
+            Vector3 eye = _defender.AimOrigin, muzzle = _defender.GetMuzzlePosition();
+            Check(Vector3.Distance(muzzle, visual.Muzzle.position) < .0001f,
+                "authority crossbow muzzle is the actual ready model child");
+            float radius = Mathf.Max(.01f, weapon.projectileRadius * .5f);
+            Vector3 segment = muzzle - eye;
+            Check(segment.magnitude > radius * 4f + .04f, "eye and crossbow muzzle leave room for an isolated intervening wall");
+            if (segment.magnitude <= radius * 4f + .04f) return;
+            var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            wall.name = "ProjectileBlockGate_RealCrossbowMiddleWall";
+            _cleanup.Add(wall);
+            // IgnoreRaycast is also used by weapon visuals. Find a genuinely empty
+            // layer so their colliders cannot invalidate the clear-endpoint fixture.
+            int occupiedLayers = 0;
+            foreach (var collider in FindObjectsByType<Collider>(FindObjectsSortMode.None))
+                if (collider.gameObject != wall && collider.enabled && collider.gameObject.activeInHierarchy)
+                    occupiedLayers |= 1 << collider.gameObject.layer;
+            int isolatedLayer = 31;
+            while (isolatedLayer >= 0 && (occupiedLayers & (1 << isolatedLayer)) != 0) isolatedLayer--;
+            Check(isolatedLayer >= 0, "middle-wall fixture has an unused physics query layer");
+            if (isolatedLayer < 0) { Destroy(wall); return; }
+            wall.layer = isolatedLayer;
+            wall.transform.SetPositionAndRotation((eye + muzzle) * .5f, Quaternion.LookRotation(segment.normalized));
+            wall.transform.localScale = new Vector3(.18f, .18f, .02f);
+            LayerMask oldLevel = config.levelMask, oldHits = config.hitMask;
+            try
+            {
+                config.levelMask = 1 << wall.layer;
+                config.hitMask = 0;
+                Physics.SyncTransforms();
+                bool endpointsClear = !Physics.CheckSphere(eye, radius, config.levelMask, QueryTriggerInteraction.Ignore)
+                    && !Physics.CheckSphere(muzzle, radius, config.levelMask, QueryTriggerInteraction.Ignore);
+                Check(endpointsClear, "real crossbow eye and muzzle spheres are both outside the middle wall");
+                bool middleHit = Physics.SphereCast(eye, radius, segment.normalized, out RaycastHit contact,
+                    segment.magnitude, config.levelMask, QueryTriggerInteraction.Ignore) && contact.collider == wall.GetComponent<Collider>();
+                Check(middleHit, "eye-to-muzzle sweep hits the intervening wall despite clear endpoints");
+                if (!endpointsClear || !middleHit) return;
+                _clock += weapon.cooldown + 1f;
+                _authority.AdvanceKitsTo(_clock);
+                int magazine = ranged.Magazine, reserve = ranged.Reserve;
+                int flights = _authority.ActiveProjectileCount;
+                Check(magazine == 1, "real crossbow muzzle fixture starts with its single loaded bolt");
+                var blocked = new AttackIntent(_defender.CombatId, _defender.Kind, weapon, 1f,
+                    muzzle, _defender.AimDirection, weapon.rangedRange, CombatRegistry.NextSequence(_defender.CombatId), _clock);
+                Check(!_authority.LaunchProjectileAsOwner(blocked)
+                    && _authority.LastAttackRejectReason == "projectile muzzle is obstructed by level geometry",
+                    "ordinary real-player crossbow launch refuses an eye-to-muzzle wall");
+                Check(_authority.ActiveProjectileCount == flights && ranged.Magazine == magazine && ranged.Reserve == reserve,
+                    "middle-wall refusal creates no flight and spends no loaded or reserve ammunition");
+                wall.GetComponent<Collider>().enabled = false;
+                Physics.SyncTransforms();
+                var clear = new AttackIntent(_defender.CombatId, _defender.Kind, weapon, 1f,
+                    muzzle, _defender.AimDirection, weapon.rangedRange, CombatRegistry.NextSequence(_defender.CombatId), _clock);
+                Check(_authority.LaunchProjectileAsOwner(clear), "removing the middle wall permits the same real crossbow launch");
+                Check(_authority.ActiveProjectileCount == flights + 1 && ranged.Magazine == magazine - 1 && ranged.Reserve == reserve,
+                    "clear real crossbow launch creates one flight and spends exactly one loaded bolt");
+                _authority.AdvanceProjectiles(weapon.rangedRange / Mathf.Max(2f, weapon.projectileSpeed) + 1f);
+                // The following melee scenario uses this same actor. Let the accepted
+                // shot's ordinary cross-weapon cooldown expire before handing it back.
+                _clock += weapon.cooldown + 1f;
+                _authority.AdvanceKitsTo(_clock);
+            }
+            finally
+            {
+                wall.GetComponent<Collider>().enabled = false;
+                config.levelMask = oldLevel;
+                config.hitMask = oldHits;
+                Destroy(wall);
+            }
+        }
+
+        private void VerifyCrossbowGuard()
+        {
+            WeaponData weapon = _defender.ActiveWeapon;
+            Check(weapon != null && weapon.CanCrossbowGuard && weapon.CanImpactGuard, "crossbow authors guard and Impact Guard capabilities");
+            Check(_defender.TryGetCrossbowGuard(out CrossbowGuardShape shape), "crossbow exposes physical weapon guard");
+            Check(_defender.ImpactGuardRemaining > 0f, "fresh crossbow raise starts authority impact window");
+            if (_defender.Loadout.Visual != null)
+                Check(Vector3.Distance(_defender.Loadout.Visual.transform.position,shape.Position)<.001f
+                    && Quaternion.Angle(_defender.Loadout.Visual.transform.rotation,shape.Rotation)<.1f,
+                    "owner crossbow raised model matches authority pose");
+            float power = _defender.Defense.ImpactResist + weapon.impactGuardResistance * .5f;
+            DamageInfo probe = new DamageInfo(10f,shape.Position,Vector3.back,shape.Position+Vector3.forward,
+                9001,EntityKind.Enemy,DamageType.Physical,false,false,0f,impactPower:power)
+                .WithMeleeGuardContact(false,false,true);
+            Check(_defender.TryResolveGuard(probe,CombatFlowTuning.Default,out GuardResult early) && !early.Broken,
+                "timely crossbow raise holds impact above ordinary resistance");
+            _clock += weapon.impactGuardDuration + .01f;
+            Check(_defender.ImpactGuardRemaining==0f && _defender.TryResolveGuard(probe,CombatFlowTuning.Default,out GuardResult late) && late.Broken,
+                "same impact breaks crossbow after window expiry");
+            int records = _authority.Riposte.BlocksRecorded;
+            Shooter shot = MakeShooter(shape.Position+shape.Rotation*new Vector3(.2f,0,2),-(shape.Rotation*Vector3.forward));
+            ResetHealth();
+            Check(Launch(shot,1), "crossbow interception projectile launched");
+            DamageInfo hit = ResolveDamage(shot,.3f);
+            Check(hit.IsValid && hit.Blocked && hit.GuardWeaponContact && !hit.GuardBladeContact && !hit.GuardShieldContact,
+                "crossbow intercept carries weapon provenance without blade or shield classification");
+            Check(_authority.Riposte.BlocksRecorded==records, "crossbow interception grants no sword response");
+            var ranged = _defender.GetComponent<RangedCombat>();
+            bool remote = ranged.RemoteDriven;
+            ranged.RemoteDriven = true;
+            ranged.SetRemoteGuard(false);
+            int ammo = ranged.Magazine;
+            Check(ranged.ServerBeginDraw(out _), "crossbow begins uncommitted draw before guard");
+            Check(ranged.SetRemoteGuard(true)==Emberdelve.Net.Rules.CombatRefusalCode.None && !ranged.IsDrawing && ranged.Magazine==ammo,
+                "raising guard cancels draw without spending a bolt");
+            Check(!ranged.ServerBeginDraw(out _) && !ranged.ServerReleaseDraw(out _,out _,out _) && ranged.Magazine==ammo,
+                "guard rejects draw and cancelled release without ammunition loss");
+            Check(!_authority.TryStartReload(_defender.CombatSender,_defender.CombatId,out string reason) && reason=="guarding",
+                "authority refuses reload while guarding");
+            Check(ranged.ServerRequestReload()==Emberdelve.Net.Rules.CombatRefusalCode.Guarding,
+                "network reload request refuses a raised guard");
+            ranged.SetRemoteGuard(false);
+            _authority.AdvanceKitsTo(_clock);
+            Check(_authority.TryForfeitRound(_defender.CombatSender,_defender.CombatId), "reload fixture spends one authoritative bolt");
+            int magazineBeforeReload = ranged.Magazine, reserveBeforeReload = ranged.Reserve;
+            Check(reserveBeforeReload>0 && ranged.ServerRequestReload()==Emberdelve.Net.Rules.CombatRefusalCode.None,
+                "network reload request starts authority timer");
+            Check(ranged.IsReloading && ranged.Magazine==magazineBeforeReload
+                && ranged.SetRemoteGuard(true)==Emberdelve.Net.Rules.CombatRefusalCode.TooEarly && !_defender.IsGuarding,
+                "committed reload cannot be guarded or grant ammunition early");
+            _clock += ranged.ReloadDuration + .01f;
+            _authority.AdvanceKitsTo(_clock);
+            Check(!ranged.IsReloading && ranged.Magazine==magazineBeforeReload+1 && ranged.Reserve==reserveBeforeReload-1,
+                "reload completion transfers exactly one missing bolt");
+            ranged.RemoteDriven = remote;
+            VerifyCrossbowMelee(shape);
+        }
+
+        private void VerifyCrossbowMelee(CrossbowGuardShape shape)
+        {
+            WeaponData weapon = Instantiate(_sword);
+            SwingPatternData pattern = ScriptableObject.CreateInstance<SwingPatternData>();
+            _cleanup.Add(weapon); _cleanup.Add(pattern);
+            weapon.weaponId="gate_crossbow_guard_contact"; weapon.comboSteps=new ComboStep[0];
+            weapon.swingPatterns=new[]{pattern}; weapon.reach=1.6f; weapon.impactPower=.1f;
+            pattern.patternId="crossbow_guard_thrust"; pattern.kind=SwingKind.Thrust;
+            pattern.windupTime=.02f; pattern.activeTime=.1f; pattern.recoveryTime=.1f;
+            pattern.reachInset=0f; pattern.sweepRadius=.02f; pattern.maxTargets=4;
+            pattern.keys=new[]{new SwingKey(0f,Vector3.zero,0f,0f),new SwingKey(1f,Vector3.zero,0f,0f)};
+            Vector3 normal=shape.Rotation*Vector3.forward;
+            foreach(float dt in new[]{.5f,.002f})
+            {
+                _clock+=10f; _authority.StepSwings(); ResetHealth(); _defender.SetGuardHeld(true);
+                Shooter attacker=MakeShooter(shape.Position+normal*.8f,-normal,weapon);
+                attacker.TryGetAimPose(out _,out float yaw,out float pitch);
+                int recorded=_authority.Riposte.BlocksRecorded;
+                bool began=_authority.TryBeginMeleeSwingAsOwner(new MeleeSwingIntent(attacker.CombatId,weapon.weaponId,0,0,yaw,pitch,1),
+                    out int id,out string reason);
+                Check(began,"crossbow melee fixture begins: "+reason);
+                if(began)
+                {
+                    for(float elapsed=0;elapsed<1f;elapsed+=dt){_clock+=dt;_authority.StepSwings();}
+                    _authority.TryGetMeleeSwingStatus(id,out MeleeSwingStatus status);
+                    Check(status.GuardStopped && status.Hits.Count==1 && status.Hits[0].Blocked,
+                        "crossbow physical contact stops melee, dt="+dt);
+                    Check(_authority.Riposte.BlocksRecorded==recorded,"crossbow melee block does not grant riposte");
+                }
+                CombatRegistry.Unregister(attacker.CombatId,attacker); _shooters.Remove(attacker);
+            }
+            _defender.SetGuardHeld(false);
+        }
+
+        private void VerifyPhysicalShield()
+        {
+            Check(_defender.TryGetGuardShield(out GuardShieldShape shield), "held shield exposes headless physical geometry");
+            Vector3 normal = shield.Rotation * Vector3.forward;
+            Shooter shot = MakeShooter(shield.Position + normal * 3f, -normal);
+            ResetHealth();
+            Check(Launch(shot, 1), "physical shield projectile accepted");
+            DamageInfo blocked = ResolveDamage(shot, 1f);
+            Check(blocked.IsValid && blocked.Blocked && blocked.GuardShieldContact && !blocked.GuardBladeContact
+                && blocked.Location == HitLocation.Unspecified, "projectile hits shield before flesh without claiming blade contact");
+            DamageInfo transformed = DamageResolver.ApplyArmorRating(blocked.WithImpactPower(2f)
+                .WithAttackHeight(Emberdelve.BladeDefense.BladeHeight.High).WithReduction(.5f, out _), 10f);
+            Check(transformed.GuardShieldContact && !transformed.GuardBladeContact,
+                "shield provenance survives damage transforms");
+            Shooter exposed = MakeShooter(_defender.CombatCenter + _defender.transform.forward * 3f, -_defender.transform.forward);
+            ResetHealth();
+            Check(Launch(exposed, 1), "uncovered body projectile accepted");
+            DamageInfo body = ResolveDamage(exposed, 1f);
+            Check(body.IsValid && !body.Blocked && !body.GuardShieldContact,
+                "projectile through uncovered body bypasses raised shield");
+
+            WeaponData weapon = Instantiate(_sword);
+            SwingPatternData pattern = ScriptableObject.CreateInstance<SwingPatternData>();
+            _cleanup.Add(weapon); _cleanup.Add(pattern);
+            weapon.weaponId = "gate_shield_contact"; weapon.comboSteps = new ComboStep[0];
+            weapon.swingPatterns = new[] { pattern }; weapon.reach = 1.6f; weapon.impactPower = .1f;
+            pattern.patternId = "shield_contact_thrust"; pattern.kind = SwingKind.Thrust;
+            pattern.windupTime = .02f; pattern.activeTime = .1f; pattern.recoveryTime = .1f;
+            pattern.reachInset = 0f; pattern.sweepRadius = .02f; pattern.maxTargets = 4;
+            pattern.keys = new[] {new SwingKey(0f,Vector3.zero,0f,0f),new SwingKey(1f,Vector3.zero,0f,0f)};
+            foreach(float dt in new[]{.5f,.002f})
+            {
+                _clock += 10f; _authority.StepSwings(); ResetHealth(); _defender.SetGuardHeld(true);
+                Shooter attacker = MakeShooter(shield.Position + normal * .8f, -normal, weapon);
+                var behind = new MeleeBystander {CombatId=CombatRegistry.AllocateId(),TeamId=_defender.TeamId,
+                    CombatCenter=shield.Position-normal*.25f};
+                CombatRegistry.Register(behind.CombatId,behind);
+                attacker.TryGetAimPose(out _,out float yaw,out float pitch);
+                bool began = _authority.TryBeginMeleeSwingAsOwner(new MeleeSwingIntent(attacker.CombatId,
+                    weapon.weaponId,0,0,yaw,pitch,1),out int id,out string why);
+                Check(began,"shield melee accepted: "+why);
+                if(began)
+                {
+                    for(float elapsed=0f;elapsed<1f;elapsed+=dt){_clock+=dt;_authority.StepSwings();}
+                    _authority.TryGetMeleeSwingStatus(id,out MeleeSwingStatus status);
+                    Check(status.GuardStopped && status.Hits.Count==1 && status.Hits[0].Blocked && behind.Hits==0,
+                        "shield stops melee and prevents contact behind it, dt="+dt);
+                    Check(!_authority.Riposte.HasParryBonus(_defender.CombatId),"physical shield never grants parry bonus");
+                    Check(!_authority.Riposte.HasLiveParry(_defender.CombatId),"physical shield never grants the sword response");
+                }
+                CombatRegistry.Unregister(behind.CombatId,behind);
+                CombatRegistry.Unregister(attacker.CombatId,attacker); _shooters.Remove(attacker);
+            }
         }
 
         private void ResetHealth() => _defender.Health.Configure(100000, 0f, 0f);

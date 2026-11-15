@@ -1,22 +1,33 @@
 # DakaDaka — current work
 
-Updated11 November2026. Rules: ../AGENTS.md. Roadmap: ROADMAP.md.
-User priorities: finish existing features, autonomous work, minimal sufficient checks, milestone-only commits.
+Updated 13 November 2026. Latest completed slice: ground loot models (Tasks/GROUND_LOOT_MODELS_20261113.md). Prior slice: replacement torch flame based on user photo, Tasks/TORCH_REFERENCE_FLAME_20261113.md. Main code/assets updated; preserve inherited uncommitted UI/combat/stash/Royale/art work. No blanket-add/reset or mixed WIP commit. Main Editor stays open/no Play; root sole mirror executor.
 
-## Completed: MAP-03 room identity and ruined architecture
+## Latest implementation and proof
 
-Continue the open moonlit ruins with fractured wall silhouettes, distinct landmarks for10 modules and purpose-grouped props/paving. Preserve existing sockets, clear axes, stairs, interactive lighting, dormant enemies and breakable barrels. Protocol14 for geometry compatibility. Baseline6f8387a1. Report Tasks/MAP_IDENTITY_20261111.md; 40 door approaches and18 terraces validated;43 level tests, NetMovement190/0, NetFinal172/0, NetDoor37/0, NetInventory148/0 passed. Build Builds/Playable/20261111-200854-084. Live host/client traversal on seeds11 and2043687868 accepted; windows closed. Main Editor untouched; root owns mirror.
+Ground loot: all24 item definitions covered, 15 new saved world entries (treasure, ammo, ranged weapons and reused melee/shield), six existing armor/torch entries and three runtime consumables. Invisible interaction proxy/custody unchanged. Hidden serialized visual cache avoids scene-reload duplicate models; authored recovered ammo suppresses legacy shaft boxes. Inventory icons unchanged in this slice.
 
-## Accepted foundation
+Build20261113-223941-399 PASS; Visual216/0, NetInventory148/0; all24 Configure twice coverage passes, main compile clean. Gallery and actual seed1344668317 crossbow/reliquary view, ordinary F pickup accepted by server, bag entry and world removal verified. Logs/acceptance/loot-models-20261113. Test players closed. Known allocator error recurred; not fixed. No mixed-tree commit.
 
-- MAP-02: mostly open sky,1.8/3.6m terraces and stairs, dormant undead and breakable barrels. Tasks/MOONLIT_RUINS_20261109.md. Solid platforms, not overlapping walkable floors; ground enemy spawns.
-- HEAL-01: potion1.8s then45HP/4s, no cancellation; bandage5s then25HP instantly, interruptible. Model/owner-observer animation, starter inventory, focused/network/live proof passed. Commit6f8387a1; build Builds/Playable/20261111-190017-299. Tasks/HEAL_BANDAGE_20261111.md.
-- Controls: Q/E skills,1/2 weapons, hold3/4 for two3-slot quick wheels, F interaction, LMB held-item use. Ammo replenishes drawn matching weapon directly. Tasks/QUICK_HANDS_20261111.md and AMMO_DRAWN_20261111.md.
-- LIGHT-01: held inventory torch, source-based hands lighting, synchronized extinguish/relight. Tasks/LIGHTING_TORCH_20261111.md.
-- Loot/inventory: paired equipment/bag and container/corpse panels; exact server transfers. Whole CC0 human source supplies class bodies and first-person hands; lowered sword hilt and bow accepted.
+Torch now uses one transparent animated volume with original tileable 3D noise: folded hot sheets, translucent gaps, fire around cloth head; sparks/smoke remain auxiliary particles. Runtime anchor follows actual hand pose. Light4.5/range12 preserved. Old five-system leaflet appearance is superseded, not claimed accepted. Body/ground/icon unchanged in this slice.
 
-## Next actions and limits
+Final playable Builds/Playable/20261113-215305-744/EmberdelveNet.exe PASS; main compile clean. Visual216/0 and Hands92/0 in214810-676 before final cosmetic lower-density/radiance correction; final correction verified by fresh build/live review. No full-suite claim. Seed1344668317 first-person movement/turn, observer flame/light and stow removal visually checked. Evidence Logs/acceptance/torch-volume-20261113/final-seed-1344668317. Short prior-version wall-clock p50 visible3.916ms/stowed3.732ms on RTX5070 with two clients; not GPU or16-player proof. User judges likeness to photo; no exact-copy claim.
 
-1. Next map slice can deepen room layouts and encounter/loot placement; current work is the accepted visual identity pass, not final campaign art. Follow the next user direction.
-2. Keep separate: sleeve seams, observer bow draw, crossbow/reload, brief magenta impact, persistent stash. No new unrelated systems or broad test reruns.
-3. Preserve/review inherited Art/Materials and Human.fbx import drift, Assets/Logs and Pipeline settings separately; never blanket-add.
+Native ThreadsafeLinearAllocator invalid-pointer error recurred in final owner, predating this slice. Deferred memory investigation remains open; runtime is not error-free. Dedicated review players shut down; main Editor untouched.
+
+## Preserved prior work
+
+Steel cuirass correction: shaped breast/back plates, tapered waist, rolled rims, closures and fauld lames; stable boiled_cuirass ID/stats, Steel Cuirass display. Tasks/STEEL_CUIRASS_20261113.md. Build165256-037, Visual218/0, live two-client equip/remove/walk/torchlight review. Other armor models/catalog/icons and owner/observer equipment views retained (Tasks/ITEM_MODELS_20261113.md, protocol41). Armor build161307-136; Visual216, Hands92, NetCombat397, NetInventory148, NetFinal172 passed plus focused AvatarArmorWire9/9 and Visual186/186. Cloaks bone-following without cloth; helmet/trouser baseline unchanged.
+
+Prior torch body/model/icon and light work: TORCH_POLISH_20261113 and TORCH_WRAP_20261113. Their particle appearance is replaced by current volume. Environment materials/uneven floor/props/moon/stars/clouds retained: ENVIRONMENT_SURFACES_20261113, FIRE_FLOOR_20261113, ROOM_PROPS_SKY_20261113. Free/CC0 and original asset provenance in ASSET_PLAN; no Dark and Darker assets imported.
+
+Physical six-pocket belt complete (three on3, three on4): potion/bandage cap5, torch1, actual bag custody, server moves/merges, profile schema6. Tasks/PHYSICAL_QUICK_BELT_20261113.md. Combined1391 EditMode cases after focused corrections, not fresh full aggregate. Relevant Hands/Loadout/NetInventory/NetExtraction/NetFinal/NetRoyale and graphics UI passed; isolated preparation restart preserved items.
+
+Royale: three maps ruins→crypts→infernal; solo16, duo16, trio15, temporary destination bots; cross-session human matchmaking absent. Shrinking zone and three randomized party portal waves, last at final60s. Controlled floor custody/cleanup/extraction passed; ordinary full-match final evacuation/profile restart acceptance remains open (Tasks/SQUIRE_ROYALE_20261113.md).
+
+## Next three actions
+
+1. Follow user visual feedback on ground loot and torch; retain gallery/live evidence. New loot inventory icons, further armor variants/cloth animation remain separate scope.
+2. Finish Royale ordinary full-match final evacuation/profile restart acceptance; controlled fixtures do not replace it.
+3. Return to explicitly deferred native memory investigation when requested; preserve logs, no engine/package upgrades or unrelated drift cleanup.
+
+

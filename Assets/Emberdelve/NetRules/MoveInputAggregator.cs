@@ -40,6 +40,12 @@ namespace Emberdelve.Net.Rules
             _historyCount = 0;
         }
 
+        /// <summary>A new server-issued movement generation has its own sequence window.</summary>
+        public void ResetGeneration()
+        {
+            ClearPendingInput(); _nextSeq = 1;
+        }
+
         public void Sample(float moveX, float moveY, bool sprintHeld, bool jumpPressed, bool crouchPressed, float yaw, float pitch)
         {
             _moveX = moveX;

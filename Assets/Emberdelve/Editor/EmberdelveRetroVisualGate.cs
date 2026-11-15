@@ -250,24 +250,44 @@ namespace Emberdelve.EditorTools
 
             Check(guids.Length > 0 && unresolved == 0, "every WeaponData ("+ guids.Length + ") maps to a model xor is explicitly unmapped (" + unresolved + " unresolved)");
 
-            // Models: URP Lit materials, no colliders, a real size.
+            // Mesh models stay URP Lit. The held torch additionally owns the existing authored
+            // transparent particle flame; it must not turn arbitrary unlit meshes into valid models.
+            Material heldFlame = AssetDatabase.LoadAssetAtPath<Material>(EmberdelvePaths.Materials + "/Torch_Flame.mat");
             int bad = 0;
             for (int i = 0; i < set.entries.Length; i++)
             {
                 GameObject prefab = set.entries[i] != null ? set.entries[i].prefab : null;
                 bool ok = prefab != null && prefab.GetComponentsInChildren<Collider>(true).Length == 0 && set.entries[i].length > 0.1f;
                 Renderer[] renderers = prefab != null ? prefab.GetComponentsInChildren<Renderer>(true) : new Renderer[0];
+                var torch = prefab != null && set.entries[i].weaponId == HandheldTorchVisual.WeaponId
+                    && AssetDatabase.GetAssetPath(prefab) == EmberdelveTorchContent.PrefabPath
+                    ? prefab.GetComponent<HandheldTorchVisual>() : null;
                 ok &= renderers.Length > 0;
                 for (int r = 0; r < renderers.Length; r++)
                 {
                     Material[] materials = renderers[r].sharedMaterials;
-                    for (int m = 0; m < materials.Length; m++) ok &= materials[m] != null && materials[m].shader.name == "Universal Render Pipeline/Lit";
+                    for (int m = 0; m < materials.Length; m++)
+                    {
+                        Material material = materials[m];
+                        if (renderers[r] is ParticleSystemRenderer && torch != null)
+                        {
+                            ok &= torch.flame != null && renderers[r].transform.IsChildOf(torch.flame)
+                                && (renderers[r].name == EmberdelveTorchFactory.FlameName || renderers[r].name == EmberdelveTorchFactory.EmbersName)
+                                && renderers[r].GetComponent<ParticleSystem>() != null
+                                && material != null && material == heldFlame && material.shader != null
+                                && material.shader.name == "Universal Render Pipeline/Particles/Unlit"
+                                && material.HasProperty("_Surface") && material.GetFloat("_Surface") == 1f
+                                && material.HasProperty("_ZWrite") && material.GetFloat("_ZWrite") == 0f
+                                && material.HasProperty("_BaseMap") && material.GetTexture("_BaseMap") != null;
+                        }
+                        else ok &= material != null && material.shader != null && material.shader.name == "Universal Render Pipeline/Lit";
+                    }
                 }
 
-                if (!ok) { bad++; Debug.LogError(Tag + " weapon model of " + (set.entries[i] != null ? set.entries[i].weaponId : "null") + " is not URP Lit / has colliders"); }
+                if (!ok) { bad++; Debug.LogError(Tag + " weapon model of " + (set.entries[i] != null ? set.entries[i].weaponId : "null") + " has invalid mesh/flame material or colliders"); }
             }
 
-            Check(set.entries.Length > 0 && bad == 0, "every weapon model ("+ set.entries.Length + ") has URP Lit materials and no colliders (" + bad + " bad)");
+            Check(set.entries.Length > 0 && bad == 0, "every weapon model ("+ set.entries.Length + ") has URP Lit mesh materials, only the authored held-torch particle exception, and no colliders (" + bad + " bad)");
 
             // Enemy prefabs no longer depend on a KayKit weapon mesh.
             int kay = 0;
@@ -319,21 +339,29 @@ namespace Emberdelve.EditorTools
                 {
                     string path = AssetDatabase.GUIDToAssetPath(guids[i]);
                     TextureImporter importer = AssetImporter.GetAtPath(path) as TextureImporter;
-                    if (importer == null || importer.filterMode != FilterMode.Point || importer.maxTextureSize > 512)
+                    bool palette = path.StartsWith(EmberdelveTextureImport.KayKitRoot);
+                    int maxSize = palette ? 256 : path.StartsWith(EmberdelveTextureImport.TextureRoot) ? 2048 : 1024;
+                    FilterMode filter = palette ? FilterMode.Point : FilterMode.Trilinear;
+                    bool correct = importer != null && importer.filterMode == filter && importer.maxTextureSize == maxSize;
+                    if (!palette) correct = correct && importer.mipmapEnabled && importer.anisoLevel == 8;
+                    if (!correct)
                     {
                         bad++;
-                        Debug.LogError(Tag + " texture not retro: " + path + " filter=" + (importer != null ? importer.filterMode.ToString() : "?") + " max=" + (importer != null ? importer.maxTextureSize : -1));
+                        Debug.LogError(Tag + " texture import does not match its material family: " + path +
+                            " expected=" + filter + "/" + maxSize + " actual=" +
+                            (importer != null ? importer.filterMode.ToString() : "?") + "/" +
+                            (importer != null ? importer.maxTextureSize : -1));
                     }
                 }
 
-                Check(bad == 0, roots[r] + ": every texture is Point filtered with max size <= 512 (" + bad + " bad)");
+                Check(bad == 0, roots[r] + ": palette or source-detail settings match every texture (" + bad + " bad)");
             }
 
             TextureImporter atlas = AssetImporter.GetAtPath(EmberdelveVendorImport.SkeletonTexturePath) as TextureImporter;
             Check(atlas != null && atlas.maxTextureSize == 256 && !atlas.mipmapEnabled && atlas.textureCompression == TextureImporterCompression.Uncompressed,
                 "KayKit atlas: 256 px, no mipmaps, uncompressed");
 
-            // Normal maps stay normal maps (Point filtering changes the look, not the encoding).
+            // Filtering changes presentation, never the normal-map encoding.
             TextureImporter normal = AssetImporter.GetAtPath(EmberdelveVisualSetup.TexturePath("Bricks100", "Normal", "png")) as TextureImporter;
             Check(normal != null && normal.textureType == TextureImporterType.NormalMap, "Bricks100 normal map is still a NormalMap");
         }
@@ -352,7 +380,7 @@ namespace Emberdelve.EditorTools
             {
                 Check(material.GetFloat("_ColorLevels") >= 2f && material.GetFloat("_ColorLevels") <= 64f, "retro colour levels " + material.GetFloat("_ColorLevels") + " are a low bit depth");
                 Check(material.GetFloat("_PixelSize") >= 1f, "retro pixel size " + material.GetFloat("_PixelSize"));
-                Check(material.GetFloat("_Strength") > 0f, "retro strength > 0 (the pass is not neutered)");
+                Check(Mathf.Approximately(material.GetFloat("_Strength"), 0f), "reference-readability preset leaves retro quantisation/pixelation off");
             }
 
             RenderPipelineAsset active = QualitySettings.renderPipeline != null ? QualitySettings.renderPipeline : GraphicsSettings.defaultRenderPipeline;

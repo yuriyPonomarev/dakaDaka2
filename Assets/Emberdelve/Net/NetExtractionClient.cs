@@ -7,7 +7,7 @@ using UnityEngine;
 namespace Emberdelve.Net
 {
     /// <summary>Owner bridge that turns the local hold lifecycle into server requests.</summary>
-    public sealed class NetExtractionClient : MonoBehaviour, IExtractionInteractionAuthority
+    public sealed class NetExtractionClient : MonoBehaviour, IExtractionInteractionAuthority, IExtractionFloorAuthority
     {
         private const float HeartbeatSeconds = 0.25f;
 
@@ -37,6 +37,14 @@ namespace Emberdelve.Net
             if (now < _nextHeartbeatAt) return;
             _nextHeartbeatAt = now + HeartbeatSeconds;
             SendHeartbeat(sequence);
+        }
+
+        public bool AcceptsExtractionFloor(int floor)
+        {
+            if (_owner == null || !_owner.IsSpawned || _rig == null || !_rig.IsInPlay || _rig.IsDead) return false;
+            var clock = _owner.RaidClock.Value;
+            return clock.IsValid && !clock.Waiting && !clock.Expired && clock.Floor == floor
+                && (floor == 0 || (floor == 3 && clock.Enabled && clock.MovementGeneration == _rig.FloorMovementGeneration));
         }
 
         public bool BeginExtractionHold()

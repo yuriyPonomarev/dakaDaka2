@@ -64,10 +64,14 @@ namespace Emberdelve.UI
         private void LateUpdate()
         {
             var controller = HotbarController.Local;
-            bool open = controller != null && controller.isActiveAndEnabled && controller.WheelOpen;
+            var actor = controller != null ? controller.GetComponent<Emberdelve.Player.PlayerRig>() : null;
+            bool available = controller != null && controller.isActiveAndEnabled && controller.Bag != null
+                && actor != null && actor.IsAlive && actor.IsInPlay;
+            bool open = available && controller.WheelOpen;
             _wheel.gameObject.SetActive(open);
-            _clientStrip.gameObject.SetActive(NetRole.IsClientOnly && controller != null && !InventoryInputFocus.OwnsEscape);
-            if (controller != null && NetRole.IsClientOnly)
+            bool showStrip = NetRole.IsClientOnly && available && !InventoryInputFocus.OwnsEscape;
+            _clientStrip.gameObject.SetActive(showStrip);
+            if (showStrip)
             {
                 var bag = controller.Bag;
                 string held = bag.HeldItem != null ? bag.HeldItem.displayName : "weapon";
@@ -76,8 +80,8 @@ namespace Emberdelve.UI
             if (!open) { _wasOpen = false; return; }
             _title.text = (controller.WheelGroup + 3) + "\nQUICK " + (controller.WheelGroup + 1);
             _hint.text = controller.Assigning
-                ? "Choose one of three slots. Release " + (controller.WheelGroup + 3) + " to assign. Esc cancels."
-                : "Choose an item. Release " + (controller.WheelGroup + 3) + " to hold / replenish ammo. 1 / 2 return to weapons.";
+                ? "Choose one of three slots. Release " + (controller.WheelGroup + 3) + " to move into the belt. Esc cancels."
+                : "Choose an item. Release " + (controller.WheelGroup + 3) + " to hold. LMB uses it; 1 / 2 return to weapons.";
             for (int i = 0; i < 3; i++)
             {
                 int slot = controller.WheelGroup * 3 + i;
@@ -92,7 +96,7 @@ namespace Emberdelve.UI
                     _items[i] = item;
                     LootPanelStyle.Decorate(_cards[i], item, found ? stack.Instance : null);
                 }
-                _names[i].text = (i + 1) + "  " + (item == null ? "Empty" : item.displayName + (stack.Count > 1 ? " x" + stack.Count : ""));
+                _names[i].text = (i + 1) + "  " + (item == null ? "Empty" : item.displayName + (item.healAmount > 0 ? " " + stack.Count + "/5" : " x" + stack.Count));
             }
             _wasOpen = true;
         }

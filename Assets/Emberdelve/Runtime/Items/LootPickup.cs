@@ -71,6 +71,12 @@ namespace Emberdelve.Items
         bool TryPrepareDropped(ItemInstance instance, Vector3 position, out IPreparedGroundDrop prepared, out string reason);
     }
 
+    public interface IGroundStackSink
+    {
+        bool TryPrepareDroppedStack(ItemData item, int amount, Vector3 position,
+            out IPreparedGroundDrop prepared, out string reason);
+    }
+
     /// <summary>Owner-side bridge for a public pickup. The server resolves and validates the item id.</summary>
     public interface IFloorLootInteractionAuthority
     {
@@ -212,9 +218,10 @@ namespace Emberdelve.Items
         private Vector3 _home;
         private float _phase;
         private ulong _networkLootId;
-        private GameObject _potionVisual;
-        private ItemData _potionVisualItem;
-        private bool _potionProxyWasEnabled;
+        // Level authoring also calls Configure: retain its cosmetic child across scene save/load.
+        [SerializeField, HideInInspector] private GameObject _authoredVisual;
+        [SerializeField, HideInInspector] private ItemData _authoredVisualItem;
+        [SerializeField, HideInInspector] private bool _proxyWasEnabled;
 
 
         public ItemData Item => _instance != null ? _instance.Definition : item;
@@ -249,7 +256,7 @@ namespace Emberdelve.Items
             ulong bits = RngMix.Combine(unchecked((ulong)(long)Mathf.RoundToInt(p.x * 64f)),
                                         unchecked((ulong)(long)Mathf.RoundToInt(p.z * 64f)));
             _phase = (bits >> 40) / 16777216f * Mathf.PI * 2f;
-            RefreshPotionVisual();
+            RefreshAuthoredVisual();
         }
 
         public void Configure(ItemData newItem, int newAmount, MonoBehaviour newHost)
@@ -259,47 +266,59 @@ namespace Emberdelve.Items
             amount = Mathf.Max(1, newAmount);
             lootHost = newHost;
             _host = newHost as ILootHost;
-            RefreshPotionVisual();
+            RefreshAuthoredVisual();
             ProjectileRecovery.DressPickup(gameObject,Item);
         }
 
-        // All creation paths keep their existing interaction proxy. Only the visible healing supply changes.
-        private void RefreshPotionVisual()
+        // All creation paths keep their existing interaction proxy. Only the visible item model changes.
+        private void RefreshAuthoredVisual()
         {
             ItemData shown = Item;
             bool potion = shown != null && (shown.IsBandage || shown.healAmount > 0);
-            if (_potionVisual != null && potion && _potionVisualItem == shown) return;
+            var catalog = ItemVisualCatalog.Load();
+            ItemVisualCatalog.Entry authored = null;
+            bool modeled = shown != null && catalog != null && catalog.TryGet(shown.itemId, out authored) && authored.worldPrefab != null;
+            if (_authoredVisual != null && (potion || modeled) && _authoredVisualItem == shown) return;
             Renderer proxy = GetComponent<Renderer>();
-            if (_potionVisual != null)
+            if (_authoredVisual != null)
             {
-                _potionVisual.SetActive(false);
-                if (Application.isPlaying) Destroy(_potionVisual); else DestroyImmediate(_potionVisual);
-                _potionVisual = null;
-                _potionVisualItem = null;
-                if (proxy != null) proxy.enabled = _potionProxyWasEnabled;
+                _authoredVisual.SetActive(false);
+                if (Application.isPlaying) Destroy(_authoredVisual); else DestroyImmediate(_authoredVisual);
+                _authoredVisual = null;
+                _authoredVisualItem = null;
+                if (proxy != null) proxy.enabled = _proxyWasEnabled;
             }
-            if (!potion) return;
-            _potionProxyWasEnabled = proxy != null && proxy.enabled;
-            _potionVisual = shown.IsBandage
+            if (!potion && !modeled) return;
+            _proxyWasEnabled = proxy != null && proxy.enabled;
+            if (modeled)
+            {
+                // Cancel the proxy's non-uniform scale before rotating the item into its resting pose.
+                _authoredVisual = new GameObject("ItemLootVisual");
+                _authoredVisual.transform.SetParent(transform, false);
+                var model = Instantiate(authored.worldPrefab, _authoredVisual.transform, false);
+                // Front faces up; full-length cloaks no longer extend below the ground proxy.
+                model.transform.localRotation = Quaternion.Euler(-90f, 0f, 0f);
+            }
+            else _authoredVisual = shown.IsBandage
                 ? Emberdelve.Player.BandageVisual.Create(shown, transform)
                 : Emberdelve.Player.PotionBottleVisual.Create(shown, transform);
-            _potionVisualItem = shown;
-            foreach (Transform part in _potionVisual.GetComponentsInChildren<Transform>()) part.gameObject.layer = gameObject.layer;
+            _authoredVisualItem = shown;
+            foreach (Transform part in _authoredVisual.GetComponentsInChildren<Transform>()) part.gameObject.layer = gameObject.layer;
             if (proxy != null) proxy.enabled = false;
-            FitPotionVisual();
+            FitAuthoredVisual();
         }
 
         private void LateUpdate()
         {
             // Network floor snapshots assign the root proxy scale after ConfigureNetworkReplica.
-            FitPotionVisual();
+            FitAuthoredVisual();
         }
 
-        private void FitPotionVisual()
+        private void FitAuthoredVisual()
         {
-            if (_potionVisual == null) return;
+            if (_authoredVisual == null) return;
             Vector3 scale = transform.lossyScale;
-            _potionVisual.transform.localScale = new Vector3(
+            _authoredVisual.transform.localScale = new Vector3(
                 1f / Mathf.Max(.0001f, Mathf.Abs(scale.x)),
                 1f / Mathf.Max(.0001f, Mathf.Abs(scale.y)),
                 1f / Mathf.Max(.0001f, Mathf.Abs(scale.z)));
@@ -344,7 +363,7 @@ namespace Emberdelve.Items
             amount = 1;
             lootHost = newHost;
             _host = newHost as ILootHost;
-            RefreshPotionVisual();
+            RefreshAuthoredVisual();
             ProjectileRecovery.DressPickup(gameObject,Item);
         }
 

@@ -25,11 +25,7 @@ namespace Emberdelve.Feedback
 
         private AudioSource _source;
 
-        private AudioClip _swing;
-        private AudioClip _impact;
-        private AudioClip _block;
         private AudioClip _draw;
-        private AudioClip _bowRelease;
         private AudioClip _hurt;
         private AudioClip _pickup;
         private AudioClip _dry;
@@ -47,13 +43,12 @@ namespace Emberdelve.Feedback
             _source = gameObject.AddComponent<AudioSource>();
             _source.playOnAwake = false;
             _source.spatialBlend = 0f;
-            _source.volume = masterVolume;
+            _source.volume = 1f;
+            _source.reverbZoneMix = 0f;
+            if (GetComponent<DungeonAmbience>() == null) gameObject.AddComponent<DungeonAmbience>();
+            if (GetComponent<WorldAudio>() == null) gameObject.AddComponent<WorldAudio>();
 
-            _swing = ProceduralAudio.SwordSwing();
-            _impact = ProceduralAudio.Impact();
-            _block = ProceduralAudio.Block();
             _draw = ProceduralAudio.BowDraw();
-            _bowRelease = ProceduralAudio.BowRelease();
             _hurt = ProceduralAudio.Hurt();
             _pickup = ProceduralAudio.Pickup();
             _dry = ProceduralAudio.DryFire();
@@ -82,6 +77,10 @@ namespace Emberdelve.Feedback
 
         private void Update()
         {
+            var worldAudio = GetComponent<WorldAudio>();
+            if (worldAudio != null) worldAudio.Volume = masterVolume;
+            WorldAudio.BindListener(_player != null && _player.Look != null ? _player.Look.AimTransform : null);
+            if (_subscribedToPlayer && _player == null) UnhookPlayer();
             if (_subscribedToPlayer) return;
             if (GameServices.TryGet<RunDirector>(out RunDirector director)) HookPlayer(director.Player);
         }
@@ -96,7 +95,7 @@ namespace Emberdelve.Feedback
 
             if (_melee != null)
             {
-                _melee.AttackStarted += OnMeleeSwingStarted;
+
                 _melee.WallStopped += OnMeleeWallStopped;
             }
 
@@ -119,7 +118,7 @@ namespace Emberdelve.Feedback
 
             if (_melee != null)
             {
-                _melee.AttackStarted -= OnMeleeSwingStarted;
+
                 _melee.WallStopped -= OnMeleeWallStopped;
             }
 
@@ -132,11 +131,12 @@ namespace Emberdelve.Feedback
             _subscribedToPlayer = false;
         }
 
-        private void OnMeleeSwingStarted(MeleeSwingIntent intent) => Play(_swing);
+
 
         private void OnMeleeWallStopped(MeleeSwingStatus status)
         {
             if (_wallFeedback != null) _wallFeedback.Play(status);
+            WorldAudio.Play(WorldSound.Metal, _player != null ? _player.AimOrigin : transform.position, .65f);
         }
 
         private void OnAttackStarted(AttackIntent intent)
@@ -144,12 +144,12 @@ namespace Emberdelve.Feedback
             if (intent.Weapon == null) return;
 
             if (intent.Weapon.IsRanged) Play(_draw);
-            else Play(_swing);
         }
 
         private void OnShotFired()
         {
-            Play(_bowRelease);
+            if (NetRole.IsClientOnly) return;
+            WorldAudio.Play(WorldSound.Bow, _player != null ? _player.AimOrigin : transform.position, .8f);
         }
 
         private void OnDamageDealt(int playerId, HitFeedback feedback)
@@ -157,12 +157,12 @@ namespace Emberdelve.Feedback
             if (!PlayerView.Shows(playerId)) return;
             if (feedback.Blocked)
             {
-                Play(_block);
+
                 ImpactFlash.Spawn(feedback.Point, new Color(0.55f, 0.75f, 1f), blockFlashSize);
             }
             else
             {
-                Play(_impact);
+
                 Color color = feedback.TargetKind == EntityKind.Enemy
                     ? new Color(1f, 0.85f, 0.45f)
                     : new Color(1f, 0.4f, 0.35f);
@@ -194,6 +194,12 @@ namespace Emberdelve.Feedback
             if (!PlayerView.Shows(playerId)) return;
             if (result.Outcome == RunState.Extracted) Play(_extract);
             else Play(_death);
+        }
+
+        private void OnDestroy()
+        {
+            foreach (AudioClip clip in new[] { _draw, _hurt, _pickup, _dry, _extract, _death })
+                if (clip != null) Destroy(clip);
         }
 
         private void Play(AudioClip clip)

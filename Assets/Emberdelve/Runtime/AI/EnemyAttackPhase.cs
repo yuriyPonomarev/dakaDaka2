@@ -27,7 +27,7 @@ namespace Emberdelve.AI
 
         public static EnemyAttackPhase Recovery(in MeleeSwingStatus status)
         {
-            if (status.WallStopped)
+            if (status.Recoiled)
             {
                 // The authority stops at this exact sweep sample, potentially before ActiveEnd.
                 float stoppedAt = status.Timing.Windup + status.Timing.Active * status.WallContactSample /

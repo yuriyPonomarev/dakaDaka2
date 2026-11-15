@@ -182,7 +182,7 @@ namespace Emberdelve.UI
 
         public bool Submit(InventoryCommandKind kind, InventorySlot source, InventorySlot target,
             Vector2Int destinationCell, EquipmentSlot destinationSlot, Guid expectedSourceGearUid,
-            Guid expectedTargetGearUid, out string reason)
+            Guid expectedTargetGearUid, out string reason, int amount = 0)
         {
             reason = null;
             IInventoryAuthority authority = _inventory != null ? _inventory.CommandAuthority : null;
@@ -196,7 +196,7 @@ namespace Emberdelve.UI
             Guid targetUid = target.Instance != null ? target.Instance.Uid : Guid.Empty;
             if (!authority.TryCreateLocalCommand(kind, source.StackId, target.StackId, destinationCell,
                     destinationSlot, sourceUid, expectedTargetGearUid != Guid.Empty ? expectedTargetGearUid : targetUid,
-                    out InventoryCommand command, out reason))
+                    out InventoryCommand command, out reason, amount))
                 return false;
 
             InventoryCommandResult result = authority.Submit(_rig, command);
@@ -230,7 +230,7 @@ namespace Emberdelve.UI
 
             if (target == 0 || !_inventory.TryGetStack(target, out InventorySlot stack))
             {
-                GameEvents.RaiseToast(ToastOwner, "Point at or select a usable item to bind it to the hotbar");
+                GameEvents.RaiseToast(ToastOwner, "Point at or select a potion, bandage or torch to move it to the belt");
                 return false;
             }
 
@@ -240,7 +240,7 @@ namespace Emberdelve.UI
                 return false;
             }
 
-            GameEvents.RaiseToast(ToastOwner, $"{stack.Item.displayName} bound to hotbar {hotbarSlot + 1}");
+            GameEvents.RaiseToast(ToastOwner, $"{stack.Item.displayName} moved to belt {hotbarSlot / 3 + 3}, slot {hotbarSlot % 3 + 1}");
             return true;
         }
     }

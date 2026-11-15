@@ -3,6 +3,7 @@ using UnityEngine;
 using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.Stats;
+using Emberdelve.Player;
 
 namespace Emberdelve.Combat
 {
@@ -50,6 +51,11 @@ namespace Emberdelve.Combat
             public float Depth;
             public Vector3 Point;
             public float T;
+            public bool GripContact;
+            public bool GuardBladeContact;
+            public bool GuardShieldContact;
+            public bool GuardWeaponContact;
+            public float EntryDistance;
         }
 
         /// <summary>The combo chain an instigator is in: authority state, never taken from an intent.</summary>
@@ -123,6 +129,7 @@ namespace Emberdelve.Combat
         private readonly Queue<int> _finishedSwingIds = new Queue<int>();
         private readonly List<SwingRecord> _stepBuffer = new List<SwingRecord>();
         private readonly List<ICombatEntity> _registryBuffer = new List<ICombatEntity>(32);
+        private readonly List<Contact> _sampleContacts = new List<Contact>(8);
         private readonly List<HitShape> _shapeBuffer = new List<HitShape>(16);
         private int _nextSwingId = 1;
 
@@ -735,7 +742,7 @@ namespace Emberdelve.Combat
             if (rec.Stopped)
             {
                 rec.Phase = SwingPhase.Recovery;
-                if (ts >= rec.StopTs + rec.Timing.WallRecoil) FinishSwing(rec, SwingEndReason.WallStop, rec.StopTs + rec.Timing.WallRecoil);
+                if (ts >= rec.StopTs + rec.Timing.WallRecoil) FinishSwing(rec, rec.EndReason, rec.StopTs + rec.Timing.WallRecoil);
                 return;
             }
 
@@ -808,6 +815,34 @@ namespace Emberdelve.Combat
             IReadOnlyList<ICombatEntity> all = CombatRegistry.All;
             for (int i = 0; i < all.Count; i++) _registryBuffer.Add(all[i]);
 
+            // Gather body and blade contacts before selecting targets, independently of registry order.
+            // A held interception ends later contacts/samples; a broken guard permits continuation.
+            _sampleContacts.Clear();
+            for (int i = 0; i < _registryBuffer.Count; i++)
+            {
+                ICombatEntity target = _registryBuffer[i];
+                if (!(target is PlayerRig defender) || target == rec.Instigator || target.IsDead
+                    || !defender.gameObject.activeInHierarchy || !CombatTeams.AreHostile(rec.Instigator, target)
+                    || rec.Hit.Contains(target.CombatId) || FindPending(rec, target.CombatId) != null
+                    || (target.CombatCenter - frame.Eye).sqrMagnitude > reachSqr
+                    || !defender.TrySweepGuard(bladeBase, clippedTip, sweepRadius, out float distance, out bool shieldContact, out bool weaponContact)) continue;
+                _shapeBuffer.Clear();
+                defender.CollectHitShapes(_shapeBuffer);
+                float bodyDistance = float.PositiveInfinity;
+                for (int j = 0; j < _shapeBuffer.Count; j++)
+                {
+                    HitShape shape = _shapeBuffer[j];
+                    if (TrySweepCapsule(bladeBase, dir, clip, shape.A, shape.B,
+                            shape.Radius + sweepRadius, out float entry)) bodyDistance = Mathf.Min(bodyDistance, entry);
+                }
+                if (distance > bodyDistance) continue;
+                _sampleContacts.Add(new Contact
+                {
+                    Target = target, FirstSample = sample, LastWindowSample = sample,
+                    Location = HitLocation.Unspecified, Point = bladeBase + dir * distance,
+                    T = length > 1e-5f ? distance / length : 0f, GuardBladeContact = !shieldContact && !weaponContact, GuardShieldContact = shieldContact, GuardWeaponContact = weaponContact, EntryDistance = distance
+                });
+            }
             for (int i = 0; i < _registryBuffer.Count; i++)
             {
                 ICombatEntity target = _registryBuffer[i];
@@ -824,6 +859,7 @@ namespace Emberdelve.Combat
                 _shapeBuffer.Clear();
                 provider.CollectHitShapes(_shapeBuffer);
 
+                float entryDistance = float.PositiveInfinity;
                 float bestDepth = -1f;
                 HitLocation bestLocation = HitLocation.Unspecified;
                 Vector3 bestPoint = default;
@@ -831,6 +867,8 @@ namespace Emberdelve.Combat
                 for (int s = 0; s < _shapeBuffer.Count; s++)
                 {
                     HitShape shape = _shapeBuffer[s];
+                    if (TrySweepCapsule(bladeBase, dir, clip, shape.A, shape.B,
+                            shape.Radius + sweepRadius, out float entry)) entryDistance = Mathf.Min(entryDistance, entry);
                     float depth = SwingGeometry.SweepDepth(bladeBase, clippedTip, shape.A, shape.B, shape.Radius, sweepRadius, out Vector3 onBlade);
                     if (depth < 0f) continue;
 
@@ -849,28 +887,61 @@ namespace Emberdelve.Combat
 
                 if (bestDepth < 0f) continue;
 
-                Contact contact = FindPending(rec, target.CombatId);
-                if (contact == null)
+                // A hand on the grip can be the first flesh touched even when the blade
+                // continues deeper into the head/torso in this same sample. Preserve that
+                // Arms wound rather than upgrading it through the ordinary depth selector.
+                bool gripContact = target is PlayerRig gripOwner && gripOwner.TryGetGuardGripHitShape(out HitShape grip)
+                    && TrySweepCapsule(bladeBase, dir, clip, grip.A, grip.B, grip.Radius + sweepRadius, out float gripEntry)
+                    && gripEntry <= entryDistance + .00001f;
+                if (gripContact)
                 {
-                    if (rec.Hits.Count + rec.Pending.Count >= pattern.maxTargets) continue;
-
-                    rec.Pending.Add(new Contact
-                    {
-                        Target = target,
-                        FirstSample = sample,
-                        LastWindowSample = sample + windowSamples,
-                        Location = bestLocation,
-                        Depth = bestDepth,
-                        Point = bestPoint,
-                        T = bestT
-                    });
+                    bestLocation = HitLocation.Arms;
+                    bestPoint = bladeBase + dir * entryDistance;
+                    bestT = length > 1e-5f ? Mathf.Clamp01(entryDistance / length) : 0f;
                 }
-                else if (sample <= contact.LastWindowSample && IsBetterContact(bestDepth, bestLocation, contact.Depth, contact.Location))
+
+                _sampleContacts.Add(new Contact
                 {
-                    contact.Depth = bestDepth;
-                    contact.Location = bestLocation;
-                    contact.Point = bestPoint;
-                    contact.T = bestT;
+                    Target = target, FirstSample = sample, LastWindowSample = sample + windowSamples,
+                    Location = bestLocation, Depth = bestDepth, Point = bestPoint, T = bestT,
+                    GripContact = gripContact, EntryDistance = entryDistance
+                });
+            }
+
+            // Flesh and metal compete for the same target budget in actual entry order.
+            // Never reserve a slot for a farther guard before a nearer body was considered.
+            _sampleContacts.Sort((a, b) =>
+            {
+                int distance = a.EntryDistance.CompareTo(b.EntryDistance);
+                if (distance != 0) return distance;
+                int guard = (b.GuardBladeContact || b.GuardShieldContact || b.GuardWeaponContact).CompareTo(a.GuardBladeContact || a.GuardShieldContact || a.GuardWeaponContact);
+                return guard != 0 ? guard : a.Target.CombatId.CompareTo(b.Target.CombatId);
+            });
+            bool guardStopped = false;
+            for (int i = 0; i < _sampleContacts.Count; i++)
+            {
+                Contact candidate = _sampleContacts[i];
+                if (rec.Hit.Contains(candidate.Target.CombatId)) continue;
+                Contact pending = FindPending(rec, candidate.Target.CombatId);
+                if (candidate.GuardBladeContact || candidate.GuardShieldContact || candidate.GuardWeaponContact)
+                {
+                    if (pending != null || rec.Hits.Count + rec.Pending.Count >= pattern.maxTargets) continue;
+                    if (!ApplySwingHit(rec, candidate, sample, frame.Eye)) continue;
+                    if (rec.Hits[rec.Hits.Count - 1].GuardBroken) continue;
+                    guardStopped = true;
+                    break;
+                }
+                if (pending == null)
+                {
+                    if (rec.Hits.Count + rec.Pending.Count < pattern.maxTargets) rec.Pending.Add(candidate);
+                }
+                else if (!pending.GripContact && !candidate.GripContact && sample <= pending.LastWindowSample
+                    && IsBetterContact(candidate.Depth, candidate.Location, pending.Depth, pending.Location))
+                {
+                    pending.Depth = candidate.Depth;
+                    pending.Location = candidate.Location;
+                    pending.Point = candidate.Point;
+                    pending.T = candidate.T;
                 }
             }
 
@@ -889,7 +960,17 @@ namespace Emberdelve.Combat
                 }
             }
 
-            if (wall)
+            if (guardStopped)
+            {
+                // Earlier wounds stay real; clipping prevented any new contact behind this guard.
+                ResolveAllPending(rec, sampleTime, sample, frame.Eye);
+                rec.Stopped = true;
+                rec.StopTs = sampleTime;
+                rec.WallSample = sample; // shared stop-sample clock; HasWallPoint remains false
+                rec.EndReason = SwingEndReason.GuardStop;
+                _chains.Remove(rec.InstigatorId);
+            }
+            else if (wall)
             {
                 ResolveAllPending(rec, sampleTime, sample, frame.Eye);
                 if (breakableContact != null)
@@ -959,13 +1040,13 @@ namespace Emberdelve.Combat
             }
         }
 
-        private void ApplySwingHit(SwingRecord rec, Contact contact, int sample, Vector3 eye)
+        private bool ApplySwingHit(SwingRecord rec, Contact contact, int sample, Vector3 eye)
         {
             ICombatEntity instigator = rec.Instigator;
             ICombatEntity target = contact.Target;
-            if (instigator == null || instigator.IsDead || target == null || target.IsDead) return;
-            if (!CombatRegistry.TryGet(target.CombatId, out ICombatEntity registered) || registered != target) return;
-            if (rec.Hit.Contains(target.CombatId)) return;
+            if (instigator == null || instigator.IsDead || target == null || target.IsDead) return false;
+            if (!CombatRegistry.TryGet(target.CombatId, out ICombatEntity registered) || registered != target) return false;
+            if (rec.Hit.Contains(target.CombatId)) return false;
 
             float multiplier = LocationTable.Multiplier(contact.Location);
             Vector3 direction = contact.Point - eye;
@@ -984,8 +1065,11 @@ namespace Emberdelve.Combat
             float armorRating = target is IArmorRatingProvider armorProvider ? DamageResolver.SanitizeArmorRating(armorProvider.GetArmorRating()) : 0f;
             DamageInfo damage = DamageResolver.ResolveSwing(rec.Weapon, rec.Pattern, resolved, resolvedHit,
                 contact.Location, multiplier, target, outgoing,
-                flatBonus, rec.StepMultiplier, zone, FlowTuning);
-            if (!damage.IsValid) return;
+                flatBonus, rec.StepMultiplier, zone, FlowTuning, contact.GuardBladeContact, contact.GuardShieldContact, contact.GuardWeaponContact);
+            if (!damage.IsValid) return false;
+            // An exhausted/nonfunctional guard cannot create damage just because metal was touched.
+            // Continue the ordinary flesh sweep when the defense refused the interception.
+            if ((contact.GuardBladeContact || contact.GuardShieldContact || contact.GuardWeaponContact) && !damage.Blocked) return false;
 
             rec.Hit.Add(target.CombatId);
             target.ApplyDamage(damage);
@@ -1001,6 +1085,7 @@ namespace Emberdelve.Combat
             PublishCombatFeedback(instigator, target, feedback, damage);
             ReportHit(CombatHitSource.Melee, instigator, target, rec.Weapon, damage, contact.Location, multiplier, rec.StepMultiplier, zone,
                 contact.T, 1f, 0f, -1f, outgoing, flatBonus, armorRating);
+            return true;
         }
 
         private void FinishSwing(SwingRecord rec, SwingEndReason reason, float endTs)

@@ -115,7 +115,18 @@ if(!$SkipGates){
     if($g.TimedOut){$lines.Add('FAIL gates: whole batch timed out after ' + $TimeoutSeconds + 's')}
     if(!$gatesPassed){$allPassed=$false}
     if(Test-Path -LiteralPath $unityLog){
-        $cacheEvents=@([IO.File]::ReadLines($unityLog) | Where-Object { $_.StartsWith('[Emberdelve][BuildCache] ') })
+        # Unity or an indexing process may still hold the log while final metadata is collected.
+        # Cache diagnostics are optional; they must not discard the gate's recorded verdict.
+        $cacheReader=$null
+        try {
+            $cacheStream=[IO.File]::Open($unityLog,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+            $cacheReader=New-Object IO.StreamReader($cacheStream)
+            $cacheEvents=@(while(($cacheLine=$cacheReader.ReadLine()) -ne $null){
+                if($cacheLine.StartsWith('[Emberdelve][BuildCache] ')){$cacheLine}
+            })
+        }catch [IO.IOException]{
+            $lines.Add('WARN optional build-cache log metadata unavailable: ' + $_.Exception.Message)
+        }finally{if($cacheReader){$cacheReader.Dispose()}}
         foreach($cacheEvent in $cacheEvents){$lines.Add($cacheEvent)}
     }
 

@@ -33,11 +33,14 @@ namespace Emberdelve.Player
         private WeaponViewModelSet _viewModels;
         private bool _armsPending;
         private ItemData _shownUtility;
+        private ulong _combatHeldStackId;
         private CharacterClassData _appliedClass;
         private PlayerRig _rig;
 
         private readonly WeaponData[] _slots = new WeaponData[SlotCapacity];
         private readonly List<RangedAmmoState> _ammo = new List<RangedAmmoState>(SlotCapacity);
+        private readonly string[] _slotAmmoIds = new string[SlotCapacity];
+        private string _liveAmmoId = "";
         private int _activeSlot;
 
         public bool HasMuzzle => _visual != null && _visual.Muzzle != null;
@@ -63,6 +66,7 @@ namespace Emberdelve.Player
 
         public WeaponData ActiveWeapon => _activeSlot >= 0 && _activeSlot < SlotCapacity ? _slots[_activeSlot] : null;
         public int ActiveSlot => _activeSlot;
+        public string ActiveAmmoPoolId => ActiveWeapon != null && ActiveWeapon.IsRanged ? _liveAmmoId : "";
         public bool UsingSecondary => _activeSlot == 1;
         public int EquippedCount => (_slots[0] != null ? 1 : 0) + (_slots[1] != null ? 1 : 0);
 
@@ -137,6 +141,8 @@ namespace Emberdelve.Player
             if (rig.Equipment != null && rig.Equipment.KitIsItems && _slots[0] == null) _slots[0] = _unarmed;
 
             _ammo.Clear();
+            _liveAmmoId = "";
+            for (int i = 0; i < SlotCapacity; i++) _slotAmmoIds[i] = AmmoKey(i, _slots[i]);
             SeedAmmo(0, data.startingReserveAmmo, data.maxReserveAmmo);
             SeedAmmo(1, data.secondaryStartingReserveAmmo, data.secondaryMaxReserveAmmo);
 
@@ -207,6 +213,7 @@ namespace Emberdelve.Player
 
         private void Update()
         {
+            RefreshHeldCombat();
             var held = _rig != null && _rig.Inventory != null ? _rig.Inventory.HeldItem : null;
             if (held != _shownUtility) SyncArms(ActiveWeapon);
             if (_armsPending && Application.isPlaying) SyncArms(ActiveWeapon);
@@ -355,7 +362,8 @@ namespace Emberdelve.Player
             if (weapon == null) return null;
 
             WeaponData previous = _slots[slot];
-            if (previous == weapon) return null;
+            string newAmmoId = AmmoKey(slot, weapon);
+            if (previous == weapon && _slotAmmoIds[slot] == newAmmoId) return null;
 
             // D1b: replacing the weapon IN HAND is a swap too (Equipment refuses earlier in the equip transaction; this is the
             // last line): refused mid-attack with no state change.
@@ -373,14 +381,13 @@ namespace Emberdelve.Player
             }
 
             _slots[slot] = weapon;
+            _slotAmmoIds[slot] = newAmmoId;
 
-            if (weapon.IsRanged && FindAmmo(weapon) == null)
+            if (weapon.IsRanged && FindAmmoById(newAmmoId) == null)
             {
-                int reserve = slot == 0 ? (_appliedClass != null ? _appliedClass.startingReserveAmmo : 0)
-                                        : (_appliedClass != null ? _appliedClass.secondaryStartingReserveAmmo : 0);
-                int maxReserve = slot == 0 ? (_appliedClass != null ? _appliedClass.maxReserveAmmo : 0)
-                                           : (_appliedClass != null ? _appliedClass.secondaryMaxReserveAmmo : 0);
-                SeedAmmo(slot, reserve, maxReserve);
+                // Only initial class creation may grant ammunition. A bought, looted or
+                // re-equipped item starts empty unless this exact UID already has a pool.
+                CreateAmmo(weapon, 0, AmmoCarryRules.Capacity(_appliedClass, weapon.weaponId), slot);
             }
 
             if (slot == _activeSlot)
@@ -404,6 +411,9 @@ namespace Emberdelve.Player
             internal int ActiveSlot;
             internal int ChangeCount;
             internal RangedAmmoState[] Ammo;
+            internal string[] AmmoIds;
+            internal string LiveAmmoId;
+            internal ulong CombatHeldStackId;
         }
 
         internal DropHandSnapshot CaptureDropHandSnapshot()
@@ -413,7 +423,9 @@ namespace Emberdelve.Player
                 Weapons = (WeaponData[])_slots.Clone(),
                 ActiveSlot = _activeSlot,
                 ChangeCount = WeaponChangeCount,
-                Ammo = new RangedAmmoState[_ammo.Count]
+                Ammo = new RangedAmmoState[_ammo.Count],
+                AmmoIds = (string[])_slotAmmoIds.Clone(), LiveAmmoId = _liveAmmoId,
+                CombatHeldStackId = _combatHeldStackId
             };
             for (int i = 0; i < _ammo.Count; i++) snapshot.Ammo[i] = CopyAmmo(_ammo[i]);
             return snapshot;
@@ -423,11 +435,14 @@ namespace Emberdelve.Player
         {
             if (snapshot == null) return;
             for (int i = 0; i < SlotCapacity; i++) _slots[i] = snapshot.Weapons[i];
+            for (int i = 0; i < SlotCapacity; i++) _slotAmmoIds[i] = snapshot.AmmoIds[i];
+            _liveAmmoId = snapshot.LiveAmmoId;
             _ammo.Clear();
             for (int i = 0; i < snapshot.Ammo.Length; i++) _ammo.Add(CopyAmmo(snapshot.Ammo[i]));
             _activeSlot = snapshot.ActiveSlot;
+            _combatHeldStackId = snapshot.CombatHeldStackId;
 
-            WeaponData weapon = ActiveWeapon;
+            WeaponData weapon = _rig != null && _rig.HeldMeleeWeapon != null ? _rig.HeldMeleeWeapon : ActiveWeapon;
             bool melee = weapon != null && !weapon.IsRanged;
             bool ranged = weapon != null && weapon.IsRanged;
             if (meleeCombat != null)
@@ -456,10 +471,11 @@ namespace Emberdelve.Player
         internal bool MatchesDropHandSnapshot(DropHandSnapshot snapshot)
         {
             if (snapshot == null || snapshot.Weapons == null || snapshot.Weapons.Length != SlotCapacity ||
-                snapshot.ActiveSlot != _activeSlot || snapshot.ChangeCount != WeaponChangeCount ||
+                snapshot.ActiveSlot != _activeSlot || snapshot.ChangeCount != WeaponChangeCount || snapshot.CombatHeldStackId != _combatHeldStackId ||
                 snapshot.Ammo == null || snapshot.Ammo.Length != _ammo.Count) return false;
             for (int i = 0; i < SlotCapacity; i++)
-                if (!ReferenceEquals(snapshot.Weapons[i], _slots[i])) return false;
+                if (!ReferenceEquals(snapshot.Weapons[i], _slots[i]) || snapshot.AmmoIds[i] != _slotAmmoIds[i]) return false;
+            if (snapshot.LiveAmmoId != _liveAmmoId) return false;
             for (int i = 0; i < _ammo.Count; i++)
             {
                 RangedAmmoState expected = snapshot.Ammo[i];
@@ -469,7 +485,7 @@ namespace Emberdelve.Player
                     if (!ReferenceEquals(expected, actual)) return false;
                     continue;
                 }
-                if (expected.weaponId != actual.weaponId ||
+                if (expected.weaponId != actual.weaponId || expected.poolId != actual.poolId ||
                     expected.magazine != actual.magazine || expected.reserve != actual.reserve ||
                     expected.maxReserve != actual.maxReserve) return false;
             }
@@ -481,6 +497,7 @@ namespace Emberdelve.Player
             return state == null ? null : new RangedAmmoState
             {
                 weaponId = state.weaponId,
+                poolId = state.poolId, definition = state.definition,
                 magazine = state.magazine,
                 reserve = state.reserve,
                 maxReserve = state.maxReserve
@@ -514,9 +531,45 @@ namespace Emberdelve.Player
             bool setChanged = setOwner != null && setOwner.BeginWeaponSet(slot, isSwap);
 
             _activeSlot = slot;
+            _slotAmmoIds[slot] = AmmoKey(slot, _slots[slot]);
+            _liveAmmoId = _slotAmmoIds[slot];
             WeaponChangeCount++;
-            WeaponData weapon = _slots[slot];
+            _combatHeldStackId = _rig != null && _rig.Inventory != null ? _rig.Inventory.HeldStackId : 0;
+            WeaponData weapon = _rig != null && _rig.HeldMeleeWeapon != null ? _rig.HeldMeleeWeapon : _slots[slot];
 
+            ConfigureCombatWeapon(weapon);
+
+            // All hand, pool and ammo callbacks remain deferred until the new stats and shared revision are final.
+            if (setOwner != null) setOwner.CompleteWeaponSet(setChanged, isSwap);
+
+            // V3d: the off hand is final only now, so dress the arms from the settled state.
+            if (_arms != null) SyncArms(weapon);
+
+            if (publishEvents)
+            {
+                GameEvents.RaiseActiveWeapon(OwnerId, weapon);
+                if (weapon != null && !NetRole.IsClientOnly)
+                    GameEvents.RaiseToast(OwnerId, $"Equipped {weapon.displayName}");
+            }
+        }
+
+        /// <summary>Quick gear remains in the bag; only the effective combat hand changes.</summary>
+        public void RefreshHeldCombat()
+        {
+            if (_rig == null || _activeSlot < 0) return;
+            ulong held = _rig.Inventory != null ? _rig.Inventory.HeldStackId : 0;
+            if (held == _combatHeldStackId) return;
+            if (rangedCombat != null && rangedCombat.enabled && rangedCombat.Weapon != null && rangedCombat.Weapon.IsRanged)
+                StoreAmmo(rangedCombat.Weapon);
+            _combatHeldStackId = held;
+            WeaponChangeCount++;
+            // Noncombat utilities still need selected ranged metadata for ammunition supply.
+            // Their input remains suppressed by PlayerRig; only the torch overrides the hand.
+            ConfigureCombatWeapon(_rig.HeldMeleeWeapon != null ? _rig.HeldMeleeWeapon : ActiveWeapon);
+        }
+
+        private void ConfigureCombatWeapon(WeaponData weapon)
+        {
             bool weaponIsMelee = weapon != null && !weapon.IsRanged;
             bool weaponIsRanged = weapon != null && weapon.IsRanged;
 
@@ -549,20 +602,6 @@ namespace Emberdelve.Player
             // with a sword's capability, and a rapier is where a Parry flag may legitimately appear.
             if (_rig != null) _rig.ApplyMainHandWeapon(weapon);
 
-            // All hand, pool and ammo callbacks remain deferred until the new stats and shared revision are final.
-            if (setOwner != null) setOwner.CompleteWeaponSet(setChanged, isSwap);
-
-            // V3d: the off hand is final only now (the set's off hand is restored by BeginWeaponSet / ApplyMainHandWeapon above), so the first-person hands are dressed again from the settled state.
-            if (_arms != null) SyncArms(weapon);
-
-            if (publishEvents)
-            {
-                GameEvents.RaiseActiveWeapon(OwnerId, weapon);
-                // Client hands are reconstructed from snapshots, including bag-only changes.
-                // Keep the presentation event, but do not announce those refreshes as equip actions.
-                if (weapon != null && !NetRole.IsClientOnly)
-                    GameEvents.RaiseToast(OwnerId, $"Equipped {weapon.displayName}");
-            }
         }
 
         private void SeedAmmo(int slot, int startingReserve, int maxReserve)
@@ -570,17 +609,18 @@ namespace Emberdelve.Player
             WeaponData weapon = _slots[slot];
             if (weapon == null || !weapon.IsRanged) return;
 
-            RangedAmmoState state = CreateAmmo(weapon, startingReserve, maxReserve);
+            RangedAmmoState state = CreateAmmo(weapon, startingReserve, maxReserve, slot);
             state.magazine = Mathf.Clamp(weapon.magazineSize, 1, 99);
         }
 
         private void StoreAmmo(WeaponData weapon)
         {
-            RangedAmmoState state = FindAmmo(weapon);
+            RangedAmmoState state = FindAmmoById(_liveAmmoId);
             if (state == null || rangedCombat == null) return;
 
             state.magazine = rangedCombat.Magazine;
-            state.reserve = rangedCombat.Reserve;
+            foreach (var pool in _ammo)
+                if (pool.weaponId == weapon.weaponId) pool.reserve = rangedCombat.Reserve;
         }
 
         /// <summary>
@@ -595,7 +635,7 @@ namespace Emberdelve.Player
                 RangedAmmoState state = _ammo[i];
                 if (state == null) continue;
 
-                WeaponData weapon = null;
+                WeaponData weapon = state.definition;
                 for (int s = 0; s < _slots.Length; s++)
                 {
                     if (_slots[s] != null && _slots[s].weaponId == state.weaponId) { weapon = _slots[s]; break; }
@@ -605,7 +645,7 @@ namespace Emberdelve.Player
                 int magazine = state.magazine;
                 int reserve = state.reserve;
                 int maxReserve = state.maxReserve;
-                if (live != null && live.enabled && live.Weapon == weapon)
+                if (live != null && live.enabled && live.Weapon == weapon && state.poolId == _liveAmmoId)
                 {
                     magazine = live.Magazine;
                     reserve = live.Reserve;
@@ -615,6 +655,7 @@ namespace Emberdelve.Player
                 seeds.Add(new KitAmmoSeed
                 {
                     WeaponId = state.weaponId,
+                    PoolId = state.poolId, ReserveId = state.weaponId,
                     MagazineSize = Mathf.Clamp(weapon.magazineSize, 1, 99),
                     ReloadTime = weapon.reloadTime,
                     Magazine = magazine,
@@ -631,20 +672,112 @@ namespace Emberdelve.Player
             return weapon != null ? FindAmmo(weapon) : null;
         }
 
+        internal void ApplyAmmoView(in KitView view)
+        {
+            if (!view.HasActiveAmmo) return;
+            RangedAmmoState loaded = FindAmmoById(view.AmmoPoolId);
+            if (loaded != null) loaded.magazine = view.Magazine;
+            foreach (var pool in _ammo)
+                if (pool.weaponId == view.ActiveWeaponId)
+                { pool.reserve = view.Reserve; pool.maxReserve = view.MaxReserve; }
+        }
+
+        private static List<ItemSnapshot> CarriedItems(LoadoutSnapshot kit)
+        {
+            var items = new List<ItemSnapshot>();
+            foreach (var entry in kit.bag.entries) items.Add(entry.item);
+            foreach (var entry in kit.equipment.entries) items.Add(entry.item);
+            return items;
+        }
+
+        /// <summary>Trusted offline departure restore, before PlayerRig's final ClassApply seed.</summary>
+        internal bool RestorePreparedAmmo(OfflineAmmunition saved, LoadoutSnapshot kit, out string reason)
+        {
+            reason = "Prepared ammunition is missing";
+            if (saved == null || saved.stored == null || saved.stored.Length != 0 || kit == null
+                || !saved.TryValidate(CarriedItems(kit), _rig.Inventory.Catalog, _appliedClass, out reason)) return false;
+            _ammo.Clear();
+            foreach (var entry in saved.loaded)
+            {
+                var weapon = OfflineAmmunition.ResolveWeapon(_rig.Inventory.Catalog, entry.weaponId);
+                var state = CreateAmmo(weapon, saved.CarriedCount(entry.weaponId), AmmoCarryRules.Capacity(_appliedClass, entry.weaponId), poolId: entry.uid);
+                state.magazine = entry.magazine;
+            }
+            // Loose ammunition survives even when no matching weapon is currently worn/carried.
+            foreach (var entry in saved.carried)
+            {
+                var weapon = OfflineAmmunition.ResolveWeapon(_rig.Inventory.Catalog, entry.weaponId);
+                CreateAmmo(weapon, entry.quantity, AmmoCarryRules.Capacity(_appliedClass, entry.weaponId), poolId: "reserve:" + entry.weaponId);
+            }
+            for (int i = 0; i < SlotCapacity; i++)
+            {
+                _slotAmmoIds[i] = AmmoKey(i, _slots[i]);
+                if (_slots[i] != null && _slots[i].IsRanged)
+                    CreateAmmo(_slots[i], 0, AmmoCarryRules.Capacity(_appliedClass, _slots[i].weaponId), i);
+            }
+            foreach (var pool in _ammo) pool.reserve = saved.CarriedCount(pool.weaponId);
+            _liveAmmoId = _activeSlot >= 0 && _activeSlot < SlotCapacity ? _slotAmmoIds[_activeSlot] : "";
+            var active = FindAmmoById(_liveAmmoId);
+            if (active != null && rangedCombat != null)
+                rangedCombat.Initialize(ActiveWeapon, active.reserve, active.maxReserve, active.magazine);
+            reason = null; return true;
+        }
+
+        internal OfflineAmmunition CapturePreparedAmmo(LoadoutSnapshot kit)
+        {
+            if (ActiveWeapon != null && ActiveWeapon.IsRanged) StoreAmmo(ActiveWeapon);
+            var result = new OfflineAmmunition();
+            foreach (var item in CarriedItems(kit))
+            {
+                var pool = FindAmmoById(item.uid);
+                if (_rig.Inventory.Catalog.TryResolveItem(item.itemId, out var definition, out _)
+                    && definition.grantedWeapon != null && definition.grantedWeapon.IsRanged
+                    && GameServices.TryGet<ICombatAuthority>(out var authority) && authority is LocalCombatAuthority local
+                    && local.TryGetLoadedRounds(item.uid, definition.grantedWeapon.weaponId, out var loaded))
+                    result.SetLoaded(item.uid, definition.grantedWeapon.weaponId, loaded);
+                else if (pool != null) result.SetLoaded(item.uid, pool.weaponId, pool.magazine);
+            }
+            var types = new HashSet<string>();
+            foreach (var pool in _ammo)
+                if (types.Add(pool.weaponId)) result.SetReserve(pool.weaponId, pool.reserve, false);
+            return result;
+        }
+
         private RangedAmmoState FindAmmo(WeaponData weapon)
+        {
+            int slot = _activeSlot >= 0 && _activeSlot < SlotCapacity && _slots[_activeSlot] == weapon ? _activeSlot : -1;
+            if (slot < 0) for (int i = 0; i < SlotCapacity; i++) if (_slots[i] == weapon) { slot = i; break; }
+            return FindAmmoById(slot >= 0 ? _slotAmmoIds[slot] : weapon.weaponId);
+        }
+
+        private RangedAmmoState FindAmmoById(string id)
         {
             for (int i = 0; i < _ammo.Count; i++)
             {
-                if (_ammo[i] != null && _ammo[i].weaponId == weapon.weaponId) return _ammo[i];
+                if (_ammo[i] != null && _ammo[i].poolId == id) return _ammo[i];
             }
             return null;
         }
 
-        private RangedAmmoState CreateAmmo(WeaponData weapon, int startingReserve, int maxReserve)
+        private string AmmoKey(int slot, WeaponData weapon)
         {
+            if (weapon == null || !weapon.IsRanged) return "";
+            ItemInstance item = _rig != null && _rig.Equipment != null ? _rig.Equipment.MainHandInstance(slot) : null;
+            return item != null && item.Definition.grantedWeapon == weapon ? item.Uid.ToString("N") : weapon.weaponId;
+        }
+
+        private RangedAmmoState CreateAmmo(WeaponData weapon, int startingReserve, int maxReserve, int slot = -1, string poolId = null)
+        {
+            if (slot < 0) slot = _activeSlot >= 0 && _activeSlot < SlotCapacity ? _activeSlot : 0;
+            poolId = poolId ?? AmmoKey(slot, weapon);
+            var existing = FindAmmoById(poolId);
+            if (existing != null) return existing;
+            if (_appliedClass != null) maxReserve = AmmoCarryRules.Capacity(_appliedClass, weapon.weaponId);
+            foreach (var pool in _ammo) if (pool.weaponId == weapon.weaponId) { startingReserve = pool.reserve; break; }
             RangedAmmoState state = new RangedAmmoState
             {
                 weaponId = weapon.weaponId,
+                poolId = poolId, definition = weapon,
                 magazine = 0,
                 reserve = Mathf.Max(0, startingReserve),
                 maxReserve = Mathf.Max(0, maxReserve)
@@ -725,6 +858,8 @@ namespace Emberdelve.Player
         /// </summary>
         private void SyncArms(WeaponData weapon)
         {
+            bool combatUtility = _rig != null && _rig.HeldMeleeWeapon != null;
+            if (combatUtility) weapon = _rig.HeldMeleeWeapon;
             if (_viewModels == null) _viewModels = WeaponViewModelSet.Load();
             if (_arms == null && Application.isPlaying)
             {
@@ -735,13 +870,13 @@ namespace Emberdelve.Player
             if (_arms == null)
             {
                 _shownUtility = _rig != null && _rig.Inventory != null ? _rig.Inventory.HeldItem : null;
-                if (_visual != null) _visual.gameObject.SetActive(_shownUtility == null);
+                if (_visual != null) _visual.gameObject.SetActive(_shownUtility == null || combatUtility);
                 return;
             }
             _armsPending = false;
             _shownUtility = _rig != null && _rig.Inventory != null ? _rig.Inventory.HeldItem : null;
-            if (_visual != null) _visual.gameObject.SetActive(_shownUtility == null);
-            if (_shownUtility != null)
+            if (_visual != null) _visual.gameObject.SetActive(_shownUtility == null || combatUtility);
+            if (_shownUtility != null && !combatUtility)
             {
                 _arms.SetVisual(null);
                 _arms.SetUtility(_shownUtility);
@@ -749,12 +884,12 @@ namespace Emberdelve.Player
                 _arms.gameObject.SetActive(true);
                 return;
             }
-            bool dressed = weapon != null && (_arms.SetWeapons(weapon, _rig != null ? _rig.OffhandWeapon : null) || weapon.isUnarmed);
+            bool dressed = weapon != null && (_arms.SetWeapons(weapon, _rig != null && !_rig.IsHoldingUtility ? _rig.OffhandWeapon : null) || weapon.isUnarmed);
             _arms.SetVisual(_visual);
             _arms.gameObject.SetActive(dressed);
             if (dressed)
             {
-                if (_visual != null && weapon.weaponId != "hollow_bow") _visual.HideBlockoutRenderers();
+                if (_visual != null && weapon.weaponId != "hollow_bow" && !weapon.CanCrossbowGuard) _visual.HideBlockoutRenderers();
                 _arms.SetBlock(_rig != null && _rig.IsGuarding);
             }
         }
@@ -763,6 +898,8 @@ namespace Emberdelve.Player
         public sealed class RangedAmmoState
         {
             public string weaponId;
+            public string poolId;
+            internal WeaponData definition;
             public int magazine;
             public int reserve;
             public int maxReserve;

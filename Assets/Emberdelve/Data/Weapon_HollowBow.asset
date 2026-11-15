@@ -35,6 +35,11 @@ MonoBehaviour:
   heldMoveSpeedPenalty: 4
   impactPower: 0
   impactResist: 15
+  rangedGuardShape: 2
+  impactGuard: 1
+  impactGuardDuration: 0.35
+  impactGuardResistance: 10
+  impactGuardRearmDelay: 0.65
   canRiposte: 0
   riposteWithOffhandShield: 0
   riposteWindow: 1
@@ -43,7 +48,7 @@ MonoBehaviour:
   riposteStrikeGap: 0.1
   twoHanded: 1
   isUnarmed: 0
-  ammoDisplayName: Ammo
+  ammoDisplayName: Arrows
   rangedRange: 46
   projectileSpeed: 42
   projectileRadius: 0.05
@@ -54,6 +59,7 @@ MonoBehaviour:
   minChargeDamageScale: 0.4
   magazineSize: 5
   reloadTime: 1.9
+  reloadWhileHeld: 1
   falloffStartRange: 18
   falloffEndRange: 46
   falloffMinScale: 0.45
@@ -69,8 +75,8 @@ MonoBehaviour:
   - time: 1.1
     scale: 0.45
   defenseRole: 1
-  capabilities: 0
-  blockReductionOverride: -1
+  capabilities: 1
+  blockReductionOverride: 1
   blockArcOverride: -1
   shaftMaterial: {fileID: 2100000, guid: 72acac9e04034ef5bb5e876c91c947d0, type: 2}
   edgeMaterial: {fileID: 2100000, guid: f4115d57bd8d322489a672ab46a79b43, type: 2}

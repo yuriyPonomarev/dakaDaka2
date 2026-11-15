@@ -43,14 +43,30 @@ namespace Emberdelve.Combat
             if (target != null && damage.Amount > 0f) _riposte.NoteDamage(target.CombatId);
         }
 
-        /// <summary>The result of a melee hit on <paramref name="target"/>: a held sword block is a parry, anything else is damage.</summary>
+        /// <summary>The result of a melee hit on <paramref name="target"/>: a physical player sword block opens a riposte only at its confirmed parry region.</summary>
         private void NoteMeleeResult(int attackerId, ICombatEntity target, in DamageInfo damage)
         {
             if (target == null) return;
             bool kitCan = target is IRiposteKit kit && RiposteKitOf(target, kit, out _);
-            if (RiposteRules.IsParry(damage.Blocked, damage.GuardBroken, damage.RangedProjectile, kitCan))
+            // Player guards have authoritative geometry. Abstract rule-only combat entities
+            // retain their own guard contract; they do not expose a physical player blade.
+            bool physicalPlayerBlock = !(target is Emberdelve.Player.PlayerRig)
+                || (damage.MeleeGuardChecked && damage.GuardBladeContact);
+            if (!damage.GuardShieldContact && physicalPlayerBlock
+                && RiposteRules.IsRiposteBlock(damage.Blocked, damage.GuardBroken, damage.RangedProjectile, kitCan))
             {
-                _riposte.NoteBlock(target.CombatId, attackerId, Now, WeaponEpochOf(target));
+                bool parryBonus = damage.MeleeGuardChecked && damage.GuardBladeContact
+                    && target is Emberdelve.Player.PlayerRig rig && !rig.Defense.HasShield
+                    && rig.TryGetGuardBlade(out Emberdelve.Player.GuardBladeBox blade)
+                    && blade.IsInParryRegion(damage.Point, rig.ActiveWeapon.parryBladeRegion);
+                // Sword/dagger response requires the confirmed sweet spot. A metal block
+                // elsewhere still stops damage, but must not open or retain a parry grant.
+                if (target is Emberdelve.Player.PlayerRig && !parryBonus)
+                {
+                    _riposte.Forget(target.CombatId);
+                    return;
+                }
+                _riposte.NoteBlock(target.CombatId, attackerId, Now, WeaponEpochOf(target), parryBonus);
                 return;
             }
 
@@ -189,7 +205,8 @@ namespace Emberdelve.Combat
             {
                 Active = true,
                 PatternIndex = patternIndex,
-                Multiplier = RiposteRules.StrikeMultiplier(weapon.riposteDamageMultiplier),
+                Multiplier = _riposte.HasParryBonus(intent.InstigatorCombatId)
+                    ? RiposteRules.StrikeMultiplier(weapon.riposteDamageMultiplier) : 1f,
                 Strike = strikeNumber,
                 SkipCooldown = skipCooldown
             };

@@ -4,7 +4,9 @@
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner",
     "Emberdelve.Runtime",
-    "Emberdelve.Rules"
+    "Emberdelve.UI",
+    "Emberdelve.Rules",
+    "Emberdelve.NetRules"
   ],
   "includePlatforms": [
     "Editor"

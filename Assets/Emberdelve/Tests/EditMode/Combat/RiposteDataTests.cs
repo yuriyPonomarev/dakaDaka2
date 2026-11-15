@@ -17,6 +17,23 @@ namespace Emberdelve.Combat.Tests
     public sealed class RiposteDataTests
     {
         private static readonly List<WeaponData> All = new List<WeaponData>();
+
+        [TestCase(0f, false)]
+        [TestCase(1f, false)]
+        [TestCase(0.1f, false)]
+        [TestCase(0.5f, true)]
+        [TestCase(0.9f, false)]
+        public void ParryRegion_FollowsRotatedBladeAndExcludesHiltAndTip(float fraction, bool expected)
+        {
+            var center = new Vector3(7f, 2f, -3f);
+            var rotation = Quaternion.Euler(31f, 118f, 14f);
+            var blade = new Emberdelve.Player.GuardBladeBox(center, rotation, new Vector3(.05f, .02f, .8f));
+            Vector3 point = center + rotation * new Vector3(0f, 0f, (fraction - .5f) * .8f);
+            Assert.That(blade.IsInParryRegion(point, new Vector2(.25f, .75f)), Is.EqualTo(expected));
+            Assert.True(blade.IsInParryRegion(point, new Vector2(0f, 1f)), "Full-length parry includes rotated hilt, middle and tip");
+            Assert.That(blade.IsInParryRegion(point, new Vector2(float.NaN, 1f)), Is.False);
+            Assert.That(blade.IsInParryRegion(point, new Vector2(.8f, .2f)), Is.False);
+        }
         // U5B: the plain arming sword and the two-handed sword riposte too (their flags are asserted in SwordFamilyTests)
         private static readonly HashSet<string> SwordFamily = new HashSet<string> { "arming_sword", "two_handed_sword" };
 
@@ -281,17 +298,17 @@ namespace Emberdelve.Combat.Tests
         }
 
         [Test]
-        public void OnlyTheOneHandedSwords_RipostesWithAnOffhandShield()
+        public void NoSwordInheritsAnOffhandShieldBlock()
         {
             foreach (WeaponData w in All)
             {
-                bool expected = w.weaponId == "ashen_short_sword" || w.weaponId == "arming_sword";
+                bool expected = false;
                 Assert.That(w.riposteWithOffhandShield, Is.EqualTo(expected), w.weaponId);
                 if (w.riposteWithOffhandShield) Assert.That(w.canRiposte, Is.True, "the shield allowance only means something on a riposting weapon");
             }
 
             WeaponData sword = All.Find(w => w.weaponId == "ashen_short_sword");
-            Assert.That(RiposteRules.KitCanRiposte(sword.canRiposte, sword.IsShield, true, sword.IsRanged, sword.RiposteStrikeCount, sword.riposteWithOffhandShield), Is.True, "the warrior's sword and shield");
+            Assert.That(RiposteRules.KitCanRiposte(sword.canRiposte, sword.IsShield, true, sword.IsRanged, sword.RiposteStrikeCount, sword.riposteWithOffhandShield), Is.False, "the warrior's shield does not grant the sword a reply");
         }
 
         [Test]

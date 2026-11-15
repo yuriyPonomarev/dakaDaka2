@@ -70,6 +70,12 @@ namespace Emberdelve.Combat
         public bool RemoteGuardWanted => _remoteGuard;
 
         private bool _remoteGuard;
+        private float _remoteAttackUntil = -1f;
+        public bool RemoteAttackWanted => RemoteDriven && Time.unscaledTime < _remoteAttackUntil;
+
+        // A disconnected or stalled owner cannot leave an unattended attack loop running.
+        public void SetRemoteAttack(bool held) =>
+            _remoteAttackUntil = held && RemoteDriven ? Time.unscaledTime + 0.75f : -1f;
         private bool _remotePressPending;
         private bool _prevSecondaryHeld;
         private int _riposteStrikesLeft;
@@ -137,6 +143,7 @@ namespace Emberdelve.Combat
             _timing = default;
             _comboStep = 0;
             _bufferedUntil = -1f;
+            _remoteAttackUntil = -1f;
             _phase = Phase.Idle;
             _phaseTimer = 0f;
             _readyTime = 0f;
@@ -159,6 +166,8 @@ namespace Emberdelve.Combat
 
             if (rig.IsDead || rig.WeaponInputSuppressed)
             {
+                _bufferedUntil = -1f;
+                _remoteAttackUntil = -1f;
                 _remoteGuard = false;
                 _remotePressPending = false;
                 _riposteStrikesLeft = 0;
@@ -169,6 +178,8 @@ namespace Emberdelve.Combat
 
             // U3B3: a remote-driven rig has no device; the network layer supplies the guard level and presses arrive as TryBeginSwing calls.
             bool primaryPressed = !RemoteDriven && input.PrimaryPressed;
+            if (!RemoteDriven && (!input.GameplayInputEnabled || input.QuickWheelCaptured)) _bufferedUntil = -1f;
+            bool primaryHeld = RemoteDriven ? RemoteAttackWanted : input.PrimaryHeld;
             bool secondaryHeld = RemoteDriven ? _remoteGuard : input.SecondaryHeld;
 
             // U3C3: a block press (guard going down-to-up edge) is a riposte request. The server decides from the parry it recorded; a refusal
@@ -189,7 +200,7 @@ namespace Emberdelve.Combat
             switch (_phase)
             {
                 case Phase.Idle:
-                    if ((primaryPressed || Time.time <= _bufferedUntil) && !secondaryHeld && Time.time >= _readyTime)
+                    if ((primaryPressed || primaryHeld || Time.time <= _bufferedUntil) && !secondaryHeld && Time.time >= _readyTime)
                     {
                         // The buffered press is spent only when the authority accepts the begin: a refusal (its cooldown clock a hair
                         // behind this one) keeps it for the rest of its 0.5 s.
@@ -272,7 +283,7 @@ namespace Emberdelve.Combat
         /// </summary>
         private bool TryBeginRequest(int step, int patternIndex)
         {
-            if (_weapon == null || rig == null || rig.IsHoldingUtility) return false;
+            if (_weapon == null || rig == null || rig.WeaponInputSuppressed || rig.ActiveWeapon != _weapon) return false;
 
             if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority))
             {
@@ -417,7 +428,7 @@ namespace Emberdelve.Combat
             if (_swingId == 0 || _recoilStarted || _pattern == null) return;
             if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)) return;
             if (!authority.TryGetMeleeSwingStatus(_swingId, out MeleeSwingStatus status)) return;
-            if (!status.WallStopped) return;
+            if (!status.Recoiled) return;
 
             _recoilStarted = true;
             _phase = Phase.Recovery;
@@ -427,12 +438,13 @@ namespace Emberdelve.Combat
             float stopTime = _timing.Windup + _timing.Active * status.WallContactSample / Mathf.Max(1, status.SampleCount);
             _phaseTimer = Mathf.Max(0f, stopTime + _timing.WallRecoil - status.Elapsed);
             rig.PlaySwingRecoil();
-            WallStopped?.Invoke(status);
-            CombatDiagnostics.Log("melee-wall", $"[MeleeCombat] swing {_swingId} stopped by level geometry at sample {status.WallContactSample}/{status.SampleCount} with {status.Hits.Count} hit(s)", this);
+            if (status.WallStopped) WallStopped?.Invoke(status);
+            CombatDiagnostics.Log("melee-stop", $"[MeleeCombat] swing {_swingId} stopped ({status.EndReason}) at sample {status.WallContactSample}/{status.SampleCount} with {status.Hits.Count} hit(s)", this);
         }
 
         private void OnDisable()
         {
+            _remoteAttackUntil = -1f;
             _remoteGuard = false;
             _remotePressPending = false;
             _riposteStrikesLeft = 0;

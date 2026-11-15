@@ -20,6 +20,8 @@ namespace Emberdelve.Combat
         Body = 3,
         /// <summary>Caught by a defender's guarding blade.</summary>
         Blade = 4,
+        Shield = 5,
+        WeaponGuard = 6,
     }
 
     /// <summary>The end of one flight: where it stopped, why, and how long it was in the air (whole fixed steps).</summary>
@@ -193,6 +195,7 @@ namespace Emberdelve.Combat
             reason = string.Empty;
             if (!CombatRegistry.TryGet(intent.InstigatorCombatId, out instigator)) { reason = "unknown instigator id"; return false; }
             if (instigator.IsDead) { reason = "instigator is dead"; return false; }
+            if (instigator is PlayerRig guarding && guarding.IsGuarding) { reason = "instigator is guarding"; return false; }
             if (!(instigator is IActiveWeaponProvider holder) || holder.ActiveWeapon == null || !holder.ActiveWeapon.IsRanged)
             { reason = "instigator has no authoritative ranged weapon"; return false; }
 
@@ -536,7 +539,7 @@ namespace Emberdelve.Combat
                 Vector3 segmentEnd = consumed <= 0f ? stepEnd : segmentStart + flight.Direction * remaining;
                 float segmentLength = remaining;
                 if (!TryFindProjectileContact(flight, segmentStart, segmentEnd, out ICombatEntity target,
-                        out Vector3 point, out float distance, out bool bladeContact, out bool wall, out Collider worldCollider))
+                        out Vector3 point, out float distance, out bool bladeContact, out bool shieldContact, out bool weaponContact, out bool wall, out Collider worldCollider))
                 {
                     consumed += remaining;
                     flight.Traveled += remaining;
@@ -565,17 +568,17 @@ namespace Emberdelve.Combat
                 bool alreadyHit = flight.SkillGroup != null && flight.SkillGroup.Targets.Contains(target.CombatId);
                 if (canDamage && !alreadyHit)
                 {
-                    ApplyProjectileImpact(flight, target, point, bladeContact, segmentStart, segmentLength, contactAirTime);
+                    ApplyProjectileImpact(flight, target, point, bladeContact, segmentStart, segmentLength, contactAirTime, shieldContact, weaponContact);
                     if (flight.SkillGroup != null && !flight.SkillGroup.Targets.Contains(target.CombatId))
                         flight.SkillGroup.Targets.Add(target.CombatId);
                 }
                 if (flight.SkillGroup != null) flight.HitTargets.Add(target.CombatId);
 
-                if (bladeContact || !flight.Piercing || !canDamage || alreadyHit || flight.HitCount >= flight.MaxTargets
+                if (bladeContact || shieldContact || weaponContact || !flight.Piercing || !canDamage || alreadyHit || flight.HitCount >= flight.MaxTargets
                     || flight.SkillGroup != null && flight.SkillGroup.Hits >= flight.SkillGroup.Budget)
                 {
                     flight.ImpactPoint = point;
-                    EndProjectile(flight, bladeContact ? ProjectileEndReason.Blade : ProjectileEndReason.Body, target.CombatId);
+                    EndProjectile(flight, weaponContact ? ProjectileEndReason.WeaponGuard : shieldContact ? ProjectileEndReason.Shield : bladeContact ? ProjectileEndReason.Blade : ProjectileEndReason.Body, target.CombatId);
                     return true;
                 }
 
@@ -620,13 +623,15 @@ namespace Emberdelve.Combat
         }
 
         private bool TryFindProjectileContact(ProjectileFlight flight, Vector3 start, Vector3 end,
-            out ICombatEntity target, out Vector3 point, out float distance, out bool bladeContact, out bool wall, out Collider worldCollider)
+            out ICombatEntity target, out Vector3 point, out float distance, out bool bladeContact, out bool shieldContact, out bool weaponContact, out bool wall, out Collider worldCollider)
         {
             worldCollider = null;
             target = null;
             point = end;
             distance = Vector3.Distance(start, end);
             bladeContact = false;
+            shieldContact = false;
+            weaponContact = false;
             wall = false;
             Vector3 delta = end - start;
             float length = delta.magnitude;
@@ -721,13 +726,14 @@ namespace Emberdelve.Combat
             for (int i = 0; i < entities.Count; i++)
             {
                 if (!(entities[i] is PlayerRig defender) || IsInactiveCombatEntity(defender) || defender.CombatId == flight.InstigatorId || defender.IsDead) continue;
-                if (!defender.TryGetProjectileGuardBlade(out GuardBladeBox blade)) continue;
-                if (blade.TrySweep(start, end, flight.Radius, out float bladeDistance) && bladeDistance <= distance)
+                if (defender.TrySweepGuard(start, end, flight.Radius, out float bladeDistance, out bool hitShield, out bool hitWeapon) && bladeDistance <= distance)
                 {
                     target = defender;
                     distance = bladeDistance;
                     point = start + direction * bladeDistance;
-                    bladeContact = true;
+                    bladeContact = !hitShield && !hitWeapon;
+                    weaponContact = hitWeapon;
+                    shieldContact = hitShield;
                     wall = false;
                 }
             }
@@ -868,12 +874,12 @@ namespace Emberdelve.Combat
         }
 
         private void ApplyProjectileImpact(ProjectileFlight flight, ICombatEntity target,
-            Vector3 point, bool bladeContact, Vector3 segmentStart, float segmentLength, float airTime)
+            Vector3 point, bool bladeContact, Vector3 segmentStart, float segmentLength, float airTime, bool shieldContact, bool weaponContact)
         {
             if (!CombatRegistry.TryGet(flight.InstigatorId, out ICombatEntity instigator) || target.IsDead) return;
             // A blade contact is stopped by the guard before the body, so it has no body location (x1, the guard
             // reduction decides the rest). Otherwise the location comes from the target's hit volumes.
-            HitLocation location = bladeContact
+            HitLocation location = bladeContact || shieldContact || weaponContact
                 ? HitLocation.Unspecified
                 : ResolveProjectileLocation(flight, target, segmentStart, segmentLength, point);
             float locationMultiplier = LocationTable.Multiplier(location);
@@ -886,7 +892,7 @@ namespace Emberdelve.Combat
                     flight.Attack.Charge, flight.Origin, flight.Direction, flight.Range, flight.Attack.Sequence, Now);
                 DamageInfo damage = DamageResolver.Resolve(flight.Weapon, resolved, hit, target,
                     flight.DamageMultiplier, flight.FlatDamageBonus,
-                    FlowTuning, true, bladeContact, location, locationMultiplier, airTimeFalloff);
+                    FlowTuning, true, bladeContact, location, locationMultiplier, airTimeFalloff, shieldContact, weaponContact);
                 if (!damage.IsValid) return;
                 target.ApplyDamage(damage);
                 NoteDamageTaken(target, damage);
@@ -906,7 +912,7 @@ namespace Emberdelve.Combat
             float scale = activation.Skill.UsesFlatDamage ? 1f : activation.Scale;
             DamageInfo skillDamage = DamageResolver.ResolveSkill(resolvedSkill, hit, target,
                 flight.DamageMultiplier, scale, flight.FlatDamageBonus,
-                true, bladeContact, location, locationMultiplier, airTimeFalloff);
+                true, bladeContact, location, locationMultiplier, airTimeFalloff, shieldContact, weaponContact);
             if (!skillDamage.IsValid) return;
             target.ApplyDamage(skillDamage);
             NoteDamageTaken(target, skillDamage);

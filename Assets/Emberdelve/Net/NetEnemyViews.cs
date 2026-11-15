@@ -30,11 +30,15 @@ namespace Emberdelve.Net
             public bool HasVitals;
             public byte VisualKind;
             public bool HasPresentation;
+            public bool HasPosition;
+            public Vector3 LastPosition;
             public EnemyPresentationWire Presentation;
             public readonly EnemyHitPresentationQueue PendingHits = new EnemyHitPresentationQueue();
         }
 
         private static readonly Dictionary<int, Entry> Entries = new Dictionary<int, Entry>();
+        private static readonly HashSet<int> RetiredEnemies = new HashSet<int>();
+        private static readonly List<Rect> RetiredFloors = new List<Rect>();
         private static int _poses;
         private static float _nextSummary;
 
@@ -75,9 +79,41 @@ namespace Emberdelve.Net
         public static void Clear()
         {
             foreach (KeyValuePair<int, Entry> pair in Entries)
-                if (pair.Value.Proxy != null) Object.Destroy(pair.Value.Proxy.gameObject);
+                DestroyProxy(pair.Value.Proxy);
             Entries.Clear();
+            RetiredEnemies.Clear(); RetiredFloors.Clear();
             _poses = 0;
+        }
+
+        private static void DestroyProxy(NetEnemyProxy proxy)
+        {
+            if (proxy == null) return;
+            proxy.gameObject.SetActive(false);
+            if (Application.isPlaying) Object.Destroy(proxy.gameObject); else Object.DestroyImmediate(proxy.gameObject);
+        }
+
+        private static bool IsRetiredPosition(Vector3 position)
+        {
+            foreach (var bounds in RetiredFloors)
+                if (bounds.Contains(new Vector2(position.x, position.z))) return true;
+            return false;
+        }
+
+        private static void RetireEnemy(int id)
+        {
+            RetiredEnemies.Add(id);
+            if (!Entries.TryGetValue(id, out var entry)) return;
+            DestroyProxy(entry.Proxy); Entries.Remove(id);
+        }
+
+        public static void RetireFloor(Rect bounds)
+        {
+            if (RetiredFloors.Contains(bounds)) return;
+            RetiredFloors.Add(bounds);
+            var retired = new List<int>();
+            foreach (var pair in Entries)
+                if (pair.Value.HasPosition && IsRetiredPosition(pair.Value.LastPosition)) retired.Add(pair.Key);
+            foreach (int id in retired) RetireEnemy(id);
         }
 
         private static Entry Get(int id)
@@ -93,12 +129,14 @@ namespace Emberdelve.Net
 
         public static void OnPose(in EnemyPoseWire pose)
         {
-            if (!pose.IsValid) return;
+            if (!pose.IsValid || RetiredEnemies.Contains(pose.Enemy)) return;
+            Vector3 where = new Vector3(pose.X, pose.Y, pose.Z);
+            if (IsRetiredPosition(where)) { RetireEnemy(pose.Enemy); return; }
             Entry entry = Get(pose.Enemy);
+            entry.HasPosition = true; entry.LastPosition = where;
             if (entry.Dead) return;
             _poses++;
 
-            Vector3 where = new Vector3(pose.X, pose.Y, pose.Z);
             if (entry.Proxy == null)
             {
                 entry.Proxy = CreateProxy(pose.Enemy, entry.VisualKind, entry.PendingHits);
@@ -114,6 +152,7 @@ namespace Emberdelve.Net
 
         public static void OnVitals(in EnemyVitalsWire vitals)
         {
+            if (RetiredEnemies.Contains(vitals.Enemy)) return;
             Entry entry = Get(vitals.Enemy);
             bool changed = !entry.HasVitals || entry.Dead != vitals.Dead || !Mathf.Approximately(entry.Health, vitals.Health) ||
                            !Mathf.Approximately(entry.MaxHealth, vitals.MaxHealth);
@@ -132,7 +171,7 @@ namespace Emberdelve.Net
 
         public static void OnPresentation(in EnemyPresentationWire state)
         {
-            if (!state.IsValid) return;
+            if (!state.IsValid || RetiredEnemies.Contains(state.Enemy)) return;
             Entry entry = Get(state.Enemy);
             byte oldKind = entry.VisualKind;
             bool hadPresentation = entry.HasPresentation;
@@ -222,6 +261,8 @@ namespace Emberdelve.Net
         public void SetIdentity(int enemyId, byte visualKind)
         {
             _enemyId = enemyId;
+            if (GetComponent<Emberdelve.Feedback.WorldFootsteps>() == null)
+                gameObject.AddComponent<Emberdelve.Feedback.WorldFootsteps>().Audible = false;
             _visualKind = visualKind;
         }
 
@@ -273,6 +314,10 @@ namespace Emberdelve.Net
         public void ApplyPresentation(in EnemyPresentationWire state, bool initial = false)
         {
             if (!state.IsValid || _animator == null) return;
+            var footsteps = GetComponent<Emberdelve.Feedback.WorldFootsteps>();
+            if (footsteps != null) footsteps.Audible = !state.IsDead && !state.IsDormant && !state.IsWaking;
+            if (!initial && !state.IsDead && state.AttackPhase == 2 && _attackPhase.Phase != 2)
+                Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldSound.Swing, transform.position + Vector3.up, .8f);
             bool starting = state.AttackPhase != 0 && (_attackPhase.Phase == 0 || initial);
             _attackPhase = new EnemyAttackPhase(state.AttackPhase, state.PhaseElapsed, state.PhaseDuration, state.RecoilStart);
             _phaseSampleTime = state.SampleTime;
@@ -333,6 +378,8 @@ namespace Emberdelve.Net
         {
             if (_dead) return;
             _dead = true;
+            var footsteps = GetComponent<Emberdelve.Feedback.WorldFootsteps>();
+            if (footsteps != null) footsteps.Audible = false;
             EnemyDormantPose.FinishDead(_animator, ref _restDriven);
             _dormant = _waking = false;
             _pendingHits.Discard();

@@ -178,7 +178,7 @@ namespace Emberdelve.EditorTools
             float before = target.Taken;
             target.Last = DamageInfo.Invalid;
             // The magazine is the authority's record now (the old rig-side reload no longer refills it behind this gate's back):
-            // keep a round available through the host seam so every probe tests its own rule, not the crossbow's 4-round magazine.
+            // keep a round available through the host seam so every probe tests its own rule, not the crossbow's single-bolt capacity.
             RangedCombat probeRanged = _rig.GetComponent<RangedCombat>();
             if (probeRanged != null && probeRanged.Magazine < 1) EmberdelveKitFixtures.RefundAmmo(probeRanged, 1);
             bool accepted = _authority.LaunchProjectileAsOwner(intent);

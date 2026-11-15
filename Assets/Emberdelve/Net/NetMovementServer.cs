@@ -61,6 +61,8 @@ namespace Emberdelve.Net
             public readonly InputSanitizer Sanitizer = new InputSanitizer();
             public readonly ServerMoveInputBuffer Buffer = new ServerMoveInputBuffer();
 
+            public uint Generation;
+            public int GenerationRejected;
             public int Forge;
             public int BadBatch;
 
@@ -192,7 +194,8 @@ namespace Emberdelve.Net
                 Object = row.Object,
                 LastPos = row.Rig.transform.position,
                 RestY = row.Rig.transform.position.y,
-                LastFrameTick = _tick
+                LastFrameTick = _tick,
+                Generation = row.Rig.FloorMovementGeneration
             };
             state.LoggedPos = state.LastPos;
             state.NextLogTick = _tick;
@@ -219,6 +222,23 @@ namespace Emberdelve.Net
             if (!_states.TryGetValue(playerId, out MoveState state)) return false;
             ticks = _tick - state.LastFrameTick;
             return true;
+        }
+
+        public void OnFloorMovementChanged(PlayerRig rig)
+        {
+            if (rig == null || !_states.TryGetValue(rig.PlayerId, out var state)) return;
+            ResetFloorMovement(state);
+        }
+
+        private void ResetFloorMovement(MoveState state)
+        {
+            state.Generation = state.Rig.FloorMovementGeneration;
+            state.Buffer.Clear(); state.Sanitizer.ResetGeneration(); state.AckDirty = false;
+            state.LastPos = state.Rig.transform.position; state.LoggedPos = state.LastPos;
+            state.RestY = state.LastPos.y; state.Moving = false; state.AirTicks = 0;
+            state.LastFrameTick = _tick;
+            _log("floor movement barrier id=" + state.PlayerId + " generation=" + state.Generation
+                + " transit=" + state.Rig.IsInFloorTransit + " pos=" + P(state.LastPos));
         }
 
         public void Unregister(int playerId, string reason)
@@ -257,6 +277,15 @@ namespace Emberdelve.Net
                          " targetOwner=" + (targetObject != null ? targetObject.OwnerClientId : 0UL) + " sender=" + senderClientId);
                 }
 
+                return;
+            }
+
+            if (state.Generation != state.Rig.FloorMovementGeneration) ResetFloorMovement(state);
+            if (state.Rig.IsInFloorTransit || batch.Generation != state.Generation)
+            {
+                state.GenerationRejected++;
+                if (IsLoggable(state.GenerationRejected)) _log("REJECT floor-generation count=" + state.GenerationRejected
+                    + " id=" + state.PlayerId + " received=" + batch.Generation + " current=" + state.Generation);
                 return;
             }
 
@@ -330,6 +359,7 @@ namespace Emberdelve.Net
             MaybeStageMovementProof();
             MaybeStageFinalProof();
             MaybeShove();
+            MaybeFloorMovementProof();
 #endif
 
             for (int i = _order.Count - 1; i >= 0; i--)
@@ -363,6 +393,8 @@ namespace Emberdelve.Net
             PlayerLook look = rig.Look;
             Transform body = rig.transform;
             if (movement == null) return;
+            if (state.Generation != rig.FloorMovementGeneration) ResetFloorMovement(state);
+            if (rig.IsInFloorTransit) { state.Buffer.Clear(); state.AckDirty = false; return; }
 
             float fallbackYaw = MoveInputFrame.WrapDegrees(body.eulerAngles.y);
             float fallbackPitch = look != null ? look.Pitch : 0f;
@@ -429,7 +461,7 @@ namespace Emberdelve.Net
 
             state.AckDirty = false;
             state.AcksSent++;
-            state.NetRig.AckRpc(MoveAckWire.From(state.AckSeq, (uint)_tick, in state.AckState));
+            state.NetRig.AckRpc(MoveAckWire.From(state.AckSeq, (uint)_tick, in state.AckState, state.Generation));
         }
 
         /// <summary>Resolves the player's movement numbers and writes them to the owner-read variable when they changed.</summary>
@@ -561,6 +593,52 @@ namespace Emberdelve.Net
         /// named player is teleported M meters along YAW. Done between two steps, and the speed tracker is told, so the jump is not
         /// counted as speed. The owner's prediction cannot know about it: the next Acks show a large error and the owner snaps.
         /// </summary>
+        private int _floorProofStage;
+        private long _floorProofReleaseTick;
+        private MoveState _floorProofActor;
+        private Vector3 _floorProofLanding;
+        private MoveAckWire _floorProofOldAck;
+        private void MaybeFloorMovementProof()
+        {
+            string path = Environment.GetEnvironmentVariable("EMBER_MOVEMENT_PROOF_PATH");
+            if (string.IsNullOrEmpty(path) || _floorProofStage == 3) return;
+            if (_floorProofStage == 0)
+            {
+                if (!File.Exists(path + ".floor")) return;
+                foreach (var state in _order) if (state.Slot == "mv-a") _floorProofActor = state;
+                var actor = _floorProofActor; var shove = NetBootstrap.LaunchArgs?.DevShove;
+                if (actor == null || shove == null) return;
+                _floorProofLanding = actor.Rig.transform.position - new Vector3(shove.DirectionX, 0, shove.DirectionZ) * shove.Meters;
+                if (Physics.CheckCapsule(_floorProofLanding + Vector3.up * .38f,
+                    _floorProofLanding + Vector3.up * 1.44f, .36f, Physics.AllLayers, QueryTriggerInteraction.Ignore))
+                { _logError("floor-proof landing is blocked"); _floorProofStage = 3; return; }
+                _floorProofOldAck = MoveAckWire.From(actor.AckSeq, (uint)_tick, in actor.AckState, actor.Generation);
+                if (!actor.Rig.TryBeginFloorTransit(out string reason))
+                { _logError("floor-proof transit refused: " + reason); _floorProofStage = 3; return; }
+                _floorProofReleaseTick = _tick + 90;
+                _floorProofStage = 1;
+                _log("floor-proof holding id=" + actor.PlayerId + " generation=" + actor.Rig.FloorMovementGeneration);
+            }
+            else if (_floorProofStage == 1 && _tick >= _floorProofReleaseTick)
+            {
+                if (!_floorProofActor.Rig.TryEndFloorTransit(_floorProofLanding, Quaternion.identity, out string reason))
+                { _logError("floor-proof arrival refused: " + reason); _floorProofStage = 3; return; }
+                _floorProofStage = 2;
+                _log("floor-proof arrived id=" + _floorProofActor.PlayerId + " generation=" + _floorProofActor.Rig.FloorMovementGeneration
+                    + " pos=" + P(_floorProofLanding));
+            }
+            else if (_floorProofStage == 2 && _tick >= _floorProofReleaseTick + 30)
+            {
+                // Deliberately delayed packets from the source floor, through the real receive/RPC paths.
+                var stale = MoveInputFrame.Create(_floorProofOldAck.LastProcessedSeq + 1, 1, 1, 90, 0, true, true, true);
+                var batch = MoveBatchWire.From(new[] { stale }, 1, _floorProofOldAck.Generation);
+                Receive(_floorProofActor.NetRig, _floorProofActor.ClientId, in batch);
+                _floorProofActor.NetRig.AckRpc(_floorProofOldAck);
+                _floorProofStage = 3;
+                _log("floor-proof stale input and ack injected id=" + _floorProofActor.PlayerId);
+            }
+        }
+
         private void MaybeShove()
         {
             if (_shoveDone || _tick % ShovePollTicks != 0) return;

@@ -56,7 +56,9 @@ namespace Emberdelve.EditorTools
             CheckMaterials();
 
             // Both builders must run clean; the dungeon is built last so it is the loaded scene afterwards.
-            EmberdelveLobbyBuilder.Build();
+            Scene lobby = EmberdelveLobbyBuilder.Build();
+            CheckLobbyShadows(lobby);
+            CheckHandheldTorchShadows();
             Scene scene = EmberdelveLevelBuilder.Build();
             AssetDatabase.SaveAssets();
 
@@ -70,6 +72,49 @@ namespace Emberdelve.EditorTools
         }
 
         // ---------------------------------------------------------------- textures / materials
+
+        private static void CheckHandheldTorchShadows()
+        {
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(EmberdelveTorchContent.PrefabPath);
+            var visual = prefab != null ? prefab.GetComponent<Emberdelve.Player.HandheldTorchVisual>() : null;
+            var source = visual != null ? visual.source : null;
+            var data = source != null ? source.GetComponent<UniversalAdditionalLightData>() : null;
+            Check(source != null && source.type == LightType.Point && source.shadows == LightShadows.Soft && data != null &&
+                data.additionalLightsShadowResolutionTier == UniversalAdditionalLightData.AdditionalLightsShadowResolutionTierMedium,
+                "held torch retains soft point shadows at explicit Medium tier");
+            var flame = visual != null ? visual.flame : null;
+            var particles = flame != null ? flame.GetComponentsInChildren<ParticleSystem>(true) : new ParticleSystem[0];
+            var volumes = flame != null ? flame.GetComponentsInChildren<MeshRenderer>(true) : new MeshRenderer[0];
+            Check(particles.Length == 2 && System.Array.Exists(particles,p=>p.name=="Embers") &&
+                System.Array.Exists(particles,p=>p.name=="SmokeWisps") && volumes.Length == 1 &&
+                volumes[0].sharedMaterial != null && volumes[0].sharedMaterial.shader.name == "Emberdelve/HandTorchVolume" &&
+                volumes[0].sharedMaterial.renderQueue >= 3000 && volumes[0].sharedMaterial.GetTexture("_NoiseTex") is Texture3D &&
+                flame.GetComponentsInChildren<Collider>(true).Length == 0 && prefab.GetComponentsInChildren<Light>(true).Length == 1,
+                "held flame uses transparent turbulent volume plus sparks/smoke; no opaque flame, collider or extra light");
+            foreach (var particle in particles)
+            {
+                var renderer = particle.GetComponent<ParticleSystemRenderer>();
+                Check(particle.main.loop && particle.main.playOnAwake && renderer != null && renderer.sharedMaterial != null &&
+                    renderer.sharedMaterial.GetTexture("_BaseMap") != null && renderer.sharedMaterial.renderQueue >= 3000,
+                    "held flame particle has soft transparent material and automatic playback: " + particle.name);
+            }
+        }
+
+        private static void CheckLobbyShadows(Scene scene)
+        {
+            int count = 0;
+            foreach (var root in scene.GetRootGameObjects())
+                foreach (var light in root.GetComponentsInChildren<Light>(true))
+                    if (light.name == "Lobby_Torch")
+                    {
+                        count++;
+                        var data = light.GetComponent<UniversalAdditionalLightData>();
+                        Check(light.type == LightType.Point && light.shadows == LightShadows.Soft && data != null &&
+                            data.additionalLightsShadowResolutionTier == UniversalAdditionalLightData.AdditionalLightsShadowResolutionTierLow,
+                            "lobby torch retains soft point shadows at explicit Low tier: " + light.transform.position);
+                    }
+            Check(count == 4, "four lobby point-light shadow sources");
+        }
 
         private static void CheckTextures()
         {
@@ -92,10 +137,10 @@ namespace Emberdelve.EditorTools
             Check(importer.textureType == type, path + " type " + type + " (was " + importer.textureType + ")");
             if (type != TextureImporterType.NormalMap) Check(importer.sRGBTexture == srgb, path + " sRGB=" + srgb + " (was " + importer.sRGBTexture + ")");
             Check(importer.wrapMode == TextureWrapMode.Repeat, path + " wrap Repeat (was " + importer.wrapMode + ")");
-            // V2 (intentional change, see Docs/Tasks/V2.md): V1 expected aniso 8 / Trilinear / 2048; the retro look is aniso 1 / Point / <= 512.
-            Check(importer.anisoLevel == 1, path + " aniso 1 (V2 retro; was 8 in V1) (was " + importer.anisoLevel + ")");
-            Check(importer.filterMode == FilterMode.Point, path + " Point filter (V2 retro) (was " + importer.filterMode + ")");
-            Check(importer.maxTextureSize <= 512, path + " max size <= 512 (V2 retro) (was " + importer.maxTextureSize + ")");
+            // Preserve the licensed source detail for the reference-informed material pass.
+            Check(importer.anisoLevel == 8, path + " aniso 8 (was " + importer.anisoLevel + ")");
+            Check(importer.filterMode == FilterMode.Trilinear, path + " Trilinear filter (was " + importer.filterMode + ")");
+            Check(importer.maxTextureSize == 2048, path + " source-detail cap 2048 (was " + importer.maxTextureSize + ")");
             Check(importer.mipmapEnabled, path + " mipmaps on");
         }
 

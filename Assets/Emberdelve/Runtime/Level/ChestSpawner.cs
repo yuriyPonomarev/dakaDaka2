@@ -17,9 +17,14 @@ namespace Emberdelve.Level
         private readonly List<ChestInteractable> _chests = new List<ChestInteractable>();
         private bool _presentationOnly;
         private DungeonLayoutData _builtLayout;
+        private MonoBehaviour _floorLootHost;
+        private GameConfig _floorConfig;
+        private Transform _floorRoot;
+        private int _floorNumber;
 
         public IReadOnlyList<ChestInteractable> Chests => _chests;
         public int Count => _chests.Count;
+        public DungeonLayoutData BuiltLayout => _builtLayout;
 
         /// <summary>
         /// Builds only the authored chest views on a network client. These components have no loot host and
@@ -33,7 +38,7 @@ namespace Emberdelve.Level
             for (int i = 0; i < existingSpawners.Length; i++)
             {
                 ChestSpawner existing = existingSpawners[i];
-                if (existing == null || !existing._presentationOnly) continue;
+                if (existing == null || !existing._presentationOnly || existing._floorRoot != null) continue;
                 if (existing._builtLayout == layout && matching == null)
                 {
                     matching = existing;
@@ -73,6 +78,62 @@ namespace Emberdelve.Level
             return spawner;
         }
 
+        /// <summary>Builds authority-owned chests below a caller-owned floor root, retaining the raid's loot host.</summary>
+        public static ChestSpawner CreateForFloor(DungeonLayoutData layout, GameConfig config,
+            MonoBehaviour lootHost, Transform floorRoot, int floorNumber)
+        {
+            if (NetRole.IsClientOnly || lootHost == null) return null;
+            return CreateFloorScoped(layout, config, lootHost, floorRoot, floorNumber, false);
+        }
+
+        /// <summary>Builds only this floor's client views without replacing any other floor's chests.</summary>
+        public static ChestSpawner CreateClientPresentationForFloor(DungeonLayoutData layout,
+            Transform floorRoot, int floorNumber)
+        {
+            if (!NetRole.IsClientOnly) return null;
+            return CreateFloorScoped(layout, null, null, floorRoot, floorNumber, true);
+        }
+
+        private static ChestSpawner CreateFloorScoped(DungeonLayoutData layout, GameConfig config,
+            MonoBehaviour lootHost, Transform floorRoot, int floorNumber, bool presentationOnly)
+        {
+            if (layout == null || floorRoot == null || floorNumber < 1 || floorNumber > 3) return null;
+            foreach (ChestSpawner existing in floorRoot.GetComponentsInChildren<ChestSpawner>(true))
+            {
+                if (existing._floorRoot != floorRoot) continue;
+                return existing._builtLayout == layout && existing._floorNumber == floorNumber &&
+                       existing._presentationOnly == presentationOnly && existing._floorLootHost == lootHost
+                       && existing._floorConfig == config ? existing : null;
+            }
+
+            // Validate all published names before creating any objects; the network and loot seed use this same ID.
+            if (layout.chestSpawns != null)
+                for (int i = 0; i < layout.chestSpawns.Count; i++)
+                {
+                    ChestSpawnSpec spec = layout.chestSpawns[i];
+                    if (spec != null && spec.lootTable != null &&
+                        !ChestInteractable.IsValidNetworkChestId(ChestName(spec, i, floorNumber))) return null;
+                }
+
+            GameObject root = new GameObject("Floor" + floorNumber + "_Chests");
+            root.transform.SetParent(floorRoot, false);
+            ChestSpawner spawner = root.AddComponent<ChestSpawner>();
+            spawner._floorRoot = floorRoot;
+            spawner._floorNumber = floorNumber;
+            spawner._presentationOnly = presentationOnly;
+            spawner._builtLayout = layout;
+            spawner._floorLootHost = lootHost;
+            spawner._floorConfig = config;
+            spawner.BuildInternal(layout, config, lootHost, presentationOnly);
+            return spawner;
+        }
+
+        private static string ChestName(ChestSpawnSpec spec, int index, int floorNumber)
+        {
+            string name = $"Chest_{spec.variant}_{spec.cell.x}_{spec.cell.y}_{index}";
+            return floorNumber > 0 ? "Floor" + floorNumber + "_" + name : name;
+        }
+
         public void Build(DungeonLayoutData layout, GameConfig config, MonoBehaviour lootHost)
         {
             _presentationOnly = false;
@@ -89,7 +150,7 @@ namespace Emberdelve.Level
             int interactLayer = LayerMask.NameToLayer(GameConfig.InteractLayerName);
             bool[,] walkable = layout.BuildWalkableGrid();
             GameObject root = new GameObject("Chests");
-            root.transform.SetParent(presentationOnly ? transform : lootHost.transform, false);
+            root.transform.SetParent(presentationOnly || _floorRoot != null ? transform : lootHost.transform, false);
 
             for (int i = 0; i < layout.chestSpawns.Count; i++)
             {
@@ -100,7 +161,7 @@ namespace Emberdelve.Level
                 Vector3 size = SizeFor(spec.variant);
 
                 GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                body.name = $"Chest_{spec.variant}_{spec.cell.x}_{spec.cell.y}_{i}";
+                body.name = ChestName(spec, i, _floorNumber);
                 body.transform.SetParent(root.transform, false);
                 body.transform.position = center + Vector3.up * (size.y * 0.5f);
                 body.transform.localScale = size;

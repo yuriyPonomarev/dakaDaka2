@@ -29,6 +29,7 @@ namespace Emberdelve.AI
 
 
         private EnemyAgent _agent;
+        private byte _soundPhase;
         private HealthComponent _health;
         private Vector3 _lastPosition;
         private float _speed;
@@ -50,6 +51,8 @@ namespace Emberdelve.AI
         {
             if (animator == null) animator = GetComponentInChildren<Animator>();
             _agent = GetComponentInParent<EnemyAgent>();
+            if (_agent != null && _agent.GetComponent<Emberdelve.Feedback.WorldFootsteps>() == null)
+                _agent.gameObject.AddComponent<Emberdelve.Feedback.WorldFootsteps>();
 
             _speedHash = Animator.StringToHash(SpeedParameter);
             _attackSpeedHash = Animator.StringToHash(AttackSpeedParameter);
@@ -140,6 +143,9 @@ namespace Emberdelve.AI
             animator.SetFloat(_speedHash, _speed);
 
             EnemyAttackPhase phase = _agent.AttackPresentation;
+            if (phase.Phase == 2 && _soundPhase != 2)
+                Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldSound.Swing, _agent.transform.position + Vector3.up, .8f);
+            _soundPhase = phase.Phase;
             if (phase.Phase != 0)
             {
                 _phaseDriven = true;

@@ -25,8 +25,10 @@ namespace Emberdelve.Player
         private Transform _muzzle;
         private Transform _arrow;
         private Transform _string;
+        private Transform _stringLeft, _stringRight;
         private bool _isRanged;
         private bool _crossbow;
+        private bool _bowGuard;
 
         // ---- swept melee presentation (D1a) -------------------------------------------------------------
         private Transform _aimFrame;
@@ -38,12 +40,14 @@ namespace Emberdelve.Player
         private int _clipMask;
         private float _swingStart;
         private bool _swinging;
+        private bool _swingSoundPlayed;
         private bool _recoiling;
         private float _recoilStart;
         private Vector3 _transitionBase;
         private Quaternion _transitionRotation;
         private Vector3 _restLocalPosition;
         private Quaternion _restLocalRotation;
+        private Vector3 _restLocalScale;
         private SwingTrail _trail;
         private Transform _guardBlade;
         private bool _guardHeld;
@@ -56,6 +60,7 @@ namespace Emberdelve.Player
 
         public Transform Muzzle => _muzzle;
         public bool IsRanged => _isRanged;
+        public float DrawProgress { get; private set; }
         public bool IsSwinging => _swinging || _recoiling;
         public float BladeLength => _bladeLength;
 
@@ -86,13 +91,19 @@ namespace Emberdelve.Player
 
         private Vector3 VisibleTip => transform.position + transform.forward * _visibleLength;
 
-        public void Configure(Transform muzzle, Transform arrow, Transform bowString, bool isRanged, bool crossbow = false)
+        public void Configure(Transform muzzle, Transform arrow, Transform bowString, bool isRanged, bool crossbow = false, bool bowGuard = false)
         {
             _muzzle = muzzle;
             _arrow = arrow;
             _string = bowString;
             _isRanged = isRanged;
             _crossbow = crossbow;
+            if (crossbow && bowString != null)
+            {
+                _stringLeft = bowString.Find("Left");
+                _stringRight = bowString.Find("Right");
+            }
+            _bowGuard = bowGuard;
             if (_arrow != null) _arrow.gameObject.SetActive(false);
         }
 
@@ -108,6 +119,7 @@ namespace Emberdelve.Player
             _guardBlade = guardBlade;
             _restLocalPosition = transform.localPosition;
             _restLocalRotation = transform.localRotation;
+            _restLocalScale = transform.localScale;
             if (_edge != null) _edge.gameObject.SetActive(false);
         }
 
@@ -156,6 +168,23 @@ namespace Emberdelve.Player
 
         private void ApplyGuardPose()
         {
+            if (_isRanged)
+            {
+                if (!_crossbow && !_bowGuard) return;
+                if (_guardHeld && _aimFrame != null)
+                    {
+                    Quaternion aim = Quaternion.LookRotation(_aimFrame.forward, Vector3.up);
+                    if (_bowGuard) BowGuardPose.ApplyModel(transform, _aimFrame.position, aim);
+                    else CrossbowGuardPose.ApplyModel(transform, _aimFrame.position, aim);
+                }
+                else
+                {
+                    transform.localPosition = _restLocalPosition;
+                    transform.localRotation = _restLocalRotation;
+                    transform.localScale = _restLocalScale;
+                }
+                return;
+            }
             if (_swinging || _recoiling || _guardBlade == null) return;
             if (_guardHeld && _aimFrame != null)
             {
@@ -200,6 +229,7 @@ namespace Emberdelve.Player
                 ? local.SwingBlockerMask.value
                 : 0;
             _swingStart = Time.time;
+            _swingSoundPlayed = false;
             _swinging = true;
             _recoiling = false;
 
@@ -239,6 +269,39 @@ namespace Emberdelve.Player
             SamplePresentation(_pattern, _timing, swingTime, _transitionBase, _transitionRotation, _guardHeld,
                 out Vector3 position, out Quaternion rotation);
             ApplyPresentation(position, rotation, active);
+        }
+
+        public void SyncNetworkSwingTime(float elapsed)
+        {
+            _swingStart = Time.time - Mathf.Max(0f, elapsed);
+            ApplySwingTime(elapsed);
+        }
+
+        public void ApplyNetworkRecoil(float stopFraction, float elapsed)
+        {
+            if (_pattern == null) return;
+            SwingPose contact = _pattern.ActivePose(Mathf.Clamp01(stopFraction));
+            _transitionBase = contact.Base;
+            _transitionRotation = contact.LocalRotation;
+            _swinging = false;
+            _recoiling = true;
+            _recoilStart = Time.time - Mathf.Max(0f, elapsed);
+            if (_trail != null) _trail.EndStroke();
+            SampleRecoil(_pattern, stopFraction, _timing.WallRecoil > 0f ? elapsed / _timing.WallRecoil : 1f,
+                _guardHeld, out Vector3 position, out Quaternion rotation);
+            ApplyPresentation(position, rotation, false);
+        }
+
+        public void CancelNetworkSwing() => EndSwing();
+
+        public static void SampleRecoil(SwingPatternData pattern, float stopFraction, float progress,
+            bool guarding, out Vector3 position, out Quaternion rotation)
+        {
+            SwingPose contact = pattern.ActivePose(Mathf.Clamp01(stopFraction));
+            ReadyPose(guarding, out Vector3 rest, out Quaternion ready);
+            float eased = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(progress));
+            position = Vector3.Lerp(contact.Base, rest, eased);
+            rotation = Quaternion.Slerp(contact.LocalRotation, ready, eased);
         }
 
         private void CaptureTransitionStart()
@@ -300,7 +363,18 @@ namespace Emberdelve.Player
 
         private void LateUpdate()
         {
-            if (_isRanged) return;
+            if (_isRanged)
+            {
+                if (_crossbow)
+                {
+                    var owner = GetComponentInParent<PlayerRig>();
+                    var ranged = owner != null ? owner.GetComponent<RangedCombat>() : null;
+                    SetCrossbowState(ranged != null && ranged.HasAuthoritativeAmmo && ranged.Magazine > 0,
+                        ranged != null && ranged.IsReloading, ranged != null ? ranged.ReloadProgress : 0f);
+                }
+                if (_crossbow || _bowGuard) ApplyGuardPose();
+                return;
+            }
             if (_pattern == null)
             {
                 ApplyGuardPose();
@@ -317,6 +391,12 @@ namespace Emberdelve.Player
                 }
 
                 ApplySwingTime(t);
+                if (!_swingSoundPlayed && t >= _timing.Windup)
+                {
+                    _swingSoundPlayed = true;
+                    if (t <= _timing.ActiveEnd)
+                        Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldSound.Swing, transform.position, .7f);
+                }
                 float activeEnd = _timing.ActiveEnd;
                 if (t >= _timing.Windup && t <= activeEnd)
                 {
@@ -363,10 +443,38 @@ namespace Emberdelve.Player
             if (_trail != null) Destroy(_trail.gameObject);
         }
 
+        /// <summary>Cosmetic state from the authoritative magazine and reload clock; never changes the muzzle or ammunition.</summary>
+        public void SetCrossbowState(bool loaded, bool reloading, float progress)
+        {
+            if (!_crossbow) return;
+            float p = float.IsNaN(progress) || float.IsInfinity(progress) ? 0f : Mathf.Clamp01(progress);
+            float pull = loaded ? 1f : reloading ? Mathf.SmoothStep(0f, 1f, (p - .2f) / .3f) : 0f;
+            Vector3 nock = new Vector3(0f, .05f * pull, Mathf.Lerp(-.025f, -.22f, pull));
+            PoseString(_stringLeft, new Vector3(-.215f, 0f, -.025f), nock);
+            PoseString(_stringRight, new Vector3(.215f, 0f, -.025f), nock);
+            if (_arrow != null)
+            {
+                bool seating = reloading && p >= .5f;
+                _arrow.gameObject.SetActive(loaded || seating);
+                float seat = loaded ? 1f : Mathf.SmoothStep(0f, 1f, (p - .5f) / .25f);
+                _arrow.localPosition = Vector3.Lerp(new Vector3(0f, .12f, -.06f), new Vector3(0f, .05f, -.22f + _arrow.localScale.z * .5f), seat);
+            }
+        }
+
+        private static void PoseString(Transform segment, Vector3 tip, Vector3 nock)
+        {
+            if (segment == null) return;
+            Vector3 delta = nock - tip;
+            segment.localPosition = (tip + nock) * .5f;
+            segment.localRotation = Quaternion.FromToRotation(Vector3.right, delta);
+            segment.localScale = new Vector3(delta.magnitude, .008f, .008f);
+        }
+
         public void SetDrawProgress(float progress)
         {
-            if (!_isRanged) return;
+            if (!_isRanged || _crossbow) return;
             float p = Mathf.Clamp01(progress);
+            DrawProgress = p;
             var bow = GetComponentInChildren<BowPresentation>();
             if (bow != null) bow.SetDraw(p);
 
@@ -401,8 +509,14 @@ namespace Emberdelve.Player
 
             GameObject root = new GameObject(ranged ? "Weapon_Bow_Blockout" : "Weapon_Sword_Blockout");
             root.transform.SetParent(parent, false);
-            root.transform.localPosition = ranged ? (weapon.weaponId == "hollow_bow" ? new Vector3(-.18f, -.13f, .75f) : new Vector3(.20f, -.17f, .30f)) : GuardBladePose.RootRestPosition;
-            root.transform.localRotation = ranged ? Quaternion.Euler(0f, -8f, 0f) : WeaponVisualRig.ReadyRotation;
+            // Bring the crossbow's prod and bolt channel into the ready view, with enough
+            // depth to avoid an oversized stock end. Its muzzle remains attached to this
+            // same physical model on owner and authority; raised guard has its own pose.
+            root.transform.localPosition = !ranged ? GuardBladePose.RootRestPosition
+                : weapon.weaponId == "hollow_bow" ? new Vector3(-.18f, -.13f, .75f)
+                : weapon.weaponId == "ember_crossbow" ? CrossbowGuardPose.ReadyPosition
+                : new Vector3(.20f, -.17f, .30f);
+            root.transform.localRotation = ranged ? (weapon.weaponId == "ember_crossbow" ? CrossbowGuardPose.ReadyRotation : Quaternion.Euler(0f, -8f, 0f)) : WeaponVisualRig.ReadyRotation;
             if (ignoreLayer >= 0) root.layer = ignoreLayer;
 
             Transform muzzle;
@@ -415,14 +529,23 @@ namespace Emberdelve.Player
                 if (crossbow)
                 {
                     // Distinct, readable crossbow silhouette from the same authored wood/metal materials.
-                    BuildPart(root.transform, "Crossbow_Stock", new Vector3(0f, -0.025f, 0.10f), new Vector3(0.07f, 0.09f, 0.52f), Quaternion.identity, weapon.shaftMaterial);
-                    BuildPart(root.transform, "Crossbow_Grip", new Vector3(0f, -0.15f, -0.01f), new Vector3(0.065f, 0.20f, 0.08f), Quaternion.Euler(-12f, 0f, 0f), weapon.gripMaterial);
-                    BuildPart(root.transform, "Crossbow_Limb", Vector3.zero, new Vector3(0.52f, 0.045f, 0.07f), Quaternion.identity, weapon.shaftMaterial);
-                    BuildPart(root.transform, "Crossbow_Limb_Center", new Vector3(0f, 0f, 0.03f), new Vector3(0.12f, 0.075f, 0.10f), Quaternion.identity, weapon.gripMaterial);
-                    bowString = BuildPart(root.transform, "Crossbow_String", new Vector3(0f, 0f, -0.025f), new Vector3(0.43f, 0.012f, 0.012f), Quaternion.identity, weapon.edgeMaterial);
-                    BuildPart(root.transform, "Crossbow_Trigger", new Vector3(0f, -0.12f, 0.10f), new Vector3(0.018f, 0.08f, 0.025f), Quaternion.identity, weapon.edgeMaterial);
-                    arrow = BuildPart(root.transform, "Crossbow_Bolt", new Vector3(0f, 0f, 0.18f), new Vector3(0.022f, 0.022f, 0.58f), Quaternion.identity, weapon.shaftMaterial);
+                    for (int i = 0; i < CrossbowGuardPose.PartCount; i++)
+                    {
+                        CrossbowGuardPart part = CrossbowGuardPose.Part(i);
+                        Material material = part.Material == CrossbowPartMaterial.Edge ? weapon.edgeMaterial
+                            : part.Material == CrossbowPartMaterial.Grip ? weapon.gripMaterial : weapon.shaftMaterial;
+                        BuildPart(root.transform, part.Name, part.Center, part.Size, part.Rotation, material);
+                    }
+                    bowString = new GameObject("Crossbow_String").transform;
+                    bowString.SetParent(root.transform, false);
+                    BuildPart(bowString, "Left", new Vector3(-.1075f, 0f, -.025f), new Vector3(.215f, .008f, .008f), Quaternion.identity, weapon.edgeMaterial);
+                    BuildPart(bowString, "Right", new Vector3(.1075f, 0f, -.025f), new Vector3(.215f, .008f, .008f), Quaternion.identity, weapon.edgeMaterial);
+                    arrow = ProjectileVisual.CreateModel(weapon, 1f).transform;
+                    arrow.name = "Crossbow_Bolt";
+                    arrow.SetParent(root.transform, false);
+                    arrow.localScale = new Vector3(1f, 1f, Mathf.Max(.2f, weapon.projectileLength));
                     muzzle = BuildPart(root.transform, "Crossbow_Muzzle", new Vector3(0f, 0f, 0.40f), new Vector3(0.001f, 0.001f, 0.001f), Quaternion.identity, null);
+                    CrossbowAppearance.Dress(root.transform, weapon);
                 }
                 else
                 {
@@ -435,12 +558,12 @@ namespace Emberdelve.Player
                 BuildPart(root.transform, "Sword_Blade", GuardBladePose.BladeLocalCenter, GuardBladePose.BladeSize, Quaternion.identity, weapon.edgeMaterial);
                 BuildPart(root.transform, "Sword_Tip", new Vector3(0f, 0f, 0.74f), new Vector3(0.03f, 0.014f, 0.12f), Quaternion.identity, weapon.edgeMaterial);
                 BuildPart(root.transform, "Sword_Guard", new Vector3(0f, 0f, 0.02f), new Vector3(0.17f, 0.035f, 0.05f), Quaternion.identity, weapon.gripMaterial);
-                BuildPart(root.transform, "Sword_Grip", new Vector3(0f, -0.02f, -0.07f), new Vector3(0.035f, 0.035f, 0.15f), Quaternion.identity, weapon.gripMaterial);
+                BuildPart(root.transform, "Sword_Grip", GuardBladePose.GripLocalCenter, GuardBladePose.GripSize, Quaternion.identity, weapon.gripMaterial);
                 muzzle = BuildPart(root.transform, "Sword_Muzzle", new Vector3(0f, 0f, 0.8f), new Vector3(0.001f, 0.001f, 0.001f), Quaternion.identity, null);
             }
 
             WeaponVisualRig rig = root.AddComponent<WeaponVisualRig>();
-            rig.Configure(muzzle, arrow, bowString, ranged, ranged && weapon.weaponId == "ember_crossbow");
+            rig.Configure(muzzle, arrow, bowString, ranged, ranged && weapon.weaponId == "ember_crossbow", weapon.CanBowGuard);
 
             if (!ranged)
             {
@@ -449,6 +572,7 @@ namespace Emberdelve.Player
                 Transform edge = BuildPart(root.transform, "Sweep_Edge", Vector3.zero, new Vector3(0.01f, 0.01f, 1f), Quaternion.identity, weapon.edgeMaterial);
                 rig.ConfigureMelee(aimFrame != null ? aimFrame : parent, edge, root.transform.Find("Sword_Blade"));
             }
+            else rig.ConfigureMelee(aimFrame != null ? aimFrame : parent, null, null);
 
             return rig;
         }
@@ -463,7 +587,11 @@ namespace Emberdelve.Player
             part.transform.localRotation = rotation;
 
             Collider collider = part.GetComponent<Collider>();
-            if (collider != null) Object.Destroy(collider);
+            if (collider != null)
+            {
+                if (Application.isPlaying) Object.Destroy(collider);
+                else Object.DestroyImmediate(collider);
+            }
 
             int ignoreLayer = LayerMask.NameToLayer("Ignore Raycast");
             if (ignoreLayer >= 0) part.layer = ignoreLayer;

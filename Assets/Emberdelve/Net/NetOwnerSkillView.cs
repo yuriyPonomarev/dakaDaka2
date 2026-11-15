@@ -37,6 +37,9 @@ namespace Emberdelve.Net
         private float _toastUntil;
         private bool _runEnded;
         private GUIStyle _raidClockStyle;
+        private GUIStyle _impactGuardStyle;
+        private GUIStyle _rangedStatusStyle;
+        private Emberdelve.Level.DungeonModuleSceneAssembler _map;
 
         private void OnEnable()
         {
@@ -78,6 +81,7 @@ namespace Emberdelve.Net
             _owner = owner;
             _interactor = owner != null ? owner.GetComponent<Interactor>() : null;
             _runEnded = false;
+            _map = FindFirstObjectByType<Emberdelve.Level.DungeonModuleSceneAssembler>();
         }
 
         /// <summary>The replicated state variable changed (server write).</summary>
@@ -94,7 +98,7 @@ namespace Emberdelve.Net
             if (!wire.IsValid) return;
             _raidClock = wire;
             _raidClockReceivedAt = Time.unscaledTimeAsDouble;
-            _hasRaidClock = wire.Enabled;
+            _hasRaidClock = wire.Enabled || wire.Waiting;
 
             int band = !wire.Enabled ? 0 : wire.Expired ? 2 : wire.Warning ? 1 : 0;
             if (band != _lastRaidClockBand)
@@ -156,11 +160,49 @@ namespace Emberdelve.Net
             {
                 float remaining = _hasRaidClock ? Mathf.Max(0f, _raidClock.RemainingSeconds - (float)(Time.unscaledTimeAsDouble - _raidClockReceivedAt)) : 0f;
                 string health = rig?.Health != null ? Mathf.CeilToInt(rig.Health.CurrentHealth) + " / " + Mathf.CeilToInt(rig.Health.MaxHealth) : "—";
-                GUI.Box(new Rect(110f, 4f, 1060f, 24f), "Health  " + health + "     •     Mana  " + Mathf.CeilToInt(_model.State.Mana) + "     •     Raid  " + FormatClock(remaining));
+                // Keep the menu summary at the window top, outside the centred inventory.
+                float hudScale = Mathf.Min(Screen.width / 1280f, Screen.height / 720f);
+                float windowTop = -(Screen.height / hudScale - 720f) * .5f;
+                GUI.Box(new Rect(110f, windowTop + 4f, 1060f, 24f), "Health  " + health + "     •     Mana  " + Mathf.CeilToInt(_model.State.Mana) + "     •     Raid  " + (_raidClock.Waiting ? "Preparing floor " + _raidClock.Floor : FormatClock(remaining)));
                 return;
             }
             if (!menuOpen && rig != null && !rig.IsDead)
             {
+                var ranged = rig.GetComponent<Emberdelve.Combat.RangedCombat>();
+                if (!rig.IsExtracted && rig.ActiveWeapon != null && rig.ActiveWeapon.IsRanged && !rig.IsHoldingUtility && ranged != null)
+                {
+                    if (_rangedStatusStyle == null)
+                        _rangedStatusStyle = new GUIStyle(GUI.skin.box)
+                        { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+                    string ammoName = string.IsNullOrEmpty(rig.ActiveWeapon.ammoDisplayName) ? "AMMO" : rig.ActiveWeapon.ammoDisplayName.ToUpperInvariant();
+                    string ammo = ranged.HasAuthoritativeAmmo ? ranged.Magazine + " / " + ranged.Reserve : "...";
+                    string label = ammoName + "  " + ammo;
+                    if (ranged.IsReloading) label += "\nRELOADING  " + ((1f - ranged.ReloadProgress) * ranged.ReloadDuration).ToString("0.0") + "s";
+                    GUI.Box(new Rect(1032f, 632f, 224f, 64f), label, _rangedStatusStyle);
+                    if (ranged.IsReloading) DrawBar(new Rect(1040f, 690f, 208f, 4f), ranged.ReloadProgress, new Color(.9f, .7f, .3f));
+                }
+                float impactGuard = rig.ImpactGuardRemaining;
+                if (!rig.IsExtracted && impactGuard > 0f && !float.IsInfinity(impactGuard))
+                {
+                    if (_impactGuardStyle == null)
+                    {
+                        _impactGuardStyle = new GUIStyle(GUI.skin.box)
+                        { fontSize = 16, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+                        _impactGuardStyle.normal.textColor = new Color(.85f, .96f, 1f);
+                    }
+                    Rect buff = new Rect(1032f, 488f, 224f, 32f);
+                    Color previous = GUI.color;
+                    GUI.color = new Color(.06f, .13f, .17f, .95f);
+                    GUI.DrawTexture(buff, Texture2D.whiteTexture);
+                    GUI.color = previous;
+                    GUI.Box(buff, "IMPACT GUARD  " + impactGuard.ToString("0.0") + "s", _impactGuardStyle);
+                }
+                if (_map != null && _map.RuntimeLayout != null)
+                {
+                    float yaw = rig.Look != null ? rig.Look.AimTransform.eulerAngles.y : rig.transform.eulerAngles.y;
+                    GUI.Box(new Rect(495f, 13f, 290f, 30f), Emberdelve.Level.DungeonWayfinding.Heading(yaw) + "  |  " +
+                        Emberdelve.Level.DungeonWayfinding.RoomAt(_map.RuntimeLayout, rig.transform.position));
+                }
                 GUI.Label(new Rect(632f, 350f, 20f, 22f), "+");
                 string prompt = _interactor != null && _interactor.CurrentTarget != null
                     ? Interactor.PromptFor(rig, _interactor.CurrentTarget) : "";
@@ -187,8 +229,10 @@ namespace Emberdelve.Net
                 float remaining = _raidClock.Expired ? 0f : Mathf.Max(0f,
                     _raidClock.RemainingSeconds - (float)(Time.unscaledTimeAsDouble - _raidClockReceivedAt));
                 string heading = _raidClock.Expired ? "RAID EXPIRED" :
-                    remaining <= 10f ? "FINAL SECONDS" : remaining <= 60f ? "EXTRACT SOON" : "RAID TIME";
-                string clockText = heading + "\n" + FormatClock(remaining);
+                    remaining <= 10f ? "FINAL SECONDS" : remaining <= 60f
+                    ? (_raidClock.Floor > 0 && _raidClock.Floor < 3 ? "DESCEND SOON" : "EXTRACT SOON") : "RAID TIME";
+                string clockText = _raidClock.Waiting ? "PREPARING FLOOR " + _raidClock.Floor + "\nWAITING FOR PLAYERS"
+                    : (_raidClock.Floor > 0 ? "F" + _raidClock.Floor + "  " : "") + heading + "\n" + FormatClock(remaining);
                 Color previous = GUI.color;
                 Rect panel = new Rect(1016f, 12f, 252f, 72f);
                 GUI.color = new Color(0.07f, 0.06f, 0.05f, 0.92f);
@@ -199,10 +243,22 @@ namespace Emberdelve.Net
                     {
                         fontSize = 22, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter
                     };
-                _raidClockStyle.normal.textColor = _raidClock.Expired || remaining <= 10f
+                _raidClockStyle.normal.textColor = _raidClock.Waiting ? Color.white : _raidClock.Expired || remaining <= 10f
                     ? new Color(1f, 0.72f, 0.58f) : remaining <= 60f
                     ? new Color(1f, 0.87f, 0.56f) : Color.white;
                 GUI.Label(panel, clockText, _raidClockStyle);
+                GUI.color = previous;
+            }
+
+            var zone = _owner.RoyaleZone.Value;
+            if (rig != null && zone.VisibleFor(rig.FloorMovementGeneration, rig.IsInPlay, rig.IsDead))
+            {
+                float outside = zone.DistanceOutside(rig.transform.position);
+                string status = outside > 0 ? "OUTSIDE ZONE  " + Mathf.CeilToInt(outside) + "m to safety"
+                    : zone.Shrinking ? "ZONE SHRINKING" : "ZONE CLOSES IN " + Mathf.CeilToInt(zone.SecondsToBoundary) + "s";
+                Color previous = GUI.color;
+                GUI.color = outside > 0 ? new Color(1f, .65f, .45f) : Color.white;
+                GUI.Box(new Rect(1016f, 88f, 252f, 28f), status);
                 GUI.color = previous;
             }
 

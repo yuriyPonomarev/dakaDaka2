@@ -11,14 +11,9 @@ namespace Emberdelve.Feedback
         public static void Configure(Light light)
         {
             if (light == null || light.type == LightType.Directional) return;
-            light.shadows = LightShadows.Soft;
-            light.shadowStrength = .9f;
-            light.shadowBias = .035f;
-            light.shadowNormalBias = .12f;
-            light.shadowNearPlane = .08f;
-            light.cullingMask = ~0;
-            light.intensity = Mathf.Min(light.intensity, 4f);
-            light.range = Mathf.Min(light.range, 11f);
+            if (Application.isPlaying && light.GetComponent<FlameAudio>() == null) light.gameObject.AddComponent<FlameAudio>();
+            // Appearance/interaction must preserve the authored light budget and reach.
+            // Decorative braziers intentionally have no shadows; torches opt into them.
             var flicker = light.GetComponent<TorchFlicker>();
             if (flicker != null) flicker.SetSourceIntensity(light.intensity);
             if (light.transform.Find("LocalLightHaze") != null) return;

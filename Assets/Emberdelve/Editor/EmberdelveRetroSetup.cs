@@ -27,7 +27,7 @@ namespace Emberdelve.EditorTools
         public const float DefaultPixelSize = 2f;        // 2 screen pixels per retro pixel (1080p -> 960x540)
         public const float DefaultColorLevels = 32f;     // 5 bits per channel
         public const float DefaultDitherStrength = 1f;
-        public const float DefaultStrength = 1f;
+        public const float DefaultStrength = 0f; // Clear rendering by default; retro treatment remains opt-in.
 
         // ---------------------------------------------------------------- material
 

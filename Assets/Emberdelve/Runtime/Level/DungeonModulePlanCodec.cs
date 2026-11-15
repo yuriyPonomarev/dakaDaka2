@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Collections.Generic;
+using Emberdelve.Rules;
 
 namespace Emberdelve.Level
 {
@@ -10,8 +11,8 @@ namespace Emberdelve.Level
     /// </summary>
     public static class DungeonModulePlanCodec
     {
-        private const byte Version = 1;
-        private const int HeaderBytes = 1 + 4 + 4 + 1;
+        private const byte Version = 2;
+        private const int HeaderBytes = 1 + 1 + 4 + 4 + 1;
         private const int PlacementBytes = 2 + 1 + 1 + 1 + 1;
         private const int HashBytes = 4;
         public const int PayloadBytes = HeaderBytes + DungeonModulePlan.Width * DungeonModulePlan.Height * PlacementBytes + HashBytes;
@@ -28,6 +29,7 @@ namespace Emberdelve.Level
             using (BinaryWriter writer = new BinaryWriter(stream))
             {
                 writer.Write(Version);
+                writer.Write(plan.RoyaleMode.HasValue ? (byte)plan.RoyaleMode.Value : (byte)0);
                 writer.Write(plan.Seed);
                 writer.Write(Convert.ToUInt32(plan.CatalogHash, 16));
                 writer.Write((byte)plan.Placements.Length);
@@ -70,6 +72,8 @@ namespace Emberdelve.Level
                 using (BinaryReader reader = new BinaryReader(stream))
                 {
                     if (reader.ReadByte() != Version) { reason = "unsupported module-plan version"; return false; }
+                    byte mode = reader.ReadByte();
+                    if (mode > (byte)RoyalePartyMode.Trio) { reason = "invalid Royale party mode"; return false; }
                     int seed = reader.ReadInt32();
                     uint transmittedCatalogHash = reader.ReadUInt32();
                     string localCatalogHash = DungeonModulePlanner.ComputeCatalogHash(modules);
@@ -115,7 +119,7 @@ namespace Emberdelve.Level
 
                     uint transmittedHash = reader.ReadUInt32();
                     if (plannedKinds.Count < 2) { reason = "plan lacks room variety"; return false; }
-                    plan = new DungeonModulePlan { Seed = seed, Placements = placements, CatalogHash = localCatalogHash };
+                    plan = new DungeonModulePlan { Seed = seed, Placements = placements, CatalogHash = localCatalogHash, RoyaleMode = mode == 0 ? (RoyalePartyMode?)null : (RoyalePartyMode)mode };
                     plan.LayoutHash = DungeonModulePlanner.ComputeHashForWire(plan);
                     if (!plan.Validate(out reason)) { plan = null; return false; }
                     if (!uint.TryParse(plan.LayoutHash, System.Globalization.NumberStyles.HexNumber,

@@ -68,6 +68,39 @@ namespace Emberdelve.Tests.Level
             Assert.IsFalse(_switch.TrySetAuthoritatively(actor, false, out string reason));
             Assert.AreEqual("No line of sight", reason); Assert.IsTrue(_light.enabled);
         }
+        [TestCase(LightShadows.None)] [TestCase(LightShadows.Soft)]
+        public void InstallationAndRelightingPreserveAuthoredLightBudget(LightShadows shadows)
+        {
+            var source = new GameObject("Authored_Light");
+            source.transform.SetParent(_root.transform, false);
+            source.transform.localPosition = Vector3.right * 2f;
+            var light = source.AddComponent<Light>();
+            light.type = LightType.Point;
+            light.intensity = 12f; light.range = 14f;
+            light.shadows = shadows; light.shadowStrength = .63f;
+            light.shadowBias = .06f; light.shadowNormalBias = .25f; light.shadowNearPlane = .2f;
+            int mask = 1 << LayerMask.NameToLayer(GameConfig.LevelLayerName);
+            light.cullingMask = mask;
+            source.AddComponent<Emberdelve.Feedback.TorchFlicker>();
+            WorldLightInteractable.Install(_root.transform);
+            WorldLightInteractable.Install(_root.transform);
+            var interaction = source.GetComponentInChildren<WorldLightInteractable>();
+            Assert.That(interaction, Is.Not.Null);
+            var actor = new Actor { InteractionOrigin = source.transform.position + Vector3.back };
+            Physics.SyncTransforms();
+            Assert.That(interaction.TrySetAuthoritatively(actor, false, out var why), Is.True, why);
+            Assert.That(light.enabled, Is.False);
+            Assert.That(interaction.TrySetAuthoritatively(actor, true, out why), Is.True, why);
+            Assert.That(light.enabled, Is.True);
+            Assert.That(light.shadows, Is.EqualTo(shadows));
+            Assert.That(light.shadowStrength, Is.EqualTo(.63f).Within(.0001f));
+            Assert.That(light.shadowBias, Is.EqualTo(.06f).Within(.0001f));
+            Assert.That(light.shadowNormalBias, Is.EqualTo(.25f).Within(.0001f));
+            Assert.That(light.shadowNearPlane, Is.EqualTo(.2f).Within(.0001f));
+            Assert.That(light.cullingMask, Is.EqualTo(mask));
+            Assert.That(light.intensity, Is.EqualTo(12f));
+            Assert.That(light.range, Is.EqualTo(14f));
+        }
         [Test] public void ClientCannotMutateAuthorityAndReplicatedStateIsIdempotent()
         {
             NetRole.Set(NetRoleKind.Client);

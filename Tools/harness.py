@@ -81,6 +81,12 @@ def select(paths, sets):
             gates, why, edit = ["NetDoor", "NetFinal", "Visual"], "world-light interaction, authority and late join; focused light tests also required", True
         elif p in ("Assets/Emberdelve/Runtime/Feedback/WorldLightAppearance.cs", "Assets/Emberdelve/Resources/Emberdelve/LocalLightHaze.shader", "Assets/Emberdelve/Runtime/Level/MoonlitRuinsEnvironment.cs"):
             gates, why, edit = ["Visual", "NetFinal"], "lighting presentation and player/late-join camera setup", True
+        elif p in ("Assets/Emberdelve/Runtime/Feedback/WorldAudio.cs", "Assets/Emberdelve/Runtime/Feedback/WorldFootsteps.cs", "Assets/Emberdelve/Runtime/Feedback/FlameAudio.cs", "Assets/Emberdelve/Runtime/Feedback/DungeonAmbience.cs", "Assets/Emberdelve/Runtime/Feedback/ProceduralAudio.cs", "Assets/Emberdelve/Runtime/Feedback/FeedbackDirector.cs"):
+            gates, why, edit = ["NetCombat", "NetDoor", "NetFinal", "Visual"], "spatial audio, combat presentation and lit/covered room state; audio fixtures also required", True
+        elif p in ("Assets/Emberdelve/Resources/Emberdelve/ImpactFlash.shader", "Assets/Emberdelve/Runtime/Feedback/ImpactFlash.cs", "Assets/Emberdelve/Runtime/Feedback/WallStopFeedback.cs"):
+            gates, why, edit = ["Visual", "NetCombat", "CombatFlow"], "retained impact shader and contact presentation", True
+        elif p == "Assets/Emberdelve/Runtime/Level/DungeonWayfinding.cs":
+            gates, why, edit = ["CombatHud", "NetFinal"], "read-only occupied-room navigation; no geometry or placement mutation", True
         elif p.startswith("Assets/Emberdelve/Editor/"):
             name = Path(p).stem
             match = re.fullmatch(r"Emberdelve(.+)Gate", name)
@@ -95,7 +101,7 @@ def select(paths, sets):
         elif p.startswith("Assets/Emberdelve/Runtime/Player/") and Path(p).stem in ("FirstPersonArmsDriver", "WeaponVisualRig"):
             gates, why, edit = ["Hands", "Visual", "NetCombat", "ProjectileBlock", "SweptMelee"], "hands and gameplay guard geometry", True
         elif p.startswith("Assets/Emberdelve/Runtime/Level/"):
-            gates, why, edit = ["NetMovement", "NetFinal", "NetDoor", "NetInventory", "RuntimeSmokeTest.RunCombatFlow"], "level geometry and authoritative placement", True
+            gates, why, edit = ["NetMovement", "NetFinal", "NetDoor", "NetInventory", "NetRoyale", "RuntimeSmokeTest.RunCombatFlow"], "level geometry, authoritative placement and three-floor handoffs", True
         elif p.startswith("Assets/Emberdelve/Runtime/Items/"):
             gates, why, edit = ["combat", "NetInventory", DROP, "NetExtraction", "NetCombat", "NetMovement", "NetSkill"], "inventory/equipment affects stats, ownership and outcomes", True
         elif p.startswith("Assets/Emberdelve/Net/") or p.startswith("Assets/Emberdelve/NetRules/"):

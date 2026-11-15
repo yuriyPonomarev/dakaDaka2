@@ -24,7 +24,17 @@ namespace Emberdelve.Combat
         private bool AuthorizeSender(CombatSenderId sender, int entityId, string command, bool skill, out string reason)
         {
             LastCommandSender = sender;
-            if (CombatSenders.Authorize(sender, entityId, out reason)) return true;
+            if (CombatSenders.Authorize(sender, entityId, out reason))
+            {
+                if (CombatRegistry.TryGet(entityId, out var entity) && entity is Emberdelve.Player.PlayerRig rig && rig.IsInFloorTransit)
+                {
+                    reason = "floor transfer pending";
+                    if (skill) LastSkillRejectReason = reason; else LastAttackRejectReason = reason;
+                    RejectedCount++;
+                    return false;
+                }
+                return true;
+            }
 
             if (skill) LastSkillRejectReason = reason;
             else LastAttackRejectReason = reason;

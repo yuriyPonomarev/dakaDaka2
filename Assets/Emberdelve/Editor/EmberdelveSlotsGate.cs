@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -262,7 +262,13 @@ namespace Emberdelve.EditorTools
             Check(GearScoreRules.TryTotal(rares, weights, out score, out reason) && score == 60, "eleven Rare pieces score 60 (2*5 + 10*5): " + reason);
 
             // ---- the command: an unknown slot is not even a legal intent
-            Check(Enum.GetNames(typeof(InventoryCommandKind)).Length == 11 && (int)InventoryCommandKind.Drop == 8 && (int)InventoryCommandKind.SwapWeaponSet == 7 && (int)InventoryCommandKind.SwapEquipment == 6 && (int)InventoryCommandKind.Use == 5, "SwapEquipment is appended as 6 after Use 5");
+            Check(Enum.GetNames(typeof(InventoryCommandKind)).Length == 14
+                && (int)InventoryCommandKind.Use == 5 && (int)InventoryCommandKind.SwapEquipment == 6
+                && (int)InventoryCommandKind.SwapWeaponSet == 7 && (int)InventoryCommandKind.Drop == 8
+                && (int)InventoryCommandKind.HoldQuickItem == 9 && (int)InventoryCommandKind.SelectWeaponSet == 10
+                && (int)InventoryCommandKind.DropStack == 11 && (int)InventoryCommandKind.DropOne == 12
+                && (int)InventoryCommandKind.Split == 13,
+                "equipment command IDs remain stable when stack drop and split intents are appended");
         }
 
         // The harness reads the phase-1 totals and finishes the single final line.

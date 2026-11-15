@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.IO;
 using Emberdelve.Net.Rules;
 using Emberdelve.Player;
@@ -86,6 +86,14 @@ namespace Emberdelve.Net
         /// <summary>Discard buffered local movement when a modal inventory takes control of input.</summary>
         public void ClearPendingMovement() => _aggregator.ClearPendingInput();
 
+        public void ResetForFloorMovement(Quaternion rotation)
+        {
+            _aggregator.ResetGeneration();
+            _yaw = MoveInputFrame.WrapDegrees(rotation.eulerAngles.y); _pitch = 0f;
+            _viewInitialized = true;
+            _aggregator.Sample(0, 0, false, false, false, _yaw, _pitch);
+        }
+
         public void Configure(NetPlayerRig owner, NetLaunchArgs args)
         {
             _owner = owner;
@@ -124,6 +132,7 @@ namespace Emberdelve.Net
         private void Update()
         {
             if (_owner == null || !_owner.IsSpawned) return;
+            if (_rig != null && _rig.IsInFloorTransit) { _aggregator.ClearPendingInput(); return; }
             if (!_viewInitialized) InitializeView();
 
             var inventory = GetComponent<NetInventoryClient>();
@@ -242,7 +251,7 @@ namespace Emberdelve.Net
 
         private void OnNetworkTick()
         {
-            if (_owner == null || !_owner.IsSpawned || !_viewInitialized) return;
+            if (_owner == null || !_owner.IsSpawned || !_viewInitialized || (_rig != null && _rig.IsInFloorTransit)) return;
 
             int batches = 1;
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -254,7 +263,7 @@ namespace Emberdelve.Net
                 // Only the first (honest) frame of a tick is predicted; flood extras are not.
                 if (i == 0 && _prediction != null) _prediction.PredictFrame(in flushed);
                 int count = _aggregator.FillBatch(_batch);
-                _owner.SubmitMoveRpc(MoveBatchWire.From(_batch, count));
+                _owner.SubmitMoveRpc(MoveBatchWire.From(_batch, count, _rig.FloorMovementGeneration));
                 _sentBatches++;
             }
 
@@ -277,7 +286,7 @@ namespace Emberdelve.Net
                     {
                         for (int i = 0; i < MoveInputAggregator.BatchSize; i++)
                             _hostile[i] = Frame(last - ReplayDistance + (uint)i, 0f, 1f, _yaw, 0f, MoveInputFrame.FlagSprint);
-                        _owner.SubmitMoveRpc(MoveBatchWire.From(_hostile, MoveInputAggregator.BatchSize));
+                        _owner.SubmitMoveRpc(MoveBatchWire.From(_hostile, MoveInputAggregator.BatchSize, _rig.FloorMovementGeneration));
                     }
 
                     break;
@@ -288,17 +297,17 @@ namespace Emberdelve.Net
                         _hostile[0] = Frame(last + 1u, float.NaN, float.NaN, _yaw, 0f, 0);
                     else
                         _hostile[0] = Frame(last + 1u, 0f, 1f, float.PositiveInfinity, float.NaN, 0);
-                    _owner.SubmitMoveRpc(MoveBatchWire.From(_hostile, 1));
+                    _owner.SubmitMoveRpc(MoveBatchWire.From(_hostile, 1, _rig.FloorMovementGeneration));
                     break;
 
                 case NetScriptKind.BigMove:
                     _hostile[0] = Frame(last + 1u, 50f, 50f, _yaw, 0f, 0);
-                    _owner.SubmitMoveRpc(MoveBatchWire.From(_hostile, 1));
+                    _owner.SubmitMoveRpc(MoveBatchWire.From(_hostile, 1, _rig.FloorMovementGeneration));
                     break;
 
                 case NetScriptKind.SeqJump:
                     _hostile[0] = Frame(last + SeqJumpDistance, 0f, forward, _yaw, 0f, 0);
-                    _owner.SubmitMoveRpc(MoveBatchWire.From(_hostile, 1));
+                    _owner.SubmitMoveRpc(MoveBatchWire.From(_hostile, 1, _rig.FloorMovementGeneration));
                     break;
 
                 case NetScriptKind.ForgeMove:
@@ -307,7 +316,7 @@ namespace Emberdelve.Net
                         if (victim != null)
                         {
                             _hostile[0] = Frame(last + 1u, 0f, forward, _yaw, 0f, MoveInputFrame.FlagSprint);
-                            victim.ForgeMoveTestRpc(MoveBatchWire.From(_hostile, 1));
+                            victim.ForgeMoveTestRpc(MoveBatchWire.From(_hostile, 1, _rig.FloorMovementGeneration));
                         }
                     }
 

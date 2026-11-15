@@ -24453,7 +24453,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Items.Inventory
   gridWidth: 10
-  gridHeight: 4
+  gridHeight: 5
 --- !u!114 &430150640
 MonoBehaviour:
   m_ObjectHideFlags: 0

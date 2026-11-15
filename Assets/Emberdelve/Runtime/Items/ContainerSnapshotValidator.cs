@@ -134,6 +134,7 @@ namespace Emberdelve.Items
                 Height = snapshot.height
             };
 
+            bool[] beltOccupied = new bool[QuickBeltRules.SlotCount];
             bool[] occupied = grid ? new bool[snapshot.width * snapshot.height] : null;
             HashSet<Guid> seenUids = new HashSet<Guid>();
             HashSet<EquipmentSlot> seenSlots = new HashSet<EquipmentSlot>();
@@ -264,7 +265,14 @@ namespace Emberdelve.Items
                 }
 
                 // ---- grid placement
-                if (grid)
+                if (grid && snapshot.kind == ContainerKinds.Bag && QuickBeltRules.TryGetSlot(new Vector2Int(entry.x, entry.y), snapshot.width, out int beltSlot))
+                {
+                    if (!QuickBeltRules.CanStore(definition) || item.quantity > QuickBeltRules.StackLimit(definition) || beltOccupied[beltSlot])
+                    { reason = $"{at}: invalid or occupied physical belt slot"; return false; }
+                    beltOccupied[beltSlot] = true;
+                    validatedEntry.Origin = new Vector2Int(entry.x, entry.y);
+                }
+                else if (grid)
                 {
                     Vector2Int size = definition.EffectiveFootprint;
                     if (entry.x < 0 || entry.y < 0 || entry.x > snapshot.width - size.x || entry.y > snapshot.height - size.y)

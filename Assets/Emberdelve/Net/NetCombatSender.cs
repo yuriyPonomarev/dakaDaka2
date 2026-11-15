@@ -3,6 +3,9 @@ using System.Globalization;
 using System.IO;
 using Emberdelve.Ballistics;
 using Emberdelve.Combat;
+using Emberdelve.Core;
+using Emberdelve.Data;
+using Emberdelve.Items;
 using Emberdelve.Net.Rules;
 using Emberdelve.Player;
 using UnityEngine;
@@ -53,7 +56,39 @@ namespace Emberdelve.Net
         // real input
         private bool _rangedMode;
         private bool _drawHeld;
+        private bool _drawCancelPending;
         private bool _guardHeld;
+        private bool _attackHeld;
+        private float _nextAttackRefresh;
+        private float _nextHeldReloadRequest;
+
+        private void ReleaseHeldAttack()
+        {
+            // Do not deliver queued refreshes after a modal UI or a released button.
+            int count = _queue.Count;
+            for (int i = 0; i < count; i++)
+            {
+                var intent = _queue.Dequeue();
+                if (intent != CombatIntentKind.AttackHold) _queue.Enqueue(intent);
+            }
+            if (_attackHeld && Enqueue(CombatIntentKind.AttackRelease)) _attackHeld = false;
+        }
+
+        private void CancelDrawInput()
+        {
+            bool cancel = _drawHeld || _drawCancelPending;
+            int count = _queue.Count;
+            for (int i = 0; i < count; i++)
+            {
+                var intent = _queue.Dequeue();
+                if (intent == CombatIntentKind.DrawStart || intent == CombatIntentKind.DrawRelease)
+                    cancel = true;
+                else if (intent != CombatIntentKind.Reload) _queue.Enqueue(intent);
+            }
+            _drawHeld = false;
+            // Separate priority slot: a full ordinary queue must not lose or delay cancellation.
+            _drawCancelPending = cancel;
+        }
 
         // scripts
         private CombatScriptParams _params = CombatScriptParams.Default;
@@ -130,11 +165,12 @@ namespace Emberdelve.Net
 
         private void Pump()
         {
-            if (_queue.Count == 0 || _owner == null || !_owner.IsSpawned) return;
+            if ((!_drawCancelPending && _queue.Count == 0) || _owner == null || !_owner.IsSpawned) return;
             float now = Time.unscaledTime;
             if (now - _lastSendAt < CombatNetLimits.ClientMinIntervalSeconds) return;
 
-            CombatIntentKind kind = _queue.Dequeue();
+            CombatIntentKind kind = _drawCancelPending ? CombatIntentKind.DrawCancel : _queue.Dequeue();
+            if (_drawCancelPending) _drawCancelPending = false;
             _lastSendAt = now;
             _sequence++;
             _sent++;
@@ -162,6 +198,8 @@ namespace Emberdelve.Net
                 var inventory = GetComponent<NetInventoryClient>();
                 if (inventory != null && inventory.IsOpen)
                 {
+                    CancelDrawInput();
+                    ReleaseHeldAttack();
                     if (_guardHeld && Enqueue(CombatIntentKind.GuardUp)) _guardHeld = false;
                 }
                 else RealInput();
@@ -175,35 +213,71 @@ namespace Emberdelve.Net
             if (_rig == null || _rig.Input == null) return;
             Emberdelve.InputLayer.EmberdelveInput input = _rig.Input;
 
-            if (_rig.WeaponInputSuppressed)
+            if (_rig.WeaponInputSuppressed || _rig.IsDead || _rig.IsExtracted || !input.GameplayInputEnabled
+                || input.QuickWheelCaptured || InventoryInputFocus.OwnsEscape)
             {
+                ReleaseHeldAttack();
                 if (_guardHeld && Enqueue(CombatIntentKind.GuardUp)) _guardHeld = false;
-                _drawHeld = false;
+                CancelDrawInput();
                 return;
             }
-            if (input.SwapPressed) { Enqueue(CombatIntentKind.SwapWeapon); _drawHeld = false; return; }
+            if (input.SwapPressed)
+            {
+                ReleaseHeldAttack();
+                // Server swap lowers guard; forget the old latch so held RMB can raise the new kit.
+                if (Enqueue(CombatIntentKind.SwapWeapon)) _guardHeld = false;
+                CancelDrawInput();
+                return;
+            }
             // Replicated equipment is already available; do not burn the first click probing WrongWeapon.
             if (_rig.ActiveWeapon != null) _rangedMode = _rig.ActiveWeapon.IsRanged;
 
             var skills = _rig.GetComponent<Emberdelve.Skills.SkillCaster>();
             if (skills != null) skills.PollSkillInput();
-            if (skills != null && skills.SuppressPrimary) { _drawHeld = false; return; }
-
-            if (_rangedMode)
+            if (skills != null && skills.SuppressPrimary)
             {
-                if (input.PrimaryPressed && !_drawHeld) { _drawHeld = Enqueue(CombatIntentKind.DrawStart); }
-                if (input.PrimaryReleased && _drawHeld) { Enqueue(CombatIntentKind.DrawRelease); _drawHeld = false; }
-            }
-            else if (input.PrimaryPressed)
-            {
-                Enqueue(CombatIntentKind.AttackPress);
+                ReleaseHeldAttack();
+                if (_guardHeld && Enqueue(CombatIntentKind.GuardUp)) _guardHeld = false;
+                CancelDrawInput();
+                return;
             }
 
-            bool guard = input.SecondaryHeld;
+            bool guard = input.SecondaryHeld && (!_rangedMode || (_rig.ActiveWeapon != null && _rig.ActiveWeapon.CanRangedGuard));
             if (guard != _guardHeld)
             {
                 if (Enqueue(guard ? CombatIntentKind.GuardDown : CombatIntentKind.GuardUp)) _guardHeld = guard;
             }
+            if (_rangedMode)
+            {
+                ReleaseHeldAttack();
+                if (guard) { CancelDrawInput(); return; }
+                bool heldReload = _rig.ActiveWeapon != null && _rig.ActiveWeapon.reloadWhileHeld;
+                if (!heldReload)
+                {
+                    if (input.ReloadPressed) Enqueue(CombatIntentKind.Reload);
+                }
+                else if (!_drawHeld && !input.PrimaryPressed && input.ReloadHeld && Time.unscaledTime >= _nextHeldReloadRequest)
+                {
+                    var ranged = _rig.GetComponent<RangedCombat>();
+                    // Wait for the server's accepted shot/ammo snapshot; never guess a spent round.
+                    if (ranged != null && ranged.HasAuthoritativeAmmo && !ranged.IsReloading
+                        && ranged.Magazine < _rig.ActiveWeapon.magazineSize && ranged.Reserve > 0
+                        && Enqueue(CombatIntentKind.Reload))
+                        _nextHeldReloadRequest = Time.unscaledTime + .25f;
+                }
+                if (input.PrimaryPressed && !_drawHeld) { _drawHeld = Enqueue(CombatIntentKind.DrawStart); }
+                if (input.PrimaryReleased && _drawHeld) { Enqueue(CombatIntentKind.DrawRelease); _drawHeld = false; }
+            }
+            else if (input.PrimaryHeld)
+            {
+                if ((!_attackHeld || Time.unscaledTime >= _nextAttackRefresh) && Enqueue(CombatIntentKind.AttackHold))
+                {
+                    _attackHeld = true;
+                    _nextAttackRefresh = Time.unscaledTime + 0.25f;
+                }
+            }
+            else ReleaseHeldAttack();
+
         }
 
         // ---- scripted drivers ------------------------------------------------------------------------
@@ -430,6 +504,22 @@ namespace Emberdelve.Net
             }
 
             Drive(0f, yaw, 0f);
+            if (_spec.IsMeleeDuelOnly && otherDead)
+            {
+                // Continue into empty space using the same leased intent as real held input.
+                if (_phase == 3)
+                {
+                    if (Time.unscaledTime - _phaseStartedAt < 3f)
+                    {
+                        if (Time.unscaledTime >= _nextAt && Enqueue(CombatIntentKind.AttackHold))
+                            _nextAt = Time.unscaledTime + 0.25f;
+                    }
+                    else if (Enqueue(CombatIntentKind.AttackRelease)) NextPhase(4);
+                    return;
+                }
+                if (Time.unscaledTime - _phaseStartedAt >= 2f) Finish("held-release-verified-window");
+                return;
+            }
             if (Time.unscaledTime - _phaseStartedAt >= 1.5f) Finish(otherDead ? "target-dead" : "presses-spent");
         }
 
@@ -437,7 +527,8 @@ namespace Emberdelve.Net
         // reported (or Hold seconds), then it drops the guard and takes hits until dead; after death it tries to act (all must be refused).
         private void MeleeDefender(NetPlayerRig other)
         {
-            Drive(0f, YawTo(_owner.transform.position, other.transform.position), 0f);
+            // Put the left-hand shield into the incoming slash using ordinary aim intent.
+            Drive(0f, YawTo(_owner.transform.position, other.transform.position) + (_phase == 2 ? 35f : 0f), 0f);
             bool dead = _rig != null && _rig.IsDead;
             int myId = _owner.ServerPlayerId.Value;
 
@@ -488,7 +579,18 @@ namespace Emberdelve.Net
         // (the riposte press, well inside the window), then waits for the two strikes to play out.
         private void ParryDefender(NetPlayerRig other)
         {
-            Drive(0f, YawTo(_owner.transform.position, other.transform.position), 0f);
+            // Use the same inventory request as the UI: the response must come from blade contact.
+            if (_phase == 1 && _rig != null && _rig.Defense.HasShield)
+            {
+                var inventory = GetComponent<NetInventoryClient>();
+                var worn = _rig.Equipment.EquippedInstance(EquipmentSlot.OffHand);
+                if (inventory != null && worn != null && inventory.TryCreateLocalCommand(
+                    InventoryCommandKind.Unequip, 0, 0, Vector2Int.zero, EquipmentSlot.OffHand,
+                    worn.Uid, System.Guid.Empty, out InventoryCommand command, out _))
+                    inventory.Submit(_rig, command);
+                return;
+            }
+            Drive(0f, YawTo(_owner.transform.position, other.transform.position), _phase <= 2 ? 21.6f : 0f);
             int myId = _owner.ServerPlayerId.Value;
             switch (_phase)
             {
@@ -529,6 +631,13 @@ namespace Emberdelve.Net
 
             if (_phase == 1)
             {
+                // The Warrior fixture starts with its sword. Request the ordinary server-owned
+                // weapon swap once, then wait for replication before operating the crossbow.
+                if (_rig.ActiveWeapon == null || !_rig.ActiveWeapon.IsRanged)
+                {
+                    if (_counter == 0 && Enqueue(CombatIntentKind.SwapWeapon)) _counter++;
+                    return;
+                }
                 bool far = _params.Away <= 0f || dist >= _params.Away;
                 if (far || Time.unscaledTime - _phaseStartedAt > AwayTimeoutSeconds)
                 {
@@ -550,15 +659,32 @@ namespace Emberdelve.Net
                 {
                     Debug.Log(NetTuning.LogPrefix + "[client] script ranged-shot aim dist=" + F(dist) + " pitch=" + F(pitch) + " speed=" + F(_params.ProjectileSpeed) +
                               " gravity=" + F(_params.ProjectileGravity));
-                    NextPhase(3);
+                    NextPhase(20);
                     _nextAt = Time.unscaledTime;
                 }
 
                 return;
             }
 
+            if (_phase == 20) // charged cancellation, duplicate cancel, then a stale release must never shoot
+            {
+                if (Time.unscaledTime < _nextAt) return;
+                if (_counter == 0) { _drawHeld = Enqueue(CombatIntentKind.DrawStart); _nextAt = Time.unscaledTime + _params.Hold; }
+                else if (_counter == 1) { CancelDrawInput(); _nextAt = Time.unscaledTime + .3f; }
+                else if (_counter == 2) { Enqueue(CombatIntentKind.DrawCancel); _nextAt = Time.unscaledTime + .3f; }
+                else if (_counter == 3) { Enqueue(CombatIntentKind.DrawRelease); _nextAt = Time.unscaledTime + .3f; }
+                else { NextPhase(3); _nextAt = Time.unscaledTime; return; }
+                _counter++;
+                return;
+            }
+
             if (_phase == 3) // full shots: start, hold, release, rest
             {
+                if (_rig.ActiveWeapon != null && _rig.ActiveWeapon.magazineSize == 1)
+                {
+                    SingleShotReloadProof();
+                    return;
+                }
                 if (_counter >= _params.Shots * 3) { NextPhase(4); return; }
                 if (Time.unscaledTime < _nextAt) return;
                 int step = _counter % 3;
@@ -576,6 +702,32 @@ namespace Emberdelve.Net
                 else if (_counter == 1) { Enqueue(CombatIntentKind.DrawRelease); _nextAt = Time.unscaledTime + 1.5f; _counter = 2; }
                 else Finish("shots-done");
             }
+        }
+
+        private void SingleShotReloadProof()
+        {
+            if (Time.unscaledTime < _nextAt) return;
+            CombatIntentKind intent;
+            float delay;
+            switch (_counter)
+            {
+                case 0: intent = CombatIntentKind.DrawStart; delay = _params.Hold; break;
+                case 1: intent = CombatIntentKind.DrawRelease; delay = 1.5f; break;
+                // An empty trigger must neither shoot nor implicitly reload.
+                case 2: intent = CombatIntentKind.DrawStart; delay = .3f; break;
+                case 3: intent = CombatIntentKind.DrawRelease; delay = .3f; break;
+                case 4: intent = CombatIntentKind.Reload; delay = .35f; break;
+                case 5: intent = CombatIntentKind.DrawStart; delay = .3f; break;
+                case 6: intent = CombatIntentKind.DrawRelease; delay = .3f; break;
+                // Repeated R must not restart the timer or credit a second bolt.
+                case 7: intent = CombatIntentKind.Reload; delay = _rig.ActiveWeapon.reloadTime + 1f; break;
+                case 8: intent = CombatIntentKind.DrawStart; delay = _params.Hold; break;
+                case 9: intent = CombatIntentKind.DrawRelease; delay = 1.5f; break;
+                default: Finish("single-shot-reload-done"); return;
+            }
+            if (!Enqueue(intent)) return;
+            _counter++;
+            _nextAt = Time.unscaledTime + delay;
         }
 
         /// <summary>Unity pitch (degrees, positive = looking down) that aims at the other player with the weapon's drop compensated.</summary>

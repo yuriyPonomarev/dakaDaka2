@@ -1,0 +1,522 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3291057265e4a754f907457815e78ace, type: 3}
+  m_Name: ItemVisualCatalog
+  m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Items.ItemVisualCatalog
+  entries:
+  - itemId: boiled_cuirass
+    worldPrefab: {fileID: 145009131488569467, guid: a25ba1c968fb0e84a83d2afb430068ee, type: 3}
+    icon: {fileID: 21300000, guid: 9ee674cebafb74a44b3eaf275455b5ba, type: 3}
+    worn:
+    - bone: 8
+      mesh: {fileID: 4300000, guid: 75ab6f0e8b03e1c449ee1ec435101f2e, type: 2}
+      materials:
+      - {fileID: 2100000, guid: 320fbf81132ad8f43b3bad54977374cf, type: 2}
+      - {fileID: 2100000, guid: 1c59b2e46fbb8964a8a24edecc37c6b1, type: 2}
+      - {fileID: 2100000, guid: d75f700ee0d8c1d43ab306efe7c8b9e1, type: 2}
+      - {fileID: 2100000, guid: 69b5159547f3d2a48a3b26edfa1906e3, type: 2}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+    - bone: 0
+      mesh: {fileID: 4300000, guid: fcba9e112e686584a8e4e8af82fbb5cd, type: 2}
+      materials:
+      - {fileID: 2100000, guid: 320fbf81132ad8f43b3bad54977374cf, type: 2}
+      - {fileID: 2100000, guid: 1c59b2e46fbb8964a8a24edecc37c6b1, type: 2}
+      - {fileID: 2100000, guid: d75f700ee0d8c1d43ab306efe7c8b9e1, type: 2}
+      - {fileID: 2100000, guid: 69b5159547f3d2a48a3b26edfa1906e3, type: 2}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+    - bone: 9
+      mesh: {fileID: 4300000, guid: 0f1296698a67e174b9272e08def20b00, type: 2}
+      materials:
+      - {fileID: 2100000, guid: 320fbf81132ad8f43b3bad54977374cf, type: 2}
+      - {fileID: 2100000, guid: 1c59b2e46fbb8964a8a24edecc37c6b1, type: 2}
+      - {fileID: 2100000, guid: d75f700ee0d8c1d43ab306efe7c8b9e1, type: 2}
+      - {fileID: 2100000, guid: 69b5159547f3d2a48a3b26edfa1906e3, type: 2}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: graspwrap_gloves
+    worldPrefab: {fileID: 6089477697825381892, guid: c55189586cf6d104a92743cddb810f5f, type: 3}
+    icon: {fileID: 21300000, guid: fcb8423fac9503047be0f7c85f2a1ad9, type: 3}
+    worn: []
+    skin:
+      rendererName: HumanBody
+      mesh: {fileID: 4300000, guid: a829599629311d14fbdf61bbfd15e2f6, type: 2}
+      boneNames:
+      - root
+      - pelvis.L
+      - upperleg01.L
+      - upperleg02.L
+      - lowerleg01.L
+      - lowerleg02.L
+      - foot.L
+      - toe1-1.L
+      - toe1-2.L
+      - toe2-1.L
+      - toe2-2.L
+      - toe2-3.L
+      - toe3-1.L
+      - toe3-2.L
+      - toe3-3.L
+      - toe4-1.L
+      - toe4-2.L
+      - toe4-3.L
+      - toe5-1.L
+      - toe5-2.L
+      - toe5-3.L
+      - pelvis.R
+      - upperleg01.R
+      - upperleg02.R
+      - lowerleg01.R
+      - lowerleg02.R
+      - foot.R
+      - toe1-1.R
+      - toe1-2.R
+      - toe2-1.R
+      - toe2-2.R
+      - toe2-3.R
+      - toe3-1.R
+      - toe3-2.R
+      - toe3-3.R
+      - toe4-1.R
+      - toe4-2.R
+      - toe4-3.R
+      - toe5-1.R
+      - toe5-2.R
+      - toe5-3.R
+      - spine05
+      - spine04
+      - spine03
+      - spine02
+      - breast.L
+      - breast.R
+      - spine01
+      - clavicle.L
+      - shoulder01.L
+      - upperarm01.L
+      - upperarm02.L
+      - lowerarm01.L
+      - lowerarm02.L
+      - wrist.L
+      - finger1-1.L
+      - finger1-2.L
+      - finger1-3.L
+      - metacarpal1.L
+      - finger2-1.L
+      - finger2-2.L
+      - finger2-3.L
+      - metacarpal2.L
+      - finger3-1.L
+      - finger3-2.L
+      - finger3-3.L
+      - metacarpal3.L
+      - finger4-1.L
+      - finger4-2.L
+      - finger4-3.L
+      - metacarpal4.L
+      - finger5-1.L
+      - finger5-2.L
+      - finger5-3.L
+      - clavicle.R
+      - shoulder01.R
+      - upperarm01.R
+      - upperarm02.R
+      - lowerarm01.R
+      - lowerarm02.R
+      - wrist.R
+      - finger1-1.R
+      - finger1-2.R
+      - finger1-3.R
+      - metacarpal1.R
+      - finger2-1.R
+      - finger2-2.R
+      - finger2-3.R
+      - metacarpal2.R
+      - finger3-1.R
+      - finger3-2.R
+      - finger3-3.R
+      - metacarpal3.R
+      - finger4-1.R
+      - finger4-2.R
+      - finger4-3.R
+      - metacarpal4.R
+      - finger5-1.R
+      - finger5-2.R
+      - finger5-3.R
+      - neck01
+      - neck02
+      - neck03
+      - head
+      - jaw
+      - special04
+      - oris02
+      - oris01
+      - oris06.L
+      - oris07.L
+      - oris06.R
+      - oris07.R
+      - tongue00
+      - tongue01
+      - tongue02
+      - tongue03
+      - tongue04
+      - tongue07.L
+      - tongue07.R
+      - tongue06.L
+      - tongue06.R
+      - tongue05.L
+      - tongue05.R
+      - levator02.L
+      - levator03.L
+      - levator04.L
+      - levator05.L
+      - levator02.R
+      - levator03.R
+      - levator04.R
+      - levator05.R
+      - special01
+      - oris04.L
+      - oris03.L
+      - oris04.R
+      - oris03.R
+      - oris06
+      - oris05
+      - special03
+      - levator06.L
+      - levator06.R
+      - special06.L
+      - special05.L
+      - eye.L
+      - orbicularis03.L
+      - orbicularis04.L
+      - special06.R
+      - special05.R
+      - eye.R
+      - orbicularis03.R
+      - orbicularis04.R
+      - temporalis01.L
+      - oculi02.L
+      - oculi01.L
+      - temporalis01.R
+      - oculi02.R
+      - oculi01.R
+      - temporalis02.L
+      - risorius02.L
+      - risorius03.L
+      - temporalis02.R
+      - risorius02.R
+      - risorius03.R
+      materials:
+      - {fileID: 2100000, guid: ffbb808d140beba4baeadaa0a685f085, type: 2}
+      - {fileID: 2100000, guid: d75f700ee0d8c1d43ab306efe7c8b9e1, type: 2}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: footpad_boots
+    worldPrefab: {fileID: 8630390124759087777, guid: 2845649e988f4b9479b84bb18a0f8058, type: 3}
+    icon: {fileID: 21300000, guid: d4c3dab882b1aca4981bb66878596fc9, type: 3}
+    worn:
+    - bone: 5
+      mesh: {fileID: 4300000, guid: 227a86ecce231eb47b003dd804ecd5e0, type: 2}
+      materials:
+      - {fileID: 2100000, guid: ffbb808d140beba4baeadaa0a685f085, type: 2}
+      - {fileID: 2100000, guid: d75f700ee0d8c1d43ab306efe7c8b9e1, type: 2}
+      - {fileID: 2100000, guid: d51ffe3ace5a4a24ab27a7503f645463, type: 2}
+      - {fileID: 2100000, guid: e16c36633d0d9ff4f936468ea3eafd3a, type: 2}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+    - bone: 3
+      mesh: {fileID: 4300000, guid: b30713d763655e84cbbabe44da06668e, type: 2}
+      materials:
+      - {fileID: 2100000, guid: ffbb808d140beba4baeadaa0a685f085, type: 2}
+      - {fileID: 2100000, guid: d75f700ee0d8c1d43ab306efe7c8b9e1, type: 2}
+      - {fileID: 2100000, guid: d51ffe3ace5a4a24ab27a7503f645463, type: 2}
+      - {fileID: 2100000, guid: e16c36633d0d9ff4f936468ea3eafd3a, type: 2}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+    - bone: 6
+      mesh: {fileID: 4300000, guid: 6a138f06f9ef4954da896c35afabc0da, type: 2}
+      materials:
+      - {fileID: 2100000, guid: ffbb808d140beba4baeadaa0a685f085, type: 2}
+      - {fileID: 2100000, guid: d75f700ee0d8c1d43ab306efe7c8b9e1, type: 2}
+      - {fileID: 2100000, guid: d51ffe3ace5a4a24ab27a7503f645463, type: 2}
+      - {fileID: 2100000, guid: e16c36633d0d9ff4f936468ea3eafd3a, type: 2}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+    - bone: 4
+      mesh: {fileID: 4300000, guid: 68ccc8239de7e414d97a2838aeaeaf63, type: 2}
+      materials:
+      - {fileID: 2100000, guid: ffbb808d140beba4baeadaa0a685f085, type: 2}
+      - {fileID: 2100000, guid: d75f700ee0d8c1d43ab306efe7c8b9e1, type: 2}
+      - {fileID: 2100000, guid: d51ffe3ace5a4a24ab27a7503f645463, type: 2}
+      - {fileID: 2100000, guid: e16c36633d0d9ff4f936468ea3eafd3a, type: 2}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: ashen_cloak
+    worldPrefab: {fileID: 7756900975383004191, guid: c6e29c41772d6c84983333ba64176d04, type: 3}
+    icon: {fileID: 21300000, guid: bb6fb4fef9b625649bde67cbd3270517, type: 3}
+    worn:
+    - bone: 8
+      mesh: {fileID: 4300000, guid: 28618e1e5eb5a1544987ba622745effa, type: 2}
+      materials:
+      - {fileID: 2100000, guid: 69b5159547f3d2a48a3b26edfa1906e3, type: 2}
+      - {fileID: 2100000, guid: d75f700ee0d8c1d43ab306efe7c8b9e1, type: 2}
+      - {fileID: 2100000, guid: d51ffe3ace5a4a24ab27a7503f645463, type: 2}
+      - {fileID: 2100000, guid: e16c36633d0d9ff4f936468ea3eafd3a, type: 2}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: emberthread_mantle
+    worldPrefab: {fileID: 76586277395401579, guid: eb2dd2af5ad9a014f84d035f0a9a90c1, type: 3}
+    icon: {fileID: 21300000, guid: 185021c36b8d7f14d87b4e983a23f3ee, type: 3}
+    worn:
+    - bone: 8
+      mesh: {fileID: 4300000, guid: ad653eb3867281b469b737bd82b682c8, type: 2}
+      materials:
+      - {fileID: 2100000, guid: 1077eec61463d6240918192e2662369b, type: 2}
+      - {fileID: 2100000, guid: d75f700ee0d8c1d43ab306efe7c8b9e1, type: 2}
+      - {fileID: 2100000, guid: d51ffe3ace5a4a24ab27a7503f645463, type: 2}
+      - {fileID: 2100000, guid: e16c36633d0d9ff4f936468ea3eafd3a, type: 2}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: pitch_torch
+    worldPrefab: {fileID: 1890061694783572249, guid: 69a4567ba4f20a84d8c549d1f9031768, type: 3}
+    icon: {fileID: 21300000, guid: cbce16ffa5eb6c44ab1e4b2cbc54d075, type: 3}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: arming_sword
+    worldPrefab: {fileID: 4483083382178540499, guid: e17b37eb0373d85408780ec25f0e11dc, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: arrow_bundle
+    worldPrefab: {fileID: 8298435022256618641, guid: e7887dd9cd610e14a99f7d52d6941a33, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: ashen_relic
+    worldPrefab: {fileID: 6051534008260130315, guid: fc332759835e8384e858575504d72a1b, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: ashen_short_sword
+    worldPrefab: {fileID: 6986864419842546384, guid: ee6e0106fd1dde94cbefdda825ab77e4, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: bolt_bundle
+    worldPrefab: {fileID: 4956335233832213665, guid: 0c94a981c17afbb4ba23278b1a3d804e, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: cinder_band_ring
+    worldPrefab: {fileID: 18553312130604412, guid: ae388b0285940354a852609fc967f9b0, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: ember_coin
+    worldPrefab: {fileID: 8652401926974097823, guid: d90a72e108f3fa84cb1cb2b067d12f00, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: ember_crossbow
+    worldPrefab: {fileID: 2605601708299319102, guid: 2a8493661ba4d454db05cbfac19f1704, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: ember_fang_blade
+    worldPrefab: {fileID: 8752679376660084515, guid: 615a2868e05790a4f9281aee13c2e955, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: emberbead_necklace
+    worldPrefab: {fileID: 4639912357655353777, guid: 86a1d38aa7bc9684f9e8987897c7e22c, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: emberbulwark_shield
+    worldPrefab: {fileID: 3519809949811467079, guid: dddb81dd945e4f849996770bb1d0eae8, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: hollow_bow
+    worldPrefab: {fileID: 6370570761747310088, guid: de86b1c59d95fd24d8c55a713f69f6d1, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: recovered_arrow
+    worldPrefab: {fileID: 995496443538066745, guid: 6043f61877938754fb92c347aabdfbd8, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: recovered_bolt
+    worldPrefab: {fileID: 1201802236390114134, guid: c44a5a51855271444a253ddaee276812, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}
+  - itemId: two_handed_sword
+    worldPrefab: {fileID: 1402926954536864405, guid: ad90a1441593c9344ba069701ca251bb, type: 3}
+    icon: {fileID: 0}
+    worn: []
+    skin:
+      rendererName: 
+      mesh: {fileID: 0}
+      boneNames: []
+      materials: []
+      localPosition: {x: 0, y: 0, z: 0}
+      localEuler: {x: 0, y: 0, z: 0}
+      localScale: {x: 1, y: 1, z: 1}

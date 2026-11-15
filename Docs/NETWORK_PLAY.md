@@ -1,19 +1,20 @@
-# Network play (U3A): how to start a server and clients
+# Network play: Squire Royale and development proofs
 
-The game always uses the authored Modular Crypts map for offline play, Host, and dedicated servers. Clients join the server-selected scene and plan. Server-simulated movement, owner prediction, interpolated other players, late join, clean disconnect and rejoin are supported. Combat, inventory, chest and enemy presentation remain incomplete online; proofs usually run with `-ember-net-no-enemies`.
+## Current Royale mode (13 November 2026)
 
-Everything below uses ONE executable. Networking is chosen by the command line (`-ember-net ...`) or by the lobby's Online panel; without either the process is the plain offline game.
+The playable mode uses three separate maps: moonlit ruins, enclosed crypts and infernal halls. Choose SOLO, DUO or TRIO in the lobby; these use16,16 and15 participants respectively. Empty seats and destination refill currently use server-owned bots. This version does not merge live players from separate server sessions. Clients and authority must use the same build (current protocol39).
 
-## 1. Build the player
+For offline play, select a class, prepare the raid and launch. Find the red descent portals on floors1 and2; approach a free slot and press F. Each slot admits one participant. Three groups appear during the floor, with the last group appearing in the final minute. Entering a portal waits for the next-floor cohort; it does not bank the carried loot. The final extraction gate exists only on floor3. Hold F for the displayed duration; damage or movement interrupts the hold. Successful offline final extraction saves the returned equipment and carried items; death loses the raid kit. Stash items remain safe. Online profile persistence is a separate scope.
 
-Close the Unity Editor for this project, then run `Tools\net\Build-NetPlayable.bat` (or the same command by hand):
+Command-line host/server selection adds `-ember-royale-mode solo`, `duo` or `trio` to the commands below. The Royale roster owns its16/16/15 capacity; the legacy `-ember-net-max-players` option below is used by development non-Royale proofs. Networking remains opt-in through the lobby Online panel or `-ember-net ...`; one executable supports offline, host, client and dedicated server.
 
-```
-"C:\Program Files\Unity\Hub\Editor\6000.2.5f1\Editor\Unity.exe" -batchmode -nographics -quit -projectPath <project> -logFile build_net.log ^
-  -executeMethod Emberdelve.EditorTools.EmberdelveWindowsBuild.BuildNetPlayable --ember-build-output C:\Games\EmberdelveNet\EmberdelveNet.exe
-```
+Windows standalone builds currently default to Direct3D11 for compatibility with the pinned Unity version after an observed DX12 device-loss incident. This is an API selection workaround, not an engine upgrade or a claimed DX12 fix.
 
-It requires and builds scenes Lobby + Modular Crypts (Development build), and generates the network player prefab from the modular scene if it is missing. The output must be an absolute path outside `Assets`. Exit code 0 means built. From a running Editor use `EmberdelveWindowsBuild.BuildNetFinalPlayer` (internal) or the gate below.
+## 1. Build and validate
+
+Keep the user's main Unity Editor open and untouched. Run tests/builds only on the CI mirror through `Tools/Run-All.ps1`; do not launch a second executor against that mirror. Use the scoped verification matrix in AGENTS.md. Builds are copied back to `Builds/Playable/<run-id>/EmberdelveNet.exe`; results are in `Logs/runs/<run-id>/run.json` and `summary.txt`. A build success alone does not mean its gameplay checks or visual acceptance passed.
+
+The command-line examples below describe development connection/lifecycle tooling. Historical U3A proof limits are not a current Royale feature-completion claim; CURRENT_WORK.md and Tasks/SQUIRE_ROYALE_20261113.md own acceptance status.
 
 ## 2. Dedicated server
 
@@ -45,9 +46,9 @@ Class: the id string only (`warrior`, `archer`); the server resolves everything 
 
 ## 4. Host (experimental)
 
-`Tools\net\Start-Host.bat [slot] [class]`, or the HOST button in the lobby (listens on 127.0.0.1 and the port in the address field; type `0.0.0.0:7777` to listen on the LAN). The host is a server plus your own player in the same window, using the same admission code as a remote player. It is NOT covered by the process gate (the gate runs a dedicated server); treat it as a development convenience. Escape stops the host and returns to the lobby (everyone connected is disconnected).
+`Tools\net\Start-Host.bat [slot] [class]`, or the HOST button in the lobby (listens on 127.0.0.1 and the port in the address field; type `0.0.0.0:7777` to listen on the LAN). The host is a server plus your own player in the same window, using the same admission code as a remote player. Royale host/client transitions are covered by NetRoyale; the separate NetFinal lifecycle gate uses a dedicated server. Escape stops the host and returns to the lobby (everyone connected is disconnected).
 
-## 5. Lifecycle rules (decisions)
+## 5. Legacy non-Royale lifecycle proof rules
 
 - Late join: allowed while the run is Running. A new client gets every existing player at the server's current position, unique ids, and spawns on the first layout spawn nobody stands within 1.2 m of.
 - Disconnect removes the actor immediately (graceful quit and hard kill alike): session, party seat, combat entity, sender binding and the network object are gone; no corpse, no linger. A killed process is noticed after the transport timeout.

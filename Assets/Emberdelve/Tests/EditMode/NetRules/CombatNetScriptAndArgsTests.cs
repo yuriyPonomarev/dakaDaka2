@@ -166,7 +166,7 @@ namespace Emberdelve.NetRules.Tests
             Assert.That(CombatNetLimits.IsValidKind(0), Is.False);
             for (int k = 1; k <= CombatNetLimits.KindMax; k++) Assert.That(CombatNetLimits.IsValidKind(k), Is.True, "kind " + k);
             Assert.That(CombatNetLimits.IsValidKind(CombatNetLimits.KindMax + 1), Is.False);
-            Assert.That(CombatNetLimits.KindMax, Is.EqualTo((byte)CombatIntentKind.SwapWeapon));
+            Assert.That(CombatNetLimits.KindMax, Is.EqualTo((byte)CombatIntentKind.DrawCancel));
             Assert.That(CombatNetLimits.ClientMinIntervalSeconds * CombatIntentGate.RequestsPerSecond, Is.GreaterThan(1.0),
                 "an honest sender at the throttle stays under the gate's rate");
         }

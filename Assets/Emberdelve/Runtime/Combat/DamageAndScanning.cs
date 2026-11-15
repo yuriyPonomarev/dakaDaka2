@@ -24,7 +24,7 @@ namespace Emberdelve.Combat
             ICombatEntity target, float instigatorMultiplier = 1f, float weaponBaseDamageBonus = 0f,
             CombatFlowTuning tuning = null, bool rangedProjectile = false, bool guardBladeContact = false,
             HitLocation projectileLocation = HitLocation.Unspecified, float projectileLocationMultiplier = 1f,
-            float airTimeFalloff = -1f)
+            float airTimeFalloff = -1f, bool guardShieldContact = false, bool guardWeaponContact = false)
         {
             // D2: a projectile that carries an air-time falloff scale (>= 0) is NOT range-attenuated here; its
             // falloff multiplies the finished hit below, after location and the defender's guard/armor. A negative
@@ -52,7 +52,7 @@ namespace Emberdelve.Combat
             DamageInfo resolved = Finalize(amount, weapon, intent.Direction, intent.Origin, intent.InstigatorCombatId,
                 intent.InstigatorKind, hit, target, null, rangedProjectile ? projectileLocation : HitLocation.Unspecified,
                 weapon != null ? weapon.impactPower : 0f, tuning, rangedProjectile, guardBladeContact,
-                locationAuthoritative: rangedProjectile);
+                locationAuthoritative: rangedProjectile, guardShieldContact: guardShieldContact, guardWeaponContact: guardWeaponContact);
             return airTimeScaled ? ApplyProjectileFalloff(resolved, airTimeFalloff) : resolved;
         }
 
@@ -71,7 +71,7 @@ namespace Emberdelve.Combat
             float s = float.IsNaN(scale) || scale < 0f ? 0f : scale;
             return new DamageInfo(Mathf.Max(1f, info.Amount * s), info.Point, info.Direction, info.SourcePosition,
                 info.SourceCombatId, info.SourceKind, info.Type, info.Blocked, info.Headshot, info.BlockReduction,
-                info.Location, info.ImpactPower, info.GuardBroken, info.RangedProjectile, info.GuardBladeContact, info.AttackHeight);
+                info.Location, info.ImpactPower, info.GuardBroken, info.RangedProjectile, info.GuardBladeContact, info.AttackHeight, info.MeleeGuardChecked, info.GuardShieldContact, info.GuardWeaponContact);
         }
 
         /// <summary>
@@ -84,7 +84,8 @@ namespace Emberdelve.Combat
         public static DamageInfo ResolveSwing(WeaponData weapon, SwingPatternData pattern, in AttackIntent intent,
             in HitCandidate hit, HitLocation location, float locationMultiplier, ICombatEntity target,
             float instigatorMultiplier = 1f, float weaponBaseDamageBonus = 0f,
-            float stepMultiplier = 1f, float zoneMultiplier = 1f, CombatFlowTuning tuning = null)
+            float stepMultiplier = 1f, float zoneMultiplier = 1f, CombatFlowTuning tuning = null,
+            bool guardBladeContact = false, bool guardShieldContact = false, bool guardWeaponContact = false)
         {
             float amount = weapon.DamageAtRange(0f, weaponBaseDamageBonus);
             amount *= pattern != null ? Mathf.Max(0.05f, pattern.damageMultiplier) : 1f;
@@ -99,7 +100,8 @@ namespace Emberdelve.Combat
                 ? BladeTrajectories.HeightOf(pattern.kind, tuning ?? CombatFlowTuning.Default)
                 : BladeHeight.Unspecified;
             return Finalize(amount, weapon, intent.Direction, intent.Origin, intent.InstigatorCombatId,
-                intent.InstigatorKind, hit, target, null, location, impact, tuning, attackHeight: height);
+                intent.InstigatorKind, hit, target, null, location, impact, tuning, attackHeight: height,
+                meleeGuardChecked: true, guardBladeContact: guardBladeContact, guardShieldContact: guardShieldContact, guardWeaponContact: guardWeaponContact);
         }
 
         /// <summary>
@@ -122,7 +124,7 @@ namespace Emberdelve.Combat
             float instigatorMultiplier = 1f, float effectScale = 1f, float weaponBaseDamageBonus = 0f,
             bool rangedProjectile = false, bool guardBladeContact = false,
             HitLocation projectileLocation = HitLocation.Unspecified, float projectileLocationMultiplier = 1f,
-            float airTimeFalloff = -1f)
+            float airTimeFalloff = -1f, bool guardShieldContact = false, bool guardWeaponContact = false)
         {
             SkillData skill = intent.Skill;
             float distance = Vector3.Distance(intent.Origin, hit.HitPoint);
@@ -170,7 +172,7 @@ namespace Emberdelve.Combat
 
             DamageInfo resolved = Finalize(amount, source, intent.Direction, intent.Origin, intent.InstigatorCombatId,
                 intent.InstigatorKind, hit, target, type, location: location, rangedProjectile: rangedProjectile,
-                guardBladeContact: guardBladeContact, locationAuthoritative: rangedProjectile);
+                guardBladeContact: guardBladeContact, locationAuthoritative: rangedProjectile, guardShieldContact: guardShieldContact, guardWeaponContact: guardWeaponContact);
             return airTimeScaled ? ApplyProjectileFalloff(resolved, airTimeFalloff) : resolved;
         }
 
@@ -193,14 +195,15 @@ namespace Emberdelve.Combat
             DamageType? overrideType = null, HitLocation location = HitLocation.Unspecified,
             float impactPower = 0f, CombatFlowTuning tuning = null, bool rangedProjectile = false,
             bool guardBladeContact = false, bool locationAuthoritative = false,
-            BladeHeight attackHeight = BladeHeight.Unspecified)
+            BladeHeight attackHeight = BladeHeight.Unspecified, bool meleeGuardChecked = false, bool guardShieldContact = false, bool guardWeaponContact = false)
         {
             DamageType type = overrideType ?? (source != null ? source.damageType : DamageType.Physical);
 
             DamageInfo info = new DamageInfo(Mathf.Max(1f, amount), hit.HitPoint, direction, origin,
                 instigatorCombatId, instigatorKind, type, false,
                 locationAuthoritative ? location == HitLocation.Head : hit.Headshot, 0f, location, impactPower);
-            if (rangedProjectile) info = info.WithProjectileGuardContact(guardBladeContact);
+            if (rangedProjectile) info = info.WithProjectileGuardContact(guardBladeContact, guardShieldContact, guardWeaponContact);
+            if (meleeGuardChecked) info = info.WithMeleeGuardContact(guardBladeContact, guardShieldContact, guardWeaponContact);
             if (attackHeight != BladeHeight.Unspecified) info = info.WithAttackHeight(attackHeight);
 
             // D1b: a defender whose guard can break answers with the reduction AND whether the hit's impact power
@@ -271,7 +274,7 @@ namespace Emberdelve.Combat
 
             return new DamageInfo(final, info.Point, info.Direction, info.SourcePosition, info.SourceCombatId,
                 info.SourceKind, info.Type, info.Blocked, info.Headshot, info.BlockReduction, info.Location,
-                info.ImpactPower, info.GuardBroken, info.RangedProjectile, info.GuardBladeContact, info.AttackHeight);
+                info.ImpactPower, info.GuardBroken, info.RangedProjectile, info.GuardBladeContact, info.AttackHeight, info.MeleeGuardChecked, info.GuardShieldContact, info.GuardWeaponContact);
         }
     }
 

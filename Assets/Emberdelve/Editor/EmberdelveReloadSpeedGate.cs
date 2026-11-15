@@ -162,7 +162,9 @@ namespace Emberdelve.EditorTools
         {
             PlayerRig rig = Rig(source, weapon, x); ResetClock(); RangedCombat ranged = rig.GetComponent<RangedCombat>();
             Close(rig.ActionSpeedFactor, archer ? 1.12f : 1f, "real class rate");
-            Check(EmberdelveKitFixtures.ConsumeAmmo(ranged, 2), "spend two owned rounds"); KitView empty = View(rig);
+            int rounds = archer ? 2 : 1;
+            Check(archer || weapon.magazineSize == 1, "crossbow reload fixture uses its authored single-bolt capacity");
+            Check(EmberdelveKitFixtures.ConsumeAmmo(ranged, rounds), $"spend {rounds} owned round(s)"); KitView empty = View(rig);
             float hp = rig.CurrentHealth, mana = rig.Mana.CurrentMana;
             CombatSenderId forged = CombatSenderId.ForPlayer(rig.PlayerId + 10000);
             Check(!_authority.TryStartReload(forged, rig.CombatId, out string forgedReason) && forgedReason.Contains("sender"), "forged sender reload refused");
@@ -177,7 +179,8 @@ namespace Emberdelve.EditorTools
             At(accepted.ReloadDuration * .5f); Close(ranged.ReloadProgress, .5f, "half accepted duration is half progress after regear");
             At(accepted.ReloadDuration - .001f); Check(View(rig).Reloading && View(rig).Magazine == empty.Magazine, "before exact boundary no ammo transfer");
             At(accepted.ReloadDuration); KitView done = View(rig);
-            Check(!done.Reloading && done.Magazine == empty.Magazine + 2 && done.Reserve == empty.Reserve - 2, "exact boundary transfers two rounds once");
+            Check(!done.Reloading && done.Magazine == empty.Magazine + rounds && done.Reserve == empty.Reserve - rounds,
+                $"exact boundary transfers {rounds} owned round(s) once");
             At(accepted.ReloadDuration + .1f); KitView again = View(rig);
             Check(again.Magazine == done.Magazine && again.Reserve == done.Reserve, "later ticks cannot transfer twice");
             Close(ranged.ReloadProgress, 0, "idle progress reset");
@@ -185,8 +188,16 @@ namespace Emberdelve.EditorTools
             KitView bootsReload = StartReload(rig, archer ? 1.6764705882f : 2.1568627451f, "next reload uses latest boots rate");
             Check(rig.Equipment.TryUnequip(EquipmentSlot.Feet, out _), "remove boots while reload runs");
             Close(View(rig).ReloadDuration, bootsReload.ReloadDuration, "removal cannot slow an accepted reload");
+            At(bootsReload.ReloadDuration - .001f);
+            Check(View(rig).Reloading && View(rig).Magazine == done.Magazine - 1 && View(rig).Reserve == done.Reserve,
+                "second reload cannot transfer its round before the accepted boundary");
             At(bootsReload.ReloadDuration); KitView final = View(rig);
             Check(!final.Reloading && final.Magazine == done.Magazine && final.Reserve == done.Reserve - 1, "boots reload transfers one owned round");
+            At(bootsReload.ReloadDuration + .1f);
+            Check(View(rig).Magazine == final.Magazine && View(rig).Reserve == final.Reserve,
+                "second completed reload transfers once only");
+            Check(archer || final.Magazine == 1 && final.Reserve == empty.Reserve - 2,
+                "two crossbow reload cycles conserve exactly two reserve bolts");
             Check(rig.CurrentHealth == hp && rig.Mana.CurrentMana == mana, "reload and gear never heal or refill mana");
             Close(weapon.drawTime, archer ? .85f : .3f, "authored draw timing remains unchanged");
         }

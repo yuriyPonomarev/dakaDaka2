@@ -147,14 +147,17 @@ namespace Emberdelve.UI
 
             Button button = root.AddComponent<Button>();
             ColorBlock colors = button.colors;
-            colors.highlightedColor = new Color(1f, 1f, 1f, 0.25f);
-            colors.pressedColor = new Color(1f, 1f, 1f, 0.4f);
-            colors.selectedColor = background;
+            colors.highlightedColor = new Color(1.28f, 1.24f, 1.15f, 1f);
+            colors.pressedColor = new Color(.72f, .68f, .58f, 1f);
+            colors.selectedColor = Color.white;
             button.colors = colors;
             button.targetGraphic = image;
+            DungeonUiStyle.Surface(image);
 
             Text text = CreateText(root.transform, "Label", label, fontSize, textColor);
             Stretch(text.rectTransform);
+            text.raycastTarget = false;
+            if (fontSize >= 17) DungeonUiStyle.Heading(text);
 
             if (onClick != null) button.onClick.AddListener(onClick);
 

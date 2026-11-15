@@ -26,6 +26,7 @@ namespace Emberdelve.UI
         private RenderTexture _texture;
         private Material _material;
         private PlayerRig _rig;
+        private EquippedArmorView _armor;
         private CharacterClassData _previewClass;
         private UnityEngine.UI.RawImage _portrait;
         private readonly UnityEngine.UI.Image[] _icons = new UnityEngine.UI.Image[4];
@@ -38,7 +39,7 @@ namespace Emberdelve.UI
         {
             var panel = UiFactory.CreateImage(transform, "CharacterPanel", LootPanelStyle.Ink,
                 new Vector2(360,650),Vector2.zero,Vector2.one*.5f,Vector2.one*.5f);
-            LootPanelStyle.Frame(panel,new Color(.48f,.47f,.42f));
+            panel.color = new Color(.08f,.073f,.061f); DungeonUiStyle.Surface(panel);
             _title=Label("Class", "CHARACTER", 20, new Vector2(0,296),new Vector2(330,30));
             var portrait = new GameObject("CharacterPreview",typeof(RectTransform),typeof(UnityEngine.UI.RawImage)).GetComponent<UnityEngine.UI.RawImage>();
             portrait.transform.SetParent(transform,false);
@@ -66,6 +67,7 @@ namespace Emberdelve.UI
         {
             var label=UiFactory.CreateText(transform,name,value,size,new Color(.85f,.81f,.69f),TextAnchor.MiddleCenter);
             label.rectTransform.anchoredPosition=position; label.rectTransform.sizeDelta=extent;
+            if(size>=20) DungeonUiStyle.Heading(label);
             label.raycastTarget=false; label.horizontalOverflow=HorizontalWrapMode.Wrap; return label;
         }
 
@@ -84,6 +86,7 @@ namespace Emberdelve.UI
                 if(_texture!=null) { _texture.Release(); Destroy(_texture); }
                 BuildPreview(_portrait);
             }
+            if(_armor!=null) { _armor.Bind(_rig!=null ? _rig.Equipment : null); _armor.Refresh(); }
             IReadOnlyList<SkillData> active=_rig!=null && _rig.Skills!=null ? _rig.Skills.ActiveSkills : null;
             IReadOnlyList<SkillData> passive=_rig!=null && _rig.Skills!=null ? _rig.Skills.PassiveSkills : null;
             if (NetRole.IsClientOnly && _rig!=null && _rig.Class!=null)
@@ -133,6 +136,7 @@ namespace Emberdelve.UI
             _stage=new GameObject("InventoryPreviewStage"); _stage.transform.position=new Vector3(0,-10000,0);
             var model=Instantiate(prefab,_stage.transform); model.transform.localPosition=Vector3.zero; model.transform.localRotation=Quaternion.Euler(0,15,0);
             foreach(var child in model.GetComponentsInChildren<Transform>(true)) child.gameObject.layer=31;
+            _armor=model.GetComponent<EquippedArmorView>() ?? model.AddComponent<EquippedArmorView>(); _armor.Bind(_rig!=null ? _rig.Equipment : null); _armor.Refresh();
 
             var renderers=model.GetComponentsInChildren<Renderer>();
             Bounds bounds=new Bounds(model.transform.position+Vector3.up*.9f,new Vector3(1,1.8f,1));

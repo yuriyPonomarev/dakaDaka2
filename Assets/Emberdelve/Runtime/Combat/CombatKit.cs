@@ -23,6 +23,8 @@ namespace Emberdelve.Combat
     public struct KitAmmoSeed
     {
         public string WeaponId;
+        public string PoolId;
+        public string ReserveId;
         public int MagazineSize;
         public float ReloadTime;
         public int Magazine;
@@ -44,6 +46,7 @@ namespace Emberdelve.Combat
         public float ManaRegen;
         public float ManaRegenDelay;
         public string ActiveWeaponId;
+        public string ActiveAmmoPoolId;
         public KitAmmoSeed[] Pools;
         public SkillData[] ActiveSkills;
     }
@@ -60,6 +63,7 @@ namespace Emberdelve.Combat
         public bool ManaRegenAllowed;
         public bool Frozen;
         public string ActiveWeaponId;
+        public string AmmoPoolId;
         public bool HasActiveAmmo;
         public int Magazine;
         public int Reserve;
@@ -92,12 +96,24 @@ namespace Emberdelve.Combat
     /// </summary>
     internal sealed class CombatKitState
     {
+        public sealed class ReservePool
+        {
+            public int Count;
+            public int Capacity;
+        }
         public sealed class AmmoPool
         {
             public string WeaponId = string.Empty;
-            public int Magazine;
-            public int Reserve;
-            public int MaxReserve;
+            public sealed class LoadedRounds
+            {
+                public string WeaponId;
+                public int Count;
+            }
+            public LoadedRounds Loaded = new LoadedRounds();
+            public int Magazine { get => Loaded.Count; set => Loaded.Count = value; }
+            public ReservePool ReserveState = new ReservePool();
+            public int Reserve { get => ReserveState.Count; set => ReserveState.Count = value; }
+            public int MaxReserve { get => ReserveState.Capacity; set => ReserveState.Capacity = value; }
             public int MagazineSize = 1;
             public float ReloadTime = 1f;
         }
@@ -116,16 +132,40 @@ namespace Emberdelve.Combat
         public bool Frozen;
 
         public readonly Dictionary<string, AmmoPool> Pools = new Dictionary<string, AmmoPool>();
+        private readonly Dictionary<string, ReservePool> _reserves = new Dictionary<string, ReservePool>();
         public string ActiveWeaponId = string.Empty;
+        public string ActiveAmmoPoolId = string.Empty;
         public bool Reloading;
         public float ReloadRemaining;
         /// <summary>Accepted immutable reload duration; ReloadTime remains the authored pool metadata.</summary>
         public float ReloadDuration;
 
         public AmmoPool Active =>
-            ActiveWeaponId.Length > 0 && Pools.TryGetValue(ActiveWeaponId, out AmmoPool pool) ? pool : null;
+            ActiveAmmoPoolId.Length > 0 && Pools.TryGetValue(ActiveAmmoPoolId, out AmmoPool pool) ? pool : null;
 
         public bool IsManaFull => Mana >= MaxMana - 0.001f;
+
+        /// <summary>A physical weapon has one magazine for the lifetime of the raid, even when its holder changes.
+        /// Legacy definition-only pools and synthetic reserve pools remain local to the actor.</summary>
+        internal void BindLoadedRounds(Dictionary<string, AmmoPool.LoadedRounds> magazines)
+        {
+            foreach (var pair in Pools)
+            {
+                if (!System.Guid.TryParseExact(pair.Key, "N", out var uid) || uid == System.Guid.Empty) continue;
+                var pool = pair.Value;
+                if (magazines.TryGetValue(pair.Key, out var existing))
+                {
+                    // ItemCatalog guarantees that a UID cannot change its weapon definition.
+                    // Never overwrite a previous holder's live count with a rig's cached seed.
+                    if (existing.WeaponId == pool.WeaponId) pool.Loaded = existing;
+                }
+                else
+                {
+                    pool.Loaded.WeaponId = pool.WeaponId;
+                    magazines.Add(pair.Key, pool.Loaded);
+                }
+            }
+        }
 
         // ---- seeding ------------------------------------------------------------------------------------
 
@@ -178,11 +218,13 @@ namespace Emberdelve.Combat
             ManaRegenAllowed = true;
 
             Pools.Clear();
+            _reserves.Clear();
             Reloading = false;
             ReloadRemaining = 0f;
             ReloadDuration = 0f;
             AddPools(seed, true);
             ActiveWeaponId = seed.ActiveWeaponId ?? string.Empty;
+            ActiveAmmoPoolId = string.IsNullOrEmpty(seed.ActiveAmmoPoolId) ? ActiveWeaponId : seed.ActiveAmmoPoolId;
         }
 
         private void ApplyRevision(in KitSeed seed)
@@ -204,6 +246,7 @@ namespace Emberdelve.Combat
         {
             AddPools(seed, false);
             ActiveWeaponId = seed.ActiveWeaponId ?? string.Empty;
+            ActiveAmmoPoolId = string.IsNullOrEmpty(seed.ActiveAmmoPoolId) ? ActiveWeaponId : seed.ActiveAmmoPoolId;
             // RangedCombat.Initialize always ended a draw/reload when the hand changed.
             Reloading = false;
             ReloadRemaining = 0f;
@@ -221,8 +264,10 @@ namespace Emberdelve.Combat
 
                 int size = Mathf.Clamp(s.MagazineSize, 1, 99);
                 int max = Mathf.Max(0, s.MaxReserve);
+                string poolId = string.IsNullOrEmpty(s.PoolId) ? s.WeaponId : s.PoolId;
+                string reserveId = string.IsNullOrEmpty(s.ReserveId) ? poolId : s.ReserveId;
 
-                if (!adoptAll && Pools.TryGetValue(s.WeaponId, out AmmoPool known))
+                if (!adoptAll && Pools.TryGetValue(poolId, out AmmoPool known))
                 {
                     // A pool the authority already holds wins over whatever the rig now says: a weapon swap is not a refill.
                     known.MagazineSize = size;
@@ -233,14 +278,20 @@ namespace Emberdelve.Combat
                     continue;
                 }
 
-                Pools[s.WeaponId] = new AmmoPool
+                // Identical weapon instances have independent loaded rounds but one reserve.
+                // Adding another item never adopts a second copy of an already owned reserve.
+                if (!_reserves.TryGetValue(reserveId, out ReservePool reserve))
+                {
+                    reserve = new ReservePool { Count = Mathf.Clamp(s.Reserve, 0, max), Capacity = max };
+                    _reserves.Add(reserveId, reserve);
+                }
+                Pools[poolId] = new AmmoPool
                 {
                     WeaponId = s.WeaponId,
+                    ReserveState = reserve,
                     MagazineSize = size,
                     ReloadTime = s.ReloadTime,
-                    MaxReserve = max,
                     Magazine = Mathf.Clamp(s.Magazine, 0, size),
-                    Reserve = Mathf.Clamp(s.Reserve, 0, max),
                 };
             }
         }
@@ -330,7 +381,7 @@ namespace Emberdelve.Combat
         public bool CanAcceptReserve(int amount)
         {
             AmmoPool pool = Active;
-            return pool != null && amount > 0 && (pool.MaxReserve <= 0 || pool.Reserve < pool.MaxReserve);
+            return pool != null && amount > 0 && (long)pool.Reserve + amount <= pool.MaxReserve;
         }
 
         public void GrantReserve(int amount)
@@ -367,6 +418,7 @@ namespace Emberdelve.Combat
                 ManaRegenAllowed = ManaRegenAllowed,
                 Frozen = Frozen,
                 ActiveWeaponId = ActiveWeaponId,
+                AmmoPoolId = ActiveAmmoPoolId,
                 HasActiveAmmo = pool != null,
                 Magazine = pool != null ? pool.Magazine : 0,
                 Reserve = pool != null ? pool.Reserve : 0,

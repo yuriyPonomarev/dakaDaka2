@@ -83,7 +83,7 @@ namespace Emberdelve.Net
                 Reject(row, sequence, "Another extraction hold is already active");
                 return false;
             }
-            if (!TryGetPoint(out ExtractionPoint point))
+            if (!TryGetPoint(row.Rig, out ExtractionPoint point))
             {
                 Reject(row, sequence, "Extraction point is unavailable");
                 return false;
@@ -276,9 +276,10 @@ namespace Emberdelve.Net
             return true;
         }
 
-        private static bool TryGetPoint(out ExtractionPoint point)
+        private static bool TryGetPoint(PlayerRig actor, out ExtractionPoint point)
         {
-            point = UnityEngine.Object.FindFirstObjectByType<ExtractionPoint>();
+            point = GameServices.TryGet(out RunDirector director) && director != null
+                ? ExtractionPoint.FindForFloor(director.ExtractionFloorFor(actor)) : null;
             return point != null;
         }
 

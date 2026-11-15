@@ -596,6 +596,7 @@ namespace Emberdelve.EditorTools
             Check(ranged != null && ranged.enabled, "P1 has the real ranged combat component");
             FireAndResolveProjectile(_p1, _p3, p3Health, true, "rival crossbow bolt");
             yield return new WaitForSeconds(1.6f);
+            yield return ReloadCrossbowForNextShot(_p1, "friendly-fire-off preparation");
 
             Place(_p3, spot + new Vector3(0f, 0f, 90f));
             Place(_p2, spot + fwd * 8f);
@@ -604,6 +605,7 @@ namespace Emberdelve.EditorTools
             p2Health = _p2.CurrentHealth;
             FireAndResolveProjectile(_p1, _p2, p2Health, false, "party crossbow bolt with friendly fire off");
             yield return new WaitForSeconds(1.6f);
+            yield return ReloadCrossbowForNextShot(_p1, "friendly-fire-on preparation");
             CombatTeams.FriendlyFire = true;
             p2Health = _p2.CurrentHealth;
             FireAndResolveProjectile(_p1, _p2, p2Health, true, "party crossbow bolt with friendly fire on");
@@ -611,6 +613,23 @@ namespace Emberdelve.EditorTools
             _p1.Loadout.SwitchToSlot(0);
             yield return new WaitForSeconds(1.0f);
             Place(_p2, spot + new Vector3(0f, 0f, 60f));
+        }
+
+        private IEnumerator ReloadCrossbowForNextShot(PlayerRig shooter, string label)
+        {
+            var ranged = shooter.GetComponent<RangedCombat>();
+            int magazine = ranged.Magazine, reserve = ranged.Reserve;
+            Check(magazine == 0 && reserve > 0, label + " has an empty crossbow and a real reserve bolt");
+            bool accepted = _authority.TryStartReload(shooter.CombatSender, shooter.CombatId, out string reason);
+            Check(accepted, label + " starts sender-bound reload: " + reason);
+            if (!accepted) yield break;
+            yield return null;
+            float waited = 0f;
+            float limit = Mathf.Max(shooter.ActiveWeapon.reloadTime, ranged.ReloadDuration) + 3f;
+            while ((ranged.IsReloading || ranged.Magazine == magazine) && waited < limit)
+            { waited += Time.deltaTime; yield return null; }
+            Check(!ranged.IsReloading && ranged.Magazine == magazine + 1 && ranged.Reserve == reserve - 1,
+                label + " completes exactly one reserve-to-magazine transfer");
         }
 
         private void FireAndResolveProjectile(PlayerRig shooter, PlayerRig target, float healthBefore,
@@ -788,7 +807,9 @@ namespace Emberdelve.EditorTools
             Check(!_director.BeginExtraction(_p1, out string direct1) && direct1.Contains("relic"), "the director refuses P1 directly too");
             Check(_director.State == RunState.Running && _director.TryGetSession(_p1.PlayerId, out PlayerSession s1) && s1.IsRunning, "P1's refused attempt left everyone Running");
             FakeActor stranger = new FakeActor { Id = 4242, Alive = true, Bag = _p2.Inventory, Origin = _p2.InteractionOrigin };
-            Check(!gate.CanInteract(stranger, out string rs) && rs.Contains("Not a player"), $"a stranger cannot extract ({rs})");
+            Check(!gate.CanInteract(stranger, out string rs) && rs.Contains("another floor"), $"a stranger has no admitted extraction floor ({rs})");
+            Check(!_director.BeginExtraction(stranger, out string strangerReason) && strangerReason.Contains("Not a player"),
+                $"a stranger cannot extract through the director ({strangerReason})");
 
             // a REAL hold through P2's own Interactor extracts P2 only
             Place(_p1, Origin + new Vector3(500f, 0f, 0f));
@@ -821,7 +842,9 @@ namespace Emberdelve.EditorTools
 
             // an extracted player is out of the fight: nobody is hostile to them, loot and the gate refuse them
             Check(!CombatTeams.AreHostile(_p3, _p2) && !CombatTeams.AreHostile(_p2, _p3), "an extracted player is nobody's enemy");
-            Check(!gate.CanInteract(_p2, out string again) && again.Contains("finished"), $"P2 cannot extract again ({again})");
+            Check(!gate.CanInteract(_p2, out string again) && again.Contains("another floor"), $"P2 no longer has an admitted extraction floor ({again})");
+            Check(!_director.BeginExtraction(_p2, out string finishedReason) && finishedReason.Contains("finished"),
+                $"P2 cannot extract again through the director ({finishedReason})");
             Check(_director.CollectLootCounted(_p2, _coin, 1) == 0, "and takes no more loot");
             EnemyAgent agent = FindFirstObjectByType<EnemyAgent>();
             Place(_p3, Origin + new Vector3(500f, 0f, 300f));

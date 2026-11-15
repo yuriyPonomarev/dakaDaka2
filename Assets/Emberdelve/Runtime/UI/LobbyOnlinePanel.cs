@@ -49,13 +49,14 @@ namespace Emberdelve.UI
             _built = true;
             _classProvider = classProvider;
 
-            RectTransform root = UiFactory.CreateGroup(canvas.transform, "OnlinePanel");
-            UiFactory.SetRect(root, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(340f, 225f), new Vector2(20f, -20f), new Vector2(0f, 1f));
+            RectTransform root = UiFactory.CreateGroup(canvas.transform.Find("LobbyRoot") ?? canvas.transform, "OnlinePanel");
+            UiFactory.SetRect(root, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(340f, 225f), new Vector2(40f, -140f), new Vector2(0f, 1f));
 
-            UiFactory.CreateImage(root, "Bg", new Color(0.05f, 0.04f, 0.03f, 0.9f), new Vector2(340f, 225f),
+            var background = UiFactory.CreateImage(root, "Bg", new Color(0.05f, 0.04f, 0.03f, 0.9f), new Vector2(340f, 225f),
                 new Vector2(170f, -112.5f), new Vector2(0f, 1f), new Vector2(0f, 1f));
+            DungeonUiStyle.Surface(background);
 
-            Text header = UiFactory.CreateText(root, "Header", "ONLINE", 17, new Color(0.95f, 0.78f, 0.4f, 1f), TextAnchor.MiddleLeft);
+            Text header = UiFactory.CreateText(root, "Header", "PLAY ONLINE", 17, new Color(0.95f, 0.78f, 0.4f, 1f), TextAnchor.MiddleLeft);
             UiFactory.SetRect(header.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(320f, 24f), new Vector2(170f, -20f));
 
             _fieldImage = UiFactory.CreateImage(root, "AddressField", new Color(0.13f, 0.11f, 0.09f, 1f), new Vector2(320f, 34f),
@@ -249,7 +250,7 @@ namespace Emberdelve.UI
             NetLobbyPhase phase = NetLobbyBridge.Phase;
             string status = NetLobbyBridge.Status;
             _statusText.text = status.Length == 0
-                ? "Host loads the modular crypt map; Join follows the server. Select a class below."
+                ? "Host uses the selected team size. Join follows the server. Both start with base gear."
                 : status;
 
             switch (phase)

@@ -44,6 +44,10 @@ namespace Emberdelve.Net
         private double _refreshAt;
         private string _lastFailure;
         private bool _hostInputPaused;
+        private ulong _carriedEntry;
+        private Vector2 _carryStart;
+        private UnityEngine.UI.Image _carry;
+        private ItemData _carriedItem;
 
         private sealed class Row
         {
@@ -138,7 +142,7 @@ namespace Emberdelve.Net
         public void OnInvalidState(string reason)
         {
             if (!IsOpen) return;
-            _lastFailure = string.IsNullOrEmpty(reason) ? "Could not read corpse contents" : reason;
+            _lastFailure = string.IsNullOrEmpty(reason) ? "Could not read container contents" : reason;
             Render();
             _stateStartedAt = 0.0;
             _refreshAt = Time.realtimeSinceStartupAsDouble + 0.35;
@@ -147,7 +151,7 @@ namespace Emberdelve.Net
         public void OnResult(ulong corpseId, uint sequence, bool accepted, ulong corpseRevision, string reason)
         {
             if (!_session.ApplyResult(corpseId, sequence, accepted, corpseRevision, reason)) return;
-            _lastFailure = accepted ? null : (string.IsNullOrEmpty(reason) ? "Server refused this corpse request" : reason);
+            _lastFailure = accepted ? null : (string.IsNullOrEmpty(reason) ? "Server refused this container request" : reason);
             if (_session.TransferSequence == 0) _transferStartedAt = 0.0;
             if (_session.StateRequestSequence == 0) _stateStartedAt = 0.0;
             if (_session.NeedsRefresh) _refreshAt = Time.realtimeSinceStartupAsDouble + 0.35;
@@ -157,6 +161,7 @@ namespace Emberdelve.Net
         public void Close(bool relockCursor = true)
         {
             if (!IsOpen) return;
+            ClearCarry();
             _session.Close();
             if (_inventoryScreen != null) { _inventoryScreen.Close(false); _inventoryScreen.SetLootCompanion(false); }
             _lastFailure = null;
@@ -189,9 +194,9 @@ namespace Emberdelve.Net
                 return;
             }
 
-            _root.localScale = Vector3.one * Mathf.Min(1f, Screen.width / 1480f, Screen.height / 700f);
-            if (Keyboard.current != null && (Keyboard.current.escapeKey.wasPressedThisFrame || Keyboard.current.iKey.wasPressedThisFrame)) { Close(); return; }
-            _inventoryScreen?.HandlePointer();
+            _root.localScale = Vector3.one * LootPanelStyle.InventoryScale(true);
+            if (Keyboard.current != null && (Keyboard.current.escapeKey.wasPressedThisFrame || Keyboard.current.iKey.wasPressedThisFrame || Keyboard.current.tabKey.wasPressedThisFrame)) { Close(); return; }
+            if (_carriedEntry == 0) _inventoryScreen?.HandlePointer();
             HandleLootPointer();
             double now = Time.realtimeSinceStartupAsDouble;
             if (_session.StateRequestSequence != 0 && now - _stateStartedAt >= StateTimeoutSeconds)
@@ -237,7 +242,7 @@ namespace Emberdelve.Net
             OnResult(corpseId, sequence, accepted, corpseRevision, reason);
         }
 
-        private void Take(int rowIndex, bool all)
+        private void Take(int rowIndex, bool all, Vector2Int? destinationCell = null)
         {
             if (!IsOpen || _bag == null || _presenter == null || _session.Document == null || _session.IsTransferPending) return;
             int entryIndex = rowIndex;
@@ -246,7 +251,7 @@ namespace Emberdelve.Net
             if (entry == null || entry.item == null) return;
             int amount = all ? entry.item.quantity : 1;
             if (!_session.TryBeginTransfer(entry.entryId, amount, _bag.Revision,
-                    out Rules.CorpseTransferUiRequest request, out string reason))
+                    out Rules.CorpseTransferUiRequest request, out string reason, destinationCell))
             {
                 _lastFailure = reason;
                 Render();
@@ -280,14 +285,14 @@ namespace Emberdelve.Net
             LootPanelStyle.Panel(background);
             _header = Label(_panel, "Header", "LOOT", 22, new Vector2(0, 297), new Vector2(440, 32));
             _header.color = new Color(.89f, .77f, .51f);
-            _status = Label(_panel, "Status", "", 14, new Vector2(0, -233), new Vector2(475, 58));
+            _status = Label(_panel, "Status", "", 14, new Vector2(0, -268), new Vector2(475, 20));
             _status.horizontalOverflow = UnityEngine.HorizontalWrapMode.Wrap;
-            Label(_panel, "Instructions", "Click: take stack   •   Shift + click: take one", 13, new Vector2(0, -278), new Vector2(475, 26));
-            _pageLabel = Label(_panel, "Page", "", 13, new Vector2(0, -185), new Vector2(180, 26));
-            _previous = Button("PreviousPage", "<", () => ChangePage(-1), new Vector2(-110,-185), new Vector2(40,26));
-            _next = Button("NextPage", ">", () => ChangePage(1), new Vector2(110,-185), new Vector2(40,26));
+            Label(_panel, "Instructions", "LMB: drag to bag   |   RMB: take stack", 13, new Vector2(0, -289), new Vector2(475, 20));
+            _pageLabel = Label(_panel, "Page", "", 13, new Vector2(0, -245), new Vector2(180, 26));
+            _previous = Button("PreviousPage", "<", () => ChangePage(-1), new Vector2(-110,-245), new Vector2(40,26));
+            _next = Button("NextPage", ">", () => ChangePage(1), new Vector2(110,-245), new Vector2(40,26));
             Button("Refresh", "Refresh", Refresh, new Vector2(-66,-308), new Vector2(110,26));
-            Button("Close", "Close [I / Esc]", () => Close(), new Vector2(66,-308), new Vector2(130,26));
+            Button("Close", "Close [Tab / Esc]", () => Close(), new Vector2(66,-308), new Vector2(130,26));
             _tip = UiFactory.CreateImage(canvas.transform, "LootTooltip", LootPanelStyle.Ink, new Vector2(290,200), Vector2.zero, new Vector2(.5f,.5f),new Vector2(.5f,.5f));
             _tip.raycastTarget = false; LootPanelStyle.Frame(_tip, LootPanelStyle.Gold);
             // A canvas-level popup avoids being occluded by the companion inventory root.
@@ -311,11 +316,44 @@ namespace Emberdelve.Net
             return button;
         }
 
+        private void ClearCarry()
+        {
+            _carriedEntry = 0;
+            _carriedItem = null;
+            if (_carry != null) { Destroy(_carry.gameObject); _carry = null; }
+        }
+
         private void HandleLootPointer()
         {
+            if (_inventoryScreen != null && _inventoryScreen.IsSplitting) { ClearCarry(); return; }
             if (Mouse.current == null || _tip == null) return;
             Vector2 pointer = Mouse.current.position.ReadValue();
             _tip.gameObject.SetActive(false);
+            if (_carriedEntry != 0)
+            {
+                int index = System.Array.FindIndex(_session.Document.entries, e => e != null && e.entryId == _carriedEntry);
+                if (index < 0 || Mouse.current.rightButton.wasPressedThisFrame) { ClearCarry(); return; }
+                RectTransformUtility.ScreenPointToLocalPointInRectangle(_root, pointer, null, out Vector2 local);
+                if (_carry != null)
+                {
+                    _carry.rectTransform.localScale = _root.localScale;
+                    _carry.rectTransform.anchoredPosition = local * _root.localScale.x;
+                    _carry.transform.SetAsLastSibling();
+                    bool fits = _inventoryScreen != null && _inventoryScreen.TryCellAt(pointer, out Vector2Int hovered) && _bag.CanPlace(hovered, _carriedItem.EffectiveFootprint);
+                    _carry.color = fits ? new Color(.15f,.45f,.25f,.8f) : new Color(.55f,.15f,.12f,.8f);
+                }
+                bool releasedDrag = Mouse.current.leftButton.wasReleasedThisFrame && (pointer - _carryStart).sqrMagnitude > 36f;
+                if (releasedDrag || Mouse.current.leftButton.wasPressedThisFrame)
+                {
+                    if (_inventoryScreen != null && _inventoryScreen.TryCellAt(pointer, out Vector2Int cell))
+                    {
+                        Take(index, true, cell);
+                        ClearCarry();
+                    }
+                    else if (releasedDrag) ClearCarry();
+                }
+                return;
+            }
             foreach (Row row in _rows)
             {
                 if (!RectTransformUtility.RectangleContainsScreenPoint(row.Rect, pointer)) continue;
@@ -336,8 +374,22 @@ namespace Emberdelve.Net
                     _tip.gameObject.SetActive(true);
                     _tip.transform.SetAsLastSibling();
                 }
-                if (Mouse.current.leftButton.wasPressedThisFrame || Mouse.current.rightButton.wasPressedThisFrame)
-                    Take(row.Index, !(Keyboard.current != null && Keyboard.current.shiftKey.isPressed));
+                if (_session.IsTransferPending || _session.StateRequestSequence != 0) return;
+                if (Mouse.current.rightButton.wasPressedThisFrame) Take(row.Index, true);
+                else if (Mouse.current.leftButton.wasPressedThisFrame)
+                {
+                    _inventoryScreen?.CancelCarry();
+                    _carriedEntry = _session.Document.entries[row.Index].entryId;
+                    _carriedItem = row.Item;
+                    _carryStart = pointer;
+                    _carry = UiFactory.CreateImage(_root.parent, "CarriedLoot", LootPanelStyle.Ink, row.Rect.sizeDelta, Vector2.zero, Vector2.one*.5f, Vector2.one*.5f);
+                    LootPanelStyle.Decorate(_carry, row.Item, row.Instance);
+                    _carry.raycastTarget = false;
+                    _carry.rectTransform.localScale = _root.localScale;
+                    RectTransformUtility.ScreenPointToLocalPointInRectangle((RectTransform)_root.parent, pointer, null, out Vector2 carryAt);
+                    _carry.rectTransform.anchoredPosition = carryAt;
+                    _tip.gameObject.SetActive(false);
+                }
                 return;
             }
         }
@@ -349,7 +401,7 @@ namespace Emberdelve.Net
             RequestState();
         }
 
-        private int Pages => Mathf.Max(1, Mathf.CeilToInt((_session.Document?.height ?? 4) / 4f));
+        private int Pages => Mathf.Max(1, Mathf.CeilToInt((_session.Document?.height ?? 4) / 5f));
         private void ChangePage(int delta) { _page = Mathf.Clamp(_page + delta, 0, Pages - 1); Render(); }
         private void ClampPage() { _page = Mathf.Clamp(_page, 0, Pages - 1); }
         private void Render()
@@ -377,7 +429,7 @@ namespace Emberdelve.Net
                     LootPanelStyle.Decorate(frame,null);
                     LootPanelStyle.EmptySlot(frame,slot);
                 }
-            for (int y = 0; y < 4; y++) for (int x = 0; x < width; x++)
+            for (int y = 0; y < 5; y++) for (int x = 0; x < width; x++)
                 UiFactory.CreateImage(_contents,"Cell_"+x+"_"+y,new Color(.13f,.12f,.11f),new Vector2(cell,cell),new Vector2(-width*step*.5f+x*step+cell*.5f,top-y*step-cell*.5f),new Vector2(.5f,.5f),new Vector2(.5f,.5f));
             if (doc != null && _bag?.Catalog != null)
                 for (int i = 0; i < doc.entries.Length; i++)
@@ -385,12 +437,12 @@ namespace Emberdelve.Net
                     var entry = doc.entries[i];
                     if (!_bag.Catalog.TryResolveItem(entry.item.itemId,out ItemData item,out _)) continue;
                     bool equipped = !string.IsNullOrEmpty(entry.slot) && System.Enum.TryParse(entry.slot,out EquipmentSlot _);
-                    if (!equipped && (entry.y / 4 != _page)) continue;
+                    if (!equipped && (entry.y / 5 != _page)) continue;
                     ItemInstance instance = null;
                     if (!string.IsNullOrEmpty(entry.item.uid)) ItemInstance.TryRestore(entry.item,_bag.Catalog.Authority,out instance,out _);
                     Vector2 size, at;
                     if (equipped) { var slot = (EquipmentSlot)System.Enum.Parse(typeof(EquipmentSlot), entry.slot); size = LootPanelStyle.SlotSize(slot); at = LootPanelStyle.SlotPosition(slot); }
-                    else { Vector2Int shape = item.EffectiveFootprint; size = new Vector2(shape.x*step-2,shape.y*step-2); at = new Vector2(-width*step*.5f+entry.x*step+size.x*.5f,top-(entry.y%4)*step-size.y*.5f); }
+                    else { Vector2Int shape = item.EffectiveFootprint; size = new Vector2(shape.x*step-2,shape.y*step-2); at = new Vector2(-width*step*.5f+entry.x*step+size.x*.5f,top-(entry.y%5)*step-size.y*.5f); }
                     var image = UiFactory.CreateImage(_contents,"Loot_"+entry.entryId,LootPanelStyle.Ink,size,at,new Vector2(.5f,.5f),new Vector2(.5f,.5f));
                     LootPanelStyle.Decorate(image,item,instance,!equipped);
                     if(entry.item.quantity > 1) Label(image.transform,"Count",entry.item.quantity.ToString(),13,new Vector2(size.x*.5f-12,size.y*.5f-10),new Vector2(24,18));
@@ -427,6 +479,7 @@ namespace Emberdelve.Net
             }
             if (_root != null) Destroy(_root.gameObject);
             if (_tip != null) Destroy(_tip.gameObject);
+            ClearCarry();
         }
     }
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEditor;
@@ -20,7 +20,7 @@ namespace Emberdelve.EditorTools
     ///
     /// One batch entry in two phases that share one final line. Phase 1 (edit mode, no scene): every pure rule against literals
     /// written here - the literal version 3 equipment and loadout documents (weapon set 1 holding Weapon and OffHand) migrating to
-    /// the literal version 5 bytes, Alt slots refused in a version 3 document, the held-factor and consumable arithmetic, belt
+    /// the literal version 6 bytes, Alt slots refused in a version 3 document, the held-factor and consumable arithmetic, belt
     /// text, item data defaults (all existing content unchanged). Phase 2 (play mode on the real level scene, because the command
     /// authority is bound to a live rig): speed with gear (exact multiplier), the swap through the authority (atomic; refused while
     /// swinging with nothing changed), the active set driving the combat weapon, the belt surviving a restore by identity, and the
@@ -38,15 +38,15 @@ namespace Emberdelve.EditorTools
 
         // Literal version 3 documents (D3b): the weapon, off hand and cloak are worn. Checksums computed outside Unity.
         internal const string EquipmentV3 = @"{""schemaVersion"":3,""kind"":""equipment"",""containerId"":""equipment"",""width"":0,""height"":0,""entries"":[{""slot"":""Weapon"",""x"":0,""y"":0,""item"":{""uid"":""7a1b2c3d4e5f60718293a4b5c6d7e8f9"",""itemId"":""ember_fang_blade"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""OffHand"",""x"":0,""y"":0,""item"":{""uid"":""8b2c3d4e5f60718293a4b5c6d7e8f90a"",""itemId"":""emberbulwark_shield"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""Back"",""x"":0,""y"":0,""item"":{""uid"":""5d6e7f8091a2b3c4d5e6f708192a3b4c"",""itemId"":""ashen_cloak"",""quantity"":1,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:6cb45a72b4e05ded4f821795bf87350ea712b96b833e1325e6b9ee147d5de450""}";
-        // The same equipment at version 5: only the version and the checksum change (the saved Weapon and OffHand ARE weapon set 1).
-        internal const string EquipmentV5 = @"{""schemaVersion"":5,""kind"":""equipment"",""containerId"":""equipment"",""width"":0,""height"":0,""entries"":[{""slot"":""Weapon"",""x"":0,""y"":0,""item"":{""uid"":""7a1b2c3d4e5f60718293a4b5c6d7e8f9"",""itemId"":""ember_fang_blade"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""OffHand"",""x"":0,""y"":0,""item"":{""uid"":""8b2c3d4e5f60718293a4b5c6d7e8f90a"",""itemId"":""emberbulwark_shield"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""Back"",""x"":0,""y"":0,""item"":{""uid"":""5d6e7f8091a2b3c4d5e6f708192a3b4c"",""itemId"":""ashen_cloak"",""quantity"":1,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:e4561739b4b91e1a40920624343c4ab15098519b279e4f8a12fb2b0e51416486""}";
-        internal const string EquipmentV5Checksum = "sha256:e4561739b4b91e1a40920624343c4ab15098519b279e4f8a12fb2b0e51416486";
+        // The same equipment at version 6: only the version and the checksum change (the saved Weapon and OffHand ARE weapon set 1).
+        internal const string EquipmentV6 = @"{""schemaVersion"":6,""kind"":""equipment"",""containerId"":""equipment"",""width"":0,""height"":0,""entries"":[{""slot"":""Weapon"",""x"":0,""y"":0,""item"":{""uid"":""7a1b2c3d4e5f60718293a4b5c6d7e8f9"",""itemId"":""ember_fang_blade"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""OffHand"",""x"":0,""y"":0,""item"":{""uid"":""8b2c3d4e5f60718293a4b5c6d7e8f90a"",""itemId"":""emberbulwark_shield"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""Back"",""x"":0,""y"":0,""item"":{""uid"":""5d6e7f8091a2b3c4d5e6f708192a3b4c"",""itemId"":""ashen_cloak"",""quantity"":1,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:970e0f20011910745025da11c63ac27fce2e05fbb33a587be59ba15ef4aa85f9""}";
+        internal const string EquipmentV6Checksum = "sha256:970e0f20011910745025da11c63ac27fce2e05fbb33a587be59ba15ef4aa85f9";
         // A version 3 document that names AltWeapon, which version 3 never wrote (valid checksum, so the migration step itself must refuse it).
         internal const string EquipmentV3WithAlt = @"{""schemaVersion"":3,""kind"":""equipment"",""containerId"":""equipment"",""width"":0,""height"":0,""entries"":[{""slot"":""AltWeapon"",""x"":0,""y"":0,""item"":{""uid"":""7a1b2c3d4e5f60718293a4b5c6d7e8f9"",""itemId"":""ember_fang_blade"",""quantity"":1,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:079a82469025202a8bd217f20c642327fff1cc8950b0cafb1f15e5aaf0b20ec3""}";
         internal const string LoadoutV3 = @"{""schemaVersion"":3,""bag"":{""schemaVersion"":3,""kind"":""bag"",""containerId"":""bag"",""width"":10,""height"":6,""entries"":[{""slot"":"""",""x"":0,""y"":0,""item"":{""uid"":"""",""itemId"":""ember_coin"",""quantity"":8,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:6e24f89b713fca9d5bfea10bc57e42caf4ebe9c25346db874e14cf6acb257cc7""},""equipment"":{""schemaVersion"":3,""kind"":""equipment"",""containerId"":""equipment"",""width"":0,""height"":0,""entries"":[{""slot"":""Weapon"",""x"":0,""y"":0,""item"":{""uid"":""7a1b2c3d4e5f60718293a4b5c6d7e8f9"",""itemId"":""ember_fang_blade"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""OffHand"",""x"":0,""y"":0,""item"":{""uid"":""8b2c3d4e5f60718293a4b5c6d7e8f90a"",""itemId"":""emberbulwark_shield"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""Back"",""x"":0,""y"":0,""item"":{""uid"":""5d6e7f8091a2b3c4d5e6f708192a3b4c"",""itemId"":""ashen_cloak"",""quantity"":1,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:6cb45a72b4e05ded4f821795bf87350ea712b96b833e1325e6b9ee147d5de450""},""checksum"":""sha256:4423867e7eac79d43b747397681bd30900665e13959753026a36a9e3932ecfca""}";
-        // The loadout at version 5: weaponSet 0 and an empty belt are added by the migration.
-        internal const string LoadoutV5 = @"{""schemaVersion"":5,""bag"":{""schemaVersion"":5,""kind"":""bag"",""containerId"":""bag"",""width"":10,""height"":6,""entries"":[{""slot"":"""",""x"":0,""y"":0,""item"":{""uid"":"""",""itemId"":""ember_coin"",""quantity"":8,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:bd48687d1281ae1a586a8814eaf0816b6754ea8fea8e7981ebfa945812c87605""},""equipment"":{""schemaVersion"":5,""kind"":""equipment"",""containerId"":""equipment"",""width"":0,""height"":0,""entries"":[{""slot"":""Weapon"",""x"":0,""y"":0,""item"":{""uid"":""7a1b2c3d4e5f60718293a4b5c6d7e8f9"",""itemId"":""ember_fang_blade"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""OffHand"",""x"":0,""y"":0,""item"":{""uid"":""8b2c3d4e5f60718293a4b5c6d7e8f90a"",""itemId"":""emberbulwark_shield"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""Back"",""x"":0,""y"":0,""item"":{""uid"":""5d6e7f8091a2b3c4d5e6f708192a3b4c"",""itemId"":""ashen_cloak"",""quantity"":1,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:e4561739b4b91e1a40920624343c4ab15098519b279e4f8a12fb2b0e51416486""},""weaponSet"":0,""belt"":["""","""","""","""","""",""""],""checksum"":""sha256:264ed5cd76d257e80680fab060535d417a3a8458ac92dd6110976c66a3d0adfc""}";
-        internal const string LoadoutV5Checksum = "sha256:264ed5cd76d257e80680fab060535d417a3a8458ac92dd6110976c66a3d0adfc";
+        // The loadout at version 6: weaponSet 0 and an empty belt are added by the migration.
+        internal const string LoadoutV6 = @"{""schemaVersion"":6,""bag"":{""schemaVersion"":6,""kind"":""bag"",""containerId"":""bag"",""width"":10,""height"":6,""entries"":[{""slot"":"""",""x"":0,""y"":0,""item"":{""uid"":"""",""itemId"":""ember_coin"",""quantity"":8,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:996fcaefb37fe2f6c157d33f6b7c03d299ffc907fb5259671f502cbd3faec96f""},""equipment"":{""schemaVersion"":6,""kind"":""equipment"",""containerId"":""equipment"",""width"":0,""height"":0,""entries"":[{""slot"":""Weapon"",""x"":0,""y"":0,""item"":{""uid"":""7a1b2c3d4e5f60718293a4b5c6d7e8f9"",""itemId"":""ember_fang_blade"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""OffHand"",""x"":0,""y"":0,""item"":{""uid"":""8b2c3d4e5f60718293a4b5c6d7e8f90a"",""itemId"":""emberbulwark_shield"",""quantity"":1,""rarity"":0,""affixes"":[]}},{""slot"":""Back"",""x"":0,""y"":0,""item"":{""uid"":""5d6e7f8091a2b3c4d5e6f708192a3b4c"",""itemId"":""ashen_cloak"",""quantity"":1,""rarity"":0,""affixes"":[]}}],""checksum"":""sha256:970e0f20011910745025da11c63ac27fce2e05fbb33a587be59ba15ef4aa85f9""},""weaponSet"":0,""belt"":["""","""","""","""","""",""""],""checksum"":""sha256:3dd5787583bfa4089aa4e56d1276ea05ce17b5d9390afce8d83407877e05aa82""}";
+        internal const string LoadoutV6Checksum = "sha256:3dd5787583bfa4089aa4e56d1276ea05ce17b5d9390afce8d83407877e05aa82";
 
         private static int _n, _fail;
         private static readonly List<UnityEngine.Object> Cleanup = new List<UnityEngine.Object>();
@@ -116,39 +116,44 @@ namespace Emberdelve.EditorTools
                   !EquipmentSlots.Accepts(EquipmentSlot.Head, EquipmentSlot.AltWeapon) && !EquipmentSlots.Accepts(EquipmentSlot.AltWeapon, EquipmentSlot.Weapon) &&
                   !EquipmentSlots.Accepts(EquipmentSlot.AltOffHand, EquipmentSlot.AltOffHand),
                 "a weapon is not an off-hand item, armor is not a weapon, and an item can never AUTHOR an Alt slot");
-            Check(Enum.GetNames(typeof(InventoryCommandKind)).Length == 11 && (int)InventoryCommandKind.Drop == 8 && (int)InventoryCommandKind.SwapWeaponSet == 7, "SwapWeaponSet is appended as command kind 7");
+            Check(Enum.GetNames(typeof(InventoryCommandKind)).Length == 14
+                && (int)InventoryCommandKind.SwapWeaponSet == 7 && (int)InventoryCommandKind.Drop == 8
+                && (int)InventoryCommandKind.HoldQuickItem == 9 && (int)InventoryCommandKind.SelectWeaponSet == 10
+                && (int)InventoryCommandKind.DropStack == 11 && (int)InventoryCommandKind.DropOne == 12
+                && (int)InventoryCommandKind.Split == 13,
+                "weapon-set command IDs remain stable when stack drop and split intents are appended");
 
-            // ---- the schema: version 5, version 1 to 3 still readable
-            Check(ContainerSnapshot.CurrentSchemaVersion == 5 && ContainerSnapshot.MinSupportedSchemaVersion == 1, "schema version 5, version 1 still readable");
+            // ---- the schema: version 6, version 1 to 3 still readable
+            Check(ContainerSnapshot.CurrentSchemaVersion == 6 && ContainerSnapshot.MinSupportedSchemaVersion == 1, "schema version 6, version 1 still readable");
 
-            // ---- literal v3 -> v5
+            // ---- literal v3 -> v6
             Check(ContainerSnapshot.TryFromJson(EquipmentV3, out ContainerSnapshot gear3, out string reason), "the literal version 3 equipment parses: " + reason);
-            Check(gear3 != null && gear3.schemaVersion == 5 && gear3.ToJson() == EquipmentV5 && gear3.checksum == EquipmentV5Checksum,
-                "the literal version 3 equipment migrates to the literal version 5 bytes and its independently computed checksum");
+            Check(gear3 != null && gear3.schemaVersion == 6 && gear3.ToJson() == EquipmentV6 && gear3.checksum == EquipmentV6Checksum,
+                "the literal version 3 equipment migrates to the literal version 6 bytes and its independently computed checksum");
             Check(gear3 != null && gear3.entries.Length == 3 && gear3.entries[0].slot == "Weapon" && gear3.entries[0].item.itemId == "ember_fang_blade" &&
                   gear3.entries[1].slot == "OffHand" && gear3.entries[1].item.itemId == "emberbulwark_shield" && gear3.entries[2].slot == "Back" &&
                   !gear3.ToJson().Contains("AltWeapon") && !gear3.ToJson().Contains("AltOffHand"),
                 "the old Weapon and OffHand stay where they were: they ARE weapon set 1, set 2 is empty");
-            Check(ContainerSnapshot.TryFromJson(EquipmentV5, out ContainerSnapshot gear4, out reason) && gear4.ToJson() == EquipmentV5, "the version 5 equipment parses as current and round-trips: " + reason);
+            Check(ContainerSnapshot.TryFromJson(EquipmentV6, out ContainerSnapshot gear4, out reason) && gear4.ToJson() == EquipmentV6, "the version 6 equipment parses as current and round-trips: " + reason);
             Check(!ContainerSnapshot.TryFromJson(EquipmentV3WithAlt, out _, out reason) && reason != null && reason.Contains("AltWeapon"),
                 "a version 3 document that names AltWeapon is refused, not reinterpreted: " + reason);
             Check(!ContainerSnapshot.TryFromJson(EquipmentV3.Replace("ember_fang_blade", "ember_fang_blade2"), out _, out reason) && reason != null,
                 "an edited version 3 equipment fails its own checksum: " + reason);
 
             Check(LoadoutSnapshot.TryFromJson(LoadoutV3, out LoadoutSnapshot loadout3, out reason), "the literal version 3 loadout parses: " + reason);
-            Check(loadout3 != null && loadout3.schemaVersion == 5 && loadout3.ToJson() == LoadoutV5 && loadout3.checksum == LoadoutV5Checksum && loadout3.ChecksumMatches(),
-                "the literal version 3 loadout migrates to the literal version 5 bytes and its independently computed checksum");
+            Check(loadout3 != null && loadout3.schemaVersion == 6 && loadout3.ToJson() == LoadoutV6 && loadout3.checksum == LoadoutV6Checksum && loadout3.ChecksumMatches(),
+                "the literal version 3 loadout migrates to the literal version 6 bytes and its independently computed checksum");
             Check(loadout3 != null && loadout3.weaponSet == 0 && loadout3.belt != null && loadout3.belt.Length == LoadoutSnapshot.BeltSlotCount &&
                   loadout3.belt[0] == "" && loadout3.belt[1] == "" && loadout3.belt[2] == "" && loadout3.belt[3] == "" &&
-                  loadout3.equipment.schemaVersion == 5 && loadout3.bag.schemaVersion == 5,
+                  loadout3.equipment.schemaVersion == 6 && loadout3.bag.schemaVersion == 6,
                 "the migrated loadout holds weapon set 1 live and an empty belt (a restore then binds the default keys, as it always did)");
-            Check(LoadoutSnapshot.TryFromJson(LoadoutV5, out LoadoutSnapshot loadout4, out reason) && loadout4.ToJson() == LoadoutV5 && loadout4.ChecksumMatches(), "the version 5 loadout parses as current and round-trips: " + reason);
+            Check(LoadoutSnapshot.TryFromJson(LoadoutV6, out LoadoutSnapshot loadout4, out reason) && loadout4.ToJson() == LoadoutV6 && loadout4.ChecksumMatches(), "the version 6 loadout parses as current and round-trips: " + reason);
             // The structural read accepts a well-formed document; the wrapper checksum (which covers weaponSet and belt) is what catches the edit, and TryRestore checks it first.
-            Check(LoadoutSnapshot.TryFromJson(LoadoutV5.Replace("\"weaponSet\":0", "\"weaponSet\":1"), out LoadoutSnapshot editedSet, out reason) && editedSet != null && !editedSet.ChecksumMatches() && editedSet.weaponSet == 1,
+            Check(LoadoutSnapshot.TryFromJson(LoadoutV6.Replace("\"weaponSet\":0", "\"weaponSet\":1"), out LoadoutSnapshot editedSet, out reason) && editedSet != null && !editedSet.ChecksumMatches() && editedSet.weaponSet == 1,
                 "editing the weapon set leaves the stored checksum wrong: the checksum covers weaponSet (" + reason + ")");
-            Check(LoadoutSnapshot.TryFromJson(LoadoutV5.Replace("\"belt\":[\"\",\"\",\"\",\"\",\"\",\"\"]", "\"belt\":[\"i:ember_coin\",\"\",\"\",\"\",\"\",\"\"]"), out LoadoutSnapshot editedBelt, out reason) && editedBelt != null && !editedBelt.ChecksumMatches(),
+            Check(LoadoutSnapshot.TryFromJson(LoadoutV6.Replace("\"belt\":[\"\",\"\",\"\",\"\",\"\",\"\"]", "\"belt\":[\"i:ember_coin\",\"\",\"\",\"\",\"\",\"\"]"), out LoadoutSnapshot editedBelt, out reason) && editedBelt != null && !editedBelt.ChecksumMatches(),
                 "editing the belt leaves the stored checksum wrong: the checksum covers the belt (" + reason + ")");
-            Check(!LoadoutSnapshot.TryFromJson(LoadoutV5.Replace("\"belt\":[\"\",\"\",\"\",\"\",\"\",\"\"]", "\"belt\":[\"\",\"\",\"\"]"), out _, out reason) && reason != null, "a belt with three keys is refused: " + reason);
+            Check(!LoadoutSnapshot.TryFromJson(LoadoutV6.Replace("\"belt\":[\"\",\"\",\"\",\"\",\"\",\"\"]", "\"belt\":[\"\",\"\",\"\"]"), out _, out reason) && reason != null, "a belt with three keys is refused: " + reason);
             Check(!LoadoutSnapshot.TryFromJson(LoadoutV3.Replace("\"schemaVersion\":3,\"bag\"", "\"weaponSet\":0,\"schemaVersion\":3,\"bag\""), out _, out reason) && reason != null, "a version 3 loadout that already carries weaponSet is refused: " + reason);
 
             // ---- weapon set and belt validation
@@ -719,32 +724,33 @@ namespace Emberdelve.EditorTools
         private void BeltByIdentity()
         {
             ItemData draught = Resolve("blood_draught");
-            ItemData arrows = Resolve("arrow_bundle");
-            if (draught == null || arrows == null) return;
+            ItemData bandages = Resolve("linen_bandage");
+            if (draught == null || bandages == null) return;
 
             _gear.Clear();
             _bag.Clear();
-            Check(_bag.TryAdd(arrows, 8, out string why) && _bag.TryAdd(draught, 3, out why), "an arrow bundle and three draughts are in the bag: " + why);
-            Check(_bag.Hotbar.TryAssign(0, StackOf(draught), out why) && _bag.Hotbar.TryAssign(1, StackOf(arrows), out why), "key 1 holds the draught, key 2 the arrows (the opposite of bag order): " + why);
-            Check(_bag.Hotbar.IdentityAt(0).Definition == draught && _bag.Hotbar.IdentityAt(1).Definition == arrows && _bag.Hotbar.IdentityAt(2).IsEmpty && _bag.Hotbar.IdentityAt(3).IsEmpty,
-                "the belt reads as identities: draught, arrows, nothing, nothing");
+            Check(_bag.TryAdd(bandages, 3, out string why) && _bag.TryAdd(draught, 3, out why), "three bandages and three draughts are in the bag: " + why);
+            Check(_bag.Hotbar.TryAssign(0, StackOf(draught), out why) && _bag.Hotbar.TryAssign(1, StackOf(bandages), out why), "key 1 holds the draught, key 2 the bandages (the opposite of bag order): " + why);
+            Check(_bag.Hotbar.IdentityAt(0).Definition == draught && _bag.Hotbar.IdentityAt(1).Definition == bandages && _bag.Hotbar.IdentityAt(2).IsEmpty && _bag.Hotbar.IdentityAt(3).IsEmpty,
+                "the belt reads as identities: draught, bandages, nothing, nothing");
 
             // reorder the bag: the belt still points at the same items
-            ulong draughtStack = StackOf(draught), arrowStack = StackOf(arrows);
-            Check(_bag.TrySwap(0, 1, out why), "the two stacks trade places in the bag: " + why);
-            Check(_bag.Hotbar.StackIdAt(0) == draughtStack && _bag.Hotbar.StackIdAt(1) == arrowStack && _bag.Hotbar.IdentityAt(0).Definition == draught && _bag.Hotbar.IdentityAt(1).Definition == arrows,
+            ulong draughtStack = StackOf(draught), bandageStack = StackOf(bandages);
+            Check(_bag.TrySwap(0, 1, out why) && _bag.Hotbar.StackIdAt(0) == bandageStack && _bag.Hotbar.StackIdAt(1) == draughtStack, "physical slots exchange their items: " + why);
+            Check(_bag.TrySwap(0, 1, out why), "restore the belt arrangement before saving: " + why);
+            Check(_bag.Hotbar.StackIdAt(0) == draughtStack && _bag.Hotbar.StackIdAt(1) == bandageStack && _bag.Hotbar.IdentityAt(0).Definition == draught && _bag.Hotbar.IdentityAt(1).Definition == bandages,
                 "after the reorder the belt still points at the same two items");
 
             // snapshot -> restore into a differently ordered bag: identities, not indices or old stack ids
             LoadoutSnapshot saved = LoadoutSnapshot.Capture(_bag, _gear);
             string json = saved.ToJson();
-            Check(saved.belt != null && saved.belt.Length == 6 && saved.belt[0] == "i:blood_draught" && saved.belt[1] == "i:arrow_bundle" && saved.belt[2] == "" && saved.belt[3] == "" &&
-                  json.Contains("\"belt\":[\"i:blood_draught\",\"i:arrow_bundle\",\"\",\"\",\"\",\"\"]"), "the snapshot spells the belt by item id: " + string.Join(",", saved.belt ?? new string[0]));
+            Check(saved.belt != null && saved.belt.Length == 6 && saved.belt[0] == "i:blood_draught" && saved.belt[1] == "i:linen_bandage" && saved.belt[2] == "" && saved.belt[3] == "" &&
+                  json.Contains("\"belt\":[\"i:blood_draught\",\"i:linen_bandage\",\"\",\"\",\"\",\"\"]"), "the snapshot spells the belt by item id: " + string.Join(",", saved.belt ?? new string[0]));
             Check(_bag.TrySwap(0, 1, out why), "the bag is reordered again before the restore: " + why);
             _bag.Clear();
             Check(LoadoutSnapshot.TryRestoreJson(json, _bag, _gear, null, out why), "the loadout restores: " + why);
-            Check(_bag.Hotbar.IdentityAt(0).Definition == draught && _bag.Hotbar.IdentityAt(1).Definition == arrows && _bag.Hotbar.IdentityAt(2).IsEmpty && _bag.Hotbar.IdentityAt(3).IsEmpty,
-                "after the restore key 1 is the draught again and key 2 the arrows (not the default seeding by bag order)");
+            Check(_bag.Hotbar.IdentityAt(0).Definition == draught && _bag.Hotbar.IdentityAt(1).Definition == bandages && _bag.Hotbar.IdentityAt(2).IsEmpty && _bag.Hotbar.IdentityAt(3).IsEmpty,
+                "after the restore key 1 is the draught again and key 2 the bandages (not the default seeding by bag order)");
             Check(_bag.Hotbar.StackIdAt(0) == StackOf(draught) && _bag.Hotbar.StackIdAt(0) != draughtStack, "the binding resolves to the NEW live stack: a retired stack id is never revived");
 
             // keys 1-4 still work: key 1 drinks the bound draught
@@ -766,6 +772,10 @@ namespace Emberdelve.EditorTools
             Check(startedDrink && _bag.TotalUnits == units - 1 && Near(_rig.Health.CurrentHealth, Mathf.Min(max, low + draught.healAmount), 0.001f), "key 1 uses exactly the bound draught (+" + draught.healAmount + "): " + why);
 
             // A full loadout explicitly saves its belt, including empty keys. Bare bag restores retain their separate default policy.
+            int returnedCell = 0;
+            foreach (var entry in saved.bag.entries)
+                if (QuickBeltRules.TryGetSlot(new Vector2Int(entry.x, entry.y), saved.bag.width, out _))
+                { entry.x = returnedCell++; entry.y = 0; }
             saved.belt = new[] { "", "", "", "", "", "" };
             saved.Seal();
             string emptyBeltJson = saved.ToJson();
@@ -796,7 +806,7 @@ namespace Emberdelve.EditorTools
             _rig.Health.SetHealth(Mathf.Max(1f, max - 60f));
             _low = _rig.Health.CurrentHealth;
             ulong stack = StackOf(draught);
-            Check(_bag.RequestHoldStack(stack, out string why), "draw the stocked draught before use: " + why);
+            Check(_bag.Hotbar.TryAssign(0, stack, out string why) && _bag.RequestHoldStack(stack, out why), "place and draw the stocked draught before use: " + why);
             return stack;
         }
 
@@ -912,6 +922,7 @@ namespace Emberdelve.EditorTools
                 ItemData torch = Resolve("pitch_torch");
                 Check(torch != null && _bag.TryAdd(torch, 1), "stock a different quick item for locked-hands requests");
                 ulong torchStack = StackOf(torch);
+                Check(_bag.Hotbar.TryAssign(1, torchStack, out _), "place the alternate utility before the drink locks inventory");
                 _bag.TryGetStack(torchStack, out InventorySlot heldTorch);
                 revision = _bag.Revision;
                 cancelled = channel.CancelledDrinks;
@@ -1073,6 +1084,7 @@ namespace Emberdelve.EditorTools
                 stack = Stock(bandage, 2);
                 ItemData torch = Resolve("pitch_torch"); Check(torch != null && _bag.TryAdd(torch, 1), "stock a second held item");
                 ulong torchStack = StackOf(torch);
+                Check(_bag.Hotbar.TryAssign(1, torchStack, out _), "place the second utility on the belt");
                 Check(_bag.TryUseStack(stack) && _bag.RequestHoldStack(torchStack, out _), "choosing another utility cancels bandaging");
                 Check(!channel.IsChanneling && _bag.TotalUnits == 3 && _bag.HeldStackId == torchStack && Near(_rig.CurrentHealth, _low, .001f), "item switch preserves every unit and health");
                 stack = Stock(bandage, 1); revision = _bag.Revision; int completed = channel.CompletedDrinks;

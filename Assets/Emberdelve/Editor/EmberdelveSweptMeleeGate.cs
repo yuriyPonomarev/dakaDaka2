@@ -1122,6 +1122,8 @@ namespace Emberdelve.EditorTools
             for (int pi = 0; pi < held.swingPatterns.Length; pi++)
             {
                 SwingPatternData p = held.swingPatterns[pi];
+                Vector3 transitionBase = rig.Look.AimTransform.InverseTransformPoint(visual.transform.position);
+                Quaternion transitionRotation = Quaternion.Inverse(rig.Look.AimTransform.rotation) * visual.transform.rotation;
                 visual.PlaySwing(held, p);
                 Check(visual.IsSwinging && visual.Pattern == p, $"{p.patternId}: the visual rig plays this pattern");
                 Check(rig.TryGetAimPose(out Vector3 eyeNow, out float yawNow, out float pitchNow), "the rig reports an aim pose");
@@ -1134,9 +1136,17 @@ namespace Emberdelve.EditorTools
                 {
                     visual.ApplySwingTime(time);
                     SwingGeometry.BladeSegment(rigFrame, p.Evaluate(time), p.BladeLength(held), out Vector3 eb, out Vector3 et);
+                    if (time < p.Timing.Windup || time > p.Timing.ActiveEnd)
+                    {
+                        // Non-damaging phases blend from the captured ready/previous pose; active geometry above stays exact.
+                        WeaponVisualRig.SamplePresentation(p, p.Timing, time, transitionBase, transitionRotation, false,
+                            out Vector3 position, out Quaternion rotation);
+                        eb = rigFrame.Eye + rigFrame.Rotation * position;
+                        et = eb + rigFrame.Rotation * rotation * Vector3.forward * p.BladeLength(held);
+                    }
                     float baseErr = (visual.BladeBase - eb).magnitude;
                     float tipErr = (visual.BladeTip - et).magnitude;
-                    Check(baseErr < 2e-3f && tipErr < 2e-3f, $"{p.patternId}: visual segment at t={time:F3} matches the pattern the authority sweeps (base {baseErr:F5}, tip {tipErr:F5})");
+                    Check(baseErr < 2e-3f && tipErr < 2e-3f, $"{p.patternId}: visual segment at t={time:F3} matches phase presentation (exact authority samples while active; base {baseErr:F5}, tip {tipErr:F5})");
                 }
             }
         }

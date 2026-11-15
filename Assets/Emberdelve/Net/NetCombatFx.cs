@@ -66,16 +66,26 @@ namespace Emberdelve.Net
         public static void OnShot(NetPlayerRig carrier, in CombatShotWire shot)
         {
             Shots++;
+            if (carrier != null && carrier.Rig != null)
+                Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldSound.Bow, carrier.Rig.AimOrigin, .8f);
             Debug.Log(NetTuning.LogPrefix + "[client] server-shot id=" + IdOf(carrier) + " serial=" + shot.Serial + " weapon=" + Dash(shot.WeaponId) +
                       " charge=" + F(shot.Charge) + " speed=" + F(shot.Speed) + " gravity=" + F(shot.Gravity));
 
             if (Replicas.TryGetValue(shot.Serial, out NetArrowReplica old) && old != null) Object.Destroy(old.gameObject);
 
-            GameObject body = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            body.name = "NetArrowReplica_" + shot.Serial;
-            Collider collider = body.GetComponent<Collider>();
-            if (collider != null) Object.Destroy(collider);
-            body.transform.localScale = Vector3.one * Mathf.Max(0.05f, shot.Radius * 2f);
+            Emberdelve.Data.WeaponData weapon = null;
+            var catalog = carrier != null && carrier.Rig != null && carrier.Rig.Inventory != null
+                ? carrier.Rig.Inventory.Catalog : null;
+            if (catalog != null)
+                foreach (var item in catalog.Items)
+                    if (item != null && item.grantedWeapon != null && item.grantedWeapon.weaponId == shot.WeaponId)
+                    { weapon = item.grantedWeapon; break; }
+            float length = weapon != null ? Mathf.Max(.2f, weapon.projectileLength) : .7f;
+            GameObject body = new GameObject("NetArrowReplica_" + shot.Serial);
+            GameObject model = ProjectileVisual.CreateModel(weapon, length);
+            model.transform.SetParent(body.transform, false);
+            // Replica position is the authority's leading tip, not the model's center.
+            model.transform.localPosition = Vector3.back * (length * .5f);
             NetArrowReplica replica = body.AddComponent<NetArrowReplica>();
             replica.Begin(in shot);
             Replicas[shot.Serial] = replica;
@@ -113,6 +123,19 @@ namespace Emberdelve.Net
                 }
             }
             Hits++;
+            if (float.IsFinite(hit.PointX) && float.IsFinite(hit.PointY) && float.IsFinite(hit.PointZ))
+            {
+                Vector3 point = new Vector3(hit.PointX, hit.PointY, hit.PointZ);
+                Emberdelve.Feedback.WorldAudio.Play(hit.Blocked ? Emberdelve.Feedback.WorldSound.Metal : Emberdelve.Feedback.WorldSound.Impact, point);
+                // Reliable server hit RPCs reach client-only presentation; the host already uses FeedbackDirector.
+                // A miss or non-damaging status report must not look like a successful strike.
+                if (hit.Blocked || (float.IsFinite(hit.Amount) && hit.Amount > 0f))
+                {
+                    Color color = hit.Blocked ? new Color(.55f, .75f, 1f)
+                        : hit.TargetIsEnemy ? new Color(1f, .85f, .45f) : new Color(1f, .4f, .35f);
+                    Emberdelve.Feedback.ImpactFlash.Spawn(point, color, hit.Blocked ? .22f : .16f);
+                }
+            }
             // Client-only owner health is updated from replicated vitals and does not raise DamageInfo.Damaged.
             // Use this server-originated hit report for the owner's block animation, guarded by the resolved target id.
             if (hit.Blocked && !hit.TargetIsEnemy)
@@ -183,6 +206,7 @@ namespace Emberdelve.Net
             Vector3 dir = new Vector3(shot.DirX, shot.DirY, shot.DirZ);
             if (dir.sqrMagnitude < 1e-6f) dir = Vector3.forward;
             dir.Normalize();
+            transform.rotation = Quaternion.LookRotation(dir);
             _state = new BallisticState(shot.OriginX, shot.OriginY, shot.OriginZ, dir.x * shot.Speed, dir.y * shot.Speed, dir.z * shot.Speed);
             _gravity = shot.Gravity;
             _maxTime = shot.MaxFlightTime > 0f ? shot.MaxFlightTime : 10f;
@@ -208,6 +232,8 @@ namespace Emberdelve.Net
             }
 
             transform.position = new Vector3(_state.PX, _state.PY, _state.PZ);
+            Vector3 velocity = new Vector3(_state.VX, _state.VY, _state.VZ);
+            if (velocity.sqrMagnitude > .0001f) transform.rotation = Quaternion.LookRotation(velocity);
             if (Elapsed > _maxTime + 1f) Destroy(gameObject); // the server's end event never came (lost client, shutdown)
         }
     }

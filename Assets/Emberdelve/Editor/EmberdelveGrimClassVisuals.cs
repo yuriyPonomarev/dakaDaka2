@@ -136,6 +136,7 @@ namespace Emberdelve.EditorTools
                         Plate("Fletching"+i,chest,a+new Vector3(.045f,.19f,0),new Vector3(.025f,.07f,.008f),cloth);
                     }
                 }
+                if (warrior) EmberdelveArmourDetail.Apply(root);
                 animator.Play("Idle",0,0);animator.Update(0);
                 var face=root.GetComponentsInChildren<MeshRenderer>().First(r=>r.name==(warrior?"VisorSlit":"FaceWrap"));
                 if(face.bounds.center.z<head.position.z)throw new Exception("Headwear faces away from live rig");

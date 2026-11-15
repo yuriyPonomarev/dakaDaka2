@@ -356,7 +356,7 @@ namespace Emberdelve.EditorTools
 
             Check(_sword.CanRiposteWeapon && _rapier.CanRiposteWeapon, "the sword and the rapier are flagged in data");
             Check(!_maul.CanRiposteWeapon && !_shieldData.CanRiposteWeapon, "the maul and the shield are not");
-            Check(_sword.riposteWithOffhandShield && !_rapier.riposteWithOffhandShield, "the sword (the warrior's, with a shield) is allowed a shield in the off hand in data");
+            Check(!_sword.riposteWithOffhandShield && !_rapier.riposteWithOffhandShield, "neither sword inherits shield contact");
             _swordNoShield = UnityEngine.Object.Instantiate(_sword);
             _swordNoShield.riposteWithOffhandShield = false;
             _cleanup.Add(_swordNoShield);
@@ -370,7 +370,7 @@ namespace Emberdelve.EditorTools
 
         private void HappyPath(bool aIsEnemy)
         {
-            float mult = RiposteRules.StrikeMultiplier(_sword.riposteDamageMultiplier);
+            float mult = 1f; // This angular fake-fighter block has no confirmed blade-region contact.
             float base0 = BaselineAmount(_sword, 0);
             float base1 = BaselineAmount(_sword, 1);
             Check(base0 > 0f && base1 > 0f, $"baselines {base0:F3} / {base1:F3}");
@@ -392,7 +392,7 @@ namespace Emberdelve.EditorTools
             Check(strikes == _sword.RiposteStrikeCount, "the strike count is the data's");
             _authority.TryGetMeleeSwingStatus(id1, out MeleeSwingStatus s1);
             Check(s1.RiposteStrike == 1, "the first swing is riposte strike 1");
-            Check(s1.StepMultiplier > 0f && Mathf.Approximately(s1.StepMultiplier, mult), $"its step multiplier is the data's x{mult}");
+            Check(s1.StepMultiplier > 0f && Mathf.Approximately(s1.StepMultiplier, mult), $"ordinary block riposte has no parry bonus: x{mult}");
             s1 = RunToEnd(id1);
             Check(CountOn(s1, d.A) == 1, "strike 1 hit the attacker");
             MeleeSwingHit h1 = HitOn(s1, d.A);
@@ -525,20 +525,20 @@ namespace Emberdelve.EditorTools
             swapped.B.Shield = true;
             Check(!BeginRiposte(swapped, out _, out _) && _authority.LastRiposteVerdict == RiposteVerdict.KitCannotRiposte, "a shield contributing to the guard at the press refuses the riposte");
 
-            // the warrior's sword and shield: the sword's data allows the shield, the block parries, the block took 0 HP
+            // The real warrior kit blocks damage but cannot borrow the sword response from its shield.
             Advance(5f);
             Duel both = NewDuel(_sword, _sword, true);
             both.B.Shield = true;
             int blocks = _authority.Riposte.BlocksRecorded;
             MeleeSwingStatus bothStatus = BlockedHit(both);
             Check(CountOn(bothStatus, both.B) == 1 && HitOn(bothStatus, both.B).Blocked && both.B.Taken == 0f, "sword and shield: the block held and took 0 HP");
-            Check(_authority.Riposte.BlocksRecorded == blocks + 1 && _authority.Riposte.HasLiveParry(both.B.CombatId), "sword and shield: the sword's block is a parry (data allows the shield)");
-            Check(BeginRiposte(both, out _, out int bothStrikes) && bothStrikes == _sword.RiposteStrikeCount, "sword and shield: the riposte is accepted");
+            Check(_authority.Riposte.BlocksRecorded == blocks && !_authority.Riposte.HasLiveParry(both.B.CombatId), "sword and shield: shield contact grants no sword response");
+            Check(!BeginRiposte(both, out _, out _), "sword and shield: borrowed riposte is refused");
         }
 
         private void HoldingGuard()
         {
-            float mult = RiposteRules.StrikeMultiplier(_sword.riposteDamageMultiplier);
+            float mult = 1f; // This angular fake-fighter block has no confirmed blade-region contact.
             float base0 = BaselineAmount(_sword, 0);
             float base1 = BaselineAmount(_sword, 1);
             Advance(5f);

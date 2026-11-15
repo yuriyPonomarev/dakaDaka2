@@ -27,6 +27,7 @@ namespace Emberdelve.Interaction
         [SerializeField] private float openYaw = 95f;
         [SerializeField] private float interactionReach = 3f;
         private bool _open;
+        private int _boundFloor;
 
         public string DoorId => doorId;
         public bool IsOpen => _open;
@@ -43,6 +44,16 @@ namespace Emberdelve.Interaction
             blocker = doorBlocker;
             openYaw = swingYaw;
             SetOpen(false);
+        }
+
+        /// <summary>Bind a freshly staged door once, before publishing any network state.</summary>
+        public bool BindStagedFloor(int floor)
+        {
+            if (floor < 2 || floor > 3) return false;
+            if (_boundFloor != 0) return _boundFloor == floor;
+            string scoped = "f" + floor + "_" + doorId;
+            if (!IsValidDoorId(doorId) || !IsValidDoorId(scoped)) return false;
+            doorId = scoped; _boundFloor = floor; return true;
         }
 
         public bool CanInteract(IInteractionActor actor, out string reason)

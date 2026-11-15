@@ -185,6 +185,12 @@ namespace Emberdelve.Net.Rules
 
         public uint LastAckedSeq { get; private set; }
 
+        /// <summary>Start a new authority-issued sequence window; discard pre-teleport corrections and predictions.</summary>
+        public void ResetForTeleport()
+        {
+            Ring.Clear(); Blend.Clear(); LastAckedSeq = 0;
+        }
+
         public void Record(in PredictionEntry entry)
         {
             Ring.Push(in entry);

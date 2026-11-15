@@ -37,6 +37,7 @@ namespace Emberdelve.Level
             for (int i = 0; i < behaviours.Length; i++)
             {
                 if (!(behaviours[i] is IDungeonModulePlanConsumer consumer)) continue;
+                if (!consumer.AcceptsSessionPlan) continue;
                 found = true;
                 if (!consumer.ApplyDungeonModulePlan(Current, out reason)) return false;
             }
@@ -46,6 +47,7 @@ namespace Emberdelve.Level
 
     public interface IDungeonModulePlanConsumer
     {
+        bool AcceptsSessionPlan { get; }
         bool ApplyDungeonModulePlan(DungeonModulePlan plan, out string reason);
     }
 }

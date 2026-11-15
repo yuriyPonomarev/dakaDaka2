@@ -30,6 +30,18 @@ class SelectionTests(unittest.TestCase):
     def test_gate_fix_only_selects_its_gate(self):
         self.assertEqual(self.plan("Assets/Emberdelve/Editor/EmberdelveNetMovementGate.cs")["gates"], ["NetMovement"])
 
+    def test_royale_is_in_network_and_full_sets_and_owns_its_gate(self):
+        self.assertIn("NetRoyale", SETS["net"])
+        self.assertIn("NetRoyale", SETS["all"])
+        p = self.plan("Assets/Emberdelve/Editor/EmberdelveNetRoyaleGate.cs")
+        self.assertEqual(p["gates"], ["NetRoyale"])
+        self.assertFalse(p["requiresFullApproval"])
+
+    def test_map_change_includes_three_floor_handoff(self):
+        p = self.plan("Assets/Emberdelve/Runtime/Level/RoyaleFloorCatalogs.cs")
+        self.assertIn("NetRoyale", p["gates"])
+        self.assertTrue(p["editMode"])
+
     def test_cache_selection_uses_existing_short_process_gates(self):
         p = self.plan("Assets/Emberdelve/Editor/EmberdelvePlayerBuildCache.cs")
         self.assertEqual(set(p["gates"]), {"NetProof", "NetAdmission"})
@@ -67,6 +79,21 @@ class SelectionTests(unittest.TestCase):
     def test_lighting_routes_rendering_and_player_setup(self):
         for path in ["Assets/Emberdelve/Runtime/Feedback/WorldLightAppearance.cs", "Assets/Emberdelve/Resources/Emberdelve/LocalLightHaze.shader.meta", "Assets/Emberdelve/Runtime/Level/MoonlitRuinsEnvironment.cs"]:
             self.assertEqual(set(self.plan(path)["gates"]), {"Visual", "NetFinal"})
+
+    def test_spatial_audio_keeps_combat_and_lighting_checks(self):
+        for name in ["WorldAudio", "WorldFootsteps", "FlameAudio", "DungeonAmbience", "ProceduralAudio", "FeedbackDirector"]:
+            p = self.plan("Assets/Emberdelve/Runtime/Feedback/" + name + ".cs")
+            self.assertEqual(set(p["gates"]), {"NetCombat", "NetDoor", "NetFinal", "Visual"})
+            self.assertTrue(p["editMode"])
+
+    def test_impact_shader_keeps_contact_and_player_render_checks(self):
+        for path in ["Resources/Emberdelve/ImpactFlash.shader", "Runtime/Feedback/ImpactFlash.cs", "Runtime/Feedback/WallStopFeedback.cs"]:
+            self.assertEqual(set(self.plan("Assets/Emberdelve/" + path)["gates"]), {"Visual", "NetCombat", "CombatFlow"})
+
+    def test_wayfinding_has_no_map_mutations_but_checks_hud_and_join(self):
+        p = self.plan("Assets/Emberdelve/Runtime/Level/DungeonWayfinding.cs")
+        self.assertEqual(set(p["gates"]), {"CombatHud", "NetFinal"})
+        self.assertTrue(p["editMode"])
 
     def test_traversal_rejected(self):
         for path in ["../secret.cs", "/tmp/x", "C:/outside.cs"]:

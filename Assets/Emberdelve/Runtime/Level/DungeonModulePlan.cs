@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Emberdelve.Rules;
 
 namespace Emberdelve.Level
 {
@@ -19,7 +20,7 @@ namespace Emberdelve.Level
         public byte QuarterTurnsClockwise;
         public DungeonModuleSockets OpenSockets;
         public DungeonModuleRole Role;
-        /// <summary>Stable slot number for the existing nine-player network limit; each cell contributes one authored anchor.</summary>
+        /// <summary>Stable legacy anchor number; Royale party clusters are derived separately from the plan mode.</summary>
         public byte PlayerSpawnSlot;
     }
 
@@ -33,7 +34,19 @@ namespace Emberdelve.Level
         public const int ModuleWidthCells = 12;
         public const int ModuleHeightCells = 12;
 
+        public RoyalePartyMode? RoyaleMode { get; internal set; }
         public int Seed { get; internal set; }
+
+        public DungeonModulePlan WithRoyaleMode(RoyalePartyMode? mode)
+        {
+            if (mode.HasValue && (mode.Value < RoyalePartyMode.Solo || mode.Value > RoyalePartyMode.Trio))
+                throw new ArgumentOutOfRangeException(nameof(mode));
+            if (!Validate(out string reason)) throw new InvalidOperationException(reason);
+            var copy = new DungeonModulePlan { Seed = Seed, CatalogHash = CatalogHash,
+                Placements = (DungeonModulePlacement[])Placements.Clone(), RoyaleMode = mode };
+            copy.LayoutHash = DungeonModulePlanner.ComputeHashForWire(copy);
+            return copy;
+        }
         public string CatalogHash { get; internal set; }
         public DungeonModulePlacement[] Placements { get; internal set; }
         public string LayoutHash { get; internal set; }
@@ -47,6 +60,8 @@ namespace Emberdelve.Level
         public bool Validate(out string reason)
         {
             reason = string.Empty;
+            if (RoyaleMode.HasValue && (RoyaleMode.Value < RoyalePartyMode.Solo || RoyaleMode.Value > RoyalePartyMode.Trio))
+            { reason = "invalid Royale party mode"; return false; }
             if (Placements == null || Placements.Length != Width * Height) { reason = "plan must contain exactly nine modules"; return false; }
             if (!uint.TryParse(CatalogHash, System.Globalization.NumberStyles.HexNumber,
                 System.Globalization.CultureInfo.InvariantCulture, out _)) { reason = "plan has no valid catalog fingerprint"; return false; }

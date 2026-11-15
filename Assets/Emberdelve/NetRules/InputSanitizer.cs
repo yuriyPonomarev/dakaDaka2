@@ -110,6 +110,12 @@ namespace Emberdelve.Net.Rules
             _burst = burst < 1.0 ? 1.0 : burst;
         }
 
+        /// <summary>Only the authority may open a new generation. Keep rate budget and lifetime rejection counters.</summary>
+        public void ResetGeneration()
+        {
+            _hasSeq = false; _lastSeq = 0;
+        }
+
         public SanitizeVerdict Submit(in MoveInputFrame frame, bool primary, double nowSeconds, out MoveInputFrame clean)
         {
             clean = default(MoveInputFrame);

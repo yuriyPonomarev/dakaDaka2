@@ -9,10 +9,9 @@ namespace Emberdelve.EditorTools
     /// Naming contract: *_BaseColor (sRGB colour), *_Normal (OpenGL normal map), *_MaskMS (R metallic, A smoothness,
     /// linear), *_AO (linear).
     ///
-    /// V2 (retro): every texture of the ambientCG sets and the KayKit atlases is Point filtered and capped at 512 px
-    /// (ambientCG, mipmaps kept so distant stone does not shimmer; normal maps are Point filtered too, which makes the
-    /// bump relief blocky like the colour, and the material's bump scale is lowered to compensate) or 256 px (KayKit
-    /// atlases: no mipmaps, uncompressed, clamped). The flame sprite is intentionally untouched (it must stay soft).
+    /// Realistic ambientCG maps retain their shipped 1024-2048 px detail with Trilinear filtering, anisotropy 8
+    /// and mipmaps. KayKit palette atlases retain Point filtering, a 256 px cap, no mipmaps, uncompressed
+    /// storage and Clamp wrapping. The flame sprite keeps its separate soft-sprite import settings.
     /// </summary>
     public sealed class EmberdelveTextureImport : AssetPostprocessor
     {
@@ -20,15 +19,15 @@ namespace Emberdelve.EditorTools
         public const string FlameTexturePath = "Assets/Emberdelve/Art/Textures/Flame_Soft.png";
         public const string KayKitRoot = "Assets/Emberdelve/Art/ThirdParty/KayKit/";
 
-        /// <summary>V2: largest edge of the ambientCG maps (the shipped 1024-2048 px sets are reduced on import).</summary>
-        public const int RetroStoneMaxSize = 512;
+        /// <summary>Largest edge of the shipped ambientCG maps; the legacy constant name is retained for callers.</summary>
+        public const int RetroStoneMaxSize = 2048;
 
         /// <summary>V2: largest edge of the KayKit palette atlases.</summary>
         public const int RetroKayKitMaxSize = 256;
 
         public override uint GetVersion()
         {
-            return 2;
+            return 3;
         }
 
         private void OnPreprocessTexture()
@@ -109,16 +108,16 @@ namespace Emberdelve.EditorTools
                 changed = true;
             }
 
-            // V2: Point filtering (was Trilinear + aniso 8 in V1).
-            if (importer.filterMode != FilterMode.Point)
+            // Preserve realistic surface detail and stable sampling on distant, oblique surfaces.
+            if (importer.filterMode != FilterMode.Trilinear)
             {
-                importer.filterMode = FilterMode.Point;
+                importer.filterMode = FilterMode.Trilinear;
                 changed = true;
             }
 
-            if (importer.anisoLevel != 1)
+            if (importer.anisoLevel != 8)
             {
-                importer.anisoLevel = 1;
+                importer.anisoLevel = 8;
                 changed = true;
             }
 

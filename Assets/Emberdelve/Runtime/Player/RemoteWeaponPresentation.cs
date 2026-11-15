@@ -37,6 +37,18 @@ namespace Emberdelve.Player
         private string _mainId,_offId,_patternId;
         private SwingPatternData _pattern;
         private bool _guard,_swing;
+        private bool _drawing;
+        private float _drawProgress;
+        private bool _crossbowLoaded;
+        public void PresentCrossbowLoaded(string weapon, bool loaded) =>
+            _crossbowLoaded = loaded && weapon == _mainId && _main != null && _main.CanCrossbowGuard;
+        public void PresentDraw(string weapon, bool drawing, float progress)
+        {
+            _drawing = drawing && weapon == _mainId && !_guard && !_swing && !_recoil
+                && !float.IsNaN(progress) && !float.IsInfinity(progress) && progress >= 0f && progress <= 1f;
+            _drawProgress = _drawing ? progress : 0f;
+        }
+        private bool _soundPlayed;
         private float _elapsed,_modelLength=1;
         private SwingTiming _timing;
         private SwingFrame _frame;
@@ -73,8 +85,12 @@ namespace Emberdelve.Player
             foreach(var weapon in Resources.FindObjectsOfTypeAll<WeaponData>()) Weapons[weapon.weaponId]=weapon;
             Weapons.TryGetValue(id,out found); return found;
         }
-        public void Present(string main,string off,string pattern,bool guard,bool swing,float elapsed,SwingTiming timing,SwingFrame frame)
+        private bool _recoil;
+        private float _stopFraction, _recoilProgress;
+        public void Present(string main,string off,string pattern,bool guard,bool swing,float elapsed,SwingTiming timing,SwingFrame frame,
+            bool recoil=false,float stopFraction=0f,float recoilProgress=0f)
         {
+            _recoil=recoil; _stopFraction=stopFraction; _recoilProgress=recoilProgress;
             if(main!=_mainId) { _mainId=main; _main=Resolve(main); Replace(ref _mainObject,ref _mainRenderers,_main,true); _patternId=null; }
             if(off!=_offId) { _offId=off; _off=Resolve(off); Replace(ref _offObject,ref _offRenderers,_off,false); }
             if(pattern!=_patternId)
@@ -82,6 +98,13 @@ namespace Emberdelve.Player
                 _patternId=pattern; _pattern=null;
                 if(_main!=null && _main.swingPatterns!=null) foreach(var candidate in _main.swingPatterns)
                     if(candidate!=null && candidate.patternId==pattern) { _pattern=candidate; break; }
+            }
+            if (!swing || !_swing || elapsed < _elapsed - .03f) _soundPlayed = false;
+            if (swing && !_soundPlayed && elapsed >= timing.Windup && elapsed <= timing.ActiveEnd &&
+                _rig != null && !_rig.IsLocallyControlled)
+            {
+                _soundPlayed = true;
+                Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldSound.Swing, _rig.AimOrigin, .7f);
             }
             _guard=guard; _swing=swing && _pattern!=null; _elapsed=elapsed; _timing=timing; _frame=frame;
         }
@@ -103,7 +126,7 @@ namespace Emberdelve.Player
             }
             target.name=main ? "RemoteMainHand" : "RemoteOffHand";
             foreach(var collider in target.GetComponentsInChildren<Collider>()) Destroy(collider);
-            renderers=target.GetComponentsInChildren<Renderer>();
+            renderers=target.GetComponentsInChildren<Renderer>(true);
         }
         private static void Visibility(Renderer[] renderers,bool visible)
         {
@@ -156,11 +179,67 @@ namespace Emberdelve.Player
                     Reach(_rightShoulder,_rightElbow,_right,grip);
                 }
             }
-            if(!visible) return;
+            if(!visible)
+            {
+                _drawing=false; _drawProgress=0f;
+                var hiddenBow=_mainObject!=null ? _mainObject.GetComponentInChildren<BowPresentation>() : null;
+                if(hiddenBow!=null) hiddenBow.SetDraw(0f);
+                return;
+            }
             if(_mainObject!=null)
             {
                 var t=_mainObject.transform;
-                if(_swing && _elapsed<_timing.Total && _pattern!=null)
+                if(_guard && _main.CanBowGuard)
+                {
+                    BowGuardPose.ApplyModel(t,_frame.Eye,_frame.Rotation);
+                    var bow=t.GetComponentInChildren<BowPresentation>();
+                    if(bow!=null) bow.SetDraw(0f);
+                    Reach(_leftShoulder,_leftElbow,_left,t.TransformPoint(BowGuardPose.LeftGrip));
+                    Reach(_rightShoulder,_rightElbow,_right,t.TransformPoint(BowGuardPose.RightGrip));
+                }
+                else if(_main.CanBowGuard)
+                {
+                    t.localScale=Vector3.one;
+                    t.SetPositionAndRotation(_frame.Eye+_frame.Rotation*new Vector3(-.18f,-.30f,.55f),
+                        _frame.Rotation*Quaternion.Euler(0f,-8f,0f));
+                    var bow=t.GetComponentInChildren<BowPresentation>();
+                    if(bow!=null)
+                    {
+                        var ranged=_rig.GetComponent<RangedCombat>();
+                        bool draw=_drawing && (ranged==null || !ranged.IsReloading);
+                        bow.SetDraw(draw ? _drawProgress : 0f);
+                        Reach(_leftShoulder,_leftElbow,_left,bow.transform.position);
+                        Reach(_rightShoulder,_rightElbow,_right,bow.transform.TransformPoint(bow.Nock));
+                    }
+                }
+                else if(_main.CanCrossbowGuard)
+                {
+                    if(_guard) CrossbowGuardPose.ApplyModel(t,_frame.Eye,_frame.Rotation);
+                    else
+                    {
+                        t.localScale=Vector3.one;
+                        // Both clients see the same ready weapon frame used by the authority's
+                        // muzzle; the idle wrist must not drive a separate lower weapon pose.
+                        t.SetPositionAndRotation(_frame.Eye+_frame.Rotation*CrossbowGuardPose.ReadyPosition,
+                            _frame.Rotation*CrossbowGuardPose.ReadyRotation);
+                    }
+                    var ranged=_rig.GetComponent<RangedCombat>();
+                    var crossbow = t.GetComponent<WeaponVisualRig>();
+                    if (crossbow != null) crossbow.SetCrossbowState(_crossbowLoaded,
+                        ranged != null && ranged.IsReloading, ranged != null ? ranged.ReloadProgress : 0f);
+                    bool reload=!_guard && ranged!=null && ranged.IsReloading;
+                    Reach(_rightShoulder,_rightElbow,_right,t.TransformPoint(FirstPersonArmsDriver.CrossbowRightGrip));
+                    Reach(_leftShoulder,_leftElbow,_left,t.TransformPoint(FirstPersonArmsDriver.CrossbowLeftGrip(reload,ranged!=null ? ranged.ReloadProgress : 0f)));
+                }
+                else if(_recoil && _pattern!=null)
+                {
+                    WeaponVisualRig.SampleRecoil(_pattern,_stopFraction,_recoilProgress,_guard,out var position,out var rotation);
+                    Vector3 start=_frame.Eye+_frame.Rotation*position;
+                    t.SetPositionAndRotation(start,_frame.Rotation*rotation*Quaternion.Euler(90,0,0));
+                    t.localScale=Vector3.one*(_pattern.BladeLength(_main)/_modelLength);
+                    Reach(_rightShoulder,_rightElbow,_right,start);
+                }
+                else if(_swing && _elapsed<_timing.Total && _pattern!=null)
                 {
                     var pose=_pattern.Evaluate(_elapsed,_timing);
                     SwingGeometry.BladeSegment(_frame,pose,_pattern.BladeLength(_main),out var start,out _);
@@ -184,9 +263,19 @@ namespace Emberdelve.Player
             }
             if(_offObject!=null)
             {
-                var position=_guard ? _frame.Eye+_frame.Rotation*new Vector3(-.18f,-.15f,.48f) : (_left!=null ? _left.position : _rig.transform.position+Vector3.up);
-                _offObject.transform.SetPositionAndRotation(position,_guard ? _frame.Rotation : _rig.transform.rotation*Quaternion.Euler(0,-30,0));
-                if(_guard) Reach(_leftShoulder,_leftElbow,_left,position);
+                if(_guard && _off!=null && _off.IsShield)
+                {
+                    var shield=GuardShieldPose.Resolve(_frame.Eye,_frame.Rotation);
+                    GuardShieldPose.ApplyModel(_offObject.transform,shield);
+                    Reach(_leftShoulder,_leftElbow,_left,_frame.Eye+_frame.Rotation*GuardShieldPose.Grip);
+                }
+                else
+                {
+                    if(_off!=null && _off.IsShield) GuardShieldPose.SetWorldScale(_offObject.transform,GuardShieldPose.Scale);
+                    else _offObject.transform.localScale=Vector3.one;
+                    _offObject.transform.SetPositionAndRotation(_left!=null ? _left.position : _rig.transform.position+Vector3.up,
+                        _rig.transform.rotation*Quaternion.Euler(0,-30,0));
+                }
             }
         }
         private void Reach(Transform shoulder,Transform elbow,Transform wrist,Vector3 target)

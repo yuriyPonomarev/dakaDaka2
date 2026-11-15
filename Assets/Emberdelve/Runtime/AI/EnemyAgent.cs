@@ -313,8 +313,45 @@ namespace Emberdelve.AI
             if (_nav != null) _nav = new NavGridPathfinder(navGrid);
         }
 
+        /// <summary>Creates a fresh monster under an inactive prepared floor using an authored visual prefab.
+        /// All wiring is assigned before Awake/Start; no live monster health, drops or animation state is cloned.</summary>
+        public static EnemyAgent CreateForFloor(EnemyData definition, NavGridData grid, GameConfig gameConfig,
+            MonoBehaviour host, Transform parent, Vector3 position, GameObject visualPrefab, string objectName)
+        {
+            if (NetRole.IsClientOnly || definition == null || grid == null || !(host is IEnemyDropHost)
+                || parent == null || parent.gameObject.activeInHierarchy || visualPrefab == null) return null;
+            var root = new GameObject(objectName);
+            root.SetActive(false);
+            root.transform.SetParent(parent, false);
+            root.transform.position = position;
+            int layer = LayerMask.NameToLayer(GameConfig.EnemyLayerName);
+            if (layer >= 0) root.layer = layer;
+            var agent = root.AddComponent<EnemyAgent>();
+            agent.data = definition; agent.navGrid = grid; agent.config = gameConfig; agent.lootHost = host;
+            agent.groundHeight = position.y;
+            float scale = definition.isElite ? 1.25f : 1f;
+            var body = new GameObject("Body");
+            body.transform.SetParent(root.transform, false); body.layer = root.layer;
+            body.transform.localPosition = Vector3.up * (.95f * scale);
+            body.AddComponent<BoxCollider>().size = new Vector3(.78f, 1.45f, .58f) * scale;
+            agent.bodyTransform = body.transform;
+            var head = new GameObject("Head");
+            head.transform.SetParent(root.transform, false); head.layer = root.layer;
+            head.transform.localPosition = Vector3.up * (1.85f * scale);
+            var headBox = head.AddComponent<BoxCollider>(); headBox.size = Vector3.one * (.44f * scale);
+            agent.headCollider = headBox;
+            var visual = Instantiate(visualPrefab, root.transform, false);
+            visual.name = "Visual";
+            visual.transform.localPosition = Vector3.zero;
+            visual.transform.localRotation = Quaternion.identity;
+            visual.transform.localScale = Vector3.one * scale;
+            root.SetActive(true); // Parent stays inactive until the destination is activated.
+            return agent;
+        }
+
         private void Awake()
         {
+            if (_health != null) return;
             _health = GetComponent<HealthComponent>();
             _status = StatusComponent.Ensure(gameObject);
             _combatId = CombatRegistry.AllocateId();
@@ -326,12 +363,19 @@ namespace Emberdelve.AI
 
         private void Start()
         {
-            if (data == null)
+            if (!EnsureRuntimeInitialized())
             {
                 Debug.LogError("[EnemyAgent] No EnemyData assigned; disabling.", this);
                 enabled = false;
-                return;
             }
+        }
+
+        public bool IsRuntimeInitialized { get; private set; }
+        public bool EnsureRuntimeInitialized()
+        {
+            if (IsRuntimeInitialized) return true;
+            if (data == null || !gameObject.activeInHierarchy) return false;
+            if (_health == null) Awake();
 
             _dropKey = AllocateDropKey(data.enemyId, transform.position);
             _health.Configure(Mathf.Max(1, data.maxHealth), 0f, 0f);
@@ -355,6 +399,8 @@ namespace Emberdelve.AI
                 Debug.LogWarning("[EnemyAgent] " + data.displayName + ": the attack weapon has no swing pattern, so this monster cannot attack.", this);
                 _telegraph = AttackTelegraphVisual.Create(transform, data.attackTelegraphCone, data.telegraphColor);
             }
+            IsRuntimeInitialized = true;
+            return true;
         }
 
         private void OnDestroy()

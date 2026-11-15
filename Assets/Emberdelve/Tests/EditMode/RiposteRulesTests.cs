@@ -81,7 +81,7 @@ namespace Emberdelve.Rules.Tests
             Assert.That(RiposteRules.KitCanRiposte(false, false, false, false, 2), Is.False, "not flagged in data");
             Assert.That(RiposteRules.KitCanRiposte(true, true, false, false, 2), Is.False, "the weapon is a shield");
             Assert.That(RiposteRules.KitCanRiposte(true, false, true, false, 2), Is.False, "a shield contributes to the guard");
-            Assert.That(RiposteRules.KitCanRiposte(true, false, true, false, 2, offhandShieldAllowed: true), Is.True, "a shield in the off hand, when the sword's data allows it");
+            Assert.That(RiposteRules.KitCanRiposte(true, false, true, false, 2, offhandShieldAllowed: true), Is.False, "legacy allowance cannot turn a shield block into a sword riposte");
             Assert.That(RiposteRules.KitCanRiposte(true, true, true, false, 2, offhandShieldAllowed: true), Is.False, "a shield itself never parries, whatever the flag");
             Assert.That(RiposteRules.KitCanRiposte(false, false, true, false, 2, offhandShieldAllowed: true), Is.False, "an unflagged weapon with a shield stays out");
             Assert.That(RiposteRules.KitCanRiposte(true, false, false, true, 2), Is.False, "ranged");
@@ -110,13 +110,13 @@ namespace Emberdelve.Rules.Tests
         // ---- parry recording ---------------------------------------------------------------------------
 
         [Test]
-        public void IsParry_OnlyAHeldMeleeBlockOfASwordKitCounts()
+        public void IsRiposteBlock_OnlyAHeldMeleeBlockOfAnEligibleKitCounts()
         {
-            Assert.That(RiposteRules.IsParry(true, false, false, true), Is.True);
-            Assert.That(RiposteRules.IsParry(false, false, false, true), Is.False, "not blocked");
-            Assert.That(RiposteRules.IsParry(true, true, false, true), Is.False, "a broken guard did not hold");
-            Assert.That(RiposteRules.IsParry(true, false, true, true), Is.False, "a projectile");
-            Assert.That(RiposteRules.IsParry(true, false, false, false), Is.False, "a shield or non-sword kit");
+            Assert.That(RiposteRules.IsRiposteBlock(true, false, false, true), Is.True);
+            Assert.That(RiposteRules.IsRiposteBlock(false, false, false, true), Is.False, "not blocked");
+            Assert.That(RiposteRules.IsRiposteBlock(true, true, false, true), Is.False, "a broken guard did not hold");
+            Assert.That(RiposteRules.IsRiposteBlock(true, false, true, true), Is.False, "a projectile");
+            Assert.That(RiposteRules.IsRiposteBlock(true, false, false, false), Is.False, "a shield or non-sword kit");
         }
 
         [Test]
@@ -216,6 +216,34 @@ namespace Emberdelve.Rules.Tests
         }
 
         // ---- the strike chain --------------------------------------------------------------------------
+
+        [Test]
+        public void OrdinaryBlock_AllowsRiposteWithoutParryBonus()
+        {
+            var tracker = new RiposteTracker();
+            tracker.NoteBlock(Defender, Attacker, T0, Epoch, false);
+            var request = Ok();
+            Assert.That(tracker.Check(Defender, T0, request), Is.EqualTo(RiposteVerdict.Allowed));
+            Assert.That(tracker.HasParryBonus(Defender), Is.False);
+            tracker.Commit(Defender, 2, T0 + 1f, 0.1f);
+            Assert.That(tracker.HasGrant(Defender), Is.True);
+            Assert.That(tracker.HasParryBonus(Defender), Is.False);
+        }
+
+        [Test]
+        public void ParryBonus_PersistsThroughFollowUpButNotAfterDamageOrNewOrdinaryBlock()
+        {
+            var tracker = new RiposteTracker();
+            tracker.NoteBlock(Defender, Attacker, T0, Epoch, true);
+            Assert.That(tracker.HasParryBonus(Defender), Is.True);
+            tracker.Commit(Defender, 2, T0 + 1f, 0.1f);
+            Assert.That(tracker.HasParryBonus(Defender), Is.True);
+            tracker.NoteDamage(Defender);
+            Assert.That(tracker.HasParryBonus(Defender), Is.False);
+            tracker.NoteBlock(Defender, Attacker, T0 + 2f, Epoch, true);
+            tracker.NoteBlock(Defender, Attacker, T0 + 3f, Epoch, false);
+            Assert.That(tracker.HasParryBonus(Defender), Is.False);
+        }
 
         [Test]
         public void FollowUpStrike_WaitsForTheGap_ThenIsAllowed_ThenTheRiposteEnds()

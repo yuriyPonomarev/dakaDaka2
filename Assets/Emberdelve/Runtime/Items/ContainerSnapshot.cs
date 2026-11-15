@@ -79,7 +79,7 @@ namespace Emberdelve.Items
     /// </summary>
     public sealed class ContainerSnapshot
     {
-        public const int CurrentSchemaVersion = 5;
+        public const int CurrentSchemaVersion = 6;
         public const int MinSupportedSchemaVersion = 1;
         /// <summary>Largest number of entries a snapshot may carry (a 12x12 bag cannot exceed 144; this is a hard sanity cap).</summary>
         public const int MaxEntries = 512;
@@ -506,6 +506,7 @@ namespace Emberdelve.Items
             steps[2] = new MigrationStep { VerifyIntegrity = VerifyVersion2Integrity, Upgrade = UpgradeVersion2To3 };
             steps[3] = new MigrationStep { VerifyIntegrity = VerifyVersion3Integrity, Upgrade = UpgradeVersion3To4 };
             steps[4] = new MigrationStep { VerifyIntegrity = root => VerifyLegacyIntegrity(root, 4), Upgrade = UpgradeVersion4To5 };
+            steps[5] = new MigrationStep { VerifyIntegrity = root => VerifyLegacyIntegrity(root, 5), Upgrade = UpgradeVersion5To6 };
             return steps;
         }
 
@@ -689,6 +690,26 @@ namespace Emberdelve.Items
                 belt.Items.Add(new JsonNode { Type = JsonNode.Kind.String, Text = "" });
             }
             Member(root, "schemaVersion").Text = "5";
+            return null;
+        }
+
+        // Physical belt positions did not exist in older containers. Keep old bag items in place.
+        private static string UpgradeVersion5To6(JsonNode root)
+        {
+            var entries = Member(root, "entries");
+            var kind = Member(root, "kind");
+            if (entries != null && entries.Type == JsonNode.Kind.Array && kind != null && kind.Text == ContainerKinds.Bag)
+            {
+                if (!StrictJson.TryInt(Member(root, "width"), "width", out int width, out string reason)) return reason;
+                if (!StrictJson.TryInt(Member(root, "height"), "height", out int height, out reason)) return reason;
+                foreach (var entry in entries.Items)
+                {
+                    if (!StrictJson.TryInt(Member(entry, "x"), "x", out int x, out reason)) return reason;
+                    if (!StrictJson.TryInt(Member(entry, "y"), "y", out int y, out reason)) return reason;
+                    if (x < 0 || y < 0 || x >= width || y >= height) return "legacy bag entry is outside its grid; physical belt cells require schema 6";
+                }
+            }
+            Member(root, "schemaVersion").Text = "6";
             return null;
         }
 

@@ -236,6 +236,8 @@ namespace Emberdelve.Level
                 Add((byte)p.ModuleIndex); Add((byte)(p.ModuleIndex >> 8));
                 Add(p.QuarterTurnsClockwise); Add((byte)p.OpenSockets); Add((byte)p.Role); Add(p.PlayerSpawnSlot);
             }
+            // Legacy map fingerprints stay stable; Royale placement is a distinct acknowledged map.
+            if (plan.RoyaleMode.HasValue) { Add(0x52); Add((byte)plan.RoyaleMode.Value); }
             return hash.ToString("X8");
         }
 

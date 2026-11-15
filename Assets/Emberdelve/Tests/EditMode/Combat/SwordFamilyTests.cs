@@ -81,7 +81,7 @@ namespace Emberdelve.Combat.Tests
         [Test]
         public void RiposteFlags_FollowTheDesign()
         {
-            Assert.That(_arming.canRiposte && _arming.riposteWithOffhandShield, Is.True, "the arming sword ripostes, also with a shield");
+            Assert.That(_arming.canRiposte && !_arming.riposteWithOffhandShield, Is.True, "the arming sword ripostes only from its own guard");
             Assert.That(_great.canRiposte, Is.True);
             Assert.That(_great.riposteWithOffhandShield, Is.False, "a two-handed sword never has a shield");
             foreach (WeaponData w in new[] { _arming, _great })

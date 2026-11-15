@@ -63,6 +63,9 @@ namespace Emberdelve.EditorTools
             foreach (Spec spec in Specs)
             {
                 GameObject root = CreateModule(spec, wall, floor, ceiling);
+                DungeonSurfaceMaterials.Apply(root);
+                DungeonFloorWear.Apply(root);
+                DungeonRoomProps.Apply(root);
                 string path = PrefabFolder + "/" + spec.Name + ".prefab";
                 GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, path);
                 UnityEngine.Object.DestroyImmediate(root);
@@ -92,7 +95,76 @@ namespace Emberdelve.EditorTools
             Debug.Log("Built 10 crypt module prefabs and Resources/Emberdelve/DungeonModuleCatalog in stable catalog order.");
         }
 
-        private static GameObject CreateModule(Spec spec, Material wall, Material floor, Material ceiling)
+        /// <summary>Mirror-only destination generation; leaves the accepted ruins catalog and prefabs untouched.</summary>
+        public static void BuildRoyaleDestinationCatalogs()
+        {
+            if (!Application.isBatchMode) throw new InvalidOperationException("Build Royale destinations on the batch mirror only");
+            foreach (int destination in new[] { 2, 3 })
+            {
+                string theme = destination == 2 ? "Crypt" : "Infernal";
+                EnsureFolder(PrefabFolder, theme);
+                var stone = AssetDatabase.LoadAssetAtPath<Material>("Assets/Emberdelve/Art/Materials/Stone_Wall.mat");
+                var floor = AssetDatabase.LoadAssetAtPath<Material>("Assets/Emberdelve/Art/Materials/Stone_Floor.mat");
+                var ceiling = AssetDatabase.LoadAssetAtPath<Material>("Assets/Emberdelve/Art/Materials/Stone_Ceiling.mat");
+                if (stone == null || floor == null || ceiling == null) throw new InvalidOperationException("Missing existing stone materials");
+                if (destination == 3)
+                {
+                    EnsureFolder("Assets/Emberdelve/Art/Generated", "Royale");
+                    stone = ThemeMaterial(stone, "Infernal_Basalt", new Color(.26f, .19f, .17f));
+                    floor = ThemeMaterial(floor, "Infernal_Paving", new Color(.42f, .29f, .22f));
+                    ceiling = ThemeMaterial(ceiling, "Infernal_Vault", new Color(.23f, .17f, .15f));
+                }
+                var definitions = new List<DungeonModuleDefinition>();
+                foreach (var original in Specs)
+                {
+                    var spec = new Spec("royale_" + theme.ToLowerInvariant() + "_v1_" + original.Id,
+                        theme + "_" + original.Name, original.Kind, original.Variant);
+                    var root = CreateModule(spec, stone, floor, ceiling, destination);
+                    DungeonSurfaceMaterials.Apply(root);
+                DungeonFloorWear.Apply(root);
+                DungeonRoomProps.Apply(root);
+                    try
+                    {
+                        var prefab = PrefabUtility.SaveAsPrefabAsset(root, PrefabFolder + "/" + theme + "/" + spec.Name + ".prefab");
+                        var definition = prefab.GetComponent<DungeonModuleDefinition>();
+                        if (!definition.HasValidSockets(out var issue)) throw new InvalidOperationException(issue);
+                        definitions.Add(definition);
+                    }
+                    finally { UnityEngine.Object.DestroyImmediate(root); }
+                }
+                string path = CatalogFolder + "/" + theme + "ModuleCatalog.asset";
+                var catalog = AssetDatabase.LoadAssetAtPath<DungeonModuleCatalog>(path);
+                if (catalog == null)
+                {
+                    catalog = ScriptableObject.CreateInstance<DungeonModuleCatalog>();
+                    AssetDatabase.CreateAsset(catalog, path);
+                }
+                var serialized = new SerializedObject(catalog);
+                var array = serialized.FindProperty("modules"); array.arraySize = definitions.Count;
+                for (int i = 0; i < definitions.Count; i++) array.GetArrayElementAtIndex(i).objectReferenceValue = definitions[i];
+                serialized.ApplyModifiedPropertiesWithoutUndo(); EditorUtility.SetDirty(catalog);
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("[RoyaleMaps] Saved crypt and infernal catalogs (20 destination prefabs); ruins untouched");
+        }
+
+        private static Material ThemeMaterial(Material source, string name, Color tint)
+        {
+            string path = "Assets/Emberdelve/Art/Generated/Royale/" + name + ".mat";
+            var material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (material == null)
+            {
+                material = new Material(source) { name = name };
+                AssetDatabase.CreateAsset(material, path);
+            }
+            else material.CopyPropertiesFromMaterial(source);
+            if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", tint);
+            if (material.HasProperty("_Color")) material.SetColor("_Color", tint);
+            EditorUtility.SetDirty(material);
+            return material;
+        }
+
+        private static GameObject CreateModule(Spec spec, Material wall, Material floor, Material ceiling, int destination = 1)
         {
             GameObject root = new GameObject(spec.Name);
             DungeonModuleDefinition definition = root.AddComponent<DungeonModuleDefinition>();
@@ -116,9 +188,9 @@ namespace Emberdelve.EditorTools
             so.ApplyModifiedPropertiesWithoutUndo();
 
             Box(root.transform, "Floor", new Vector3(0,-0.3f,0), new Vector3(Half*2,0.6f,Half*2), floor);
-            if (spec.Kind == DungeonModuleKind.Vault)
+            if (destination > 1 || spec.Kind == DungeonModuleKind.Vault)
                 Box(root.transform, "Roof", new Vector3(0,WallHeight+0.3f,0), new Vector3(Half*2,0.6f,Half*2), ceiling);
-            if (spec.Kind == DungeonModuleKind.Vault)
+            if (destination > 1 || spec.Kind == DungeonModuleKind.Vault)
             {
                 BuildSide(root.transform, true, false, wall);
                 BuildSide(root.transform, true, true, wall);
@@ -140,8 +212,12 @@ namespace Emberdelve.EditorTools
                 Box(root.transform, "Arch_Jamb_"+names[i]+"_B", positions[i] + axis * DoorHalf + Vector3.up*2f, new Vector3(horizontal ? .55f : .7f,4.3f,horizontal ? .7f : .55f), wall);
                 Box(root.transform, "Arch_Lintel_"+names[i], positions[i]+Vector3.up*4f, horizontal ? new Vector3(4.6f,.55f,.8f) : new Vector3(.8f,.55f,4.6f), wall);
             }
-            AddRoomFeature(root.transform, spec, wall, floor);
-            if (spec.Kind == DungeonModuleKind.Entry) MoonlitRuinsContent.AddEnvironment(root.transform);
+            if (destination == 1)
+            {
+                AddRoomFeature(root.transform, spec, wall, floor);
+                if (spec.Kind == DungeonModuleKind.Entry) MoonlitRuinsContent.AddEnvironment(root.transform);
+            }
+            else RoyaleRoomArchitecture.Build(root.transform, destination, spec.Kind, spec.Variant, wall, floor);
             return root;
         }
 

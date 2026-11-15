@@ -2,6 +2,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.Rendering.Universal;
 using Emberdelve.Core;
 using Emberdelve.Feedback;
 using Emberdelve.Flow;
@@ -119,9 +120,39 @@ namespace Emberdelve.EditorTools
             light.range = 12f;
             light.intensity = intensity;
             light.shadows = LightShadows.Soft;
+            ConfigureTorchShadowResolution(light);
 
             TorchFlicker flicker = torch.AddComponent<TorchFlicker>();
             EmberdelveTorchFactory.Build(torch, flicker);
+        }
+
+        private static void ConfigureTorchShadowResolution(Light light)
+        {
+            var data = light.GetComponent<UniversalAdditionalLightData>();
+            if (data == null) data = light.gameObject.AddComponent<UniversalAdditionalLightData>();
+            var serialized = new SerializedObject(data);
+            var tier = serialized.FindProperty("m_AdditionalLightsShadowResolutionTier");
+            if (tier == null) throw new System.InvalidOperationException("URP shadow resolution tier missing");
+            // Four point lights need 24 faces. Low256 fits the 2048 atlas and matches the
+            // previous automatic downscale, without changing illumination or soft shadows.
+            tier.intValue = UniversalAdditionalLightData.AdditionalLightsShadowResolutionTierLow;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        /// <summary>Batch-only migration of saved lobby lights; preserve scene objects and identifiers.</summary>
+        public static void UpdateSavedLobbyShadowResolution()
+        {
+            if (!Application.isBatchMode) throw new System.InvalidOperationException("Run this migration on the batch test mirror");
+            Scene scene = EditorSceneManager.OpenScene(EmberdelvePaths.LobbyScenePath);
+            int count = 0;
+            foreach (var root in scene.GetRootGameObjects())
+                foreach (var light in root.GetComponentsInChildren<Light>(true))
+                    if (light.name == "Lobby_Torch" && light.type == LightType.Point)
+                    { ConfigureTorchShadowResolution(light); count++; }
+            if (count != 4) throw new System.InvalidOperationException("Expected four saved lobby torches, found " + count);
+            EditorSceneManager.MarkSceneDirty(scene);
+            EditorSceneManager.SaveScene(scene);
+            Debug.Log("[Emberdelve][LobbyShadows] configured four Low-tier point lights");
         }
 
         private static void SetProperty(SerializedObject serialized, string name, Object value)

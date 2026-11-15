@@ -77,7 +77,7 @@ namespace Emberdelve.EditorTools
                 Check(Reachable(layout.BuildWalkableGrid(), layout.playerStartCell, new Vector2Int(6,4)), "the cache approach is reachable from the normal entry");
                 Check(EmberdelveAssetLibrary.Gloves.moveSpeedPenalty == 3f, "gloves author three movement points (one percent base)");
                 ItemData tonic = EmberdelveAssetLibrary.SmolderingTonic;
-                Check(tonic != null && tonic.itemId == "smoldering_tonic" && tonic.healAmount == 45 && tonic.useChannelSeconds == 1.8f && tonic.healOverTimeSeconds == 4f && tonic.maxStack == 2, "authored tonic: two per stack, 1.8s drink then 45 HP over 4s");
+                Check(tonic != null && tonic.itemId == "smoldering_tonic" && tonic.healAmount == 45 && tonic.useChannelSeconds == 1.8f && tonic.healOverTimeSeconds == 4f && tonic.maxStack == 5, "authored tonic: five per stack, 1.8s drink then 45 HP over 4s");
                 Check(EmberdelveAssetLibrary.Draught.useChannelSeconds == 1.8f && EmberdelveAssetLibrary.Draught.healOverTimeSeconds == 4f, "Blood Draught drinks for 1.8 seconds then heals over four seconds");
                 Check(EmberdelveAssetLibrary.JewelerLoot.Validate().Count == 0 && EmberdelveAssetLibrary.JewelerLoot.maxRolls == 4 && EmberdelveAssetLibrary.JewelerLoot.nothingWeight == 0, "the new four-entry cache is a valid loot table");
             }

@@ -29,7 +29,7 @@ namespace Emberdelve.Net.Rules
     public static class NetTuning
     {
         /// <summary>Wire protocol version checked in connection approval.</summary>
-        public const int ProtocolVersion = 14;
+        public const int ProtocolVersion = 41; // Retained observer armor appearance adds six cosmetic item IDs.
 
         public const int DefaultPort = 7777;
         public const string DefaultAddress = "127.0.0.1";
@@ -183,6 +183,7 @@ namespace Emberdelve.Net.Rules
         public bool HasScriptYaw { get; private set; }
         public float ScriptYaw { get; private set; }
         /// <summary>U3A4b development shove (server); null when not given.</summary>
+        public int RoyalePartySize { get; private set; }
         public NetDevShove DevShove { get; private set; }
         public string DevShoveFile { get; private set; } = "";
         /// <summary>The socket layer (default <see cref="NetUdpPath.Scan"/>).</summary>
@@ -271,6 +272,7 @@ namespace Emberdelve.Net.Rules
         {
             switch (name)
             {
+                case "ember-royale-mode":
                 case "ember-net":
                 case "ember-port":
                 case "ember-net-port":
@@ -347,6 +349,15 @@ namespace Emberdelve.Net.Rules
         {
             switch (name)
             {
+                case "ember-royale-mode":
+                    switch (value.ToLowerInvariant())
+                    {
+                        case "solo": RoyalePartySize = 1; break;
+                        case "duo": RoyalePartySize = 2; break;
+                        case "trio": RoyalePartySize = 3; break;
+                        default: _errors.Add("invalid -ember-royale-mode (solo|duo|trio)"); break;
+                    }
+                    break;
                 case "ember-net":
                     switch (value.ToLowerInvariant())
                     {

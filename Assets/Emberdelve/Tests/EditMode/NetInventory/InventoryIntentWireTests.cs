@@ -29,6 +29,28 @@ namespace Emberdelve.Tests.NetInventory
             Assert.AreEqual(input.TargetStackId, output.TargetStackId);
         }
 
+        [TestCase(0)]
+        [TestCase(5)]
+        public void PhysicalBeltMovePreservesReservedCellAndServerRevision(int beltSlot)
+        {
+            var cell = QuickBeltRules.Cell(beltSlot, 10);
+            var command = new InventoryCommand(InventoryCommandKind.Move, 99, 12, 24, 32, 0,
+                cell, EquipmentSlot.None, Guid.Empty, Guid.Empty);
+            using (var writer = new FastBufferWriter(512, Allocator.Temp))
+            {
+                writer.WriteValueSafe(InventoryIntentWire.FromCommand(command));
+                using (var reader = new FastBufferReader(writer, Allocator.Temp))
+                {
+                    reader.ReadValueSafe(out InventoryIntentWire decoded);
+                    Assert.IsTrue(decoded.TryCreateCommand(5, out var rebuilt, out var reason), reason);
+                    Assert.AreEqual(cell, rebuilt.DestinationCell);
+                    Assert.AreEqual(24, rebuilt.ExpectedRevision);
+                    Assert.AreEqual(32, rebuilt.SourceStackId);
+                    Assert.AreEqual(5, rebuilt.OwnerPlayerId);
+                }
+            }
+        }
+
         [Test]
         public void RefusesMissingOwnerUnknownKindAndInvalidFields()
         {
@@ -78,6 +100,55 @@ namespace Emberdelve.Tests.NetInventory
                     Assert.AreEqual(command.TargetStackId, rebuilt.TargetStackId);
                     Assert.AreEqual(5, rebuilt.OwnerPlayerId);
                 }
+            }
+        }
+        [TestCase(InventoryCommandKind.DropOne)]
+        [TestCase(InventoryCommandKind.DropStack)]
+        public void StackDropWirePreservesIntentAndRejectsForgedGearOrDestination(InventoryCommandKind kind)
+        {
+            var command = new InventoryCommand(kind, 1, 7, 23, 41, 0, Vector2Int.zero,
+                EquipmentSlot.None, Guid.Empty, Guid.Empty);
+            var wire = InventoryIntentWire.FromCommand(command);
+            using (var writer = new FastBufferWriter(512, Allocator.Temp))
+            {
+                writer.WriteValueSafe(wire);
+                using (var reader = new FastBufferReader(writer, Allocator.Temp))
+                {
+                    reader.ReadValueSafe(out InventoryIntentWire decoded);
+                    Assert.That(decoded.TryCreateCommand(9, out var result, out var reason), Is.True, reason);
+                    Assert.That(result.Kind, Is.EqualTo(kind)); Assert.That(result.OwnerPlayerId, Is.EqualTo(9));
+                    Assert.That(result.SourceStackId, Is.EqualTo(41)); Assert.That(result.ExpectedRevision, Is.EqualTo(23));
+                    decoded.SourceUidLow = 1; Assert.That(decoded.TryCreateCommand(9, out _, out _), Is.False);
+                    decoded = wire; decoded.CellX = 1; Assert.That(decoded.TryCreateCommand(9, out _, out _), Is.False);
+                    decoded = wire; decoded.TargetStackId = 2; Assert.That(decoded.TryCreateCommand(9, out _, out _), Is.False);
+                    decoded = wire; decoded.SourceStackId = 0; Assert.That(decoded.TryCreateCommand(9, out _, out _), Is.False);
+                }
+            }
+        }
+        [Test] public void SplitWireCarriesAmountAndDoesNotAdmitAmountOnOtherKinds()
+        {
+            var command = new InventoryCommand(InventoryCommandKind.Split, 1, 9, 17, 23, 0,
+                new Vector2Int(7,3), EquipmentSlot.None, Guid.Empty, Guid.Empty, 2);
+            using(var writer = new FastBufferWriter(512, Allocator.Temp))
+            {
+                writer.WriteValueSafe(InventoryIntentWire.FromCommand(command));
+                using(var reader = new FastBufferReader(writer, Allocator.Temp))
+                {
+                    reader.ReadValueSafe(out InventoryIntentWire decoded);
+                    Assert.That(decoded.TryCreateCommand(5, out var result, out var reason), Is.True, reason);
+                    Assert.That(result.Amount, Is.EqualTo(2)); Assert.That(result.SourceStackId, Is.EqualTo(23));
+                    Assert.That(result.DestinationCell, Is.EqualTo(new Vector2Int(7,3)));
+                    Assert.That(result.OwnerPlayerId, Is.EqualTo(5));
+                    decoded.Amount = 0; Assert.That(decoded.TryCreateCommand(5, out _, out _), Is.False);
+                    decoded.Amount = -1; Assert.That(decoded.TryCreateCommand(5, out _, out _), Is.False);
+                }
+            }
+            foreach(InventoryCommandKind kind in Enum.GetValues(typeof(InventoryCommandKind)))
+            {
+                if(kind == InventoryCommandKind.Split) continue;
+                var forged = new InventoryCommand(kind, 1, 1, 0, 23, 0, Vector2Int.zero,
+                    EquipmentSlot.None, Guid.Empty, Guid.Empty, 1);
+                Assert.That(forged.IsStructurallyValid(out _), Is.False, kind.ToString());
             }
         }
     }

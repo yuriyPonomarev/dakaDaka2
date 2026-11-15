@@ -53,12 +53,24 @@ namespace Emberdelve.AI
             VectorInt goal = ResolveWalkable(_grid.CellFromWorld(to));
 
             if (start.x < 0 || goal.x < 0) return false;
-            if (start.Equals(goal))
-            {
-                path.Add(_grid.CellCenter(goal.x, goal.y));
-                return true;
-            }
+            return Search(start, goal, false, default, 0f, path);
+        }
 
+        /// <summary>Finds the nearest reachable cell inside an area, rather than snapping its centre
+        /// onto a possibly disconnected room. Uses the same stairs and corner rules as point routes.</summary>
+        public bool TryFindPathInsideCircle(Vector3 from, Vector2 center, float radius, List<Vector3> path)
+        {
+            path.Clear();
+            if (_grid == null || _grid.width <= 0 || _grid.height <= 0 || radius < 0f
+                || float.IsNaN(radius) || float.IsInfinity(radius)
+                || float.IsNaN(center.x) || float.IsInfinity(center.x)
+                || float.IsNaN(center.y) || float.IsInfinity(center.y)) return false;
+            VectorInt start = ResolveWalkable(_grid.CellFromWorld(from));
+            return start.x >= 0 && Search(start, default, true, center, radius, path);
+        }
+
+        private bool Search(VectorInt start, VectorInt goal, bool area, Vector2 center, float radius, List<Vector3> path)
+        {
             _frontier.Clear();
             _cameFrom.Clear();
             _cells.Clear();
@@ -73,8 +85,10 @@ namespace Emberdelve.AI
                 VectorInt current = _frontier.Dequeue();
                 _cells.Add(current);
 
-                if (current.Equals(goal))
+                Vector3 world = area ? _grid.CellCenter(current.x, current.y) : default;
+                if (area ? (new Vector2(world.x, world.z) - center).sqrMagnitude <= radius * radius : current.Equals(goal))
                 {
+                    goal = current;
                     found = true;
                     break;
                 }

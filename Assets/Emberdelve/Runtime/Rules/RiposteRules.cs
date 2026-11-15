@@ -71,6 +71,7 @@ namespace Emberdelve.BladeDefense
             public float BlockTime;
             public int Attacker;
             public int WeaponEpoch;
+            public bool ParryBonus;
 
             public bool GrantActive;
             public int StrikesTotal;
@@ -96,7 +97,7 @@ namespace Emberdelve.BladeDefense
 
         public int EntryCount => _entries.Count;
 
-        /// <summary>True when the defender has a Live parry (not yet used, cancelled or checked against the window).</summary>
+        /// <summary>Legacy window query: true for a live eligible block, including an ordinary block. Use HasParryBonus to distinguish parries.</summary>
         public bool HasLiveParry(int defender) => _entries.TryGetValue(defender, out Entry e) && e.State == State.Live;
 
         /// <summary>The attacker whose hit the defender last parried (-1 when none was recorded).</summary>
@@ -118,7 +119,10 @@ namespace Emberdelve.BladeDefense
             return left > 0f ? left : 0f;
         }
 
-        public void NoteBlock(int defender, int attacker, float now, int weaponEpoch)
+        public bool HasParryBonus(int defender) => _entries.TryGetValue(defender, out Entry e)
+            && (e.State == State.Live || e.GrantActive) && e.ParryBonus;
+
+        public void NoteBlock(int defender, int attacker, float now, int weaponEpoch, bool parryBonus = false)
         {
             if (float.IsNaN(now) || float.IsInfinity(now)) return;
             Entry e = EntryFor(defender);
@@ -126,6 +130,7 @@ namespace Emberdelve.BladeDefense
             e.BlockTime = now;
             e.Attacker = attacker;
             e.WeaponEpoch = weaponEpoch;
+            e.ParryBonus = parryBonus;
             e.GrantActive = false;
             BlocksRecorded++;
         }
@@ -273,15 +278,15 @@ namespace Emberdelve.BladeDefense
             return authored;
         }
 
-        /// <summary>A kit may riposte when its weapon is flagged (data), is not a shield or ranged, and no shield contributes to the guard unless the weapon's data allows an off-hand shield (FIX2: the warrior's sword and shield; the parry is the sword's, a shield alone never parries).</summary>
+        /// <summary>A kit may riposte when its weapon is flagged (data), is not a shield or ranged, and no shield contributes to the guard. The legacy allowance argument is ignored; a shield cannot grant another weapon's response.</summary>
         public static bool KitCanRiposte(bool weaponFlagged, bool weaponIsShield, bool guardHasShield, bool weaponIsRanged, int strikeCount, bool offhandShieldAllowed = false) =>
-            weaponFlagged && !weaponIsShield && (!guardHasShield || offhandShieldAllowed) && !weaponIsRanged && strikeCount > 0;
+            weaponFlagged && !weaponIsShield && !guardHasShield && !weaponIsRanged && strikeCount > 0;
 
         /// <summary>
-        /// A block counts as a parry when the guard HELD (blocked, not broken) against a melee hit and the kit can riposte. A broken
+        /// A block opens an ordinary riposte when the guard HELD (blocked, not broken) against a melee hit and the kit can riposte. A broken
         /// guard, a miss, a hit from behind and a projectile are not parries.
         /// </summary>
-        public static bool IsParry(bool blocked, bool guardBroken, bool projectile, bool kitCanRiposte) =>
+        public static bool IsRiposteBlock(bool blocked, bool guardBroken, bool projectile, bool kitCanRiposte) =>
             blocked && !guardBroken && !projectile && kitCanRiposte;
     }
 }

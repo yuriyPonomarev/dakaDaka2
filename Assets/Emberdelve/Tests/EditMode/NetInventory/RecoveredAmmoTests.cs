@@ -1,5 +1,6 @@
 using System;
 using Emberdelve.Core;
+using Emberdelve.Flow;
 using Emberdelve.Data;
 using Emberdelve.Items;
 using Emberdelve.Player;
@@ -16,6 +17,9 @@ namespace Emberdelve.Tests.NetInventory
         public void WrongWeaponPreservesRoundAndMatchingUseGrantsExactlyOne(string itemName,string matching,string wrong)
         {
             var previous=NetRole.Current;GameObject owner=null;
+            // This is an isolated inventory fixture, not an actor in the open scene's raid.
+            GameServices.TryGet<RunDirector>(out var sceneDirector);
+            GameServices.Unregister(sceneDirector);
             try
             {
                 NetRole.ResetToOffline();owner=new GameObject("RecoveredAmmoTest");owner.SetActive(false);
@@ -27,6 +31,7 @@ namespace Emberdelve.Tests.NetInventory
                 var item=AssetDatabase.LoadAssetAtPath<ItemData>("Assets/Emberdelve/Data/Item_Recovered"+itemName+".asset");
                 Assert.That(bag.TryAdd(item,1),Is.True);
                 var stack=bag.Slots[0];var authority=bag.CommandAuthority;
+                Assert.That(bag.Hotbar.TryAssign(0,stack.StackId,out _),Is.False,"recovered ammunition stays in the bag");
                 Assert.That(bag.HeldStackId,Is.Zero);
                 var potion=AssetDatabase.LoadAssetAtPath<ItemData>("Assets/Emberdelve/Data/Item_BloodDraught.asset");
                 Assert.That(bag.TryAdd(potion,1),Is.True);
@@ -35,6 +40,7 @@ namespace Emberdelve.Tests.NetInventory
                 var potionResult=authority.Submit(rig,potionUse);
                 Assert.That(potionResult.Accepted,Is.False);
                 Assert.That(potionResult.Reason,Does.Contain("take that item in hand"));
+                Assert.That(bag.Hotbar.TryAssign(0,potionStack.StackId,out var beltReason),Is.True,beltReason);
                 Assert.That(bag.RequestHoldStack(potionStack.StackId,out _),Is.True);
                 ranged.Initialize(Weapon(matching),3,20);
                 Assert.That(bag.RequestQuickStack(stack.StackId,out _),Is.False,"ammo cannot replace a held potion implicitly");
@@ -61,7 +67,7 @@ namespace Emberdelve.Tests.NetInventory
                 Assert.That(bag.HeldItem,Is.Null);
                 Assert.That(bag.RequestHoldStack(stack.StackId,out _),Is.False,"retired stack cannot be selected");
             }
-            finally {if(owner!=null)UnityEngine.Object.DestroyImmediate(owner);NetRole.Set(previous);}
+            finally {if(owner!=null)UnityEngine.Object.DestroyImmediate(owner);GameServices.Register(sceneDirector);NetRole.Set(previous);}
         }
         static WeaponData Weapon(string name)=>AssetDatabase.LoadAssetAtPath<WeaponData>("Assets/Emberdelve/Data/Weapon_"+name+".asset");
         [Test] public void RecoveryRestsAboveRealFloorAndRefusesVoid()

@@ -2,11 +2,11 @@
 
 19October2026: user explicitly authorized searching open-source textures/packs/assets. Codex curates downloads and licenses; local worker integrates only assigned files. No payments or external messages.
 
-First inventory/reuse the existing packs at C:/Users/yrapa/Documents/just test/новый-игровой-проект/assets/vendor and original manifest.json. They include KayKit dungeon/adventurer/skeleton meshes/animations and Kenney audio. Do not redownload the same files. Import into a Unity vendor namespace only when the relevant stage is assigned; preserve licenses/hashes and use prefab adapters so collider/gameplay sizes remain stable. Inspect actual file formats before deciding whether Unity needs an importer or alternate source format; do not claim glTF is natively ready merely because Godot loaded it.
+First inventory/reuse the existing packs at C:/Users/yrapa/Documents/just test/РЅРѕРІС‹Р№-РёРіСЂРѕРІРѕР№-РїСЂРѕРµРєС‚/assets/vendor and original manifest.json. They include KayKit dungeon/adventurer/skeleton meshes/animations and Kenney audio. Do not redownload the same files. Import into a Unity vendor namespace only when the relevant stage is assigned; preserve licenses/hashes and use prefab adapters so collider/gameplay sizes remain stable. Inspect actual file formats before deciding whether Unity needs an importer or alternate source format; do not claim glTF is natively ready merely because Godot loaded it.
 
 Verified author sources:
-- KayKit Dungeon Remastered: https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0 — author README/license CC0-1.0, dungeon props/walls/chests, FBX/GLTF/OBJ listed. Already downloaded content is preferred.
-- ambientCG textures: https://docs.ambientcg.com/license/ — downloadable assets are CC0-1.0. Candidate source for missing worn stone/wood/moss surfaces; no particular texture downloaded/selected yet.
+- KayKit Dungeon Remastered: https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0 вЂ” author README/license CC0-1.0, dungeon props/walls/chests, FBX/GLTF/OBJ listed. Already downloaded content is preferred.
+- ambientCG textures: https://docs.ambientcg.com/license/ вЂ” downloadable assets are CC0-1.0. Candidate source for missing worn stone/wood/moss surfaces; no particular texture downloaded/selected yet.
 
 For every imported pack/material keep a machine-readable manifest: source URL, creator, license text/file, pinned version/commit if applicable, downloaded/copied SHA256, relative Unity path, modifications and usage. Open-source code dependencies and art licenses are distinct: inspect package/code license as well as asset license. Final selection prioritizes a coherent dark stylized crypt, readable enemy/player/weapon silhouettes and restrained telegraphs. Unlicensed/ambiguous, ripped or merely free-to-view content is not a deliverable.
 
@@ -25,7 +25,7 @@ User rejected the chibi KayKit dungeon props (wanted a grim, less cartoony Dark 
 
 User rejected the chibi KayKit skeletons and chose a free CC0 animated human model turned into grim undead. Enemies now use the Quaternius Universal Animation Library 1 + 2 (Standard) mannequin, Humanoid. License CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/); author Quaternius (https://quaternius.com). The KayKit skeleton characters are no longer used; the KayKit blade / axe / small shield meshes remain as weapon placeholders until the weapon-visual slice.
 
-**5 Nov update:** enemy bodies now use the rigged Human Skeleton by Grab3D, CC0-1.0, https://grab3d.com/models/anatomy/human-skeleton/ ; source GLB `Art/ThirdParty/Grab3D/HumanSkeleton/human-skeleton-rigged.glb`, SHA-256 `40e26b694ecbb89ea1f00f1d0a8ecd4a2d9a1d48f70b10ae8aec15593bd30e73`. Original license and manifest are alongside it. The author states the mesh and textures were AI-generated and cleaned up in Blender, with automatic rigging. `Tools/OptimizeGrab3DSkeleton.py` uses Blender to make the skinned FBX and extract its texture: 270,030 → 22,952 triangles, preserving the rig and weights; Unity imports the result as Humanoid. The existing CC0 Quaternius animation library remains in use. Four variants use the same skeleton with different bone tones and equipment; the game currently maps Minion, Rogue and Warrior. Finger bones are absent and extreme retargeted poses need in-game review. Client-only enemy views remain separate proxies.
+**5 Nov update:** enemy bodies now use the rigged Human Skeleton by Grab3D, CC0-1.0, https://grab3d.com/models/anatomy/human-skeleton/ ; source GLB `Art/ThirdParty/Grab3D/HumanSkeleton/human-skeleton-rigged.glb`, SHA-256 `40e26b694ecbb89ea1f00f1d0a8ecd4a2d9a1d48f70b10ae8aec15593bd30e73`. Original license and manifest are alongside it. The author states the mesh and textures were AI-generated and cleaned up in Blender, with automatic rigging. `Tools/OptimizeGrab3DSkeleton.py` uses Blender to make the skinned FBX and extract its texture: 270,030 в†’ 22,952 triangles, preserving the rig and weights; Unity imports the result as Humanoid. The existing CC0 Quaternius animation library remains in use. Four variants use the same skeleton with different bone tones and equipment; the game currently maps Minion, Rogue and Warrior. Finger bones are absent and extreme retargeted poses need in-game review. Client-only enemy views remain separate proxies.
 
 | Asset | Source | License | SHA256 | Unity path | Use |
 |---|---|---|---|---|---|
@@ -93,3 +93,51 @@ Resources/Emberdelve/UI/CharacterPreview.prefab reuses the existing Quaternius U
 - Tools/Convert-UnifiedHuman.py uses Blender4.3.2: one weighted body including eyes, 34,146 triangles, 163 bones and all30 finger bones. All12,862 hand/finger-weighted source vertices survive conversion at identical coordinates. Removed importer helper; reduced body topology, preserved hand detail, joined eye geometry. No source texture images or animations; project materials/clothing are original.
 - EmberdelveUnifiedHuman maps native MakeHuman bones to Humanoid; both class prefabs and FP_Arms derive from Human.fbx. Class armour/headwear fitted to the body, closed boots added. Existing inventory portrait automatically uses the class prefab. No separate third-party FPS arm mesh imported. Fixed apparel still does not reflect individual equipped armour items.
 - Source has a Unity metacarpal in-between-rotation warning during avatar configuration; the resulting avatar is valid/humanoid, all finger mappings resolve, and retargeted grips are visually reviewed. No claim of mocap-perfect fingers or photographic skin textures.
+
+## REF-01 original synthesized sound (11 Nov 2026)
+
+Runtime/Feedback/ProceduralAudio.cs generates the new swing, impact, stone-step, flame and wind clips locally from original deterministic synthesis code. No downloaded or extracted Dark and Darker audio was used. No third-party source/license or imported binary asset applies to these generated clips. Existing CC0 art and animation licenses remain unchanged. This is a prototype sound pass, not a claim of recorded Foley quality.
+
+## Warrior armour metalwork (12 Nov 2026)
+- Original project geometry generated by Editor/EmberdelveArmourDetail.cs: closed helmet crown, plate edge beads, small rivet domes. Four Warrior_*PlateEdges / Warrior_*Rivets mesh assets in Art/Models/GrimPlayers, attached under existing Cuirass/GreatHelm. Existing WornSteel and OldBrass materials reused; no downloaded/extracted assets.
+- Bounded saved-prefab migration preserves existing unified Innerscene body, avatar, hands, animation and all original components. Future GrimClassVisuals builder invokes the same detail authoring. Visual evidence in Tasks/RENDER_READABILITY_20261112.md; this is fixed costume detail, not equipment-driven appearance.
+
+Shoulder follow-up12 November: original authored Warrior_ShoulderL_Plated and Warrior_ShoulderR_Plated mesh assets derived from this project's existing shoulder shell coordinates, three closed thin bands, existing WornSteel material. No external mesh/texture imported. Original source assets retained. Evidence shoulder-plates-live-20261112; thickness accepted, broad arm-opening fit still unfinished.
+
+Shoulder fit follow-up: same original meshes tapered radially from unchanged shoulder socket to72percent distal ring, preserving source, bones and existing materials. Live shoulder-fit-live-20261112 portrait/guard/attack/step inspected; no new external assets. Latest exact playable122427-208.
+
+## Reference UI pass (13 November 2026)
+- Cinzel heading font: Copyright 2020 The Cinzel Project Authors, SIL Open Font License 1.1. Original unmodified variable font from https://github.com/google/fonts/tree/main/ofl/cinzel (Cinzel[wght].ttf); bundled at Assets/Emberdelve/Resources/UI/Fonts/Cinzel.ttf with OFL.txt. Body text retains the existing built-in font.
+- DungeonUiStyle generates original deterministic panel grain and simple metal borders in code. No Dark and Darker textures, UI assets or models imported. Reference screenshot from the publisher's Steam store is retained only under Logs/acceptance/reference-ui-20261113, outside player assets.
+
+## Royale destination rooms and portal presentation (13 November 2026)
+-20 original saved room prefabs in Prefabs/DungeonModules/Crypt and Infernal, generated by existing DungeonModuleContentBuilder with RoyaleRoomArchitecture. Reuse existing licensed stone/metal materials and project tomb/column/brazier helpers. No extracted original-game assets.
+- Art/Generated/Royale/Infernal_Basalt, Infernal_Paving and Infernal_Vault are derived material instances from the existing project's stone materials with authored tints; original materials remain untouched.
+- DescentPortalVisual generates original arch-rim, veil and downward-chevron meshes within the existing trigger bounds, with the existing Gate_Portal material and per-renderer property blocks. No new external art, particle system or global atmosphere.
+
+Royale crypt dependency: Art/Generated/CryptFlame_BlueParticle.mat is a factory-derived copy of existing Torch_Flame.mat with blue tint; retained original shader/texture and source license. Required generated output alongside the20 crypt/infernal prefabs, not only Generated/Royale folder. No third-party game assets.
+
+## Environment surface scale and import correction (13 November 2026)
+- Reuses existing ambientCG Bricks100, PavingStones142 and Rock030 color/OpenGL normal/packed mask/AO maps, existing CC0 license and manifest. No new external or reference-game assets.
+- Original DungeonWorldStone URP shader projects these maps in world space with signed normal blending, local-light/shadow/fog support and low-frequency tint variation. World_Stone and World_Infernal material assets live in Art/Generated/DungeonSurfaces; original Art/Materials files preserved.
+- Wall texture period3m; paving7.14m, rock2.5m. Roughness response increased through lower smoothness multiplier, normal strength0.55-0.65, AO0.65. Six materials assigned to30 saved room prefabs without geometry/collision changes. Future room builders bind the same assets.
+-166 importer metas copied from validated mirror to main:16 ambientCG2048,150 PolyHaven1024, trilinear/aniso8 instead of512/point. Main import/compile and shader diagnostic evidence: Logs/acceptance/environment-surfaces-20261113/main-import-check.json. Visual acceptance recorded in Tasks/ENVIRONMENT_SURFACES_20261113.md.
+
+Room props/sky (13 November): reuses existing CC0 PolyHaven wooden_crate_02, wine_barrel_01 and wooden_bucket_01 meshes/materials. Original lathed ceramic vessel mesh and WeatheredClay material derive from project stone maps; procedural moon/craters/stars/clouds authored in MoonlitSky shader. No external downloads or original-game assets.
+
+## Equipment-driven armor models (13 November 2026)
+- Original cuirass, boots and two cloaks, leather/cloth/metal textures and URP materials authored by EmberdelveItemArmorModels; saved in Art/Models/Equipment and Prefabs/Visual/Equipment. Inventory sprites are rendered from those same models. No external downloads or Dark and Darker assets.
+- Graspwrap glove garment derives hand/wrist topology and skin weights from the existing Innerscene Human CC0 source listed above. Source mesh remains unchanged; garment clips the wrist and offsets the surface. One skinned renderer/two materials preserves finger bending, 25,883 triangles for both gloves. Other pieces use bone-attached meshes.
+- ItemVisualCatalog connects five existing item definitions to these cosmetic assets; wearer, portrait, first-person hands and ground loot reuse the same references. No new stats or item licensing dependencies.
+
+## Handheld pitch torch model and fire (13 November 2026)
+- Original project mesh PitchTorchBody (6,606 triangles, four submeshes) from EmberdelveHandTorchModel; wood grain, leather pores, hammered iron, cloth weave/ember emission textures generated deterministically. Saved Art/Models/HandTorch, no external downloads or copied reference-game assets.
+- Original FlameTongue/SmokeWisp masks and HandTorchFire URP shader; four bounded particle systems authored by EmberdelveHandTorchFlame. Held Viewmodel_PitchTorch and unlit ground IV_pitch_torch share the body mesh. Inventory icon rendered from that body.
+- Room/brazier particle materials and existing licensed assets unchanged. This item-only pass retains the authored point-light intensity/range and the existing weapon/utility rules.
+
+Steel cuirass correction (2026-11-13): original formed breast/backplate, rolled rims, leather closures and three waist lames authored in EmberdelveItemArmorModels; dedicated original TemperedSteel/BurnishedSteelEdges textures/materials. Replaces leather visual for stable boiled_cuirass ID; no external model or Dark and Darker asset used. Evidence Tasks/STEEL_CUIRASS_20261113.md.
+
+Reference flame correction (2026-11-13): original HandTorchVolume URP shader and generated64^3 seamless 3D value-noise asset; continuous fire volume, auxiliary smoke/sparks. User photo used as visual direction, not imported/extracted as texture. No external assets. Evidence Tasks/TORCH_REFERENCE_FLAME_20261113.md.
+
+## Ground loot models (13 November 2026)
+Original treasure and ammunition meshes authored by EmberdelveLootModels: struck coins, reliquary, gem-set ring, chain/bead pendant, fletched arrows/bolts and bound bundles. Original carved bow/crossbow ground shapes supplement existing licensed melee/shield meshes from WeaponViewModelSet. Original small procedural surface textures/materials saved under Art/Models/Loot; cosmetic prefabs under Prefabs/Items/Loot. No reference-game assets or external downloads. Existing potion/bandage and six armor/torch representations preserved. Coverage and visual evidence tracked in Tasks/GROUND_LOOT_MODELS_20261113.md.

@@ -62,7 +62,7 @@ namespace Emberdelve.Net
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(PlayerRig))]
-    public sealed class NetPlayerRig : NetworkBehaviour, IDoorInteractionAuthority, IFloorLootInteractionAuthority
+    public sealed class NetPlayerRig : NetworkBehaviour, IDoorInteractionAuthority, IFloorLootInteractionAuthority, IDescentPortalAuthority
     {
         public readonly NetworkVariable<int> ServerPlayerId = new NetworkVariable<int>(
             0, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
@@ -106,20 +106,143 @@ namespace Emberdelve.Net
         public readonly NetworkVariable<bool> GuardRaised = new NetworkVariable<bool>(
             false, NetworkVariableReadPermission.Owner, NetworkVariableWritePermission.Server);
 
+        /// <summary>Approximate owner buff display; exact guard expiry remains server-owned.</summary>
+        public readonly NetworkVariable<float> ImpactGuardRemaining = new NetworkVariable<float>(
+            0f, NetworkVariableReadPermission.Owner, NetworkVariableWritePermission.Server);
+        public readonly NetworkVariable<RangedAmmoWire> RangedAmmo = new NetworkVariable<RangedAmmoWire>(
+            default, NetworkVariableReadPermission.Owner, NetworkVariableWritePermission.Server);
+
         public readonly NetworkVariable<AvatarCombatWire> AvatarCombat = new NetworkVariable<AvatarCombatWire>(
             default, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+        public readonly NetworkVariable<AvatarArmorWire> AvatarArmor = new NetworkVariable<AvatarArmorWire>(
+            default, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+        private PlayerAvatar _armorTarget;
+        private AvatarArmorWire _presentedArmor;
+        private bool _armorPresented;
+        public readonly NetworkVariable<FloorMovementWire> FloorMovement = new NetworkVariable<FloorMovementWire>(
+            default, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+        public readonly NetworkVariable<DescentPortalWire> DescentPortals = new NetworkVariable<DescentPortalWire>(
+            default, NetworkVariableReadPermission.Owner, NetworkVariableWritePermission.Server);
+        public readonly NetworkVariable<RoyaleZoneWire> RoyaleZone = new NetworkVariable<RoyaleZoneWire>(
+            default, NetworkVariableReadPermission.Owner, NetworkVariableWritePermission.Server);
+        public void SetRoyaleZoneFromServer(RoyaleZoneWire state)
+        { if (IsServer && IsSpawned && state.IsValid && !RoyaleZone.Value.Equals(state)) RoyaleZone.Value = state; }
+        private uint _appliedFloorGeneration;
+        private bool _floorMovementApplied;
+        private int _ownerPresentedSwingId;
+        private int _ownerPresentedRecoilId;
+        private bool _ownerCombatAnimating;
         private void LateUpdate()
         {
             if (!IsSpawned || Rig == null) return;
             var view = Rig.GetComponent<Emberdelve.Player.PlayerAvatar>();
+            if (IsServer)
+            {
+                var armor = AvatarArmorWire.Capture(Rig.Equipment);
+                if (!AvatarArmor.Value.Equals(armor)) AvatarArmor.Value = armor;
+            }
+            else if (!IsOwner && view != null)
+            {
+                var armor = AvatarArmor.Value;
+                if (!_armorPresented || _armorTarget != view || !_presentedArmor.Equals(armor))
+                {
+                    var shown = armor.IsValid ? armor : default;
+                    view.PresentArmor(shown.Head.ToString(), shown.Chest.ToString(), shown.Legs.ToString(),
+                        shown.Hands.ToString(), shown.Feet.ToString(), shown.Back.ToString());
+                    _armorTarget = view; _presentedArmor = armor; _armorPresented = true;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                    if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-ember-item-model-review") >= 0)
+                        Debug.Log(NetTuning.LogPrefix + "[client] armor-appearance player=" + ServerPlayerId.Value +
+                            " head=" + shown.Head + " chest=" + shown.Chest + " legs=" + shown.Legs +
+                            " hands=" + shown.Hands + " feet=" + shown.Feet + " back=" + shown.Back);
+#endif
+                }
+            }
             var pose = AvatarCombat.Value;
+            // Remote movement is disabled. Only observers consume replicated stance for footsteps;
+            // the owner keeps its predicted controller state, including reconciliation.
+            if (NetRole.IsClientOnly && !IsOwner)
+            {
+                var footsteps = Rig.GetComponent<Emberdelve.Feedback.WorldFootsteps>();
+                if (footsteps != null) footsteps.ReplicatedCrouched = pose.IsValid && pose.Crouched;
+            }
+            if (NetRole.IsClientOnly)
+            {
+                var ranged = Rig.GetComponent<RangedCombat>();
+                if (ranged != null)
+                {
+                    ranged.ApplyReplicatedReload(pose.IsValid ? pose.Main.ToString() : "",
+                        pose.IsValid && pose.Reloading, pose.ReloadProgress, pose.ReloadDuration);
+                    if (IsOwner)
+                    {
+                        var ammo = RangedAmmo.Value;
+                        ranged.ApplyReplicatedAmmo(ammo.IsValid ? ammo.Weapon.ToString() : "", ammo.Magazine, ammo.Reserve);
+                    }
+                }
+            }
+            if (NetRole.IsClientOnly && IsOwner)
+            {
+                // The owner's ranged simulation is disabled: feed the same authoritative
+                // charge to the first-person bow/string/hands as to observers.
+                var weapon = Rig.ActiveWeapon;
+                bool drawing = pose.IsValid && pose.Drawing && !pose.Guard && !pose.Reloading
+                    && !pose.Swing && !pose.Recoil && !Rig.IsDead && !Rig.IsExtracted
+                    && weapon != null && pose.Main.ToString() == weapon.weaponId;
+                Rig.SetDrawVisual(drawing ? pose.DrawProgress : 0f);
+                if (pose.IsValid) PresentOwnerCombat(pose);
+            }
             if (NetRole.IsClientOnly && pose.IsValid)
                 PotionDrinkPresentation.Ensure(Rig).ApplyNetwork(pose.Drinking, pose.DrinkProgress, pose.DrinkDuration);
             if (view != null && pose.IsValid) view.PresentUtility(pose.Utility.ToString());
             if (view != null && pose.IsValid)
                 view.PresentCombat(pose.Main.ToString(),pose.Off.ToString(),pose.Pattern.ToString(),pose.Guard,pose.Swing,
                     pose.PresentationElapsed(NetworkManager.ServerTime.Time),new Emberdelve.Data.SwingTiming(pose.Windup,pose.Active,pose.Recovery,0),
-                    new Emberdelve.Combat.SwingFrame(Rig.transform.position+pose.EyeOffset,pose.Aim));
+                    new Emberdelve.Combat.SwingFrame(Rig.transform.position+pose.EyeOffset,pose.Aim),
+                    pose.Recoil,pose.StopFraction,pose.RecoilProgress(NetworkManager.ServerTime.Time));
+            // Draw is server presentation state, never a client charge or ammunition claim.
+            var remoteWeapons = Rig.GetComponent<RemoteWeaponPresentation>();
+            if (remoteWeapons != null)
+            {
+                remoteWeapons.PresentCrossbowLoaded(pose.IsValid ? pose.Main.ToString() : "", pose.IsValid && pose.CrossbowLoaded);
+                remoteWeapons.PresentDraw(pose.IsValid ? pose.Main.ToString() : "",
+                    pose.IsValid && pose.Drawing && !Rig.IsDead && !Rig.IsExtracted, pose.DrawProgress);
+            }
+        }
+
+        private void PresentOwnerCombat(in AvatarCombatWire pose)
+        {
+            var visual = Rig.Loadout != null ? Rig.Loadout.Visual : null;
+            if (visual == null) return;
+            if ((!pose.Swing && !pose.Recoil) || Rig.IsDead)
+            {
+                if (_ownerCombatAnimating) visual.CancelNetworkSwing();
+                _ownerCombatAnimating = false;
+                return;
+            }
+            var weapon = Rig.ActiveWeapon;
+            if (weapon == null || weapon.weaponId != pose.Main.ToString() || weapon.swingPatterns == null) return;
+            Emberdelve.Data.SwingPatternData pattern = null;
+            foreach (var candidate in weapon.swingPatterns)
+                if (candidate != null && candidate.patternId == pose.Pattern.ToString()) { pattern = candidate; break; }
+            if (pattern == null) return;
+            if (!_ownerCombatAnimating || _ownerPresentedSwingId != pose.SwingId)
+            {
+                Rig.PlaySwingVisual(weapon, pattern, new Emberdelve.Data.SwingTiming(pose.Windup,pose.Active,pose.Recovery,pose.RecoilDuration));
+                _ownerPresentedSwingId = pose.SwingId;
+                _ownerCombatAnimating = true;
+                Debug.Log(NetTuning.LogPrefix + "[client] owner-swing-visual id=" + ServerPlayerId.Value + " swing=" + pose.SwingId + " pattern=" + pose.Pattern);
+            }
+            double now = NetworkManager.ServerTime.Time;
+            if (pose.Recoil)
+            {
+                visual.ApplyNetworkRecoil(pose.StopFraction,pose.RecoilElapsed(now));
+                if (_ownerPresentedRecoilId != pose.SwingId)
+                {
+                    _ownerPresentedRecoilId = pose.SwingId;
+                    Debug.Log(NetTuning.LogPrefix + "[client] owner-recoil-visual id=" + ServerPlayerId.Value + " swing=" + pose.SwingId);
+                }
+            }
+            else visual.SyncNetworkSwingTime(pose.PresentationElapsed(now));
         }
 
         private static readonly List<NetPlayerRig> SpawnedRigs = new List<NetPlayerRig>();
@@ -155,26 +278,36 @@ namespace Emberdelve.Net
 
         public static bool ShouldUseHostDoorBridge(NetPlayerRole role) => role == NetPlayerRole.HostPlayer;
 
+        public static NetPlayerRole ResolveRole(bool server, bool host, bool owner, bool playerObject) => server
+            ? (host && owner && playerObject ? NetPlayerRole.HostPlayer : NetPlayerRole.Server)
+            : (owner && playerObject ? NetPlayerRole.Owner : NetPlayerRole.Observer);
+
         public override void OnNetworkSpawn()
         {
             _rig = GetComponent<PlayerRig>();
-            if (IsOwner && NetRole.IsClientOnly && _rig.Inventory != null) _rig.Inventory.BeginNetworkSession();
+            if (IsOwner && NetworkObject.IsPlayerObject && NetRole.IsClientOnly && _rig.Inventory != null) _rig.Inventory.BeginNetworkSession();
 
             if (IsServer)
             {
                 // Server and host both ran the admission already, so the rig has its real id and party.
+                _rig.FloorMovementChanged += PublishFloorMovement;
+                FloorMovement.Value = CaptureFloorMovement(_rig);
                 ServerPlayerId.Value = _rig.PlayerId;
                 ServerPartyId.Value = _rig.PartyId;
                 ServerClassId.Value = new FixedString32Bytes(ClassIdForWire(_rig));
-                Role = IsOwner ? NetPlayerRole.HostPlayer : NetPlayerRole.Server;
+                AvatarCombat.Value = new AvatarCombatWire { InFloorTransit = _rig.IsInFloorTransit,
+                    Aim = Quaternion.LookRotation(_rig.AimDirection, Vector3.up),
+                    EyeOffset = _rig.AimOrigin - _rig.transform.position };
+                Role = ResolveRole(true, IsHost, IsOwner, NetworkObject.IsPlayerObject);
                 ApplyServerRole();
             }
             else
             {
-                Role = IsOwner ? NetPlayerRole.Owner : NetPlayerRole.Observer;
+                Role = ResolveRole(false, false, IsOwner, NetworkObject.IsPlayerObject);
                 ServerPlayerId.OnValueChanged += OnServerPlayerIdChanged;
                 ServerPartyId.OnValueChanged += OnServerPartyIdChanged;
                 ApplyClientView();
+                FloorMovement.OnValueChanged += OnFloorMovementChanged;
 
                 // U3B3: the server's health / death (observers and owner alike), and the line the gate reads.
                 Vitals.OnValueChanged += OnVitalsChanged;
@@ -207,8 +340,17 @@ namespace Emberdelve.Net
                     SkillState.OnValueChanged += OnSkillStateChanged;
                     if (SkillState.Value.MaxMana > 0f) OnSkillStateChanged(default(SkillStateWire), SkillState.Value);
                 }
+                if (GetComponent<NetFinalExitView>() == null) gameObject.AddComponent<NetFinalExitView>().Configure(this);
+                if (GetComponent<NetRoyaleZoneBoundary>() == null) gameObject.AddComponent<NetRoyaleZoneBoundary>().Configure(this);
+                if (GetComponent<NetDescentPortalViews>() == null) gameObject.AddComponent<NetDescentPortalViews>().Configure(this);
+                DescentPortals.OnValueChanged += OnDescentPortalsChanged;
+                OnDescentPortalsChanged(default, DescentPortals.Value);
                 RaidClock.OnValueChanged += OnRaidClockChanged;
                 OnRaidClockChanged(default, RaidClock.Value);
+                ImpactGuardRemaining.OnValueChanged += OnImpactGuardChanged;
+                OnImpactGuardChanged(0f, ImpactGuardRemaining.Value);
+                RangedAmmo.OnValueChanged += OnRangedAmmoChanged;
+                OnRangedAmmoChanged(default, RangedAmmo.Value);
 
                 if (GetComponent<NetSkillSender>() == null)
                     gameObject.AddComponent<NetSkillSender>().Configure(this, NetBootstrap.LaunchArgs);
@@ -248,10 +390,48 @@ namespace Emberdelve.Net
             Debug.Log(Emberdelve.Net.Rules.NetTuning.LogPrefix + "[" + (IsServer ? (IsOwner ? "host" : "server") : "client") +
                       "] player object spawned role=" + Role + " netId=" + NetworkObjectId + " owner=" + OwnerClientId +
                       " playerId=" + _rig.PlayerId + " party=" + _rig.PartyId + " class=" + ClassIdText);
+            if (!IsServer) OnFloorMovementChanged(default, FloorMovement.Value);
+        }
+
+        private static FloorMovementWire CaptureFloorMovement(PlayerRig rig) => new FloorMovementWire
+        {
+            Generation = rig.FloorMovementGeneration, InTransit = rig.IsInFloorTransit,
+            Position = rig.transform.position, Rotation = rig.transform.rotation
+        };
+
+        private void PublishFloorMovement(PlayerRig rig)
+        {
+            if (!IsServer || !IsSpawned) return;
+            NetMovementServer.Current?.OnFloorMovementChanged(rig);
+            if (!rig.IsInFloorTransit)
+            {
+                rig.Look?.ApplyAimPose(rig.transform.eulerAngles.y, 0f);
+                GetComponent<Unity.Netcode.Components.NetworkTransform>()?.Teleport(
+                    rig.transform.position, rig.transform.rotation, rig.transform.localScale);
+            }
+            FloorMovement.Value = CaptureFloorMovement(rig);
+        }
+
+        private void OnFloorMovementChanged(FloorMovementWire previous, FloorMovementWire current)
+        {
+            if (!NetRole.IsClientOnly || _rig == null || !current.IsValid
+                || (_floorMovementApplied && current.Generation <= _appliedFloorGeneration)) return;
+            if (current.Generation == 0) return; // Ordinary initial spawn has no transition history to discard.
+            if (!_rig.ApplyReplicatedFloorMovement(current.Generation, current.InTransit, current.Position, current.Rotation)) return;
+            _appliedFloorGeneration = current.Generation; _floorMovementApplied = true;
+            GetComponent<NetOwnerPrediction>()?.ResetForFloorMovement();
+            GetComponent<NetInputSender>()?.ResetForFloorMovement(current.Rotation);
+            OnRaidClockChanged(default, RaidClock.Value);
+            _rig.Look?.ApplyAimPose(current.Rotation.eulerAngles.y, 0f);
+            Debug.Log(NetTuning.LogPrefix + "[client] floor movement applied id=" + ServerPlayerId.Value
+                + " generation=" + current.Generation + " transit=" + current.InTransit + " pos=" + current.Position);
         }
 
         public override void OnNetworkDespawn()
         {
+            _armorTarget = null; _armorPresented = false; _presentedArmor = default;
+            if (_rig != null) _rig.FloorMovementChanged -= PublishFloorMovement;
+            FloorMovement.OnValueChanged -= OnFloorMovementChanged;
             int despawningPlayerId = ServerPlayerId.Value;
             if (Role == NetPlayerRole.Owner) PlayerView.ClearNetworkLocalPlayer(despawningPlayerId);
             ServerPlayerId.OnValueChanged -= OnServerPlayerIdChanged;
@@ -261,6 +441,18 @@ namespace Emberdelve.Net
             MoveParams.OnValueChanged -= OnMoveParamsChanged;
             SkillState.OnValueChanged -= OnSkillStateChanged;
             RaidClock.OnValueChanged -= OnRaidClockChanged;
+            DescentPortals.OnValueChanged -= OnDescentPortalsChanged;
+            GetComponent<NetDescentPortalViews>()?.Apply(default);
+            GetComponent<NetFinalExitView>()?.Hide();
+            ImpactGuardRemaining.OnValueChanged -= OnImpactGuardChanged;
+            if (!IsServer && _rig != null) _rig.ApplyReplicatedImpactGuard(0f);
+            RangedAmmo.OnValueChanged -= OnRangedAmmoChanged;
+            if (!IsServer && _rig != null)
+            {
+                var ranged = _rig.GetComponent<RangedCombat>();
+                if (ranged != null)
+                { ranged.ApplyReplicatedAmmo("", 0, 0); ranged.ApplyReplicatedReload("", false, 0f, 0f); }
+            }
             Vitals.OnValueChanged -= OnVitalsChanged;
 
             NetCombatSender combatSender = GetComponent<NetCombatSender>();
@@ -396,10 +588,52 @@ namespace Emberdelve.Net
             if (view != null) view.OnState(current);
         }
 
+        private void OnDescentPortalsChanged(DescentPortalWire before, DescentPortalWire current)
+            => GetComponent<NetDescentPortalViews>()?.Apply(current);
+        public void SetDescentPortalsFromServer(DescentPortalWire state)
+        { if (IsServer && IsSpawned && state.IsValid && !DescentPortals.Value.Equals(state)) DescentPortals.Value = state; }
+        public bool DescentReady(int floor) => IsSpawned && Rig != null && Rig.IsInPlay && !Rig.IsDead
+            && (Role == NetPlayerRole.HostPlayer || (Role == NetPlayerRole.Owner && DescentPortals.Value.IsValid
+                && DescentPortals.Value.Floor == floor && DescentPortals.Value.Generation == Rig.FloorMovementGeneration));
+        public bool RequestDescent(int floor, int group, int slot)
+        {
+            if (!DescentReady(floor) || floor < 1 || floor > 2 || group < 0 || group > 2 || slot < 0 || slot > 2) return false;
+            if (Role == NetPlayerRole.HostPlayer) return NetInventoryServer.Current != null
+                && NetInventoryServer.Current.RequestDescent(NetworkManager.ServerClientId, NetworkObject, floor, group, slot);
+            int size = DescentPortals.Value.Count / 3;
+            if (slot >= size || !DescentPortals.Value.IsAvailable(group * size + slot)) return false;
+            DescentIntentRpc((byte)floor, (byte)group, (byte)slot); return true;
+        }
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
+        public void DescentIntentRpc(byte floor, byte group, byte slot, RpcParams rpcParams = default)
+        {
+            bool accepted = NetInventoryServer.Current != null && NetInventoryServer.Current.RequestDescent(
+                rpcParams.Receive.SenderClientId, NetworkObject, floor, group, slot);
+            if (rpcParams.Receive.SenderClientId == OwnerClientId) DescentResultRpc(accepted);
+        }
+        [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
+        public void DescentResultRpc(bool accepted)
+        { if (!accepted && Role == NetPlayerRole.Owner) GameEvents.RaiseToast(Rig.PlayerId, "Portal is unavailable or out of reach"); }
+
         private void OnRaidClockChanged(RaidClockWire previous, RaidClockWire current)
         {
             NetOwnerSkillView view = GetComponent<NetOwnerSkillView>();
-            if (view != null) view.OnRaidClock(current);
+            if (view == null) return;
+            if (current.Floor > 0 && (_rig == null || current.MovementGeneration != _rig.FloorMovementGeneration
+                || (current.Enabled && _rig.IsInFloorTransit))) { view.OnRaidClock(default); return; }
+            view.OnRaidClock(current);
+        }
+
+        private void OnImpactGuardChanged(float previous, float current)
+        {
+            if (!IsServer && IsOwner && _rig != null) _rig.ApplyReplicatedImpactGuard(current);
+        }
+
+        private void OnRangedAmmoChanged(RangedAmmoWire previous, RangedAmmoWire current)
+        {
+            if (!IsOwner || IsServer || !current.IsValid) return;
+            Debug.Log(NetTuning.LogPrefix + "[client] ranged-ammo weapon=" + current.Weapon
+                + " magazine=" + current.Magazine + " reserve=" + current.Reserve);
         }
 
         /// <summary>Writes the newest server clock sample to this player's owner-only replicated value.</summary>
@@ -450,7 +684,8 @@ namespace Emberdelve.Net
 
         public bool RequestFloorLootPickup(ulong pickupId)
         {
-            if (pickupId == 0 || !IsOwner || _floorLootSequence >= FloorLootIntentGate.MaxSequence) return false;
+            if (pickupId == 0 || (Role != NetPlayerRole.Owner && Role != NetPlayerRole.HostPlayer)
+                || _floorLootSequence >= FloorLootIntentGate.MaxSequence) return false;
             uint sequence = ++_floorLootSequence;
             if (Role == NetPlayerRole.HostPlayer)
                 return NetInventoryServer.Current != null && NetInventoryServer.Current.RequestFloorLootPickup(
@@ -539,10 +774,10 @@ namespace Emberdelve.Net
 
         [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
         public void CorpseTransferIntentRpc(ulong corpseId, ulong entryId, int amount,
-            ulong corpseRevision, ulong bagRevision, uint sequence, RpcParams rpcParams = default)
+            ulong corpseRevision, ulong bagRevision, uint sequence, int destinationX = -1, int destinationY = -1, RpcParams rpcParams = default)
         {
             NetInventoryServer.Current?.RequestCorpseTransfer(rpcParams.Receive.SenderClientId, NetworkObject,
-                corpseId, entryId, amount, corpseRevision, bagRevision, sequence);
+                corpseId, entryId, amount, corpseRevision, bagRevision, sequence, destinationX, destinationY);
         }
 
         [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
@@ -779,6 +1014,7 @@ namespace Emberdelve.Net
         private void ApplyServerRole()
         {
             if (Role != NetPlayerRole.Server) return; // the host's own player keeps the camera and input the prefab authored
+            StripPresentation();
 
             // RunDirector.TrySpawnNetworkPlayer already stripped the presentation; make it unconditional here too so a
             // rig spawned by some other path is still a headless simulation body.
@@ -849,7 +1085,7 @@ namespace Emberdelve.Net
         private void ApplyReplicatedIdentity()
         {
             _rig.SetNetworkPlayerId(ServerPlayerId.Value);
-            _rig.AssignParty(ServerPartyId.Value, IsOwner);
+            _rig.AssignParty(ServerPartyId.Value, Role == NetPlayerRole.Owner);
             if (Role == NetPlayerRole.Owner) PlayerView.BindNetworkLocalPlayer(_rig.PlayerId);
         }
 

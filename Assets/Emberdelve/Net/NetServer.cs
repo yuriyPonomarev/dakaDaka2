@@ -36,7 +36,7 @@ namespace Emberdelve.Net
     ///
     /// Everything a client says is data: the connect payload is a slot string and a class id string, nothing else.
     /// </summary>
-    internal sealed class NetServer
+    internal sealed partial class NetServer
     {
         private const float StatusSeconds = 2f;
         private const float SceneLoadTimeoutSeconds = 60f;
@@ -72,6 +72,8 @@ namespace Emberdelve.Net
         private readonly List<NetIdentity> _pendingCorpseDisconnects = new List<NetIdentity>();
         // U3A5 rejoin policy: slot (lower case) -> the player id its last actor had. A returning slot is a NEW actor with a NEW id.
         private readonly Dictionary<string, int> _lastRemovedBySlot = new Dictionary<string, int>();
+
+        private readonly Dictionary<int, PlayerRig> _bots = new Dictionary<int, PlayerRig>();
 
         private NetMovementServer _movement;
         private NetSkillServer _skills;
@@ -180,6 +182,142 @@ namespace Emberdelve.Net
         /// <summary>Connections that hold a seat (approved, spawned or about to be).</summary>
         public int SeatCount => _approved.Count;
 
+        public int BotCount => _bots.Count;
+        public int RegisteredAdventurerCount
+        {
+            get
+            {
+                int count = 0;
+                foreach (var entity in CombatRegistry.All) if (entity is PlayerRig) count++;
+                return count;
+            }
+        }
+        private RoyalePopulationDriver _initialPopulation;
+        private RoyaleDescentDriver _descentPopulation;
+        private NetRoyaleMapServer _royaleMaps;
+        private float _nextRoyaleMapTick;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        private bool _royaleMapProofPrepared, _royaleMapProofReported;
+        private readonly bool _royaleMapProof = Array.IndexOf(Environment.GetCommandLineArgs(), "-ember-royale-map-proof") >= 0;
+#endif
+        private float _nextPopulationTick;
+        private string _populationWaitReason;
+
+        /// <summary>Authority-only destination population. Bots never acquire a transport connection
+        /// or PlayerObject ownership; ordinary NGO spawning publishes them to every observer.</summary>
+        public bool TrySpawnRoyaleBot(int floor, int party, string classId, out PlayerRig rig, out string reason)
+        {
+            rig = null; reason = "Network bot spawning is unavailable";
+            if (_nm == null || !_nm.IsServer || !_nm.IsListening || _director == null || _combat == null
+                || !_director.TryResolveClass(classId, out var character)) return false;
+            PlayerRig created = null;
+            bool committed = false;
+            try
+            {
+                if (!_director.FloorCoordinator.TrySpawnBot(floor, party, _playerPrefab, character, out created, out reason)) return false;
+                var networkObject = created.GetComponent<NetworkObject>();
+                var networkRig = created.GetComponent<NetPlayerRig>();
+                if (networkObject == null || networkRig == null)
+                { reason = "Bot prefab is missing its network components"; return false; }
+                networkObject.DontDestroyWithOwner = true;
+                networkObject.Spawn(true);
+                if (!networkObject.IsSpawned || networkObject.IsPlayerObject || networkRig.Role != NetPlayerRole.Server
+                    || !_combat.OnBotAdmitted(created, networkRig))
+                { reason = "Bot network admission failed"; return false; }
+                _bots.Add(created.PlayerId, created);
+                rig = created; committed = true; reason = null;
+                _log("bot admitted id=" + rig.PlayerId + " party=" + rig.PartyId + " floor=" + floor + " netId=" + networkObject.NetworkObjectId);
+                return true;
+            }
+            catch (Exception error)
+            {
+                reason = "Bot spawn failed: " + error.Message;
+                _logError(reason);
+                return false;
+            }
+            finally
+            {
+                if (!committed && created != null) RetireBot(created, "bot spawn rollback");
+            }
+        }
+
+        private void TickRoyalePopulation(float now)
+        {
+            if (_director == null || !_director.IsStarted || !_director.RoyaleMode.HasValue
+                || now < _nextPopulationTick) return;
+            _nextPopulationTick = now + .25f;
+            if (_initialPopulation != null && _initialPopulation.Started)
+            {
+                if (_descentPopulation == null) _descentPopulation = new RoyaleDescentDriver(_director,
+                    _director.Config != null ? _director.Config.raidDurationSeconds : 600,
+                    PrepareRoyaleDestination, SpawnInitialBot, floor => _royaleMaps != null && _royaleMaps.PublicStateReady(floor));
+                if (_descentPopulation.Tick(now, out string wait)) _log("Royale destination population arrived");
+                else if (wait != _populationWaitReason) { _populationWaitReason = wait; _log("Royale descent: " + wait); }
+                return;
+            }
+            if (_initialPopulation == null)
+                _initialPopulation = new RoyalePopulationDriver(_director, 1,
+                    _director.Config != null ? _director.Config.raidDurationSeconds : 600, 15f, SpawnInitialBot);
+            // Approved connections must all finish their authoritative map ACK and actor admission.
+            bool ready = _approved.Count > 0 && _table.Count == _approved.Count && _pending.Count == 0;
+            if (_initialPopulation.Tick(now, ready, out string reason))
+                _log("Royale floor 1 started population=" + _director.FloorCoordinator.ReservedCount(1));
+            else if (reason != _populationWaitReason)
+            { _populationWaitReason = reason; _log("Royale population: " + reason); }
+        }
+
+        private bool PrepareRoyaleDestination(int floor, out string reason)
+        {
+            reason = "Royale destination prerequisites missing";
+            if (_modulePlan == null || _moduleCatalog == null || _director?.Layout == null) return false;
+            if (!RoyaleFloorCatalogs.TryLoad(floor, out var destinationCatalog, out reason)) return false;
+            if (!DungeonModulePlanner.TryCreate(unchecked(_modulePlan.Seed + floor * 7919), destinationCatalog.Modules,
+                out var plan, out reason)) return false;
+            var layout = _director.Layout;
+            float spacing = Mathf.Max(layout.gridWidth, layout.gridHeight) * layout.CellSize + 100f;
+            return _director.FloorCoordinator.TryPrepare(floor, layout, destinationCatalog, plan,
+                layout.origin + Vector3.right * (spacing * (floor - 1)), out reason);
+        }
+
+        private bool SpawnInitialBot(int floor, int party, out PlayerRig rig, out string reason)
+        {
+            rig = null; reason = "No approved class for bot";
+            string preferred = _bots.Count % 2 == 0 ? "warrior" : "archer";
+            if (!_director.TryResolveClass(preferred, out var character))
+            {
+                foreach (var session in _director.Players)
+                    if (!session.IsBot && session.Class != null) { character = session.Class; break; }
+            }
+            return character != null && TrySpawnRoyaleBot(floor, party, character.classId, out rig, out reason);
+        }
+
+        // Removal is lifecycle-only, not a substitute for death/corpse settlement.
+        private void RetireBot(PlayerRig rig, string reason)
+        {
+            if (rig == null) return;
+            _bots.Remove(rig.PlayerId);
+            _combat?.OnBotRemoved(rig.CombatId);
+            _director?.RemovePlayer(rig.PlayerId, reason);
+            var networkObject = rig.GetComponent<NetworkObject>();
+            if (networkObject != null && networkObject.IsSpawned)
+            {
+                try { networkObject.Despawn(true); }
+                catch (Exception error)
+                {
+                    _logError("Bot despawn failed id=" + rig.PlayerId + ": " + error.Message);
+                    UnityEngine.Object.Destroy(rig.gameObject);
+                }
+            }
+            else if (Application.isPlaying) UnityEngine.Object.Destroy(rig.gameObject);
+            else UnityEngine.Object.DestroyImmediate(rig.gameObject);
+        }
+
+        private void RetireAllBots()
+        {
+            foreach (var rig in new List<PlayerRig>(_bots.Values)) RetireBot(rig, "shutdown");
+            _bots.Clear();
+        }
+
         public void Install()
         {
             _nm.ConnectionApprovalCallback = Approve;
@@ -210,6 +348,7 @@ namespace Emberdelve.Net
             int mapSeed = unchecked((int)(raidSeed ^ (raidSeed >> 32)));
             if (DungeonModulePlanner.TryCreate(mapSeed, _moduleCatalog.Modules, out _modulePlan, out string reason))
             {
+                _modulePlan = _modulePlan.WithRoyaleMode(RunContext.SelectedRoyaleMode);
                 string variation = string.Empty;
                 if (_args.ModularMapProofServer && !FindDifferentSeedPlan(_modulePlan, out variation))
                 {
@@ -271,6 +410,31 @@ namespace Emberdelve.Net
                 FlushAwaitingSpawns();
             }
 
+            if (_director != null && _director.RoyaleMode.HasValue && now >= _nextRoyaleMapTick)
+            {
+                _nextRoyaleMapTick = now + .25f;
+                if (_royaleMaps == null) _royaleMaps = new NetRoyaleMapServer(_nm, _director,
+                    client => _approved.TryGetValue(client, out var info) && info.Connected && info.ModulePlanReady, _log, client => _inventory?.PublishDestinationWorld(client));
+                _royaleMaps.Tick(now);
+            }
+            TickRoyalePopulation(now);
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if (_royaleMapProof && _initialPopulation != null && _initialPopulation.Started)
+            {
+                if (!_royaleMapProofPrepared)
+                {
+                    _royaleMapProofPrepared = true;
+                    for (int floor = 2; floor <= 3; floor++)
+                    {
+                        if (!PrepareRoyaleDestination(floor, out string reason))
+                            _logError("Royale geometry proof preparation failed floor=" + floor + " reason=" + reason);
+                    }
+                }
+                if (!_royaleMapProofReported && _royaleMaps != null && _royaleMaps.PublicStateReady(2) && _royaleMaps.PublicStateReady(3))
+                { _royaleMapProofReported = true; _log("Royale geometry proof BOTH DESTINATIONS ACKNOWLEDGED publicState=true"); }
+            }
+            TickRoyaleDescentProof();
+#endif
             PublishRaidClock(now);
 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -489,6 +653,8 @@ namespace Emberdelve.Net
                 if (!TryPlaceContestPlayers(chest, a.Rig, b.Rig, out float distanceA, out float distanceB)) continue;
                 if (!chest.InstallContestFixtureInstance(instance)) continue;
                 _inventory?.PublishChestState(chest);
+                if (Array.IndexOf(Environment.GetCommandLineArgs(), "-ember-item-model-review") >= 0)
+                    GrantItemModelReviewArmor(a, catalog);
                 _log("chest-contest fixture chest=" + chest.ChestId + " uid=" + instance.UidText +
                      " playerA=" + a.PlayerId + " playerB=" + b.PlayerId + " clientA=" + a.ClientId + " clientB=" + b.ClientId +
                      " reach=" + _director.InteractionReach.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) +
@@ -500,6 +666,26 @@ namespace Emberdelve.Net
                 return;
             }
             _logError("chest-contest fixture unavailable: no Supply chest passed production CanInteract for both server actors");
+        }
+
+        // Explicit development visual review only; ordinary contest fixtures keep their original loadouts.
+        private void GrantItemModelReviewArmor(NetIdentity owner, ItemCatalog catalog)
+        {
+            if (owner?.Rig?.Inventory == null) return;
+            foreach (string id in new[] { "boiled_cuirass", "graspwrap_gloves", "footpad_boots", "ashen_cloak", "emberthread_mantle" })
+            {
+                if (!catalog.TryResolveItem(id, out ItemData definition, out string reason) ||
+                    !catalog.TryMintCommon(_director.Session.Issuer, definition, out ItemInstance instance, out reason) ||
+                    !owner.Rig.Inventory.TryAddInstance(instance, out reason))
+                {
+                    _logError("item-model-review grant failed item=" + id + " reason=" + reason);
+                    return;
+                }
+                // TryAddInstance raises the existing InventoryChanged event; NetInventoryServer sends the owner snapshot.
+                _log("item-model-review granted player=" + owner.PlayerId + " item=" + id + " uid=" + instance.UidText);
+            }
+            _log("item-model-review ready player=" + owner.PlayerId + " bagRevision=" + owner.Rig.Inventory.Revision +
+                " bagCells=" + owner.Rig.Inventory.UsedCells + " equippedByFixture=False");
         }
 
         private static bool TryPlaceContestPlayers(ChestInteractable chest, PlayerRig a, PlayerRig b,
@@ -1793,18 +1979,16 @@ namespace Emberdelve.Net
             if (_director == null || now < _nextRaidClockPublishAt) return;
             _nextRaidClockPublishAt = now + 0.25f;
 
-            bool enabled = _director.RaidCountdownEnabled;
-            var sample = new RaidClockWire
-            {
-                Enabled = enabled,
-                RemainingSeconds = enabled ? Mathf.Max(0f, _director.RaidSecondsRemaining) : 0f,
-                Expired = enabled && _director.RaidExpired
-            };
             foreach (NetIdentity row in _table.All)
             {
                 if (row?.Object == null) continue;
                 NetPlayerRig view = row.Object.GetComponent<NetPlayerRig>();
-                if (view != null) view.SetRaidClockFromServer(sample);
+                if (view != null)
+                {
+                    view.SetRaidClockFromServer(RaidClockWire.From(_director.ClockFor(row.Rig)));
+                    view.SetDescentPortalsFromServer(DescentPortalWire.Capture(_director, row.Rig));
+                    view.SetRoyaleZoneFromServer(RoyaleZoneWire.Capture(_director, row.Rig));
+                }
             }
         }
 
@@ -1921,9 +2105,12 @@ namespace Emberdelve.Net
 
         private void Decide(ulong clientId, byte[] payload, NetworkManager.ConnectionApprovalResponse response)
         {
-            NetApprovalResult r = _sceneFailed
-                ? new NetApprovalResult(false, "server not ready", "", "")
-                : NetApproval.Evaluate(payload, NetTuning.ProtocolVersion, _approved.Count, _args.MaxPlayers, SlotInUse, ClassApproved);
+            NetApprovalResult r = _sceneFailed || (_director != null && _director.RoyaleMode.HasValue && _director.FloorCoordinator.IsAdmissionClosed(1))
+                ? new NetApprovalResult(false, _sceneFailed ? "server not ready" : "Royale admission closed", "", "")
+                : NetApproval.Evaluate(payload, NetTuning.ProtocolVersion, _approved.Count,
+                    _director != null && _director.RoyaleMode.HasValue
+                        ? new Emberdelve.Rules.RoyaleRoster(_director.RoyaleMode.Value).Capacity : _args.MaxPlayers,
+                    SlotInUse, ClassApproved);
 
             response.Approved = r.Approved;
             response.CreatePlayerObject = false;
@@ -2289,6 +2476,8 @@ namespace Emberdelve.Net
 
         private void OnRunEnded(int playerId, RunResult result)
         {
+            // Bots have no owner UI. Their corpse custody and replicated death remain normal actor flow.
+            if (result.PlayerId == playerId && _bots.ContainsKey(playerId)) return;
             if (result.PlayerId != playerId || !_table.TryGetByPlayer(playerId, out NetIdentity row) || row == null)
             {
                 _logError("run-result not sent: no matching admitted owner for player=" + playerId);
@@ -2431,6 +2620,7 @@ namespace Emberdelve.Net
         /// <summary>Server stops: every remaining actor is taken out of the run first so the counts end at zero.</summary>
         public void OnShutdownBegin()
         {
+            RetireAllBots();
             RetryCorpseDisconnects();
             if (_pendingCorpseDisconnects.Count > 0)
                 _logError("server shutdown with " + _pendingCorpseDisconnects.Count + " disconnect loadout(s) still on retained rigs; no durable corpse persistence is configured");
@@ -2451,6 +2641,8 @@ namespace Emberdelve.Net
 
         public void Dispose()
         {
+            _royaleMaps?.Dispose(); _royaleMaps = null;
+            RetireAllBots();
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
             if (_doorProofOccluder != null) UnityEngine.Object.Destroy(_doorProofOccluder);
             if (_corpseProofHostPresenter != null)

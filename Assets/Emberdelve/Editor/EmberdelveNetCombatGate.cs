@@ -83,6 +83,21 @@ namespace Emberdelve.EditorTools
             public double Amount, LocMult, BlockReduction, OutMult, Flat, Armor, Step, Zone, Charge, Air, AirScale, Dist, Px, Py, Pz;
         }
 
+        private static bool _enemyOnly, _parryOnly;
+        public static void RunParryProofOnly()
+        {
+            _parryOnly = true;
+            try { Run(); }
+            finally { _parryOnly = false; }
+        }
+
+        public static void RunEnemyProofOnly()
+        {
+            _enemyOnly = true;
+            try { Run(); }
+            finally { _enemyOnly = false; }
+        }
+
         public static void Run()
         {
             int exit = 1;
@@ -165,16 +180,34 @@ namespace Emberdelve.EditorTools
                 if (!File.Exists(exe)) return 1;
             }
 
-            int rc = MeleeSession(exe, runDir, logs, sword, tables, warriorHealth, interval, stop);
-            if (rc != 0) return rc;
-            rc = ParrySession(exe, runDir, logs, sword, tables, interval, stop);
-            if (rc != 0) return rc;
-            rc = RangedSession(exe, runDir, logs, bow, tables);
-            if (rc != 0) return rc;
-            rc = AbuseSession(exe, runDir, logs);
-            if (rc != 0) return rc;
-            rc = EnemySession(exe, runDir, logs);
-            if (rc != 0) return rc;
+            int rc;
+            if (_parryOnly)
+            {
+                rc = ParrySession(exe, runDir, logs, sword, tables, interval, stop);
+                if (rc != 0) return rc;
+            }
+            else if (!_enemyOnly)
+            {
+                rc = MeleeSession(exe, runDir, logs, sword, tables, warriorHealth, interval, stop);
+                if (rc != 0) return rc;
+                rc = ParrySession(exe, runDir, logs, sword, tables, interval, stop);
+                if (rc != 0) return rc;
+                rc = RangedSession(exe, runDir, logs, bow, tables);
+                if (rc != 0) return rc;
+                WeaponData crossbow = warrior.secondaryWeapon;
+                Check(crossbow != null && crossbow.IsRanged && crossbow.magazineSize == 1 && !crossbow.reloadWhileHeld,
+                    "shipped crossbow holds one bolt and requires a fresh reload press");
+                if (crossbow == null || !crossbow.IsRanged) return 1;
+                rc = RangedSession(exe, runDir, logs, crossbow, tables, true);
+                if (rc != 0) return rc;
+                rc = AbuseSession(exe, runDir, logs);
+                if (rc != 0) return rc;
+            }
+            if (!_parryOnly)
+            {
+                rc = EnemySession(exe, runDir, logs);
+                if (rc != 0) return rc;
+            }
 
             string[] forbidden = { "error CS", "NullReferenceException", "Exception:", "InvalidOperationException" };
             foreach (string path in Directory.GetFiles(logs, "*.log"))
@@ -239,6 +272,21 @@ namespace Emberdelve.EditorTools
             if (dead == null) { DumpTail(s.ServerLog); }
             if (dead != null) Check(Near(GD(dead, "max"), warriorHealth), "B's maximum health is the derived pool " + warriorHealth + " (was " + dead.Groups["max"].Value + ")");
             Thread.Sleep(5000); // B's post-mortem attempts and A's script end
+            Check(WaitForRegex(logA, @"script melee-duel done role=attacker why=held-release-verified-window", 15, a) != null,
+                "held melee: sender finished its hold/release observation window");
+            string heldLog = ReadShared(s.ServerLog);
+            Check(LogContains(logA, "owner-swing-visual id=" + idA + " swing="),
+                "the owning client drives its real first-person weapon from the server swing state");
+            Match heldStart = Regex.Match(heldLog, @"combat-intent client=" + clientA + @" id=" + idA + @" kind=AttackHold seq=\d+ outcome=Accepted");
+            Match heldEnd = Regex.Match(heldLog, @"combat-intent client=" + clientA + @" id=" + idA + @" kind=AttackRelease seq=\d+ outcome=Accepted");
+            Check(heldStart.Success && heldEnd.Success && heldEnd.Index > heldStart.Index, "held melee: server accepted hold then release");
+            if (heldStart.Success && heldEnd.Success && heldEnd.Index > heldStart.Index)
+            {
+                Check(Regex.Matches(heldLog.Substring(heldStart.Index, heldEnd.Index - heldStart.Index), @"combat-swing id=" + idA + " ").Count >= 2,
+                    "held melee: server started multiple swings from refreshed held intent");
+                Check(Regex.Matches(heldLog.Substring(heldEnd.Index), @"combat-swing id=" + idA + " ").Count == 0,
+                    "held melee: release stops subsequent server swings");
+            }
 
             List<HitLine> hits = ParseHits(s.ServerLog);
             List<HitLine> onB = hits.FindAll(h => h.Attacker == idA && h.Target == idB && h.Source == "Melee");
@@ -331,8 +379,14 @@ namespace Emberdelve.EditorTools
             Check(WaitForRegex(logB, @"\[client\] owner id=" + idB + @" views=2 owned=1", 60, b) != null, "parry: B settles with views=2");
             Check(LogContains(logB, C + "combat sender started script=melee-parry realInput=False"), "parry: B's combat sender runs the melee-parry script");
 
-            File.WriteAllText(goA, "go stop=" + F(stop) + " interval=" + F(interval) + " presses=1");
             File.WriteAllText(goB, "go hold=8");
+            // Inventory replication must finish before A's only swing, including on slow machines.
+            Match readyGuard = WaitForRegex(s.ServerLog, @"combat-intent client=" + clientB + @" id=" + idB +
+                @" kind=GuardDown seq=\d+ outcome=Accepted reason=None", 60, s.Server);
+            Check(readyGuard != null, "parry: defender unequipped shield and server accepted blade guard before attacker starts");
+            if (readyGuard == null) return 1;
+            Thread.Sleep(650); // Match the scripted movement/aim settle before the attack approaches.
+            File.WriteAllText(goA, "go stop=1.25 interval=" + F(interval) + " presses=1");
 
             int strikes = sword.RiposteStrikeCount;
             Match last = WaitForRegex(s.ServerLog, @"combat-swing id=" + idB + @" .*riposte=" + strikes, 90, s.Server);
@@ -347,19 +401,19 @@ namespace Emberdelve.EditorTools
             if (onB.Count == 1)
             {
                 HitLine h = onB[0];
-                Check(h.Blocked == "True" && h.GuardBroken == "False", "parry: B's sword-and-shield block held (not broken)");
+                Check(h.Blocked == "True" && h.GuardBroken == "False", "parry: B's physical blade block held (not broken)");
                 Check(h.Amount == 0.0, "parry: the held block took ZERO HP (reported amount " + F(h.Amount) + ")");
                 Check(Near(h.BlockReduction, Emberdelve.BladeDefense.BladeGuardRules.HeldGuardReduction), "parry: the reported reduction is the held-guard value");
             }
 
-            double mult = Emberdelve.BladeDefense.RiposteRules.StrikeMultiplier(sword.riposteDamageMultiplier);
+            double mult = sword.riposteDamageMultiplier; // Contact must earn the physical parry region, not an ordinary edge block.
             Check(onA.Count == strikes, "parry: B's riposte landed exactly the data's " + strikes + " strikes on A (got " + onA.Count + ")");
             for (int i = 0; i < onA.Count; i++)
             {
                 HitLine h = onA[i];
                 string why = MeleeMismatch(h, sword, tables, true);
                 Check(why == null && h.Blocked == "False", "parry: riposte hit " + (i + 1) + " (" + F(h.Amount) + ") matches the data-derived value" + (why != null ? " (" + why + ")" : ""));
-                Check(Near(h.Step, mult), "parry: riposte hit " + (i + 1) + " carries the data multiplier x" + F(mult) + " (step " + F(h.Step) + ")");
+                Check(Near(h.Step, mult), "parry: riposte hit " + (i + 1) + " carries the confirmed-parry multiplier x" + F(mult) + " (step " + F(h.Step) + ")");
             }
 
             for (int k = 1; k <= strikes; k++)
@@ -448,20 +502,22 @@ namespace Emberdelve.EditorTools
         // 2. ranged shot
         // ============================================================================================
 
-        private static int RangedSession(string exe, string runDir, string logs, WeaponData bow, List<HitLocationTable> tables)
+        private static int RangedSession(string exe, string runDir, string logs, WeaponData bow, List<HitLocationTable> tables, bool singleShot = false)
         {
-            Debug.Log(Tag + " ---- session 2: ranged-shot");
-            Session s = StartServer(exe, runDir, logs, "ranged", "-ember-net-combat-test-fixture-server -ember-net-no-enemies -ember-net-party-size 1");
+            string prefix = singleShot ? "crossbow" : "ranged";
+            string shooterClass = singleShot ? "warrior" : "archer";
+            Debug.Log(Tag + " ---- session: " + prefix);
+            Session s = StartServer(exe, runDir, logs, prefix, "-ember-net-combat-test-fixture-server -ember-net-no-enemies -ember-net-party-size 1");
             if (s == null) return 1;
 
-            string goA = Path.Combine(runDir, "ranged_a.go"), goB = Path.Combine(runDir, "ranged_b.go");
-            string quitA = Path.Combine(runDir, "ranged_a.quit"), quitB = Path.Combine(runDir, "ranged_b.quit");
+            string goA = Path.Combine(runDir, prefix + "_a.go"), goB = Path.Combine(runDir, prefix + "_b.go");
+            string quitA = Path.Combine(runDir, prefix + "_a.quit"), quitB = Path.Combine(runDir, prefix + "_b.quit");
             foreach (string f in new[] { goA, goB, quitA, quitB }) if (File.Exists(f)) File.Delete(f);
 
-            string logA = Path.Combine(logs, "ranged_a.log"), logB = Path.Combine(logs, "ranged_b.log");
-            Process a = Launch(exe, logA, ClientArgs(s.Port, "rng-a", "archer", Q(quitA), "-ember-net-script ranged-shot -ember-net-script-start-file " + Q(goA)) + " -ember-net-autoquit 500");
-            Match admA = WaitForRegex(s.ServerLog, AdmittedRegex("rng-a", "archer"), 90, s.Server);
-            Check(a != null && admA != null, "server admitted A (archer)");
+            string logA = Path.Combine(logs, prefix + "_a.log"), logB = Path.Combine(logs, prefix + "_b.log");
+            Process a = Launch(exe, logA, ClientArgs(s.Port, "rng-a", shooterClass, Q(quitA), "-ember-net-script ranged-shot -ember-net-script-start-file " + Q(goA)) + " -ember-net-autoquit 500");
+            Match admA = WaitForRegex(s.ServerLog, AdmittedRegex("rng-a", shooterClass), 90, s.Server);
+            Check(a != null && admA != null, "server admitted A (" + shooterClass + ")");
             if (admA == null) return 1;
             Process b = Launch(exe, logB, ClientArgs(s.Port, "rng-b", "warrior", Q(quitB), "-ember-net-script ranged-shot -ember-net-script-start-file " + Q(goB)) + " -ember-net-autoquit 500");
             Match admB = WaitForRegex(s.ServerLog, AdmittedRegex("rng-b", "warrior"), 90, s.Server);
@@ -499,8 +555,12 @@ namespace Emberdelve.EditorTools
             Check(WaitForRegex(logB, @"\[client\] owner id=" + idB + @" views=2 owned=1", 60, b) != null, "B settles with views=2");
             string fileA = "go shots=2 hold=" + F(hold) + " early=" + F(early) + " " + common;
             string fileB = "go " + common;
-            File.WriteAllText(goA, fileA);
-            File.WriteAllText(goB, fileB);
+            // The crossbow becomes active only after the scripted ordinary weapon swap.
+            if (singleShot) { File.WriteAllText(goA, fileA); File.WriteAllText(goB, fileB); }
+            Match initialAmmo = WaitForRegex(s.ServerLog, @"combat-ammo id=" + idA + @" weapon=" + Regex.Escape(bow.weaponId)
+                + @" magazine=(?<mag>\d+) reserve=(?<reserve>\d+)", 15, s.Server);
+            Check(initialAmmo != null, "server publishes the shooter's authoritative initial ammunition");
+            if (!singleShot) { File.WriteAllText(goA, fileA); File.WriteAllText(goB, fileB); }
 
             bool shotsDone = WaitForRegex(logA, @"\[client\] script ranged-shot done role=shooter", 120, a) != null;
             Check(shotsDone, "the shooter's script finished");
@@ -520,6 +580,25 @@ namespace Emberdelve.EditorTools
             Check(shots.Count >= 2 && shots[0].Charge >= 0.999 && shots[1].Charge >= 0.999, "the two full draws carry charge 1.0, measured by the server's clock");
             Check(CountMatches(s.ServerLog, @"combat-intent client=" + clientA + @" id=" + idA + @" kind=DrawRelease seq=\d+ outcome=Accepted reason=None charge=1\.000") >= 2, "the release lines show the server's charge 1.000");
 
+            Check(CountMatches(s.ServerLog, @"combat-intent client="+clientA+@" id="+idA+@" kind=DrawCancel seq=\d+ outcome=Accepted") >= 2,
+                "charged draw cancellation and its duplicate are accepted without other actions");
+            Check(CountMatches(s.ServerLog, @"combat-intent client="+clientA+@" id="+idA+@" kind=DrawRelease seq=\d+ outcome=Refused reason=NotDrawing") >= 1,
+                "release after charged cancellation cannot launch an arrow");
+            Check(shots.Count == CountMatches(s.ServerLog, @"combat-intent client="+clientA+@" id="+idA+@" kind=DrawRelease seq=\d+ outcome=Accepted"),"only accepted releases create projectiles; cancellation creates none");
+
+            if (singleShot)
+            {
+                string intents = @"combat-intent client=" + clientA + @" id=" + idA;
+                Check(shots.Count == 2, "single-shot crossbow launches exactly two bolts separated by explicit reload");
+                Check(CountMatches(s.ServerLog, intents + @" kind=Reload seq=\d+ outcome=Accepted reason=None") == 1,
+                    "exactly one explicit crossbow reload accepted");
+                Check(CountMatches(s.ServerLog, intents + @" kind=Reload seq=\d+ outcome=Refused reason=TooEarly") == 1,
+                    "duplicate reload during its timer refused");
+                Check(CountMatches(s.ServerLog, intents + @" kind=DrawStart seq=\d+ outcome=Refused reason=NoAmmo") == 2,
+                    "empty trigger and trigger during reload both refused without a bolt");
+            }
+            else
+            {
             // The early draw: either the server refuses it (TooEarly) or it fires with a measured charge below 1; a client cannot claim a charge.
             List<string> releases = Lines(s.ServerLog, @"combat-intent client=" + clientA + @" id=" + idA + @" kind=DrawRelease ");
             Check(releases.Count >= 3, "the shooter released three draws (" + releases.Count + ")");
@@ -531,6 +610,7 @@ namespace Emberdelve.EditorTools
                 double minHold = Math.Max(early, CombatNetLimits.ClientMinIntervalSeconds);
                 if (minHold / drawSeconds < bow.minChargeToFire * 0.9) Check(last.Groups["r"].Value == "TooEarly", "an early release is refused with reason TooEarly");
                 else Debug.Log(Tag + " early-release refusal not asserted: the client's send spacing (" + F(minHold) + " s) exceeds the minimum charge window (" + F(drawSeconds * bow.minChargeToFire) + " s)");
+            }
             }
 
             List<HitLine> hits = ParseHits(s.ServerLog).FindAll(h => h.Attacker == idA && h.Target == idB && h.Source == "Projectile");
@@ -550,6 +630,27 @@ namespace Emberdelve.EditorTools
                 Check(hits.Exists(h => h.AirScale >= 0.0 && Math.Abs(h.AirScale - bow.AirTimeFalloffScale((float)h.Air)) <= 0.01), "the falloff scale applied equals the weapon's table at the logged air time");
 
             Check(CountMatches(s.ServerLog, @"combat reject=") == 0, "honest ranged traffic produced no combat reject");
+            if (initialAmmo != null)
+            {
+                int expectedMagazine = GI(initialAmmo, "mag") - shots.Count + (singleShot ? 1 : 0);
+                int expectedReserve = GI(initialAmmo, "reserve") - (singleShot ? 1 : 0);
+                if (singleShot)
+                {
+                    Check(GI(initialAmmo, "mag") == 1 && GI(initialAmmo, "reserve") > 0, "crossbow starts with one loaded bolt and owned reserve");
+                    string ammoPattern = @"combat-ammo id=" + idA + @" weapon=" + Regex.Escape(bow.weaponId) + @" magazine=(?<mag>\d+) reserve=(?<reserve>\d+)";
+                    MatchCollection states = Regex.Matches(ReadShared(s.ServerLog), ammoPattern);
+                    int reserve = GI(initialAmmo, "reserve");
+                    Check(states.Count == 4 && GI(states[0], "mag") == 1 && GI(states[0], "reserve") == reserve
+                        && GI(states[1], "mag") == 0 && GI(states[1], "reserve") == reserve
+                        && GI(states[2], "mag") == 1 && GI(states[2], "reserve") == reserve - 1
+                        && GI(states[3], "mag") == 0 && GI(states[3], "reserve") == reserve - 1,
+                        "authoritative ammo sequence is loaded -> spent -> one reserve transferred -> spent; no implicit refill");
+                }
+                Check(expectedMagazine >= 0 && WaitForRegex(logA, @"\[client\] ranged-ammo weapon=" + Regex.Escape(bow.weaponId)
+                    + @" magazine=" + expectedMagazine + @" reserve=" + expectedReserve + @"(?:\s|$)", 15, a) != null,
+                    "owner sees each accepted shot spent once; refused early release spends no ammunition");
+                Check(!LogContains(logB, "ranged-ammo weapon=" + bow.weaponId), "observer receives no private archer ammunition state");
+            }
             Check(WaitForCount(logB, @"\[client\] server-shot id=" + idA + " ", shots.Count, 20, b), "B (observer) was told every arrow launch (" + shots.Count + ")");
             Check(WaitForCount(logB, @"\[client\] server-flight-end id=" + idA + " ", shots.Count, 20, b), "B was told every flight end");
             foreach (Match m in Regex.Matches(ReadShared(logB), @"server-flight-end id=" + idA + @" serial=\d+ air=(?<air>" + NumBody + @") replicaAir=(?<rep>" + NumBody + ")"))
@@ -737,7 +838,9 @@ namespace Emberdelve.EditorTools
                 @"combat-enemy-proof fixture player=" + attackerId + @" enemy=(?<enemy>\d+) distance=(?<distance>\d+(?:\.\d+)?) lineOfSight=True enemyStunned=True placement=server-dev", 20, s.Server);
             Check(fixture != null, "server staged the proof attacker beside a live, held enemy with clear line of sight");
 
-            Match view = WaitForRegex(logA, @"\[client\] enemy-view summary total=(?<total>\d+) alive=(?<alive>\d+) dead=(?<dead>\d+) poses=(?<poses>\d+)", 40, a);
+            // The initial snapshot can precede the first pose packet. Wait for the required state,
+            // not merely the first summary line, while retaining the full-count/live/pose assertions.
+            Match view = WaitForRegex(logA, @"\[client\] enemy-view summary total=(?<total>\d+) alive=(?<alive>[1-9]\d*) dead=(?<dead>\d+) poses=(?<poses>[1-9]\d*)", 40, a);
             Check(view != null, "the client logged an enemy-view summary");
             if (view != null)
             {

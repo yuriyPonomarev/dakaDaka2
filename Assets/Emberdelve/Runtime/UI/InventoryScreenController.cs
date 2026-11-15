@@ -45,7 +45,7 @@ namespace Emberdelve.UI
         private const float PanelInset = 16f;
         private const float ColumnGap = 10f;
         private const float HeaderHeight = 26f;
-        private const float DetailHeight = 44f;
+        private const float DetailHeight = 30f;
         // The instruction band needs three 13pt lines (the selected-item hint); the detail line only ever wraps to two.
         private const float CarryHeight = 62f;
 
@@ -93,6 +93,14 @@ namespace Emberdelve.UI
         private Equipment _equipment => _model.Equipment;
 
         private Canvas _canvas;
+        private ulong _splitStackId, _splitRevision;
+        private int _splitAmount;
+        private bool _splitChoosingCell;
+        private RectTransform _splitDialog;
+        private UnityEngine.UI.Text _splitAmountText;
+        private UnityEngine.UI.Image _splitGhost;
+        public bool IsSplitting => _splitStackId != 0;
+
         private RectTransform _root;
         private RectTransform _panel;
         private Image _backdrop;
@@ -147,7 +155,7 @@ namespace Emberdelve.UI
         public bool IsLootCompanion { get; private set; }
         private void LateUpdate()
         {
-            if (_root != null && IsOpen) _root.localScale = Vector3.one * Mathf.Min(1f, Screen.width / (IsLootCompanion ? 1480f : 940f), Screen.height / 700f);
+            if (_root != null && IsOpen) _root.localScale = Vector3.one * LootPanelStyle.InventoryScale(IsLootCompanion);
         }
 
         private bool RunEnded => _director != null && (_director.State == RunState.Dead || _director.State == RunState.Extracted
@@ -248,6 +256,7 @@ namespace Emberdelve.UI
         {
             if (!IsOpen) return;
             IsOpen = false;
+            CancelSplit();
             InventoryInputFocus.Close(this);
 
             // Closing drops the selection, not an item: the selected stack never left the bag, so there is
@@ -327,12 +336,17 @@ namespace Emberdelve.UI
         /// Reads mouse clicks while the screen is open. Called by the HUD every frame so this screen does not
         /// need its own Input Action map: the bag is presentation and input routing stays in one place.
         /// </summary>
+        private bool _dragArmed;
+        private Vector2 _dragStart;
+        public void CancelCarry() => CancelSelection();
+
         public void HandlePointer()
         {
             if (!IsOpen) return;
             if (_rig != null && _rig.Input != null && _rig.Input.QuickWheelCaptured) return;
             if (!IsLootCompanion && Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
             {
+                if (IsSplitting) { CancelSplit(); Rebuild(); return; }
                 Close();
                 _director?.SetInventoryOpen(false);
                 return;
@@ -367,6 +381,19 @@ namespace Emberdelve.UI
 
             if (_rig != null && _rig.GetComponent<HotbarController>() is HotbarController activeWheel && activeWheel.WheelOpen) return;
             Vector2 screen = mouse.position.ReadValue();
+            if (IsSplitting)
+            {
+                HandleSplitPointer(screen, mouse);
+                return;
+            }
+            if (!_showCharacter && mouse.leftButton.wasPressedThisFrame && Keyboard.current != null &&
+                Keyboard.current.ctrlKey.isPressed && TryCellAt(screen, out var splitCell))
+            {
+                int splitIndex = _inventory.IndexAtCell(splitCell);
+                if (splitIndex >= 0) BeginSplit(_inventory.Slots[splitIndex]);
+                return;
+            }
+
 
             UpdateGhost(screen);
             ShowTooltipAt(screen);
@@ -376,8 +403,24 @@ namespace Emberdelve.UI
             // selection is re-resolved before anything is done with it.
             ValidateSelection();
 
-            if (mouse.leftButton.wasPressedThisFrame) HandleClick(screen, false);
-            else if (mouse.rightButton.wasPressedThisFrame) HandleClick(screen, true);
+            if (mouse.leftButton.wasPressedThisFrame)
+            {
+                bool wasCarrying = HasSelection;
+                HandleClick(screen, false);
+                _dragArmed = !wasCarrying && HasSelection;
+                _dragStart = screen;
+            }
+            else if (mouse.rightButton.wasPressedThisFrame)
+            {
+                _dragArmed = false;
+                if (Keyboard.current != null && Keyboard.current.shiftKey.isPressed) TryDropAt(screen);
+                else HandleClick(screen, true);
+            }
+            if (mouse.leftButton.wasReleasedThisFrame && _dragArmed)
+            {
+                _dragArmed = false;
+                if ((screen - _dragStart).sqrMagnitude > 36f && HasSelection) HandleClick(screen, false);
+            }
 
             HandleHotbarKeys(screen);
             HandleDropKey(screen);
@@ -413,12 +456,10 @@ namespace Emberdelve.UI
                 int index = _inventory.IndexAtCell(cell);
                 if (index < 0) return false;
                 InventorySlot source = _inventory.Slots[index];
-                if (source.Instance == null)
-                {
-                    GameEvents.RaiseToast(ToastOwner, "Only gear can be dropped");
-                    return false;
-                }
-                accepted = SubmitInventoryCommand(InventoryCommandKind.Drop, source, default, Vector2Int.zero, EquipmentSlot.None, Guid.Empty, Guid.Empty, out reason);
+                InventoryCommandKind dropKind = source.Instance != null ? InventoryCommandKind.Drop
+                    : (Keyboard.current != null && Keyboard.current.ctrlKey.isPressed
+                        ? InventoryCommandKind.DropOne : InventoryCommandKind.DropStack);
+                accepted = SubmitInventoryCommand(dropKind, source, default, Vector2Int.zero, EquipmentSlot.None, Guid.Empty, Guid.Empty, out reason);
             }
             else return false;
 
@@ -646,6 +687,33 @@ namespace Emberdelve.UI
             }
         }
 
+        private void QuickTransferUtility(InventorySlot source)
+        {
+            string reason = null;
+            bool accepted = false;
+            if (_inventory.IsBeltCell(source.Origin))
+            {
+                Vector2Int free = _inventory.FindFreeOrigin(source.Item.EffectiveFootprint);
+                if (free.x < 0) reason = "No room in the bag; the item stays in its belt slot";
+                else accepted = SubmitInventoryCommand(InventoryCommandKind.Move, source, default, free,
+                    EquipmentSlot.None, Guid.Empty, Guid.Empty, out reason);
+            }
+            else
+            {
+                int destination = -1;
+                for (int i = 0; i < QuickBeltRules.SlotCount; i++)
+                    if (_inventory.TryGetBeltStack(i, out var other) && other.Item == source.Item &&
+                        other.Item.CanStack && other.Count < QuickBeltRules.StackLimit(other.Item)) { destination = i; break; }
+                if (destination < 0)
+                    for (int i = 0; i < QuickBeltRules.SlotCount; i++)
+                        if (!_inventory.TryGetBeltStack(i, out _)) { destination = i; break; }
+                if (destination < 0) reason = "The utility belt is full; drag onto a slot to swap";
+                else accepted = _inventory.Hotbar.TryAssign(destination, source.StackId, out reason);
+            }
+            if (!accepted) GameEvents.RaiseToast(ToastOwner, reason);
+            ClearSelection(); Rebuild();
+        }
+
         private void HandleRightClick(Vector2 screen)
         {
             // The established gesture is cancel-first: while a selection exists, only a right-click on
@@ -703,6 +771,12 @@ namespace Emberdelve.UI
                 InventorySlot source = _inventory.Slots[index];
                 if (source.Item == null) return;
 
+                if (QuickBeltRules.CanStore(source.Item))
+                {
+                    QuickTransferUtility(source);
+                    return;
+                }
+
                 if (HotbarBindings.IsUsableDefinition(source.Item))
                 {
                     if (_inventory.RequestQuickStack(source.StackId, out string holdReason))
@@ -756,7 +830,7 @@ namespace Emberdelve.UI
         /// <summary>Reached through the button's own onClick, i.e. the canvas raycaster and the InputSystem module.</summary>
         private void SelectBagTab()
         {
-            if (!_showCharacter) return;
+            if (IsSplitting || !_showCharacter) return;
             _showCharacter = false;
             _hoverInstance = null; // the tooltip was hidden with the tab; forget it so the next frame re-shows it without a pointer move
             _hoverDefinition = null;
@@ -766,7 +840,7 @@ namespace Emberdelve.UI
 
         private void SelectCharacterTab()
         {
-            if (_showCharacter) return;
+            if (IsSplitting || _showCharacter) return;
             _showCharacter = true;
             ApplyTabVisibility();
             Rebuild();
@@ -994,6 +1068,96 @@ namespace Emberdelve.UI
 
         // ------------------------------------------------------------ selection
 
+        private void BeginSplit(InventorySlot source)
+        {
+            if (!_model.CommandsAllowed || source.Instance != null || source.Item == null || source.Count < 2) return;
+            ClearSelection();
+            _dragArmed = false;
+            _splitStackId = source.StackId;
+            _splitRevision = _inventory.Revision;
+            _splitAmount = 1;
+            _splitChoosingCell = false;
+            if (_tipPanel != null) _tipPanel.gameObject.SetActive(false);
+            if (_splitDialog == null)
+            {
+                _splitDialog = UiFactory.CreatePanel(_root, "SplitAmount", new Color(.08f,.07f,.055f,.98f));
+                _splitDialog.anchorMin = _splitDialog.anchorMax = new Vector2(.5f,.5f);
+                _splitDialog.pivot = new Vector2(.5f,.5f);
+                _splitDialog.sizeDelta = new Vector2(360,220);
+                _splitDialog.anchoredPosition = Vector2.zero;
+                var title = UiFactory.CreateText(_splitDialog,"Title","SPLIT STACK",21,new Color(.9f,.8f,.55f));
+                title.rectTransform.sizeDelta = new Vector2(330,32); title.rectTransform.anchoredPosition = new Vector2(0,80);
+                _splitAmountText = UiFactory.CreateText(_splitDialog,"Amount","",18,Color.white);
+                _splitAmountText.rectTransform.sizeDelta = new Vector2(230,56);
+                _splitAmountText.rectTransform.anchoredPosition = new Vector2(0,24);
+                SplitButton("Less","-",new Vector2(-140,20),new Vector2(42,40),()=>ChangeSplitAmount(-1));
+                SplitButton("More","+",new Vector2(140,20),new Vector2(42,40),()=>ChangeSplitAmount(1));
+                SplitButton("Place","CHOOSE CELL",new Vector2(78,-62),new Vector2(166,40),()=>
+                {
+                    if (!ValidateSplitSource(out _)) { CancelSplit(); return; }
+                    _splitChoosingCell = true; _splitDialog.gameObject.SetActive(false);
+                });
+                SplitButton("Cancel","CANCEL",new Vector2(-100,-62),new Vector2(130,40),()=> { CancelSplit(); Rebuild(); });
+            }
+            _splitDialog.gameObject.SetActive(true);
+            _splitDialog.SetAsLastSibling();
+            ChangeSplitAmount(0);
+        }
+
+        private void SplitButton(string name, string label, Vector2 position, Vector2 size, UnityEngine.Events.UnityAction click)
+        {
+            var button = UiFactory.CreateButton(_splitDialog,name,label,click,size,new Color(.25f,.21f,.13f),Color.white,15);
+            ((RectTransform)button.transform).anchoredPosition = position;
+        }
+
+        private bool ValidateSplitSource(out InventorySlot source)
+        {
+            source = default;
+            return IsOpen && _model.CommandsAllowed && _inventory != null && _inventory.Revision == _splitRevision &&
+                _inventory.TryGetStack(_splitStackId,out source) && source.Instance == null && source.Item != null &&
+                source.Count > _splitAmount && _splitAmount > 0;
+        }
+
+        private void ChangeSplitAmount(int delta)
+        {
+            if (!ValidateSplitSource(out var source)) { CancelSplit(); return; }
+            _splitAmount = Mathf.Clamp(_splitAmount+delta,1,source.Count-1);
+            _splitAmountText.text = source.Item.displayName+"\n"+_splitAmount+" / "+source.Count;
+        }
+
+        private void CancelSplit()
+        {
+            _splitStackId = 0; _splitChoosingCell = false;
+            if (_splitDialog != null) _splitDialog.gameObject.SetActive(false);
+            if (_splitGhost != null) { Destroy(_splitGhost.gameObject); _splitGhost = null; }
+        }
+
+        private void HandleSplitPointer(Vector2 screen, Mouse mouse)
+        {
+            if (!ValidateSplitSource(out var source))
+            { CancelSplit(); Rebuild(); GameEvents.RaiseToast(ToastOwner,"Inventory changed; select the stack again"); return; }
+            if (mouse.rightButton.wasPressedThisFrame) { CancelSplit(); Rebuild(); return; }
+            if (!_splitChoosingCell) return;
+            if (_splitGhost == null)
+            {
+                _splitGhost = UiFactory.CreateImage(_root,"SplitCarry",Color.white,
+                    new Vector2(source.Size.x*CellSize,source.Size.y*CellSize),Vector2.zero,new Vector2(.5f,.5f),new Vector2(.5f,.5f));
+                LootPanelStyle.Decorate(_splitGhost,source.Item,null);
+                foreach(var graphic in _splitGhost.GetComponentsInChildren<UnityEngine.UI.Graphic>()) graphic.raycastTarget=false;
+            }
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(_root,screen,CanvasCamera,out var point))
+                _splitGhost.rectTransform.anchoredPosition=point;
+            bool hasCell = TryCellAt(screen,out var cell);
+            _splitGhost.color=hasCell && _inventory.CanPlaceItem(source.Item,_splitAmount,cell) ? new Color(.15f,.45f,.25f,.85f) : new Color(.55f,.15f,.12f,.85f);
+            _splitGhost.transform.SetAsLastSibling();
+            if (_carryLabel != null) _carryLabel.text="Place "+source.Item.displayName+" x"+_splitAmount+" in a free cell. RMB / Esc: cancel";
+            if (!mouse.leftButton.wasPressedThisFrame || !hasCell) return;
+            bool accepted = _model.Submit(InventoryCommandKind.Split,source,default,cell,EquipmentSlot.None,
+                Guid.Empty,Guid.Empty,out var reason,_splitAmount);
+            if (accepted) { CancelSplit(); Rebuild(); }
+            else GameEvents.RaiseToast(ToastOwner,reason);
+        }
+
         private void SelectStack(int index)
         {
             if (!_model.TrySelectIndex(index)) return;
@@ -1041,6 +1205,7 @@ namespace Emberdelve.UI
 
         private void ClearSelection()
         {
+            CancelSplit();
             _model.Clear();
 
             if (_carryGhost != null)
@@ -1073,7 +1238,7 @@ namespace Emberdelve.UI
         /// the cells live in, any parent rotation or scale, and the canvas render mode. A click in a gap, on
         /// the panel border or outside the grid belongs to no cell, so it stays a no-op.
         /// </summary>
-        private bool TryCellAt(Vector2 screen, out Vector2Int cell)
+        public bool TryCellAt(Vector2 screen, out Vector2Int cell)
         {
             cell = Vector2Int.zero;
 
@@ -1136,7 +1301,7 @@ namespace Emberdelve.UI
             _root = UiFactory.CreateGroup(canvas.transform, "InventoryRoot");
             _root.gameObject.SetActive(false);
 
-            _backdrop = UiFactory.CreateImage(_root,"InventoryBackdrop",new Color(0,0,0,.62f),new Vector2(6000,4000),Vector2.zero,new Vector2(.5f,.5f),new Vector2(.5f,.5f));
+            _backdrop = UiFactory.CreateImage(_root,"InventoryBackdrop",new Color(0,0,0,.92f),new Vector2(6000,4000),Vector2.zero,new Vector2(.5f,.5f),new Vector2(.5f,.5f));
             _panel = UiFactory.CreatePanel(_root, "SatchelPanel", PanelColor);
             _panel.sizeDelta = new Vector2(PanelWidth, PanelHeight);
             _panel.anchoredPosition = new Vector2(PanelCenterX, PanelCenterY);
@@ -1226,6 +1391,7 @@ namespace Emberdelve.UI
             _tipPanel = UiFactory.CreateImage(_root, "TooltipPanel", new Color(0.045f, 0.04f, 0.036f, 1f),
                 new Vector2(TooltipPanelWidth, 80f), Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
             _tipPanel.rectTransform.pivot = new Vector2(0f, 1f);
+            DungeonUiStyle.Surface(_tipPanel);
             _tipPanel.raycastTarget = false;
             _tipBody = UiFactory.CreateText(_tipPanel.transform, "TooltipBody", string.Empty, 13, TextColor, TextAnchor.UpperLeft);
             _tipBody.rectTransform.anchorMin = Vector2.zero;
@@ -1285,6 +1451,11 @@ namespace Emberdelve.UI
         /// entry point (the same reason it was public before the U1C2C layout work); making it private was
         /// unrelated to containing the panel.
         /// </summary>
+        private static Vector2 BeltPosition(int slot)
+        {
+            return new Vector2((slot < 3 ? -184f : 80f) + (slot % 3) * 52f, 18f);
+        }
+
         public void Rebuild()
         {
             if (_root == null) return;
@@ -1328,10 +1499,10 @@ namespace Emberdelve.UI
             EquipmentSlot[] order = SlotOrder();
             float leftColumnWidth = PanelWidth - PanelInset * 2f;
             float headerTop = innerTop;
-            float gridTop = 8f;
+            float gridTop = -18f;
             float detailTop = gridTop - gridHeight - ColumnGap;
             float carryTop = detailTop - DetailHeight - ColumnGap;
-            if (_panel != null) _panel.sizeDelta = new Vector2(PanelWidth, Mathf.Max(PanelHeight, 2f * (gridHeight + 110f)));
+            if (_panel != null) _panel.sizeDelta = new Vector2(PanelWidth, Mathf.Max(PanelHeight, 2f * (gridHeight + 136f)));
 
             Vector2 gridCentrePanel = new Vector2(innerLeft + gridWidth * 0.5f, gridTop - gridHeight * 0.5f);
             Vector2 gridCenter = PanelToRoot(gridCentrePanel);
@@ -1360,6 +1531,33 @@ namespace Emberdelve.UI
                 }
             }
 
+            // Six physical utility slots share authority with the bag but occupy no bag cells.
+            for (int belt = 0; belt < HotbarBindings.SlotCount; belt++)
+            {
+                Vector2 center = PanelToRoot(BeltPosition(belt));
+                Vector2Int coordinate = _inventory.BeltCell(belt);
+                bool occupied = _inventory.TryGetBeltStack(belt, out _);
+                Image cell = UiFactory.CreateImage(_gridGroup, "BeltCell_" + belt,
+                    occupied ? CellBlockedColor : CellColor, Vector2.one * CellSize,
+                    center - gridCenter, Vector2.one * .5f, Vector2.one * .5f);
+                LootPanelStyle.Frame(cell, LootPanelStyle.Gold);
+                _cellImages.Add(cell); _cellRects.Add(cell.rectTransform); _cellCoords.Add(coordinate);
+                if (!occupied)
+                {
+                    Text hint = UiFactory.CreateText(cell.transform, "EmptyBeltSlot", (belt % 3 + 1).ToString(), 12, DimColor);
+                    hint.raycastTarget = false;
+                }
+            }
+            for (int group = 0; group < 2; group++)
+            {
+                Text label = UiFactory.CreateText(_gridGroup, "BeltGroup_" + group,
+                    (group + 3) + "  QUICK SLOTS", 13, TextColor, TextAnchor.MiddleCenter, FontStyle.Bold);
+                label.raycastTarget = false;
+                UiFactory.SetRect(label.rectTransform, Vector2.one * .5f, Vector2.one * .5f,
+                    new Vector2(156, 16), PanelToRoot(new Vector2(group == 0 ? -132 : 132, 49)) - gridCenter);
+                _equipLabels.Add(label);
+            }
+
             // Root-local centre of the selected stack, kept outside the slot loop so the ghost block below
             // can park the no-mouse ghost over the footprint it actually names.
             Vector2 selectedCenter = Vector2.zero;
@@ -1370,8 +1568,9 @@ namespace Emberdelve.UI
                 InventorySlot slot = _inventory.Slots[i];
                 if (slot.Item == null) continue;
 
-                Vector2Int size = slot.Size;
-                Vector2 center = _gridOrigin + new Vector2(
+                bool inBelt = _inventory.IsBeltCell(slot.Origin);
+                Vector2Int size = inBelt ? Vector2Int.one : slot.Size;
+                Vector2 center = inBelt ? PanelToRoot(BeltPosition(slot.Origin.x - width)) : _gridOrigin + new Vector2(
                     slot.Origin.x * step + (size.x * CellSize + (size.x - 1) * CellGap) * 0.5f,
                     gridHeight - (slot.Origin.y * step + (size.y * CellSize + (size.y - 1) * CellGap) * 0.5f));
 
@@ -1412,9 +1611,10 @@ namespace Emberdelve.UI
                 LootPanelStyle.Decorate(block, slot.Item, slot.Instance);
                 _itemImages.Add(block);
 
-                if (slot.Count > 1)
+                if (slot.Count > 1 || inBelt)
                 {
-                    Text count = UiFactory.CreateText(block.transform, "Count", slot.Count.ToString(), 13, Color.white,
+                    string quantity = inBelt && slot.Item.healAmount > 0 ? slot.Count + "/5" : slot.Count.ToString();
+                    Text count = UiFactory.CreateText(block.transform, "Count", quantity, 13, Color.white,
                         TextAnchor.LowerRight, FontStyle.Bold);
                     count.rectTransform.anchorMin = Vector2.zero;
                     count.rectTransform.anchorMax = Vector2.one;
@@ -1424,9 +1624,10 @@ namespace Emberdelve.UI
             }
 
             // Equipment mirrors the looted player paper doll.
-            Vector2 equipCenter = PanelToRoot(Vector2.zero);
-            if (_sidebar != null) { ((RectTransform)_sidebar.transform).anchoredPosition = equipCenter + new Vector2(-450,0); _sidebar.Bind(_rig); }
+            Vector2 equipCenter = PanelToRoot(new Vector2(0, 40));
+            if (_sidebar != null) { ((RectTransform)_sidebar.transform).anchoredPosition = PanelToRoot(Vector2.zero) + new Vector2(-450,0); _sidebar.Bind(_rig); }
             _equipGroup.anchoredPosition = equipCenter;
+            _equipGroup.localScale = Vector3.one * .85f;
             _equipColumnLeftRoot = 0f;
 
             for (int i = 0; i < order.Length; i++)
@@ -1499,9 +1700,9 @@ namespace Emberdelve.UI
             if (_carryLabel != null)
             {
                 _carryLabel.text = HasSelection
-                    ? $"Selected {_model.SelectedItem.displayName} x{_model.SelectedAmount} ({SelectedSummary()})   " +
-                      "left click: move or wear   hold 3/4: assign wheel   right click: cancel"
-                    : "Right click: wear / hold / replenish ammo. Hover + hold 3/4: assign wheel. Potions require holding; ammo keeps weapons drawn.";
+                    ? $"Selected {_model.SelectedItem.displayName} x{_model.SelectedAmount}\n" +
+                      "Drag / click: place   RMB: cancel   hold 3/4: move to belt"
+                    : "LMB: move   Ctrl+LMB: split   RMB: equip / belt\nShift+RMB / Q: drop (Ctrl: one)   Hold 3/4: belt";
                 _carryLabel.rectTransform.sizeDelta = new Vector2(leftColumnWidth, InstructionHeight);
                 _carryLabel.rectTransform.anchoredPosition = PanelToRoot(new Vector2(innerLeft, instructionTop));
             }
@@ -1521,7 +1722,7 @@ namespace Emberdelve.UI
             if (_statsPane != null)
             {
                 _statsPane.rectTransform.sizeDelta = new Vector2(paneWidth, paneHeight);
-                _statsPane.rectTransform.anchoredPosition = new Vector2(paneWidth * 0.5f, -paneHeight * 0.5f);
+                _statsPane.rectTransform.anchoredPosition = new Vector2(paneWidth * 0.5f - PanePadding, -paneHeight * 0.5f + PanePadding);
             }
 
             if (_statsView != null)
@@ -1575,7 +1776,7 @@ namespace Emberdelve.UI
         private string BuildDetailText()
         {
             if (_inventory == null) return string.Empty;
-            return $"Carried value  {_inventory.CarriedValue}     �     Free space  {_inventory.FreeCells}/{_inventory.Capacity}";
+            return $"Carried value  {_inventory.CarriedValue}     вЂў     Free space  {_inventory.FreeCells}/{_inventory.Capacity}";
         }
     }
 }

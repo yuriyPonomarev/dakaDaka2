@@ -6,6 +6,7 @@ using Emberdelve.Player;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace Emberdelve.EditorTools
 {
@@ -24,23 +25,19 @@ namespace Emberdelve.EditorTools
             var wood = Material("Torch_Wood", new Color(.14f,.075f,.035f));
             var cloth = Material("Torch_PitchCloth", new Color(.11f,.08f,.055f));
             var iron = Material("Torch_Iron", new Color(.12f,.11f,.09f));
-            var fire = Material("Torch_Flame", new Color(1f,.27f,.025f), true);
-            var core = Material("Torch_FlameCore", new Color(1f,.72f,.20f), true);
             var root = new GameObject("PitchTorch");
             try
             {
-                Part(root.transform,"Ash handle",PrimitiveType.Cylinder,new Vector3(0,.22f,0),new Vector3(.038f,.31f,.038f),wood);
-                Part(root.transform,"Pitch cloth",PrimitiveType.Capsule,new Vector3(0,.48f,0),new Vector3(.075f,.075f,.075f),cloth);
-                for(int i=0;i<3;i++) Part(root.transform,"Iron binding",PrimitiveType.Cylinder,new Vector3(0,.43f+i*.055f,0),new Vector3(.079f,.007f,.079f),iron);
+                EmberdelveHandTorchModel.Build(root.transform);
                 var flame = new GameObject("Visible flame"); flame.transform.SetParent(root.transform,false);
-                flame.transform.localPosition = new Vector3(0,.60f,0);
-                Part(flame.transform,"Amber flame",PrimitiveType.Sphere,new Vector3(0,.05f,0),new Vector3(.065f,.18f,.065f),fire);
-                Part(flame.transform,"Hot core",PrimitiveType.Sphere,new Vector3(0,.01f,.012f),new Vector3(.045f,.10f,.045f),core);
+                flame.transform.localPosition = new Vector3(0,.55f,0);
+                EmberdelveTorchFactory.BuildHandheldFlame(flame.transform, Vector3.zero);
                 var lightObject = new GameObject("Flame light"); lightObject.transform.SetParent(root.transform,false);
                 lightObject.transform.localPosition = new Vector3(0,.67f,0);
                 var light = lightObject.AddComponent<Light>(); light.type = LightType.Point;
-                light.color = new Color(1f,.57f,.24f); light.intensity=1.5f; light.range=8f;
+                light.color = new Color(1f,.66f,.34f); light.intensity=HandheldTorchVisual.LightIntensity; light.range=HandheldTorchVisual.LightRange;
                 light.shadows=LightShadows.Soft; light.shadowBias=.035f; light.shadowNormalBias=.12f; light.shadowNearPlane=.08f;
+                ConfigureShadowResolution(light);
                 var visual=root.AddComponent<HandheldTorchVisual>(); visual.source=light; visual.flame=flame.transform;
                 Folder("Assets/Emberdelve/Prefabs/Weapons");
                 PrefabUtility.SaveAsPrefabAsset(root,PrefabPath);
@@ -87,6 +84,53 @@ namespace Emberdelve.EditorTools
             EditorUtility.SetDirty(set); AssetDatabase.SaveAssets();
             Debug.Log("[Emberdelve] Inventory torch authored: catalog, starter bags, weapon and held model.");
         }
+        public static void UpdateSavedTorchFlame()
+        {
+            if (!Application.isBatchMode) throw new InvalidOperationException("Run this migration on the batch test mirror");
+            var root = PrefabUtility.LoadPrefabContents(PrefabPath);
+            try
+            {
+                var visual = root.GetComponent<HandheldTorchVisual>();
+                if (visual == null || visual.flame == null) throw new InvalidOperationException("Saved torch flame root missing");
+                // Keep the serialized flame root and light/grip/model intact; only replace its old visuals.
+                for (int i = visual.flame.childCount - 1; i >= 0; i--)
+                    UnityEngine.Object.DestroyImmediate(visual.flame.GetChild(i).gameObject);
+                visual.flame.localPosition = new Vector3(0f,.55f,0f);
+                EmberdelveTorchFactory.BuildHandheldFlame(visual.flame, Vector3.zero);
+                PrefabUtility.SaveAsPrefabAsset(root, PrefabPath);
+                Debug.Log("[Emberdelve][HeldTorchFlame] replaced opaque flame with authored particles");
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+        }
+
+        private static void ConfigureShadowResolution(Light light)
+        {
+            var data = light.GetComponent<UniversalAdditionalLightData>();
+            if (data == null) data = light.gameObject.AddComponent<UniversalAdditionalLightData>();
+            var serialized = new SerializedObject(data);
+            var tier = serialized.FindProperty("m_AdditionalLightsShadowResolutionTier");
+            if (tier == null) throw new InvalidOperationException("URP shadow resolution tier missing");
+            // Six point-light faces at 512 match the previous 1024 -> 512 automatic reduction.
+            // Two visible held torches also fit the current 2048 atlas without global quality changes.
+            tier.intValue = UniversalAdditionalLightData.AdditionalLightsShadowResolutionTierMedium;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        public static void UpdateSavedTorchShadowResolution()
+        {
+            if (!Application.isBatchMode) throw new InvalidOperationException("Run this migration on the batch test mirror");
+            var root = PrefabUtility.LoadPrefabContents(PrefabPath);
+            try
+            {
+                var visual = root.GetComponent<HandheldTorchVisual>();
+                if (visual == null || visual.source == null) throw new InvalidOperationException("Saved torch light missing");
+                ConfigureShadowResolution(visual.source);
+                PrefabUtility.SaveAsPrefabAsset(root, PrefabPath);
+                Debug.Log("[Emberdelve][HeldTorchShadows] configured Medium-tier point light");
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+        }
+
         public static ItemData[] WithStarterTorch(ItemData[] items)
         {
             var torch=AssetDatabase.LoadAssetAtPath<ItemData>(ItemPath);

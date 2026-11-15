@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using Emberdelve.Core;
 using Emberdelve.Data;
+using Emberdelve.Flow;
 using Emberdelve.Items;
 using Emberdelve.Player;
 using NUnit.Framework;
@@ -12,6 +13,22 @@ namespace Emberdelve.Tests.NetInventory
 {
     public sealed class InventoryDropRollbackTests
     {
+        private RunDirector _previousDirector;
+
+        [SetUp] public void IsolateStandaloneTransaction()
+        {
+            // GroundSinkOverride exercises inventory rollback without a raid. A director left
+            // registered by the open scene must not reject this fixture's standalone player.
+            GameServices.TryGet<RunDirector>(out _previousDirector);
+            GameServices.Unregister<RunDirector>(_previousDirector);
+        }
+
+        [TearDown] public void RestoreAmbientDirector()
+        {
+            if (_previousDirector != null) GameServices.Register<RunDirector>(_previousDirector);
+            _previousDirector = null;
+        }
+
         private sealed class RefusingGround : IGroundItemSink
         {
             public ItemInstance Seen;

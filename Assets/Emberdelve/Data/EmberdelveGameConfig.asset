@@ -26,7 +26,7 @@ MonoBehaviour:
   maxPartySize: 3
   friendlyFire: 0
   inventoryGridWidth: 10
-  inventoryGridHeight: 4
+  inventoryGridHeight: 5
   inventoryCapacity: 8
   itemCatalog: {fileID: 11400000, guid: f3859776d17eaa3448ab3ad4e93ce4d8, type: 2}
   unarmedWeapon: {fileID: 11400000, guid: cd7e9513655812d43866a45b2054d989, type: 2}

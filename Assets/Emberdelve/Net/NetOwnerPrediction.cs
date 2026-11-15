@@ -51,6 +51,9 @@ namespace Emberdelve.Net
         private uint _lastPredictedSeq;
         private uint _lastAckSeq;
         private int _acksReceived;
+        private int _discardedFloorAcks;
+        private uint _lastDiscardedGeneration = uint.MaxValue;
+        private uint _lastDiscardedCurrent = uint.MaxValue;
 
         private float _nextStatsLog;
         private int _statsLoggedAcks = -1;
@@ -117,11 +120,21 @@ namespace Emberdelve.Net
             if (_predicting) _movement.ApplyPredictionParams(in data);
         }
 
+        public void ResetForFloorMovement()
+        {
+            _recon.ResetForTeleport();
+            _lastPredictedSeq = _lastAckSeq = 0;
+            _lastPos = transform.position;
+            _predicting = false;
+            _posLogged = false;
+        }
+
         // ---- predict ---------------------------------------------------------------------------------------------
 
         /// <summary>One network tick, one frame: step the body with it and remember what happened.</summary>
         public void PredictFrame(in MoveInputFrame frame)
         {
+            if (_rig == null || _rig.IsInFloorTransit) return;
             if (!_predicting && !TryBegin()) return;
             if (_movement == null) return;
 
@@ -157,6 +170,18 @@ namespace Emberdelve.Net
 
         public void OnAck(in MoveAckWire ack)
         {
+            if (_rig == null) return;
+            if (_rig.IsInFloorTransit || ack.Generation != _rig.FloorMovementGeneration)
+            {
+                _discardedFloorAcks++;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                if (_discardedFloorAcks <= 3 || _lastDiscardedGeneration != ack.Generation || _lastDiscardedCurrent != _rig.FloorMovementGeneration)
+                    Debug.Log(NetTuning.LogPrefix + "[client] discarded movement ack generation=" + ack.Generation
+                        + " current=" + _rig.FloorMovementGeneration);
+                _lastDiscardedGeneration = ack.Generation; _lastDiscardedCurrent = _rig.FloorMovementGeneration;
+#endif
+                return;
+            }
             _acksReceived++;
             if (!_predicting) return;
 
