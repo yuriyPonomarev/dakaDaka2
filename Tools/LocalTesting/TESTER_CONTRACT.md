@@ -4,7 +4,7 @@ The user explicitly instructed: "ты разрабатываешь — лока�
 You are the LOCAL TESTER. Codex owns all game implementation and fixes. This latest instruction supersedes the old worker/file-tools-only and manager-runs-tests role for your assigned verification task.
 Use the existing Strata provider/model and HIGH thinking. Do not change models/config/packages, make network calls beyond local Unity/Strata, send messages, publish, commit, or resume the obsolete U2B10 controller.
 
-Project: C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka
+Primary development project on this machine: C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff. The old ../DakaDaka checkout is preserved and is not the source. Run batch verification on ../DakaDaka_ci as directed by AGENTS.md.
 Unity6000.2.5f1. No engine/package upgrades. Keep existing names, six attributes, class scores, both mana pools, saves and exact item identities.
 You may read all task-relevant project files and run PowerShell/Unity/tests/builds needed by the assigned brief. Write only evidence under Logs and your report under Docs/Reviews. Do NOT modify game code, test code, definitions, existing tests, Tools or project settings. Existing authorized data builders may serialize their current owned assets while testing; record any resulting data changes.
 When a test fails, preserve raw logs, identify the exact assertion, inspect its source/inputs, and report a concrete reproduction and likely cause to Codex. Do not fix it or alter a tolerance. Do not claim a successful engine exit proves a test passed.

@@ -1,12 +1,16 @@
 # DakaDaka — current work
 
-Updated 13 November 2026. Latest completed slice: ground loot models (Tasks/GROUND_LOOT_MODELS_20261113.md). Prior slice: replacement torch flame based on user photo, Tasks/TORCH_REFERENCE_FLAME_20261113.md. Main code/assets updated; preserve inherited uncommitted UI/combat/stash/Royale/art work. No blanket-add/reset or mixed WIP commit. Main Editor stays open/no Play; root sole mirror executor.
+## Development checkout (16 November 2026)
+
+The primary checkout for all development and agents on this machine is `C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff`, tracking GitHub `origin/main`. The prior `../DakaDaka` checkout is preserved with a different Git history and is not the development source. The handoff WIP is committed as `94471be3` in the rewritten history; six material changes and local-only files were excluded and remain in the old checkout. Historical logs and builds referenced below may exist only in the old checkout or `../DakaDaka_ci`; their results do not establish a fresh run in this checkout. Use `../DakaDaka_ci` as the test mirror, with the primary checkout as source.
+
+Updated 13 November 2026. Latest completed slice: ground loot models (Tasks/GROUND_LOOT_MODELS_20261113.md). Prior slice: replacement torch flame based on user photo, Tasks/TORCH_REFERENCE_FLAME_20261113.md. Historical status at that date: UI/combat/stash/Royale/art changes were uncommitted; the later handoff WIP commit records them as described above. Main Editor stays open/no Play; root sole mirror executor.
 
 ## Latest implementation and proof
 
 Ground loot: all24 item definitions covered, 15 new saved world entries (treasure, ammo, ranged weapons and reused melee/shield), six existing armor/torch entries and three runtime consumables. Invisible interaction proxy/custody unchanged. Hidden serialized visual cache avoids scene-reload duplicate models; authored recovered ammo suppresses legacy shaft boxes. Inventory icons unchanged in this slice.
 
-Build20261113-223941-399 PASS; Visual216/0, NetInventory148/0; all24 Configure twice coverage passes, main compile clean. Gallery and actual seed1344668317 crossbow/reliquary view, ordinary F pickup accepted by server, bag entry and world removal verified. Logs/acceptance/loot-models-20261113. Test players closed. Known allocator error recurred; not fixed. No mixed-tree commit.
+Build20261113-223941-399 PASS; Visual216/0, NetInventory148/0; all24 Configure twice coverage passes, main compile clean. Gallery and actual seed1344668317 crossbow/reliquary view, ordinary F pickup accepted by server, bag entry and world removal verified. Logs/acceptance/loot-models-20261113. Test players closed. Known allocator error recurred; not fixed. At the time of this proof there was no mixed-tree commit.
 
 Torch now uses one transparent animated volume with original tileable 3D noise: folded hot sheets, translucent gaps, fire around cloth head; sparks/smoke remain auxiliary particles. Runtime anchor follows actual hand pose. Light4.5/range12 preserved. Old five-system leaflet appearance is superseded, not claimed accepted. Body/ground/icon unchanged in this slice.
 

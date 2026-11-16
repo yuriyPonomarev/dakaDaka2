@@ -6,6 +6,8 @@ User-approved process reset: 8 November 2026.
 
 ## Start here (keep context small)
 
+On this machine, the primary development checkout for all agents is `C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff`. Open, edit, commit and run project commands from this checkout. `../DakaDaka` is the preserved old checkout with a different Git history, not the development source. On other machines, use the checkout cloned from the current GitHub `main` instead of the machine-specific path.
+
 Read Docs/CURRENT_WORK.md first, then only the active task report and relevant code.
 Docs/ROADMAP.md owns milestone order; CURRENT_WORK owns current status and three next actions.
 Archive and old chats are historical evidence, not mandatory startup reading.
@@ -56,7 +58,7 @@ Readiness is separate: implemented -> automated proof -> visual proof -> accepte
 
 ## Unity pipeline
 
-Never close the user's Editor or invoke EditorApplication.Exit in it. Batch/playmode/scene-opening/network gates run only on ../DakaDaka_ci.
+Never close the user's Editor or invoke EditorApplication.Exit in it. Batch/playmode/scene-opening/network gates run only on ../DakaDaka_ci, using the primary development checkout as the runner source.
 CLI in the main project (installed Pipeline command names; query if names differ):
 - `unity status --format json`
 - `unity command editor set_auto_tick --enable true`
