@@ -230,15 +230,15 @@ namespace Emberdelve.EditorTools
             bloom.highQualityFiltering.Override(true);
 
             ColorAdjustments grade = GetOrAdd<ColorAdjustments>(profile);
-            grade.postExposure.Override(0.35f);
-            grade.contrast.Override(15f);
+            grade.postExposure.Override(0.6f);
+            grade.contrast.Override(6f);
             grade.saturation.Override(-12f);
             grade.colorFilter.Override(new Color(1f, 0.93f, 0.84f, 1f));
 
             Vignette vignette = GetOrAdd<Vignette>(profile);
             vignette.color.Override(Color.black);
             // V2: stronger vignette than V1 (0.35 / 0.4).
-            vignette.intensity.Override(0.5f);
+            vignette.intensity.Override(0.45f);
             vignette.smoothness.Override(0.45f);
             vignette.rounded.Override(false);
 

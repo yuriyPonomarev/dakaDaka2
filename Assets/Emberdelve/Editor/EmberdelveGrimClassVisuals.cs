@@ -20,6 +20,7 @@ namespace Emberdelve.EditorTools
             BuildVisuals();
             EmberdelveWindowsBuild.BuildNetPlayable();
         }
+        [MenuItem("Emberdelve/Visual/Rebuild Player Visuals")]
         public static void BuildVisuals()
         {
             EmberdelveVisualSetup.EnsureFolder(Art);
@@ -53,7 +54,7 @@ namespace Emberdelve.EditorTools
         }
         static void Build(string className)
         {
-            current=className;
+            current=className;shells.Clear();
             string source=EmberdelveUnifiedHuman.ModelPath;
             var root=new GameObject(className+"Avatar");
             try
@@ -137,6 +138,7 @@ namespace Emberdelve.EditorTools
                     }
                 }
                 if (warrior) EmberdelveArmourDetail.Apply(root);
+                SmoothShells();
                 animator.Play("Idle",0,0);animator.Update(0);
                 var face=root.GetComponentsInChildren<MeshRenderer>().First(r=>r.name==(warrior?"VisorSlit":"FaceWrap"));
                 if(face.bounds.center.z<head.position.z)throw new Exception("Headwear faces away from live rig");
@@ -193,6 +195,59 @@ namespace Emberdelve.EditorTools
             var mesh=new Mesh{name=current+"_"+name};mesh.SetVertices(vertices);mesh.SetUVs(0,uv);mesh.SetTriangles(tris,0);mesh.RecalculateNormals();mesh.RecalculateBounds();
             var go=new GameObject(name,typeof(MeshFilter),typeof(MeshRenderer));go.transform.SetParent(bone,false);
             go.GetComponent<MeshFilter>().sharedMesh=SaveMesh(mesh,name);go.GetComponent<MeshRenderer>().sharedMaterial=material;
+            if(sides>4)shells.Add(new ShellJob{name=name,bone=bone,origin=origin,rotation=rotation,y=y,x=x,z=z,sides=sides,hood=hood,offset=offset,filter=go.GetComponent<MeshFilter>()});
+        }
+        // Smooth pass: the coarse shells above stay as the stable source topology for EmberdelveArmourDetail; every shell
+        // that is still shown as-is gets a spline-profiled, three-times-denser copy saved beside it as <part>_Smooth.
+        struct ShellJob{public string name;public Transform bone;public Vector3 origin;public Quaternion rotation;public float[] y,x,z;public int sides;public bool hood;public float offset;public MeshFilter filter;}
+        static readonly List<ShellJob> shells=new List<ShellJob>();
+        static float Spline(float[] v,int row,float t)
+        {
+            float p0=v[Mathf.Max(row-1,0)],p1=v[row],p2=v[Mathf.Min(row+1,v.Length-1)],p3=v[Mathf.Min(row+2,v.Length-1)];
+            return .5f*(2*p1+(-p0+p2)*t+(2*p0-5*p1+4*p2-p3)*t*t+(-p0+3*p1-3*p2+p3)*t*t*t);
+        }
+        static void SmoothShells()
+        {
+            const int Sub=5;
+            foreach(var job in shells)
+            {
+                if(job.filter==null||job.filter.sharedMesh==null||job.filter.sharedMesh.name!=current+"_"+job.name)continue;
+                int sides=job.sides*3,rows=(job.y.Length-1)*Sub+1,stride=sides+1;
+                var vertices=new List<Vector3>();var uv=new List<Vector2>();var tris=new List<int>();
+                for(int r=0;r<rows;r++)
+                {
+                    int row=Mathf.Min(r/Sub,job.y.Length-2);float t=(r-row*Sub)/(float)Sub;
+                    float y=Mathf.Lerp(job.y[row],job.y[row+1],t),x=Mathf.Max(0,Spline(job.x,row,t)),z=Mathf.Max(0,Spline(job.z,row,t));
+                    for(int i=0;i<=sides;i++)
+                    {
+                        float angle=(i*360f/sides+job.offset)*Mathf.Deg2Rad;
+                        vertices.Add(job.bone.InverseTransformPoint(job.origin+job.rotation*new Vector3(Mathf.Sin(angle)*x,y,Mathf.Cos(angle)*z)));
+                        uv.Add(new Vector2(i/(float)sides*2,r/(float)(rows-1)*2));
+                    }
+                }
+                for(int r=0;r<rows-1;r++)for(int i=0;i<sides;i++)
+                {
+                    float angle=(i+.5f)*360f/sides;
+                    if(job.hood && r/Sub<2 && (angle<55||angle>305))continue;
+                    int a=r*stride+i,b=a+stride;
+                    tris.AddRange(new[]{a,a+1,b,a+1,b+1,b});
+                }
+                var mesh=new Mesh{name=current+"_"+job.name+"_Smooth"};
+                mesh.SetVertices(vertices);mesh.SetUVs(0,uv);mesh.SetTriangles(tris,0);mesh.RecalculateNormals();
+                var normals=mesh.normals;
+                for(int r=0;r<rows;r++){Vector3 n=(normals[r*stride]+normals[r*stride+sides]).normalized;normals[r*stride]=n;normals[r*stride+sides]=n;}
+                if(job.hood)
+                {
+                    // Inside of the open hood: separate vertices, so the two faces keep opposite normals.
+                    int count=vertices.Count,triCount=tris.Count;var all=new Vector3[count*2];
+                    for(int i=0;i<count;i++){vertices.Add(vertices[i]);uv.Add(uv[i]);all[i]=normals[i];all[count+i]=-normals[i];}
+                    for(int i=0;i<triCount;i+=3)tris.AddRange(new[]{tris[i]+count,tris[i+2]+count,tris[i+1]+count});
+                    mesh.SetVertices(vertices);mesh.SetUVs(0,uv);mesh.SetTriangles(tris,0);normals=all;
+                }
+                mesh.normals=normals;mesh.RecalculateTangents();mesh.RecalculateBounds();
+                job.filter.sharedMesh=SaveMesh(mesh,job.name+"_Smooth");
+            }
+            shells.Clear();
         }
     }
 }

@@ -109,7 +109,7 @@ namespace Emberdelve.EditorTools
             Cylinder(root, "Brazier_Bowl", position + Vector3.up * 1.4f, new Vector3(.85f, .13f, .85f), metal);
             Transform lamp = Group(root, "Brazier_Light", position + Vector3.up * 1.8f, 0);
             Light light = lamp.gameObject.AddComponent<Light>();
-            light.type = LightType.Point; light.range = 14f; light.intensity = 12f;
+            light.type = LightType.Point; light.range = 18f; light.intensity = 22f;
             light.cullingMask = LayerMask.GetMask(GameConfig.LevelLayerName);
             light.color = blue ? new Color(.3f, .65f, 1f) : new Color(1f, .49f, .19f);
             light.shadows = LightShadows.None;

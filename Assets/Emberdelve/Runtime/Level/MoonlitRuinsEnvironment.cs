@@ -23,12 +23,12 @@ namespace Emberdelve.Level
             RenderSettings.skybox=sky;
             RenderSettings.ambientMode=AmbientMode.Trilight;
             RenderSettings.ambientSkyColor=new Color(.10f,.14f,.22f);
-            RenderSettings.ambientEquatorColor=new Color(.028f,.04f,.065f);
-            RenderSettings.ambientGroundColor=new Color(.009f,.012f,.02f);
+            RenderSettings.ambientEquatorColor=new Color(.06f,.072f,.10f);
+            RenderSettings.ambientGroundColor=new Color(.03f,.034f,.044f);
             RenderSettings.fog=true;
             RenderSettings.fogMode=FogMode.Exponential;
-            RenderSettings.fogColor=new Color(.035f,.055f,.095f);
-            RenderSettings.fogDensity=.008f;
+            RenderSettings.fogColor=new Color(.07f,.09f,.135f);
+            RenderSettings.fogDensity=.02f;
             if(moon!=null)
             {
                 moon.transform.rotation=Quaternion.Euler(48,32,0);
