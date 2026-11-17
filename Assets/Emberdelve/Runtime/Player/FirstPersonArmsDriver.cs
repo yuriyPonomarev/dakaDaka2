@@ -466,7 +466,7 @@ namespace Emberdelve.Player
         public void PlayConfirmedBlockImpact(bool shieldBlock)
         {
             if (!shieldBlock && _visual != null) _visual.PlayBlockImpact();
-            AddJolt(new Vector3(0f, 0.025f, -0.07f), shieldBlock);
+            AddJolt(new Vector3(0f, 0.03f, -0.095f), shieldBlock);   // a held block never breaks: the shield/blade is only knocked back a little
         }
 
         /// <summary>A short camera-relative push of a hand (decays in a third of a second).</summary>

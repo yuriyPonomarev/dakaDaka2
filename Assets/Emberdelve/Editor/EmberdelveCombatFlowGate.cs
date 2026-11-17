@@ -492,8 +492,8 @@ namespace Emberdelve.EditorTools
             Near(0.65f, AssetDatabase.LoadAssetAtPath<CharacterClassData>(EmberdelvePaths.Data + "/Class_Warrior.asset").guardSpeedMultiplier, 1e-6f, "warrior blocking move multiplier is 0.65");
 
             // pure rules
-            Check(CombatFlowRules.IsGuardBroken(30f, 20f) && CombatFlowRules.IsGuardBroken(20f, 20f) && !CombatFlowRules.IsGuardBroken(19.99f, 20f),
-                "guard break rule: power >= resist breaks, below does not");
+            Check(!CombatFlowRules.IsGuardBroken(30f, 20f) && !CombatFlowRules.IsGuardBroken(20f, 20f) && !CombatFlowRules.IsGuardBroken(19.99f, 20f),
+                "guard break rule: impact power never breaks a guard");
             Check(!CombatFlowRules.IsGuardBroken(0f, 0f) && !CombatFlowRules.IsGuardBroken(0f, 20f), "a source with no impact power (a skill) never breaks a guard");
             Near(1f - 18f / 300f, CombatFlowRules.HeldFactor(_sword, _shield, true), 1e-6f, "held factor sword + shield = 1 - 18/300");
             Near(1f - 10f / 300f, CombatFlowRules.HeldFactor(_sword, _shield, false), 1e-6f, "a shield that does not contribute adds no penalty");
@@ -1486,63 +1486,38 @@ namespace Emberdelve.EditorTools
             Check(!_authority.IsGuardStaggered(_rig.CombatId) && _rig.IsGuarding, "sword vs heater: no stagger, the guard stays up");
             Cooldown(3f);
 
-            // 2. exactly at the resist breaks (>=), just under does not
+            // 2. impact power equal to or above the old resist no longer breaks anything: the guard holds
             DamageInfo? atEdge = SwingAtRig(edge, true);
-            Check(atEdge.HasValue && atEdge.Value.GuardBroken, "impact power equal to the resist breaks the guard (>=)");
+            Check(atEdge.HasValue && atEdge.Value.Blocked && !atEdge.Value.GuardBroken, "impact power equal to the resist: the guard holds");
             Cooldown(3f);
             _rig.SetGuardHeld(true);
             DamageInfo? under = SwingAtRig(justUnder, true);
             Check(under.HasValue && under.Value.Blocked && !under.Value.GuardBroken, "impact power 19.9 against resist 20 is a normal block");
             Cooldown(3f);
 
-            // 3. heavy (30) against the heater: broken, reduced mitigation, stagger
+            // 3. heavy (30) against the heater: held whole, no stagger, no break
             _rig.SetGuardHeld(true);
             _toasts.Clear();
             int breaksBefore = _authority.GuardBreaksApplied;
             DamageInfo? heavyHit = SwingAtRig(heavy, true);
-            Check(heavyHit.HasValue && heavyHit.Value.Blocked && heavyHit.Value.GuardBroken, "heavy vs heater: the block is engaged and BROKEN (Blocked + GuardBroken flags)");
+            Check(heavyHit.HasValue && heavyHit.Value.Blocked && !heavyHit.Value.GuardBroken, "heavy vs heater: the block holds, force never breaks it");
             if (heavyHit.HasValue)
             {
-                Near(reduction * 0.3f, heavyHit.Value.BlockReduction, 1e-4f, "broken guard: only 30 percent of the normal reduction remains");
-                Check(heavyHit.Value.GuardShieldContact && heavyHit.Value.Location == HitLocation.Unspecified,
-                    "broken guard: the sweep contacted the shield, not a body hit volume");
-                Near(shieldContactDamage * (1f - reduction * 0.3f), heavyHit.Value.Amount, 0.01f, "broken guard: shield-contact damage x (1 - 0.3 x reduction), without an arm multiplier");
-                Check(heavyHit.Value.Amount > unguarded * (1f - reduction) + 1f, "broken guard: takes clearly more damage than a normal block");
+                Near(BladeGuardRules.HeldGuardReduction, heavyHit.Value.BlockReduction, 1e-4f, "heavy vs heater: the whole hit is taken off");
+                Near(unguarded * (1f - BladeGuardRules.HeldGuardReduction), heavyHit.Value.Amount, 0.01f, "heavy vs heater: 0 HP");
                 Near(30f, heavyHit.Value.ImpactPower, 1e-4f, "the hit carries the heavy weapon's impact power");
             }
-            Check(_authority.GuardBreaksApplied == breaksBefore + 1, "the authority counted one guard break");
-            Check(_toasts.Exists(t => t.Contains("GUARD BROKEN")), $"HUD feedback: a GUARD BROKEN toast was raised ({string.Join(" | ", _toasts)})");
-            Check(_authority.IsGuardStaggered(_rig.CombatId), "stagger: the guard is staggered after the break");
-            float remaining = _authority.GuardStaggerRemaining(_rig.CombatId);
-            Check(remaining > 0.1f && remaining <= 0.8f + 1e-4f, $"stagger: part of the 0.8 s remains after the swing ({remaining:F2})");
-            _rig.SetGuardHeld(true);
-            Check(!_rig.IsGuarding, "stagger: holding the guard button does not raise the guard");
-            float walk = _rig.Movement.ResolveWalkSpeed();
-            float held = 1f - 18f / 300f;
-            Check(_rig.Movement.ResolveGroundSpeed(false, false) <= walk + 1e-4f && walk <= 8f + 1e-4f,
-                "D1c1: the held/flow factors only lower the walking speed: ground speed <= rule speed <= the rule's cap of 8 (the factor is <= 1, so applying it after the clamp cannot break the cap)");
-            Near(walk * held * 0.6f * 0.9f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "stagger: brief move slow x0.6 (and the heavy hit's own x0.9 hit slow: a broken guard is not blocked)");
-
-            // a hit during the stagger finds no guard to resolve
-            DamageInfo duringStagger = new DamageInfo(20f, _rig.CombatCenter, Vector3.back, _rig.transform.position + Vector3.forward * 2f, 999, EntityKind.Enemy, DamageType.Physical, false, false, 0f, HitLocation.Body, 10f);
-            Check(!_rig.TryResolveGuard(duringStagger, CombatFlowTuning.Default, out _), "stagger: a hit during the stagger finds no guard (it is not blocked)");
-
-            Check(_authority.GuardBrokenEntryCount >= 1, "prune: the guard-break stamp exists while the stagger runs");
-
-            // the guard can be raised again once the stagger has passed (authority clock)
-            _clock += remaining + 0.05f;
-            Check(!_authority.IsGuardStaggered(_rig.CombatId), "stagger: over after its length");
-            _authority.StepSwings();
-            Check(_authority.GuardBrokenEntryCount == 0, "prune: the expired guard-break stamp is removed by the next step");
-            _rig.SetGuardHeld(true);
-            Check(_rig.IsGuarding, "stagger: the guard can be raised again afterwards");
+            Check(_authority.GuardBreaksApplied == breaksBefore, "the authority counted no guard break");
+            Check(!_toasts.Exists(t => t.Contains("GUARD BROKEN")), "HUD: no GUARD BROKEN toast");
+            Check(!_authority.IsGuardStaggered(_rig.CombatId) && _rig.IsGuarding, "the guard is not staggered and stays up after a heavy hit");
+            Check(_authority.GuardBrokenEntryCount == 0, "no guard-break stamp exists");
             _rig.SetGuardHeld(false);
             Cooldown(3f);
 
-            // 4. the pattern's impact scale (overhead x1.2) can break what the slash only blocks
+            // 4. the overhead's impact scale does not break what the slash only blocks either
             WeaponData borderline = UnityEngine.Object.Instantiate(_sword);
             _cleanup.Add(borderline);
-            borderline.impactPower = 17f;       // slash 17 < 20, overhead 17 x 1.2 = 20.4 >= 20
+            borderline.impactPower = 17f;
             _rig.SetGuardHeld(true);
             DamageInfo? slash17 = SwingAtRig(borderline, true);
             Check(slash17.HasValue && slash17.Value.Blocked && !slash17.Value.GuardBroken, "impact 17 slash: normal block");
@@ -1551,13 +1526,13 @@ namespace Emberdelve.EditorTools
             // Raise the shield towards the descending blade rather than keep the slash-facing pose.
             _rig.Look.ApplyAimPose(18f, -35f);
             DamageInfo? over17 = SwingAtRig(borderline, true, pattern: 2, legacyPattern: true);
-            Check(over17.HasValue && over17.Value.GuardShieldContact && over17.Value.GuardBroken,
-                $"impact 17 overhead (x1.2 = 20.4): breaks the same guard (contact={over17?.GuardShieldContact}, location={over17?.Location}, impact={over17?.ImpactPower})");
+            Check(over17.HasValue && over17.Value.GuardShieldContact && over17.Value.Blocked && !over17.Value.GuardBroken,
+                $"impact 17 overhead (x1.2 = 20.4): still held (contact={over17?.GuardShieldContact}, location={over17?.Location}, impact={over17?.ImpactPower})");
             _rig.Look.ApplyAimPose(35f, 0f);
             Cooldown(3f);
             _clock += 2f;
 
-            // 5. buckler (resist above the blade kit's): sword (10) blocks, heavy (30) breaks
+            // 5. buckler: sword (10) and heavy (30) are both held
             _rig.SetOffhandWeapon(buckler);
             Near(buckler.impactResist, _rig.Defense.ImpactResist, 1e-4f, "buckler: the kit's impact resist is the buckler's " + buckler.impactResist);
             _rig.SetGuardHeld(true);
@@ -1566,7 +1541,7 @@ namespace Emberdelve.EditorTools
             Cooldown(3f);
             _rig.SetGuardHeld(true);
             DamageInfo? heavyVsBuckler = SwingAtRig(heavy, true);
-            Check(heavyVsBuckler.HasValue && heavyVsBuckler.Value.GuardBroken, "heavy (30) vs buckler: broken");
+            Check(heavyVsBuckler.HasValue && heavyVsBuckler.Value.Blocked && !heavyVsBuckler.Value.GuardBroken, "heavy (30) vs buckler: held, not broken");
             Cooldown(3f);
             _clock += 2f;
             _rig.SetOffhandWeapon(_rig.Class.offhandShield); // U5A: an empty off hand stays empty, so the class shield is put back explicitly
@@ -1585,7 +1560,7 @@ namespace Emberdelve.EditorTools
             Check(_rig.TryResolveGuard(skillLike, CombatFlowTuning.Default, out GuardResult gr) && !gr.Broken && Mathf.Abs(gr.Reduction - BladeGuardRules.HeldGuardReduction) < 1e-4f,
                 "a hit with no impact power (a skill's flat damage) is blocked normally and never breaks the guard");
             DamageInfo heavyLike = skillLike.WithImpactPower(99f);
-            Check(_rig.TryResolveGuard(heavyLike, CombatFlowTuning.Default, out gr) && gr.Broken && Mathf.Abs(gr.Reduction - reduction * 0.3f) < 1e-4f, "an impact power of 99 breaks it");
+            Check(_rig.TryResolveGuard(heavyLike, CombatFlowTuning.Default, out gr) && !gr.Broken && Mathf.Abs(gr.Reduction - BladeGuardRules.HeldGuardReduction) < 1e-4f, "an impact power of 99 does not break it");
             _rig.SetGuardHeld(false);
             Check(!_rig.TryResolveGuard(heavyLike, CombatFlowTuning.Default, out _), "with the guard down there is nothing to break");
 
@@ -2339,7 +2314,7 @@ namespace Emberdelve.EditorTools
             _rig.Health.Heal(1000f);
             _rig.Status.ClearStatuses();
 
-            foreach ((WeaponData weapon, bool expectBreak, string label) c in new[] { (_claw, false, "claw (12)"), (_maul, true, "maul (30)"), (_bow, false, "arrow (0)"), (_crossbow, false, "bolt (0)") })
+            foreach ((WeaponData weapon, bool expectBreak, string label) c in new[] { (_claw, false, "claw (12)"), (_maul, false, "maul (30)"), (_bow, false, "arrow (0)"), (_crossbow, false, "bolt (0)") })
             {
                 _rig.SetGuardHeld(true);
                 _playerHits.Clear();
@@ -2395,7 +2370,7 @@ namespace Emberdelve.EditorTools
                 }
                 else
                 {
-                    Check(!_rig.Status.HasStatus(StatusKind.Slow), "claw: a blocked claw hit applies no slow");
+                    Check(!_rig.Status.HasStatus(StatusKind.Slow), "a blocked hit applies no slow");
                 }
 
                 _rig.SetGuardHeld(false);

@@ -273,7 +273,7 @@ namespace Emberdelve.Combat.Tests
         }
 
         [Test]
-        public void ABlockedRiposteStrike_IntoAHoldingGuard_TakesZero_AndABrokenOneKeepsThePartial()
+        public void ABlockedRiposteStrike_IntoAHoldingGuard_TakesZero_EvenWhenTheStrikeIsHeavy()
         {
             WeaponData sword = All.Find(w => w.weaponId == "ashen_short_sword");
             float mult = RiposteRules.StrikeMultiplier(sword.riposteDamageMultiplier);
@@ -288,13 +288,12 @@ namespace Emberdelve.Combat.Tests
             Assert.That(guarded.Amount, Is.EqualTo(0f), "FIX2: a held block, a riposte strike included, costs 0 HP");
             Assert.That(guarded.IsValid, Is.True, "a held block is still a valid, resolved hit");
 
-            // a guard the strike breaks keeps only the authored reduction x the break scale (the 1.0 floor applies again)
-            CombatFlowTuning tuning = new CombatFlowTuning();
-            Dummy broken = new Dummy { Guarding = true, Resist = 0.01f, Reduction = 0.5f };
-            DamageInfo breaking = Swing(sword, pattern, mult, broken);
-            Assert.That(breaking.GuardBroken, Is.True);
-            float expected = Mathf.Max(1f, unguarded.Amount * (1f - broken.Reduction * Mathf.Clamp01(tuning.guardBreakReductionScale)));
-            Assert.That(breaking.Amount, Is.EqualTo(expected).Within(expected * 1e-4f), "a broken guard keeps the partial reduction");
+            // force never pierces a covering guard: even a guard with no impact resist still takes the whole hit
+            Dummy weak = new Dummy { Guarding = true, Resist = 0.01f, Reduction = 0.5f };
+            DamageInfo heavy = Swing(sword, pattern, mult, weak);
+            Assert.That(heavy.GuardBroken, Is.False);
+            Assert.That(heavy.Amount, Is.EqualTo(0f), "a covering guard is never broken by impact power");
+
         }
 
         [Test]

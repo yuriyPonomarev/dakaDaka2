@@ -202,25 +202,22 @@ namespace Emberdelve.Rules.Tests
         }
 
         [Test]
-        public void ImpactAtOrAboveResist_BreaksTheGuardWithTheScaledReductionAndStillPays()
+        public void ImpactPower_NeverBreaksTheGuard_TheHeldGuardTakesTheWholeHitAndPaysOnce()
         {
             GuardInput g = Baseline();
             g.EnduranceEnabled = true;
             g.EnduranceCurrent = 100f;
             g.EnduranceCost = 7f;
-            g.ImpactPower = g.ImpactResist;
-            GuardVerdict v = BladeGuardRules.Resolve(in g);
-            Assert.That(v.Outcome, Is.EqualTo(GuardOutcome.Broken));
-            Assert.That(v.Broken, Is.True);
-            Assert.That(v.Reduction, Is.EqualTo(g.BlockReduction * g.BreakReductionScale).Within(1e-6f));
-            Assert.That(v.EnduranceSpent, Is.EqualTo(g.EnduranceCost));
-
-            g.ImpactPower = g.ImpactResist - 0.01f;
-            Assert.That(BladeGuardRules.Resolve(in g).Outcome, Is.EqualTo(GuardOutcome.Blocked));
-
-            g.ImpactPower = 0f;
-            g.ImpactResist = 0f;
-            Assert.That(BladeGuardRules.Resolve(in g).Outcome, Is.EqualTo(GuardOutcome.Blocked), "no impact power never breaks");
+            foreach (float power in new[] { 0f, g.ImpactResist - 0.01f, g.ImpactResist, g.ImpactResist * 10f, 9999f })
+            {
+                g.ImpactPower = power;
+                GuardVerdict v = BladeGuardRules.Resolve(in g);
+                Assert.That(v.Outcome, Is.EqualTo(GuardOutcome.Blocked), "impact " + power);
+                Assert.That(v.Broken, Is.False);
+                Assert.That(v.Reduction, Is.EqualTo(BladeGuardRules.HeldGuardReduction));
+                Assert.That(v.EnduranceSpent, Is.EqualTo(g.EnduranceCost));
+                Assert.That(BladeGuardRules.IsGuardBroken(power, g.ImpactResist), Is.False);
+            }
         }
 
         [Test]
@@ -365,7 +362,7 @@ namespace Emberdelve.Rules.Tests
         }
 
         [Test]
-        public void HeldGuardReduction_IsAllOfTheHit_AndBrokenGuardKeepsTheAuthoredPartial()
+        public void HeldGuardReduction_IsAllOfTheHit_ForAnyAuthoredReductionAndAnyImpact()
         {
             Assert.That(BladeGuardRules.HeldGuardReduction, Is.EqualTo(1f));
             GuardInput g = Baseline();
@@ -373,10 +370,11 @@ namespace Emberdelve.Rules.Tests
             {
                 g.BlockReduction = authored;
                 g.ImpactPower = g.ImpactResist - 0.01f;
-                Assert.That(BladeGuardRules.Resolve(in g).Reduction, Is.EqualTo(BladeGuardRules.HeldGuardReduction), "held, authored " + authored);
-                g.ImpactPower = g.ImpactResist;
-                Assert.That(BladeGuardRules.Resolve(in g).Reduction, Is.EqualTo(authored * g.BreakReductionScale).Within(1e-6f), "broken, authored " + authored);
+                Assert.That(BladeGuardRules.Resolve(in g).Reduction, Is.EqualTo(BladeGuardRules.HeldGuardReduction), "light, authored " + authored);
+                g.ImpactPower = g.ImpactResist * 10f;
+                Assert.That(BladeGuardRules.Resolve(in g).Reduction, Is.EqualTo(BladeGuardRules.HeldGuardReduction), "heavy, authored " + authored);
             }
         }
+
     }
 }

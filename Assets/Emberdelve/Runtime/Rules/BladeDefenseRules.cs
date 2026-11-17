@@ -85,7 +85,7 @@ namespace Emberdelve.BladeDefense
     ///   2. attacker outside the front arc (behind)   -> OutsideArc  (full damage, costs nothing)
     ///   3. attack height not covered by guard height -> WrongHeight (full damage, costs nothing)
     ///   4. endurance enabled and the pool cannot pay -> Exhausted   (full damage, costs nothing)
-    ///   5. impact power reaches impact resist        -> Broken      (reduction x break scale, pays the cost)
+    ///   5. (removed) impact power never breaks a guard: force only pushes the shield/blade back visually
     ///   6. otherwise                                 -> Blocked     (HeldGuardReduction: the whole hit, 0 HP; pays the cost)
     /// Shields and blades share the rule; a shield only differs by the height tolerance the caller passes. Nothing here parries.
     /// </summary>
@@ -139,12 +139,12 @@ namespace Emberdelve.BladeDefense
             }
         }
 
-        /// <summary>A hit breaks a guard when it carries impact power (above zero) and that power reaches the defender's impact resist.</summary>
-        public static bool IsGuardBroken(float impactPower, float impactResist)
-        {
-            if (float.IsNaN(impactPower) || float.IsNaN(impactResist)) return false;
-            return impactPower > 0f && impactPower >= impactResist;
-        }
+        /// <summary>
+        /// Design rule (Dark and Darker parity): the force of a blow never pierces a guard that covers it. A guard that is up, inside the
+        /// arc and in the right band always holds; a heavy hit only pushes the shield or blade back visually. Kept as a function so every
+        /// caller shares the one answer; the arguments are ignored.
+        /// </summary>
+        public static bool IsGuardBroken(float impactPower, float impactResist) => false;
 
         /// <summary>Endurance one held hit costs: base + impactPower x perImpact. Negative, NaN and infinite parts count as 0.</summary>
         public static float BlockCost(float impactPower, float baseCost, float costPerImpact)
@@ -167,12 +167,6 @@ namespace Emberdelve.BladeDefense
             {
                 bool affordable = g.EnduranceCurrent > 0f && g.EnduranceCurrent >= cost;
                 if (!affordable) return new GuardVerdict(GuardOutcome.Exhausted, 0f, 0f);
-            }
-
-            float reduction = Clamp01(g.BlockReduction);
-            if (IsGuardBroken(g.ImpactPower, g.ImpactResist))
-            {
-                return new GuardVerdict(GuardOutcome.Broken, reduction * Clamp01(g.BreakReductionScale), cost);
             }
 
             return new GuardVerdict(GuardOutcome.Blocked, HeldGuardReduction, cost);

@@ -2016,7 +2016,7 @@ namespace Emberdelve.EditorTools
             SwingKey[] keys = new SwingKey[5];
             for (int i = 0; i < keys.Length; i++)
             {
-                float yaw = -half + cone * (i / 4f);
+                float yaw = half - cone * (i / 4f);   // the shared Sword_Regular_A attack clip moves the hand from the attacker's right to the left
                 float r = yaw * Mathf.Deg2Rad;
                 keys[i] = new SwingKey(i / 4f, new Vector3(handRadius * Mathf.Sin(r), handY, handRadius * Mathf.Cos(r)), yaw, -2f);
             }

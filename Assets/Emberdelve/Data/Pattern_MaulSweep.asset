@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Pattern_MaulSweep
   m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.SwingPatternData
   patternId: maul_sweep
-  kind: 0
+  kind: 1
   windupTime: 0.1
   activeTime: 0.18
   recoveryTime: 0.5
@@ -35,22 +35,22 @@ MonoBehaviour:
   restRoll: 14
   keys:
   - t: 0
-    basePos: {x: -0.6062178, y: -0.1, z: 0.34999996}
-    bladeYaw: -60
+    basePos: {x: 0.6062178, y: -0.1, z: 0.34999996}
+    bladeYaw: 60
     bladePitch: -2
   - t: 0.25
-    basePos: {x: -0.35, y: -0.1, z: 0.60621774}
-    bladeYaw: -30
+    basePos: {x: 0.35, y: -0.1, z: 0.60621774}
+    bladeYaw: 30
     bladePitch: -2
   - t: 0.5
     basePos: {x: 0, y: -0.1, z: 0.7}
     bladeYaw: 0
     bladePitch: -2
   - t: 0.75
-    basePos: {x: 0.35, y: -0.1, z: 0.60621774}
-    bladeYaw: 30
+    basePos: {x: -0.35, y: -0.1, z: 0.60621774}
+    bladeYaw: -30
     bladePitch: -2
   - t: 1
-    basePos: {x: 0.6062178, y: -0.1, z: 0.34999996}
-    bladeYaw: 60
+    basePos: {x: -0.6062178, y: -0.1, z: 0.34999996}
+    bladeYaw: -60
     bladePitch: -2

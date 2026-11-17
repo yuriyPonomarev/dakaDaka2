@@ -216,8 +216,8 @@ namespace Emberdelve.Player
             if (remaining <= 0f || _aimFrame == null) return;
             float t = 1f - Mathf.Clamp01(remaining / BlockImpactDuration);
             float pulse = Mathf.Sin(t * Mathf.PI) * (1f - t * 0.25f);
-            transform.position += _aimFrame.rotation * new Vector3(0f, 0.025f, -0.14f) * pulse;
-            transform.rotation = Quaternion.AngleAxis(-12f * pulse, _aimFrame.right) * transform.rotation;
+            transform.position += _aimFrame.rotation * new Vector3(0f, 0.03f, -0.17f) * pulse;
+            transform.rotation = Quaternion.AngleAxis(-15f * pulse, _aimFrame.right) * transform.rotation;
         }
 
         /// <summary>Starts presenting a swing: from now the rig is posed by the pattern curve, clock = Time.time.</summary>

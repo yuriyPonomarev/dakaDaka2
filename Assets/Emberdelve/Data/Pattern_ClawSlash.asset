@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Pattern_ClawSlash
   m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.SwingPatternData
   patternId: claw_slash
-  kind: 0
+  kind: 1
   windupTime: 0.1
   activeTime: 0.18
   recoveryTime: 0.4
@@ -35,22 +35,22 @@ MonoBehaviour:
   restRoll: 14
   keys:
   - t: 0
-    basePos: {x: -0.5196153, y: -0.2, z: 0.29999998}
-    bladeYaw: -60
+    basePos: {x: 0.5196153, y: -0.2, z: 0.29999998}
+    bladeYaw: 60
     bladePitch: -2
   - t: 0.25
-    basePos: {x: -0.3, y: -0.2, z: 0.51961523}
-    bladeYaw: -30
+    basePos: {x: 0.3, y: -0.2, z: 0.51961523}
+    bladeYaw: 30
     bladePitch: -2
   - t: 0.5
     basePos: {x: 0, y: -0.2, z: 0.6}
     bladeYaw: 0
     bladePitch: -2
   - t: 0.75
-    basePos: {x: 0.3, y: -0.2, z: 0.51961523}
-    bladeYaw: 30
+    basePos: {x: -0.3, y: -0.2, z: 0.51961523}
+    bladeYaw: -30
     bladePitch: -2
   - t: 1
-    basePos: {x: 0.5196153, y: -0.2, z: 0.29999998}
-    bladeYaw: 60
+    basePos: {x: -0.5196153, y: -0.2, z: 0.29999998}
+    bladeYaw: -60
     bladePitch: -2

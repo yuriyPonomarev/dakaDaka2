@@ -377,11 +377,11 @@ namespace Emberdelve.EditorTools
                 if (p == null) continue;
                 anyHeavy = true;
                 float maulImpact = _maul.impactPower * p.impactPowerScale;
-                Check(BladeGuardRules.IsGuardBroken(maulImpact, blade.ImpactResist),
-                    "blade: the maul's " + p.patternId + " (impact " + maulImpact.ToString("F2", CultureInfo.InvariantCulture) + ") still breaks the blade guard (resist " + blade.ImpactResist.ToString("F2", CultureInfo.InvariantCulture) + ")");
+                Check(!BladeGuardRules.IsGuardBroken(maulImpact, blade.ImpactResist),
+                    "blade: the maul's " + p.patternId + " (impact " + maulImpact.ToString("F2", CultureInfo.InvariantCulture) + ") never breaks the blade guard (resist " + blade.ImpactResist.ToString("F2", CultureInfo.InvariantCulture) + ")");
                 GuardVerdict maulHit = BladeGuardRules.Resolve(InputFor(blade, _maul, p, 0f, BladeHeight.Mid, BladeTrajectories.HeightOf(p.kind, _flow)));
-                Check(maulHit.Broken, "blade: a maul hit by " + p.patternId + " breaks the guard (" + maulHit.Outcome + ")");
-                Near(blade.BlockReduction * Mathf.Clamp01(_flow.guardBreakReductionScale), maulHit.Reduction, 1e-5f, "blade: a broken blade guard keeps only the break-scaled reduction");
+                Check(maulHit.Mitigated && !maulHit.Broken, "blade: a maul hit by " + p.patternId + " is held, force never breaks the guard (" + maulHit.Outcome + ")");
+                Near(BladeGuardRules.HeldGuardReduction, maulHit.Reduction, 1e-5f, "blade: a heavy hit on a covering blade guard is taken off whole");
             }
 
             Check(anyHeavy, "blade: the maul has a pattern to test the guard break with");
@@ -651,19 +651,15 @@ namespace Emberdelve.EditorTools
             int slashDistance = Math.Abs((int)bladeDummy.GuardHeight - (int)_flow.HeightFor(BladeTrajectories.Of(slash.kind)));
             Check(slashHeld.Blocked == (slashDistance <= _flow.bladeHeightTolerance), "front, lowered blade guard: the slash is held exactly when its band is within the tolerance (" + bladeDummy.Last + ")");
 
-            // a heavy hit breaks the guard: reduction x break scale
+            // a heavy hit still does not break the guard
             SwingPatternData maulPattern = _maul.swingPatterns != null && _maul.swingPatterns.Length > 0 ? _maul.swingPatterns[0] : null;
             if (maulPattern == null) { Check(false, "resolver: the maul has no pattern"); return; }
 
             shieldDummy.GuardHeight = BladeHeight.Mid;
             DamageInfo maulBare = Swing(_maul, maulPattern, front, null);
             DamageInfo maulGuarded = Swing(_maul, maulPattern, front, shieldDummy);
-            bool expectBreak = BladeGuardRules.IsGuardBroken(_maul.impactPower * maulPattern.impactPowerScale, shieldKit.ImpactResist);
-            Check(maulGuarded.GuardBroken == expectBreak, "the maul breaks the guard exactly when its impact power reaches the resist (" + expectBreak + ")");
-            float expectedAmount = expectBreak
-                ? Mathf.Max(1f, maulBare.Amount * (1f - shieldKit.BlockReduction * Mathf.Clamp01(_flow.guardBreakReductionScale)))
-                : maulBare.Amount * (1f - BladeGuardRules.HeldGuardReduction);
-            Near(expectedAmount, maulGuarded.Amount, 0.01f, "maul damage: a broken guard keeps the authored reduction x break scale, a held one takes 0");
+            Check(maulGuarded.Blocked && !maulGuarded.GuardBroken, "the maul never breaks a covering guard, whatever its impact power");
+            Near(maulBare.Amount * (1f - BladeGuardRules.HeldGuardReduction), maulGuarded.Amount, 0.01f, "maul damage: a held guard takes 0 HP");
         }
 
         // ---------------------------------------------------------------------------------------------

@@ -739,7 +739,7 @@ namespace Emberdelve.EditorTools
             Probe(blade.Center - inward * 0.8f, inward, true, true, 0.002f, "fine blade interception");
             Probe(blade.Center - inward * 0.8f, inward, true, true, 0.5f, "single target coarse", 1);
             Probe(blade.Center - inward * 0.8f, inward, true, true, 0.002f, "single target reversed registry", 1);
-            Probe(blade.Center - inward * 0.8f, inward, true, true, 0.5f, "broken guard continuation", 4, true);
+            Probe(blade.Center - inward * 0.8f, inward, true, true, 0.5f, "heavy impact is still stopped by the guard", 4, true);
             Probe(front, -_defender.transform.forward, true, false, 0.5f, "body strike misses raised blade");
             Probe(_defender.CombatCenter, -inward, true, false, 0.5f, "body reached before blade");
             Probe(blade.Center - inward * 0.8f, inward, false, false, 0.5f, "lowered blade cannot block");
@@ -901,10 +901,10 @@ namespace Emberdelve.EditorTools
             }
 
             void Probe(Vector3 origin, Vector3 direction, bool raised, bool expectedBlock, float dt, string label,
-                int targetLimit = 4, bool broken = false)
+                int targetLimit = 4, bool heavy = false)
             {
                 pattern.maxTargets = targetLimit;
-                weapon.impactPower = broken ? 1000f : 0.1f;
+                weapon.impactPower = heavy ? 1000f : 0.1f;
                 _clock += 10f;
                 ResetHealth(); _defender.SetGuardHeld(raised);
                 Shooter attacker = MakeShooter(origin, direction, weapon);
@@ -932,7 +932,7 @@ namespace Emberdelve.EditorTools
                 {
                     for (float elapsed = 0f; elapsed < 1f; elapsed += dt) { _clock += dt; _authority.StepSwings(); }
                     bool found = _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus status);
-                    int expectedHits = targetLimit == 1 ? 1 : broken ? 3 : expectedBlock ? 2 : 1;
+                    int expectedHits = targetLimit == 1 ? 1 : expectedBlock ? 2 : 1;
                     Check(found && status.Hits.Count == expectedHits, label + " resolves only reachable contacts within the limit");
                     if (found && status.Hits.Count > 0 && targetLimit != 1)
                     {
@@ -944,11 +944,6 @@ namespace Emberdelve.EditorTools
                     {
                         Check(before.Hits == 1 && behind.Hits == 0 && status.Hits[0].TargetCombatId == before.CombatId,
                             label + " nearer body receives the only hit; farther guard cannot steal its slot");
-                    }
-                    else if (broken)
-                    {
-                        Check(!status.GuardStopped && status.Hits[0].GuardBroken && before.Hits == 1 && behind.Hits == 1,
-                            label + " broken guard permits the remaining sweep to reach the farther body");
                     }
                     else if (expectedBlock)
                     {
@@ -1099,8 +1094,8 @@ namespace Emberdelve.EditorTools
             Check(_defender.TryResolveGuard(probe,CombatFlowTuning.Default,out GuardResult early) && !early.Broken,
                 "timely crossbow raise holds impact above ordinary resistance");
             _clock += weapon.impactGuardDuration + .01f;
-            Check(_defender.ImpactGuardRemaining==0f && _defender.TryResolveGuard(probe,CombatFlowTuning.Default,out GuardResult late) && late.Broken,
-                "same impact breaks crossbow after window expiry");
+            Check(_defender.ImpactGuardRemaining==0f && _defender.TryResolveGuard(probe,CombatFlowTuning.Default,out GuardResult late) && !late.Broken,
+                "the same impact never breaks the crossbow guard, even after the impact window expires");
             int records = _authority.Riposte.BlocksRecorded;
             Shooter shot = MakeShooter(shape.Position+shape.Rotation*new Vector3(.2f,0,2),-(shape.Rotation*Vector3.forward));
             ResetHealth();
