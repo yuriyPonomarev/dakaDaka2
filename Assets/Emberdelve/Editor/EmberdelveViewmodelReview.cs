@@ -45,5 +45,25 @@ namespace Emberdelve.EditorTools
             }
             Debug.LogError("[ViewmodelReview] no pitch torch on the belt");
         }
+
+        [MenuItem("Emberdelve/Debug/Log Arms Pose (Play Mode)")]
+        public static void LogArms()
+        {
+            if (!EditorApplication.isPlaying) return;
+            var arms = Object.FindFirstObjectByType<FirstPersonArmsDriver>();
+            var camera = Camera.main;
+            if (arms == null || camera == null) { Debug.LogError("[ViewmodelReview] no arms/camera"); return; }
+            var rig = Object.FindFirstObjectByType<PlayerRig>();
+            Transform frame = rig != null && rig.Look != null ? rig.Look.AimTransform : camera.transform;
+            Transform hand = arms.Animator.GetBoneTransform(HumanBodyBones.RightHand);
+            Transform upper = arms.Animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
+            Transform lower = arms.Animator.GetBoneTransform(HumanBodyBones.RightLowerArm);
+            Debug.Log("[ViewmodelReview] frame=" + frame.name + " cam=" + camera.name + " camInFrame=" + frame.InverseTransformPoint(camera.transform.position).ToString("F3")
+                + " grip=" + frame.InverseTransformPoint(arms.GripRight.position).ToString("F3")
+                + " hand=" + frame.InverseTransformPoint(hand.position).ToString("F3")
+                + " shoulder=" + frame.InverseTransformPoint(upper.position).ToString("F3")
+                + " reach=" + ((lower.position - upper.position).magnitude + (hand.position - lower.position).magnitude).ToString("F3")
+                + " fov=" + camera.fieldOfView + " near=" + camera.nearClipPlane + " armsScale=" + arms.Animator.transform.lossyScale.ToString("F2"));
+        }
     }
 }

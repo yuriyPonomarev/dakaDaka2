@@ -67,7 +67,7 @@ namespace Emberdelve.Player
         public static readonly Vector3 PatternRest = new Vector3(0.26f, -0.20f, 0.30f);
 
         /// <summary>Cosmetic sword ready pose of the first-person hand (aim frame) and its blade direction (rig frame, blade along forward).</summary>
-        public static readonly Vector3 SwordReadyHand = new Vector3(0.27f, -0.21f, 0.52f);
+        public static readonly Vector3 SwordReadyHand = new Vector3(0.23f, -0.13f, 0.50f);
         public static readonly Quaternion SwordReadyRotation = Quaternion.Euler(-64f, -24f, 0f);
         public static readonly Quaternion ShieldGuardSwordRotation = Quaternion.Euler(-20f, -20f, 0f);
 
@@ -676,7 +676,8 @@ namespace Emberdelve.Player
                         if (across.sqrMagnitude < .04f) across = Vector3.ProjectOnPlane(frame.up, forearm);
                         if (across.sqrMagnitude > 1e-6f)
                         {
-                            Vector3 natural = Vector3.RotateTowards(across.normalized, handle, 25f * Mathf.Deg2Rad, 0f);
+                            // Swings keep the blade exactly where the pattern sends it; only the ready pose is straightened.
+                            Vector3 natural = Vector3.RotateTowards(across.normalized, handle, Mathf.Lerp(25f, 180f, Mathf.SmoothStep(0f, 1f, _swingWeight)) * Mathf.Deg2Rad, 0f);
                             gripRotation = Quaternion.FromToRotation(handle, natural) * gripRotation;
                         }
                         gripRotation = RollToForearm(gripRotation, forearm, _handR, gripRight);
