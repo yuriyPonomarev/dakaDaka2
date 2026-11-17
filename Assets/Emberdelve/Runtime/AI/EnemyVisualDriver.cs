@@ -35,6 +35,11 @@ namespace Emberdelve.AI
         private float _speed;
         private bool _phaseDriven;
         private bool _restDriven;
+        private bool _releasing;
+        private float _blendInUntil;
+        private float _lastTarget;
+        private const float AttackBlendIn = 0.12f;
+        private const float RecoveryHoldFraction = 0.35f;
         private float _attackPlayedAt = -10f;
         private float _attackPlaybackDuration;
         private float _attackClipLength = 1f;
@@ -148,18 +153,64 @@ namespace Emberdelve.AI
             _soundPhase = phase.Phase;
             if (phase.Phase != 0)
             {
-                _phaseDriven = true;
+                // Recovery hands the body back to idle with a long blend instead of holding the lunge and snapping at its end.
+                bool releaseNow = phase.Phase == 3 && phase.Duration > 0.05f && phase.Elapsed >= phase.Duration * RecoveryHoldFraction;
+                if (_releasing || releaseNow)
+                {
+                    if (!_releasing)
+                    {
+                        _releasing = true;
+                        _phaseDriven = false;
+                        animator.SetFloat(_attackSpeedHash, 0.35f);
+                        animator.CrossFadeInFixedTime("Idle", Mathf.Clamp(phase.Duration - phase.Elapsed + 0.12f, 0.18f, 0.45f));
+                    }
+                    if (phase.Phase == 3) return;
+                    _releasing = false;
+                }
+
+                float target = phase.NormalizedTime();
+                if (!_phaseDriven)
+                {
+                    // Enter the attack with a short blend from whatever locomotion pose the body is in (no first-frame pop).
+                    _phaseDriven = true;
+                    _blendInUntil = Time.time + AttackBlendIn;
+                    animator.ResetTrigger(_attackHash);
+                    animator.ResetTrigger(_hitHash);
+                    animator.SetFloat(_attackSpeedHash, 0f);
+                    animator.CrossFadeInFixedTime("Attack", AttackBlendIn, 0, target * _attackClipLength);
+                    _lastTarget = target;
+                    return;
+                }
+                if (Time.time < _blendInUntil)
+                {
+                    // Keep the blend alive; advance the attack state at the phase rate instead of re-playing it.
+                    float rate = (target - _lastTarget) / dt;
+                    animator.SetFloat(_attackSpeedHash, Mathf.Max(0f, rate * _attackClipLength));
+                    _lastTarget = target;
+                    return;
+                }
                 animator.ResetTrigger(_attackHash);
                 animator.ResetTrigger(_hitHash);
                 animator.SetFloat(_attackSpeedHash, 0f);
-                animator.Play("Attack", 0, phase.NormalizedTime());
+                // Smooth the scrub target slightly so frame hitches never jump the pose.
+                float smoothed = Mathf.Abs(target - _lastTarget) > 0.2f ? target : Mathf.Lerp(_lastTarget, target, 1f - Mathf.Exp(-dt / 0.03f));
+                _lastTarget = smoothed;
+                animator.Play("Attack", 0, smoothed);
                 animator.Update(0f);
             }
-            else if (_phaseDriven)
+            else
             {
+                if (_phaseDriven)
+                {
+                    animator.SetFloat(_attackSpeedHash, 1f);
+                    animator.CrossFadeInFixedTime("Idle", 0.22f);
+                }
+                else if (_releasing)
+                {
+                    animator.SetFloat(_attackSpeedHash, 1f);
+                }
                 _phaseDriven = false;
-                animator.SetFloat(_attackSpeedHash, 1f);
-                animator.CrossFadeInFixedTime("Idle", 0.08f);
+                _releasing = false;
             }
         }
 

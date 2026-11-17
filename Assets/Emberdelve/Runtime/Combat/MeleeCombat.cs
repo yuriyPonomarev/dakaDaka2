@@ -188,6 +188,12 @@ namespace Emberdelve.Combat
             _remotePressPending = false;
             _prevSecondaryHeld = secondaryHeld;
             if (pressed && secondaryHeld && _riposteStrikesLeft == 0 && !IsSwinging) TryBeginRiposte();
+            // DaD feel: right after a sword parry the attack button answers with the riposte too (the block re-press still works).
+            if (primaryPressed && _riposteStrikesLeft == 0 && !IsSwinging && ParryWindowOpen() && TryBeginRiposte())
+            {
+                primaryPressed = false;
+                _bufferedUntil = -1f;
+            }
             if (_riposteStrikesLeft > 0 && _phase == Phase.Idle) ContinueRiposte();
 
             rig.SetGuardHeld(secondaryHeld && !IsSwinging && _riposteStrikesLeft == 0);
@@ -335,6 +341,14 @@ namespace Emberdelve.Combat
             CombatDiagnostics.Log("melee-swing",
                 $"[MeleeCombat] swing #{sequence} ({_weapon.weaponId}, {pattern.patternId}, combo step {step} x{stepData.damageMultiplier:F2}) accepted by the authority as swing {swingId}", this);
             return true;
+        }
+
+        /// <summary>True while the authority holds a live parry for this rig (sword kit, no shield): the attack press then ripostes.</summary>
+        private bool ParryWindowOpen()
+        {
+            if (_weapon == null || rig == null || !_weapon.CanRiposteWeapon || rig.GuardHasShield) return false;
+            return GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)
+                && authority is LocalCombatAuthority local && local.RiposteWindowRemaining(rig.CombatId) > 0f;
         }
 
         /// <summary>
