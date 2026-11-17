@@ -840,6 +840,9 @@ namespace Emberdelve.Player
                             float hook = finger == 0 ? -.3f : joint == 0 ? .05f : joint == 1 ? -.9f : -.6f;
                             curl = Mathf.Lerp(finger == 0 ? .4f : .65f, hook, Mathf.Lerp(.65f, 1f, Mathf.Clamp01(draw)));
                         }
+                        // An authored grip (baked from a free hand-pose clip) wins over the generic curl.
+                        FpGripPose grip = !bow ? FpGripPose.Load() : null;
+                        if (grip != null && grip.TryGet(index, out float authored)) curl = authored;
                         _fingerPose.muscles[index] = curl;
                     }
             }
