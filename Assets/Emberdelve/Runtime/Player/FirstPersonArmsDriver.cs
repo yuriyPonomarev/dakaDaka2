@@ -67,7 +67,7 @@ namespace Emberdelve.Player
         public static readonly Vector3 PatternRest = new Vector3(0.26f, -0.20f, 0.30f);
 
         /// <summary>Cosmetic sword ready pose of the first-person hand (aim frame) and its blade direction (rig frame, blade along forward).</summary>
-        public static readonly Vector3 SwordReadyHand = new Vector3(0.23f, -0.13f, 0.50f);
+        public static readonly Vector3 SwordReadyHand = new Vector3(0.24f, -0.15f, 0.56f);
         public static readonly Quaternion SwordReadyRotation = Quaternion.Euler(-64f, -24f, 0f);
         public static readonly Quaternion ShieldGuardSwordRotation = Quaternion.Euler(-20f, -20f, 0f);
 
@@ -90,8 +90,8 @@ namespace Emberdelve.Player
         // The kite shield's rear straps sit above its geometric centre.
         public static readonly Vector3 ShieldMountOffset = new Vector3(0f, -0.115f, 0f);
 
-        public const float MinModelScale = 0.9f;
-        public const float MaxModelScale = 1.1f;
+        public const float MinModelScale = 0.8f;
+        public const float MaxModelScale = 0.92f;
         /// <summary>Fraction of the half field of view the hand may use before it is pulled back inside.</summary>
         public const float FrustumFill = 0.9f;
 
@@ -628,14 +628,14 @@ namespace Emberdelve.Player
             {
                 float ready = 1f - Mathf.SmoothStep(0f, 1f, guardBlend);
                 handLocal = Vector3.Lerp(handLocal,
-                    ClampToView(camera, new Vector3(.34f, -.36f, .52f) + offsetRight), ready);
-                localRotation = Quaternion.Slerp(localRotation, Quaternion.Euler(-74f, 12f, 0f), ready);
+                    ClampToView(camera, new Vector3(.30f, -.40f, .60f) + offsetRight), ready);
+                localRotation = Quaternion.Slerp(localRotation, Quaternion.Euler(-56f, 20f, 0f), ready);
             }
             if (_utilityItem != null)
             {
                 bool torch = _utilityItem.itemId == "pitch_torch";
-                handLocal = ClampToView(camera, (torch ? new Vector3(.34f,-.36f,.52f) : new Vector3(.13f,-.22f,.45f)) + offsetRight);
-                localRotation = Quaternion.Euler(torch ? -74f : -82f, torch ? 12f : 15f, 0f);
+                handLocal = ClampToView(camera, (torch ? new Vector3(.30f,-.40f,.60f) : new Vector3(.13f,-.22f,.45f)) + offsetRight);
+                localRotation = Quaternion.Euler(torch ? -56f : -82f, torch ? 20f : 15f, 0f);
                 if (_bottle != null)
                 {
                     bool drinking = _drink != null && _drink.IsDrinking;

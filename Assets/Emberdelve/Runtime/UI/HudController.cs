@@ -620,11 +620,12 @@ namespace Emberdelve.UI
             const float gap = 14f;
 
             RectTransform bar = UiFactory.CreateGroup(_root, "SkillBar");
-            UiFactory.SetRect(bar, new Vector2(1f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(-28f, 128f));
+            // Centred above the quick belt: the bottom-right corner is where the first-person weapon hand sits.
+            UiFactory.SetRect(bar, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), Vector2.zero, new Vector2(0f, 132f));
 
             for (int i = 0; i < _skillSlots.Length; i++)
             {
-                float x = -(chipWidth + gap) * (_skillSlots.Length - 1 - i) - chipWidth * 0.5f;
+                float x = (i - (_skillSlots.Length - 1) * 0.5f) * (chipWidth + gap);
 
                 Image background = UiFactory.CreateImage(bar, "SkillSlot" + i, new Color(0.075f, 0.07f, 0.06f, 0.9f),
                     new Vector2(chipWidth, chipHeight), new Vector2(x, chipHeight * 0.5f),
