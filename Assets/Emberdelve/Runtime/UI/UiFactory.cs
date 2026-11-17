@@ -105,6 +105,11 @@ namespace Emberdelve.UI
             text.verticalOverflow = VerticalWrapMode.Overflow;
             text.supportRichText = false;
             text.text = content;
+            // Soft drop shadow: every label stays readable over bright torchlight and dark stone alike.
+            Shadow shadow = root.AddComponent<Shadow>();
+            shadow.effectColor = new Color(0f, 0f, 0f, 0.82f);
+            shadow.effectDistance = new Vector2(1.2f, -1.2f);
+            shadow.useGraphicAlpha = true;
             return text;
         }
 
@@ -138,6 +143,11 @@ namespace Emberdelve.UI
 
             Image image = root.AddComponent<Image>();
             image.color = background;
+            DungeonUiStyle.Surface(image, false);
+            Outline rim = image.gameObject.AddComponent<Outline>();
+            rim.effectColor = new Color(DungeonUiStyle.Brass.r, DungeonUiStyle.Brass.g, DungeonUiStyle.Brass.b, 0.9f);
+            rim.effectDistance = new Vector2(1f, 1f);
+            rim.useGraphicAlpha = false;
 
             RectTransform rect = image.rectTransform;
             rect.anchorMin = new Vector2(0.5f, 0.5f);

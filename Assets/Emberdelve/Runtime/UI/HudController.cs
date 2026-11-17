@@ -381,10 +381,12 @@ namespace Emberdelve.UI
                 new Vector2(282f, 28f), new Vector2(0f, -28f), new Vector2(.5f, .5f));
             _roomLabel.raycastTarget = false;
             _roomBack.raycastTarget = false;
+            DungeonUiStyle.BarBack(_roomBack.transform);
             _roomLabel.gameObject.SetActive(false);
             _roomBack.gameObject.SetActive(false);
 
             _classLabel = UiFactory.CreateText(_root, "ClassLabel", "Class", 26, ink, TextAnchor.UpperLeft);
+            DungeonUiStyle.Heading(_classLabel);
             UiFactory.SetRect(_classLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(420f, 34f), new Vector2(24f, -22f), new Vector2(0f, 1f));
 
@@ -415,6 +417,8 @@ namespace Emberdelve.UI
                 new Vector2(BarWidth, BarHeight), new Vector2(24f, 44f), new Vector2(0f, 0f), new Vector2(0f, 0f));
             _healthFill.rectTransform.pivot = new Vector2(0f, 0.5f);
             _healthFillRect = _healthFill.rectTransform;
+            DungeonUiStyle.Bar(_healthFill);
+            DungeonUiStyle.BarBack(_root.Find("HealthBack"));
 
             _healthLabel = UiFactory.CreateText(_root, "HealthLabel", "100 / 100", 15, ink, TextAnchor.MiddleLeft);
             UiFactory.SetRect(_healthLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
@@ -432,6 +436,7 @@ namespace Emberdelve.UI
                 new Vector2(220f, 10f), new Vector2(-24f - 220f, 48f), new Vector2(1f, 0f), new Vector2(1f, 0f));
             _ammoFill.rectTransform.pivot = new Vector2(0f, 0.5f);
             _ammoFillRect = _ammoFill.rectTransform;
+            DungeonUiStyle.Bar(_ammoFill);
 
             UiFactory.CreateImage(_root, "ManaBack", new Color(0.07f, 0.07f, 0.09f, 0.85f),
                 new Vector2(BarWidth, ManaBarHeight), new Vector2(24f + BarWidth * 0.5f, 18f),
@@ -441,6 +446,8 @@ namespace Emberdelve.UI
                 new Vector2(BarWidth, ManaBarHeight), new Vector2(24f, 18f), new Vector2(0f, 0f), new Vector2(0f, 0f));
             _manaFill.rectTransform.pivot = new Vector2(0f, 0.5f);
             _manaFillRect = _manaFill.rectTransform;
+            DungeonUiStyle.Bar(_manaFill);
+            DungeonUiStyle.BarBack(_root.Find("ManaBack"));
 
             _manaLabel = UiFactory.CreateText(_root, "ManaLabel", "0 / 0", 14, dim, TextAnchor.MiddleLeft);
             UiFactory.SetRect(_manaLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),

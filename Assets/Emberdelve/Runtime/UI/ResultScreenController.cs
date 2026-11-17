@@ -62,6 +62,8 @@ namespace Emberdelve.UI
                 new Vector2(2400f, 1400f), Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
 
             _titleLabel = UiFactory.CreateText(_root, "Title", "", 44, Color.white, TextAnchor.MiddleCenter);
+
+            DungeonUiStyle.Heading(_titleLabel);
             UiFactory.SetRect(_titleLabel.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
                 new Vector2(1100f, 70f), new Vector2(0f, 150f));
 
