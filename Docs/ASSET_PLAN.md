@@ -141,3 +141,21 @@ Reference flame correction (2026-11-13): original HandTorchVolume URP shader and
 
 ## Ground loot models (13 November 2026)
 Original treasure and ammunition meshes authored by EmberdelveLootModels: struck coins, reliquary, gem-set ring, chain/bead pendant, fletched arrows/bolts and bound bundles. Original carved bow/crossbow ground shapes supplement existing licensed melee/shield meshes from WeaponViewModelSet. Original small procedural surface textures/materials saved under Art/Models/Loot; cosmetic prefabs under Prefabs/Items/Loot. No reference-game assets or external downloads. Existing potion/bandage and six armor/torch representations preserved. Coverage and visual evidence tracked in Tasks/GROUND_LOOT_MODELS_20261113.md.
+
+## Cinder Warden (17 November 2026)
+
+The original user-requested Meshy cyclops and separate ironbound club were transferred into the development checkout from `DakaDaka`. The [source manifest](../SourceArt/AI/Meshy/CinderWarden/manifest.json) records the generated reference images, Meshy terms, geometry and texture settings, source hashes and four task IDs. The original Meshy jobs used 44 credits. Integration reused those outputs.
+
+The body has 27,520 triangles and the rigid club has 6,731. The body holds a fixed weapon grip with the club parented to the right hand. Pipe smoke reuses the project's SmokeWisp material. Five Meshy motions and the existing Quaternius `Death01` clip drive the Humanoid. The combat visual is `Resources/Emberdelve/NetEnemyVisuals/EnemyVisual_CinderWarden.prefab`. The source visual and URP materials are under `Art/Models/AI/Meshy/CinderWarden`.
+
+## Meshy warrior and first-person arms (17 November 2026)
+
+The user requested a Meshy player character, bare first-person hands, textures, rigging and animations, then rejected the first physique and asked for a more muscular and brutal warrior. The revised body uses a nano-banana-pro reference, meshy-t2.5 geometry with 31,484 triangles and meshy-7 PBR textures. Base color and normal maps are 4096 pixels. Metallic and roughness maps are 2048 pixels. The body has a Unity Humanoid rig at 1.9 metres with all 30 finger joints.
+
+That Smart Topology prototype is superseded by the user-approved Meshy 7.1 detailed generation: 314,833 triangles, open separated fingers, 4K color/normal and 2K metallic/roughness maps. Both paid Meshy rig results omitted fingers despite verified requests. Tools/Repair-MeshyHeroHands.py adds 30 finger joints locally, weights them, blends webbing and keeps weights identical across split UV vertices. It preserves the generated surface and UVs. CryptWarriorHero.fbx and its derived 50,560-triangle first-person arms now use the same source and Hero texture set. The older generated revisions remain as rollback/provenance sources.
+
+Both active rigs use Unity Humanoid. Existing generated idle, sword slash, shield push, archery, torch, walking and running clips are reused through Humanoid retargeting. The first-person equipment driver retains gameplay trajectories and uses rig-specific elbow alignment, support-grip roll and authored finger rotations. The native rotations are selected only by the new arms prefab.
+
+Art/Models/Meshy/CryptDelver/manifest.json records task IDs, source checksums, all source revisions, derivation and measured charges. Charges were 38 credits initially, 29 for the muscular prototype, 44 for the approved detailed generation and 5 for the approved rig-only retry: 116 total, verified balance 979. The user's connected Meshy account terms govern use of these commissioned generations. Blender is used as a local authoring tool; no external character models or textures were imported.
+
+Visual review and focused verification are recorded in Tasks/MESHY_CHARACTER_20261117.md. Unity maps all 30 repaired finger joints. The detailed revision's visual acceptance remains with the user.

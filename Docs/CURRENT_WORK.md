@@ -4,9 +4,13 @@
 
 The primary checkout for all development and agents on this machine is `C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff`, tracking GitHub `origin/main`. The prior `../DakaDaka` checkout is preserved with a different Git history and is not the development source. The handoff WIP is committed as `94471be3` in the rewritten history; six material changes and local-only files were excluded and remain in the old checkout. Historical logs and builds referenced below may exist only in the old checkout or `../DakaDaka_ci`; their results do not establish a fresh run in this checkout. Use `../DakaDaka_ci` as the test mirror, with the primary checkout as source.
 
-Updated 13 November 2026. Latest completed slice: ground loot models (Tasks/GROUND_LOOT_MODELS_20261113.md). Prior slice: replacement torch flame based on user photo, Tasks/TORCH_REFERENCE_FLAME_20261113.md. Historical status at that date: UI/combat/stash/Royale/art changes were uncommitted; the later handoff WIP commit records them as described above. Main Editor stays open/no Play; root sole mirror executor.
+Updated 17 November 2026. Active slice is the user-requested Meshy warrior and bare first-person hands, followed by feedback requesting a more muscular physique and healthier wrist poses. Tasks/MESHY_CHARACTER_20261117.md records assets, charges, current visual limitations and proof. The latest completed slice before this work was ground loot models (Tasks/GROUND_LOOT_MODELS_20261113.md), following the torch reference pass (Tasks/TORCH_REFERENCE_FLAME_20261113.md). Historical UI/combat/stash/Royale/art work is recorded by the handoff WIP commit described above.
 
 ## Latest implementation and proof
+
+Cinder Warden is installed in the Modular Crypts elite slot. The boss starts awake with 320 HP and has an authoritative, animation-sampled club sweep. Existing raid AI and loot rules drive the encounter. `EnemySweep` passed 121 checks including 13 boss checks, and the enemy wire fixture passed 22 checks. `CinderCrypt` verified a real player hit in the saved scene (120 to 61.5 HP after the warning). `NetCombat` and `NetFinal` also passed. See [Cinder Warden task report](Tasks/CINDER_WARDEN_CRYPT_20261117.md).
+
+Meshy warrior WIP now uses the314,833-triangle detailed Meshy7.1 muscular body, 4K color/normal maps and seven reused Meshy clips. Two server rig results omitted fingers despite verified requests. Local Blender repair preserves the generated surface/body rig and adds30 mapped finger joints with seam-consistent skin weights. The active first-person mesh derives from this same source:28,022 vertices/50,560 triangles, authored closed-hand/bow-hook rotations and rig-specific grip/scale/elbow settings. New assets and references are in the development checkout. Total spending116 credits, verified balance979. Visual EditMode v22 passed186/187, with only the same legacy enemy-derived-mesh mismatch. Run20261117-202622-322 passed Hands92, Visual216, NetCombat396, ProjectileBlock191 and SweptMelee674 in258.8s. v23 compiled and rendered actual24-frame body and first-person sword motion previews; equipment and motion inspected. Owned test processes exited; primary Editor untouched. Tasks/MESHY_CHARACTER_20261117.md records evidence and pending visual acceptance. Changes remain uncommitted during user review.
 
 Ground loot: all24 item definitions covered, 15 new saved world entries (treasure, ammo, ranged weapons and reused melee/shield), six existing armor/torch entries and three runtime consumables. Invisible interaction proxy/custody unchanged. Hidden serialized visual cache avoids scene-reload duplicate models; authored recovered ammo suppresses legacy shaft boxes. Inventory icons unchanged in this slice.
 
@@ -30,7 +34,7 @@ Royale: three maps ruins→crypts→infernal; solo16, duo16, trio15, temporary d
 
 ## Next three actions
 
-1. Follow user visual feedback on ground loot and torch; retain gallery/live evidence. New loot inventory icons, further armor variants/cloth animation remain separate scope.
+1. Review the installed detailed Meshy warrior and bare first-person hands with the user; all five focused gates passed, final equipment and motion previews are available. User visual acceptance remains pending. See Tasks/MESHY_CHARACTER_20261117.md.
 2. Finish Royale ordinary full-match final evacuation/profile restart acceptance; controlled fixtures do not replace it.
 3. Return to explicitly deferred native memory investigation when requested; preserve logs, no engine/package upgrades or unrelated drift cleanup.
 
