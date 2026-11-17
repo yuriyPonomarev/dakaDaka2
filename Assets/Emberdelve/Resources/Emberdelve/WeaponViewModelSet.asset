@@ -56,4 +56,4 @@ MonoBehaviour:
   spareModels:
   - ornate_medieval_mace
   - ornate_war_hammer
-  armsPrefab: {fileID: 1463284168323612115, guid: cffd7247f8415f24f85afc78d9fb2fdd, type: 3}
+  armsPrefab: {fileID: 8264778687440001090, guid: da5cc9dcce9efe64085712e6b3530495, type: 3}

@@ -1,0 +1,128 @@
+{
+  "generator": "Meshy",
+  "created": "2026-11-17",
+  "purpose": "Muscular dark-dungeon warrior with bare first-person hands",
+  "reference_task": "01a1eac5-bd98-7750-a4a5-22b4f6c70cd5",
+  "model_task": "01a1eaca-26be-73ae-b9f4-955c77de586a",
+  "rig_task": "01a1eae9-5df6-7064-aa38-6e46ae85e9d3",
+  "animation_task": "01a1ea74-65d4-72ce-87ca-f9c91fbee4ee",
+  "image_model": "nano-banana-pro",
+  "geometry_model": "meshy-7.1",
+  "texture_model": "meshy-7",
+  "texture_resolution": "4k base color/normal; 2k metallic/roughness",
+  "target_triangles": 300000,
+  "source_triangles": 314833,
+  "skeleton_template": "unity_humanoid",
+  "include_fingers": true,
+  "height_meters": 1.9,
+  "rig_recovery": {
+    "server_rigs": [
+      "01a1ead0-a43d-7242-ab3a-9aba584a74d6",
+      "01a1eae9-5df6-7064-aa38-6e46ae85e9d3"
+    ],
+    "server_result": "Both tasks charged 5 credits and returned body-only skeletons despite verified include_fingers=true requests.",
+    "local_tool": "Tools/Repair-MeshyHeroHands.py",
+    "tool_version": "Blender 4.3.2",
+    "derived_file": "CryptWarriorHero.fbx",
+    "finger_joints_added": 30,
+    "surface_vertices_preserved": 177046,
+    "derivation": "Retains Meshy body rig and generated surface/UVs; fits finger joints to hand cross-sections, blends webbing weights, and unifies weights at coincident split UV vertices. No additional external character geometry or textures.",
+    "source_glb_sha256": "469a71ed2f5ed48a2ccabcb079afdc7ddddd3f087be3c33c2fc96efd28e498da",
+    "derived_fbx_sha256": "6c5af2dfa2900db92f4077a9d263923994793d931514e91f58a396bb79d09856"
+  },
+  "first_person_source": {
+    "file": "CryptWarriorHero.fbx",
+    "mesh": "CryptDelverArms.asset",
+    "vertices": 28022,
+    "triangles": 50560,
+    "textures": "Textures/Hero",
+    "viewmodel_scale": 1.4,
+    "derivation": "UV-preserving arms-only extraction from the repaired detailed body, with skeleton-specific grip and bow-hook rotations. No radial anatomy morph."
+  },
+  "actions": [
+    {
+      "id": 0,
+      "name": "Idle"
+    },
+    {
+      "id": 219,
+      "name": "Right_Hand_Sword_Slash"
+    },
+    {
+      "id": 220,
+      "name": "Shield_Push_Left"
+    },
+    {
+      "id": 224,
+      "name": "Archery_Shot"
+    },
+    {
+      "id": 337,
+      "name": "Torch_Look_Around"
+    }
+  ],
+  "included_animations": [
+    "Walking",
+    "Running"
+  ],
+  "animation_transfer": "The original seven Meshy clips retarget through their Unity Humanoid source avatars. Existing project Block and Death states remain.",
+  "consumed_credits": {
+    "initial_pipeline": 38,
+    "muscular_prototype": 29,
+    "detailed_reference": 9,
+    "detailed_model_with_textures": 30,
+    "detailed_rig": 5,
+    "approved_rig_only_retry": 5,
+    "detail_revision_total": 49,
+    "session_total": 116
+  },
+  "provenance": "Commissioned generations through the user's connected Meshy account with explicit spending approval. Use follows the account's Meshy terms. Original local finger repair and pose authoring.",
+  "current_quality_status": "Detailed source installed. Thirty finger joints map in Unity; closed-hand surface remains continuous across UV seams. Equipment/attack/body captures inspected. User visual acceptance remains pending.",
+  "verification": {
+    "visual_editmode": {
+      "total": 187,
+      "passed": 186,
+      "failed": 1,
+      "remaining_failure": "Unchanged legacy enemy-derived-mesh comparison, 8462 versus 30577 vertices",
+      "evidence": "Logs/acceptance/meshy-character-20261117/visual-editmode-hero-v22"
+    },
+    "gates": {
+      "Hands": 92,
+      "Visual": 216,
+      "NetCombat": 396,
+      "ProjectileBlock": 191,
+      "SweptMelee": 674
+    },
+    "all_five_gates_passed": true,
+    "run": "Logs/runs/20261117-202622-322",
+    "elapsed_seconds": 258.8,
+    "credits_remaining": 979
+  },
+  "previous_revisions": {
+    "muscular_prototype": {
+      "reference_task": "01a1ea83-2e48-7401-afa0-bc93efd409fa",
+      "model_task": "01a1ea84-a79c-759a-8a73-df8b7d8c348a",
+      "rig_task": "01a1ea87-3137-75d1-a4f3-fa1b444a1467",
+      "source_triangles": 31484,
+      "source_rig_fbx_sha256": "7ab3fe330869b758b9b0be7f2fc8fddd5994718d809226f3be08dc51572d8e7b",
+      "first_person_source": {
+        "model_task": "01a1ea71-4f30-75ef-a14b-ad0bf1dfcec4",
+        "rig_task": "01a1ea73-19ac-72d9-9fc4-cf24dba3ef16",
+        "file": "CryptWarriorArmsSource.fbx",
+        "derivation": "UV-preserving arms extraction from the initial Meshy rig, retaining clean finger topology. Weighted radial shaping increases forearm thickness by up to 32 percent and hand thickness by 6 percent. Both generated rigs use Unity Humanoid.",
+        "source_fbx_sha256": "793227bc89828208d7d4262cb2a25ae305dce1b264c91231464853eddcd25b4a",
+        "textures": "Textures/Arms",
+        "viewmodel_scale": 1.5
+      }
+    },
+    "initial": {
+      "reference_task": "01a1ea70-3f30-746d-b215-ba2b97e570fb",
+      "model_task": "01a1ea71-4f30-75ef-a14b-ad0bf1dfcec4",
+      "rig_task": "01a1ea73-19ac-72d9-9fc4-cf24dba3ef16",
+      "source_triangles": 27288,
+      "source_rig_glb_sha256": "45d983b3fa2de5c5bf4f0497c035c2195f23215ed4f4364900520d097d1d33f4",
+      "source_rig_fbx_sha256": "793227bc89828208d7d4262cb2a25ae305dce1b264c91231464853eddcd25b4a",
+      "consumed_credits": 38
+    }
+  }
+}

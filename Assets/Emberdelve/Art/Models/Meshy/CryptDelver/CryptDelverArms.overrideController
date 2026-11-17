@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!221 &22100000
+AnimatorOverrideController:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: CryptDelverArms
+  m_Controller: {fileID: 9100000, guid: 47f38049dd6e19044b93ad1fb0b78d2a, type: 2}
+  m_Clips:
+  - m_OriginalClip: {fileID: 7400000, guid: 3ea9430996fdf624aac2a1f10f45ff4c, type: 2}
+    m_OverrideClip: {fileID: 0}
+  - m_OriginalClip: {fileID: 7400000, guid: 24380f1587204004b8405135c01b3f33, type: 2}
+    m_OverrideClip: {fileID: 0}
+  - m_OriginalClip: {fileID: 7400000, guid: dcd6b08a4735bad44afb4df813809089, type: 2}
+    m_OverrideClip: {fileID: 0}
+  - m_OriginalClip: {fileID: 7400000, guid: 309a0c12eed66ef43adaa96766cf3c97, type: 2}
+    m_OverrideClip: {fileID: 0}
+  - m_OriginalClip: {fileID: 7400000, guid: d4230148226f97541a0349ae7a575275, type: 2}
+    m_OverrideClip: {fileID: -2901233246522174405, guid: a473a14ea35f30f468eb5b9317fad441, type: 3}
+  - m_OriginalClip: {fileID: 7400000, guid: fc17e5254a6f16441b41c8e383460c7a, type: 2}
+    m_OverrideClip: {fileID: 5392990168159487488, guid: 5563c7992bc2388439e52513bb5366e1, type: 3}
+  - m_OriginalClip: {fileID: 7400000, guid: bd4764917d3b32e4c9d522759652ee77, type: 2}
+    m_OverrideClip: {fileID: -3100369314251171874, guid: 5563c7992bc2388439e52513bb5366e1, type: 3}
+  - m_OriginalClip: {fileID: 7400000, guid: 66b364192eac1fd4799effd83adf49dd, type: 2}
+    m_OverrideClip: {fileID: 0}

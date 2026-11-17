@@ -101,6 +101,10 @@ namespace Emberdelve.Player
         [SerializeField] private Animator animator;
         [SerializeField] private Transform gripRight;
         [SerializeField] private Transform gripLeft;
+        [SerializeField] private float supportGripRoll;
+        [SerializeField] private bool alignWristToGrip;
+        [SerializeField] private float modelScale = ModelScale;
+        [SerializeField] private FpGripPose gripPoseOverride;
         [Tooltip("Where the arms root sits relative to the aim frame (camera pivot) when nothing is in front of the player.")]
         [SerializeField] private Vector3 restPosition = Vector3.zero;
         [Tooltip("Distance in front of the camera the weapon may reach before the arms are pushed back (a stand-in for a separate viewmodel camera).")]
@@ -531,13 +535,6 @@ namespace Emberdelve.Player
 
             bool swinging = _visual != null && _visual.IsSwinging;
             _swingWeight = Mathf.MoveTowards(_swingWeight, swinging ? 1f : 0f, (swinging ? 14f : 4f) * dt);
-            // A shield does the blocking: the sword stays lowered at the side instead of crossing in front of the shield.
-            if (_offHand != null && _blockHeld && !swinging)
-            {
-                localBase = PatternRest;
-                localRotation = ShieldGuardSwordRotation;
-            }
-
             float guardTarget = _blockHeld ? 1f : 0f;
             _guardBlend = Mathf.MoveTowards(_guardBlend, guardTarget, 7f * dt);
             // Ease only the rendered hands when entering/leaving guard. The weapon rig also
@@ -563,15 +560,17 @@ namespace Emberdelve.Player
         /// anchor, then solves the right arm onto the weapon grip target and the left arm onto the shield / second grip.
         /// <paramref name="localBase"/> / <paramref name="localRotation"/> are the weapon rig's pose in the aim frame.
         /// </summary>
-        public void Pose(Transform frame, Camera camera, Vector3 localBase, Quaternion localRotation, float guardBlend, Vector3 offsetRight, Vector3 offsetLeft)
+        public void Pose(Transform frame, Camera camera, Vector3 localBase, Quaternion localRotation, float guardBlend, Vector3 offsetRight, Vector3 offsetLeft,
+            float? swingBlend = null)
         {
             if (!ResolveBones() || frame == null) return;
+            float poseSwingWeight = swingBlend ?? _swingWeight;
 
             if (_utilityItem != null || (_mainData != null && !_mainData.IsRanged)) PoseFingers(false, 0f);
 
             // Scale the mannequin and hold the middle of the shoulders at its viewmodel anchor.
             Transform model = animator.transform;
-            model.localScale = Vector3.one * ModelScale;
+            model.localScale = Vector3.one * modelScale;
             Vector3 mid = (_upperR.position + _upperL.position) * 0.5f;
             model.position += frame.TransformPoint(ShoulderCenter) - mid;
 
@@ -616,9 +615,9 @@ namespace Emberdelve.Player
             {
                 // Ready framing only: low and to the right with the forearm in view, blade leaning forward
                 // instead of standing up through the whole screen. Swings and the blade guard keep the rig's pose.
-                float ready = (1f - Mathf.SmoothStep(0f, 1f, guardBlend)) * (1f - Mathf.SmoothStep(0f, 1f, _swingWeight));
-                if (_offHand != null && _blockHeld) ready = Mathf.Max(ready, 1f - Mathf.SmoothStep(0f, 1f, _swingWeight));
+                float ready = (1f - Mathf.SmoothStep(0f, 1f, guardBlend)) * (1f - Mathf.SmoothStep(0f, 1f, poseSwingWeight));
                 handLocal = Vector3.Lerp(handLocal, ClampToView(camera, SwordReadyHand + offsetRight), ready);
+                handLocal += Vector3.down * (.20f * poseSwingWeight * (1f - guardBlend));
                 localRotation = Quaternion.Slerp(localRotation, SwordReadyRotation, ready);
             }
             // A long burning head needs its own ready framing: the sword's leftward yaw
@@ -661,7 +660,7 @@ namespace Emberdelve.Player
             Vector3 gripPosition = frame.TransformPoint(handLocal);
             if (gripRight != null)
             {
-                SolveArm(_upperR, _lowerR, _handR, gripRight, gripPosition, gripRotation, frame.rotation * RightPole);
+                SolveArmWithWrist(_upperR, _lowerR, _handR, gripRight, gripPosition, gripRotation, frame.rotation * RightPole);
                 if (_bottle == null && _bandage == null)
                 {
                     // A handle is free to turn in the fist. Roll the grip about the handle so the knuckles continue the
@@ -677,11 +676,13 @@ namespace Emberdelve.Player
                         if (across.sqrMagnitude > 1e-6f)
                         {
                             // Swings keep the blade exactly where the pattern sends it; only the ready pose is straightened.
-                            Vector3 natural = Vector3.RotateTowards(across.normalized, handle, Mathf.Lerp(25f, 180f, Mathf.SmoothStep(0f, 1f, _swingWeight)) * Mathf.Deg2Rad, 0f);
+                            float committed = Mathf.Max(poseSwingWeight, guardBlend);
+                            Vector3 natural = Vector3.RotateTowards(across.normalized, handle,
+                                Mathf.Lerp(25f, 180f, Mathf.SmoothStep(0f, 1f, committed)) * Mathf.Deg2Rad, 0f);
                             gripRotation = Quaternion.FromToRotation(handle, natural) * gripRotation;
                         }
                         gripRotation = RollToForearm(gripRotation, forearm, _handR, gripRight);
-                        SolveArm(_upperR, _lowerR, _handR, gripRight, gripPosition, gripRotation, frame.rotation * RightPole);
+                        SolveArmWithWrist(_upperR, _lowerR, _handR, gripRight, gripPosition, gripRotation, frame.rotation * RightPole);
                     }
                 }
                 if (_mainHand != null) _mainHand.transform.localScale = Vector3.one * WeaponScale;
@@ -693,7 +694,7 @@ namespace Emberdelve.Player
                 float uncork = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(.12f, .27f, p));
                 Vector3 cork = gripRight.TransformPoint(new Vector3(0f, .145f, 0f));
                 Vector3 leftRest = frame.TransformPoint(new Vector3(-.20f, -.28f, .35f));
-                SolveArm(_upperL, _lowerL, _handL, gripLeft, Vector3.Lerp(leftRest, cork, uncork),
+                SolveArmWithWrist(_upperL, _lowerL, _handL, gripLeft, Vector3.Lerp(leftRest, cork, uncork),
                     frame.rotation * Quaternion.Euler(15f, 30f, -65f), frame.rotation * LeftPole);
             }
 
@@ -701,7 +702,7 @@ namespace Emberdelve.Player
             {
                 Vector3 leftRest = new Vector3(-.20f, -.28f, .35f);
                 Vector3 wrappedWrist = new Vector3(-.09f, -.18f, .43f);
-                SolveArm(_upperL, _lowerL, _handL, gripLeft,
+                SolveArmWithWrist(_upperL, _lowerL, _handL, gripLeft,
                     frame.TransformPoint(Vector3.Lerp(leftRest, wrappedWrist, _drinkRaise)),
                     frame.rotation * Quaternion.Euler(10f, 65f, -75f), frame.rotation * LeftPole);
             }
@@ -713,13 +714,13 @@ namespace Emberdelve.Player
                 _offHand.transform.localPosition = ShieldMountOffset;
                 Vector3 shieldPosition = Vector3.Lerp(ShieldRest, ShieldRaised, guardBlend) + offsetLeft;
                 Quaternion shieldRotation = Quaternion.Euler(Vector3.Lerp(ShieldRestEuler, ShieldRaisedEuler, guardBlend));
-                SolveArm(_upperL, _lowerL, _handL, gripLeft, frame.TransformPoint(ClampToView(camera, shieldPosition)), frame.rotation * shieldRotation, frame.rotation * LeftPole);
+                SolveArmWithWrist(_upperL, _lowerL, _handL, gripLeft, frame.TransformPoint(ClampToView(camera, shieldPosition)), frame.rotation * shieldRotation, frame.rotation * LeftPole);
                 if (_blockHeld)
                 {
                     GuardShieldShape shield = GuardShieldPose.Resolve(frame.position, frame.rotation);
                     // Raised defense follows the physical surface immediately; cosmetic bob/clamping
                     // must not make the shield appear somewhere the server cannot block.
-                    SolveArm(_upperL, _lowerL, _handL, gripLeft,
+                    SolveArmWithWrist(_upperL, _lowerL, _handL, gripLeft,
                         frame.TransformPoint(GuardShieldPose.Grip), shield.Rotation, frame.rotation * LeftPole);
                     GuardShieldPose.ApplyModel(_offHand.transform, shield);
                 }
@@ -730,7 +731,7 @@ namespace Emberdelve.Player
                 Vector3 second = gripRight.position - axis * (SecondGripOffset * WeaponScale);
                 // Solve the palm's authored grip, not the wrist. Keep its grasp aligned with the
                 // handle throughout the swing instead of preserving the idle wrist rotation.
-                SolveArm(_upperL, _lowerL, _handL, _leftWeaponGrip, second, gripRight.rotation, frame.rotation * LeftPole);
+                SolveArmWithWrist(_upperL, _lowerL, _handL, _leftWeaponGrip, second, gripRight.rotation, frame.rotation * LeftPole);
             }
         }
 
@@ -772,6 +773,8 @@ namespace Emberdelve.Player
             if (_mainData != null && !_mainData.IsRanged)
                 gripRight.localRotation *= Quaternion.AngleAxis(90f, Vector3.up);
             CalibrateWeaponGrip(animator, _leftWeaponGrip, true);
+            if (_mainData != null && !_mainData.IsRanged)
+                _leftWeaponGrip.localRotation *= Quaternion.AngleAxis(supportGripRoll, Vector3.up);
             _weaponGripsCalibrated = true;
         }
 
@@ -823,6 +826,8 @@ namespace Emberdelve.Player
                 _poseRotations[i] = _poseBones[i].localRotation;
             }
             _fingerPoseHandler.GetHumanPose(ref _fingerPose);
+            FpGripPose selectedGrip = null;
+            if (!bow) selectedGrip = gripPoseOverride != null ? gripPoseOverride : FpGripPose.Load();
             for (int side = 0; side < 2; side++)
             {
                 if (!bow && side == 0 && _offHand == null && !(_mainData != null && _mainData.twoHanded)) continue;
@@ -841,8 +846,7 @@ namespace Emberdelve.Player
                             curl = Mathf.Lerp(finger == 0 ? .4f : .65f, hook, Mathf.Lerp(.65f, 1f, Mathf.Clamp01(draw)));
                         }
                         // An authored grip (baked from a free hand-pose clip) wins over the generic curl.
-                        FpGripPose grip = !bow ? FpGripPose.Load() : null;
-                        if (grip != null && grip.TryGet(index, out float authored)) curl = authored;
+                        if (selectedGrip != null && selectedGrip.TryGet(index, out float authored)) curl = authored;
                         _fingerPose.muscles[index] = curl;
                     }
             }
@@ -856,6 +860,19 @@ namespace Emberdelve.Player
                 bool finger = i >= (int)HumanBodyBones.LeftThumbProximal && i <= (int)HumanBodyBones.RightLittleDistal;
                 if (!finger) _poseBones[i].localRotation = _poseRotations[i];
             }
+            if (gripPoseOverride != null)
+                for (int i = 0; i < gripPoseOverride.nativeBones.Length; i++)
+                {
+                    int index = gripPoseOverride.nativeBones[i];
+                    if (index < 0 || index >= _poseBones.Length || _poseBones[index] == null) continue;
+                    bool left = index <= (int)HumanBodyBones.LeftLittleDistal;
+                    if (!bow && left && _offHand == null && !(_mainData != null && _mainData.twoHanded)) continue;
+                    if (i >= gripPoseOverride.nativeRotations.Length) continue;
+                    Quaternion rotation = gripPoseOverride.nativeRotations[i];
+                    if (bow && !left && i < gripPoseOverride.nativeBowRotations.Length)
+                        rotation = gripPoseOverride.nativeBowRotations[i];
+                    _poseBones[index].localRotation = rotation;
+                }
         }
 
         public static readonly Vector3 CrossbowRightGrip = new Vector3(0f, -.15f, -.01f);
@@ -881,7 +898,7 @@ namespace Emberdelve.Player
             PoseFingers(false, 0f);
             EnsureWeaponGrips();
             // The procedural weapon stays in its physical pose; only the mannequin follows it.
-            SolveArm(_upperR, _lowerR, _handR, gripRight, crossbow.TransformPoint(CrossbowRightGrip),
+            SolveArmWithWrist(_upperR, _lowerR, _handR, gripRight, crossbow.TransformPoint(CrossbowRightGrip),
                 crossbow.rotation * Quaternion.Euler(-12f, 0f, 0f), frame.rotation * RightPole);
             // Calibrated grip +Z runs wrist-to-fingers. At rest fingers point up around the stock,
             // keeping the wrist below the sightline. Raised guard retains the reachable overhead grip.
@@ -894,7 +911,7 @@ namespace Emberdelve.Player
                 turn = Mathf.SmoothStep(0f, 1f, p / .2f)
                     * (1f - Mathf.SmoothStep(0f, 1f, (p - .75f) / .25f));
             }
-            SolveArm(_upperL, _lowerL, _handL, _leftWeaponGrip, crossbow.TransformPoint(CrossbowLeftGrip(reloading, reloadProgress)),
+            SolveArmWithWrist(_upperL, _lowerL, _handL, _leftWeaponGrip, crossbow.TransformPoint(CrossbowLeftGrip(reloading, reloadProgress)),
                 crossbow.rotation * Quaternion.Euler(guarding ? 90f : Mathf.Lerp(-90f, 25f, turn), 0f, 0f), frame.rotation * LeftPole);
         }
 
@@ -904,9 +921,9 @@ namespace Emberdelve.Player
             PoseFingers(false, 0f);
             EnsureWeaponGrips();
             bow.SetDraw(0f);
-            SolveArm(_upperL, _lowerL, _handL, _leftWeaponGrip, bow.transform.TransformPoint(BowGuardPose.LeftGrip),
+            SolveArmWithWrist(_upperL, _lowerL, _handL, _leftWeaponGrip, bow.transform.TransformPoint(BowGuardPose.LeftGrip),
                 bow.transform.rotation, frame.rotation * LeftPole);
-            SolveArm(_upperR, _lowerR, _handR, gripRight, bow.transform.TransformPoint(BowGuardPose.RightGrip),
+            SolveArmWithWrist(_upperR, _lowerR, _handR, gripRight, bow.transform.TransformPoint(BowGuardPose.RightGrip),
                 bow.transform.rotation, frame.rotation * RightPole);
         }
 
@@ -917,7 +934,7 @@ namespace Emberdelve.Player
             EnsureWeaponGrips();
             bow.SetDraw(draw);
             // Bow handle and string are vertical; the sword's +90-degree mapping is wrong here.
-            SolveArm(_upperL, _lowerL, _handL, _leftWeaponGrip, bow.transform.position,
+            SolveArmWithWrist(_upperL, _lowerL, _handL, _leftWeaponGrip, bow.transform.position,
                 bow.transform.rotation, frame.rotation * LeftPole);
             if (_stringGrip == null)
             {
@@ -928,7 +945,7 @@ namespace Emberdelve.Player
             var middle = animator.GetBoneTransform(HumanBodyBones.RightMiddleDistal);
             _stringGrip.position = index != null && middle != null ? Vector3.Lerp(index.position, middle.position, .5f) : gripRight.position;
             _stringGrip.rotation = gripRight.rotation;
-            SolveArm(_upperR, _lowerR, _handR, _stringGrip, bow.transform.TransformPoint(bow.Nock),
+            SolveArmWithWrist(_upperR, _lowerR, _handR, _stringGrip, bow.transform.TransformPoint(bow.Nock),
                 bow.transform.rotation, frame.rotation * RightPole);
         }
 
@@ -995,7 +1012,22 @@ namespace Emberdelve.Player
         /// <paramref name="targetPosition"/> with <paramref name="targetRotation"/>; the elbow bends towards <paramref name="poleDirection"/>.
         /// A target beyond the arm's reach is approached as far as the arm stretches.
         /// </summary>
-        public static void SolveArm(Transform upper, Transform lower, Transform hand, Transform effector, Vector3 targetPosition, Quaternion targetRotation, Vector3 poleDirection)
+        private void SolveArmWithWrist(Transform upper, Transform lower, Transform hand, Transform effector,
+            Vector3 targetPosition, Quaternion targetRotation, Vector3 poleDirection)
+        {
+            Vector3 handForward = Vector3.zero;
+            if (alignWristToGrip && animator != null && (_mainData == null || !_mainData.IsRanged))
+            {
+                var middle = animator.GetBoneTransform(hand == _handL
+                    ? HumanBodyBones.LeftMiddleProximal : HumanBodyBones.RightMiddleProximal);
+                if (middle != null)
+                    handForward = Quaternion.Inverse(hand.rotation) * (middle.position - hand.position);
+            }
+            SolveArm(upper, lower, hand, effector, targetPosition, targetRotation, poleDirection, handForward);
+        }
+
+        public static void SolveArm(Transform upper, Transform lower, Transform hand, Transform effector, Vector3 targetPosition, Quaternion targetRotation, Vector3 poleDirection,
+            Vector3 localHandForward = default)
         {
             // Rotation-only local offset retains the mannequin's scale. InverseTransformPoint
             // removes that scale and leaves the grip short of its target on scaled viewmodels.
@@ -1018,6 +1050,14 @@ namespace Emberdelve.Player
             float cos = Mathf.Clamp((l1 * l1 + reach * reach - l2 * l2) / (2f * l1 * reach), -1f, 1f);
             float sin = Mathf.Sqrt(1f - cos * cos);
             Vector3 pole = Vector3.ProjectOnPlane(poleDirection, direction);
+            // Choose the elbow swivel that continues the forearm into the knuckles.
+            // Wrist and grip targets retain their exact position and orientation.
+            if (localHandForward.sqrMagnitude > 1e-8f)
+            {
+                Vector3 aligned = Vector3.ProjectOnPlane(-(handRotation * localHandForward), direction);
+                if (aligned.sqrMagnitude > 1e-8f)
+                    pole = Vector3.RotateTowards(pole.normalized, aligned.normalized, Mathf.PI / 3f, 0f);
+            }
             if (pole.sqrMagnitude < 1e-6f) pole = Vector3.ProjectOnPlane(Vector3.down, direction);
             if (pole.sqrMagnitude < 1e-6f) pole = Vector3.ProjectOnPlane(Vector3.right, direction);
             pole.Normalize();

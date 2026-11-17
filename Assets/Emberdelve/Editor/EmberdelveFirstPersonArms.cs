@@ -105,7 +105,7 @@ namespace Emberdelve.EditorTools
             AnimatorController controller = BuildController(clips);
             AssetDatabase.SaveAssets();
             AssetDatabase.ImportAsset(ControllerPath, ImportAssetOptions.ForceUpdate);
-            string result = BuildPrefab(mesh, sleeve, skin, controller);
+            string result = BuildPrefab(mesh, new[] { sleeve, skin }, controller, BodySource, PrefabPath);
 
             WeaponViewModelSet set = EmberdelveWeaponModels.WriteSet();
             set.armsPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
@@ -577,11 +577,12 @@ namespace Emberdelve.EditorTools
 
         // ---------------------------------------------------------------- prefab
 
-        private static string BuildPrefab(Mesh mesh, Material sleeve, Material skin, AnimatorController controller)
+        internal static string BuildPrefab(Mesh mesh, Material[] materials, RuntimeAnimatorController controller,
+            string bodySource, string prefabPath)
         {
-            GameObject fbx = AssetDatabase.LoadAssetAtPath<GameObject>(BodySource);
+            GameObject fbx = AssetDatabase.LoadAssetAtPath<GameObject>(bodySource);
             Avatar avatar = null;
-            Object[] assets = AssetDatabase.LoadAllAssetsAtPath(BodySource);
+            Object[] assets = AssetDatabase.LoadAllAssetsAtPath(bodySource);
             for (int i = 0; i < assets.Length; i++) if (assets[i] is Avatar a) { avatar = a; break; }
 
             // 1. Measure on a probe in the guard pose (hands, feet, facing) - the live Animator pose with root motion off.
@@ -591,7 +592,7 @@ namespace Emberdelve.EditorTools
             Measure(fbx, avatar, out facing, out handRight, out gripPositionRight, out gripRotationRight, out gripPositionLeft, out gripRotationLeft, out handLeftShield);
 
             // 2. The prefab.
-            GameObject root = new GameObject("FirstPersonArms");
+            GameObject root = new GameObject(System.IO.Path.GetFileNameWithoutExtension(prefabPath));
             try
             {
                 GameObject model = (GameObject)PrefabUtility.InstantiatePrefab(fbx);
@@ -610,7 +611,7 @@ namespace Emberdelve.EditorTools
                 for (int i = 0; i < skinned.Length; i++)
                 {
                     skinned[i].sharedMesh = mesh;
-                    skinned[i].sharedMaterials = new[] { sleeve, skin };
+                    skinned[i].sharedMaterials = materials;
                     skinned[i].shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                     skinned[i].receiveShadows = true;
                     skinned[i].updateWhenOffscreen = true;
@@ -644,8 +645,8 @@ namespace Emberdelve.EditorTools
                 serialized.FindProperty("gripLeft").objectReferenceValue = gripLeft;
                 serialized.ApplyModifiedPropertiesWithoutUndo();
 
-                PrefabUtility.SaveAsPrefabAsset(root, PrefabPath);
-                AssetDatabase.ImportAsset(PrefabPath, ImportAssetOptions.ForceUpdate);
+                PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+                AssetDatabase.ImportAsset(prefabPath, ImportAssetOptions.ForceUpdate);
                 return "built; facing=" + facing.ToString("0.00") + " handR=" + handRight.ToString("0.00") + " turn=" + turn.eulerAngles.ToString("0");
             }
             finally

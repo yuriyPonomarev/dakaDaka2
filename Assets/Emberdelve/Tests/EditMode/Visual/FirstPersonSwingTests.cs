@@ -21,6 +21,35 @@ namespace Emberdelve.Tests.Visual
         private const string SwordId = "ashen_short_sword";
         private const string ShieldId = "emberbulwark_shield";
 
+        [Test]
+        public void WristAlignedElbowPreservesTheGripAndReducesWristBend()
+        {
+            var root = new GameObject("WristAlignmentTest");
+            try
+            {
+                var upper = new GameObject("Upper").transform;
+                upper.SetParent(root.transform, false);
+                var lower = new GameObject("Lower").transform;
+                lower.SetParent(upper, false);
+                lower.localPosition = Vector3.right * .3f;
+                var hand = new GameObject("Hand").transform;
+                hand.SetParent(lower, false);
+                hand.localPosition = Vector3.right * .3f;
+                var grip = new GameObject("Grip").transform;
+                grip.SetParent(hand, false);
+                grip.localPosition = Vector3.forward * .08f;
+                Vector3 target = new Vector3(.4f, .15f, .08f);
+                FirstPersonArmsDriver.SolveArm(upper, lower, hand, grip, target,
+                    Quaternion.identity, Vector3.down, Vector3.forward);
+                Assert.That(Vector3.Distance(grip.position, target), Is.LessThan(.0001f));
+                Assert.That(Quaternion.Angle(grip.rotation, Quaternion.identity), Is.LessThan(.01f));
+                Assert.That(Vector3.Angle(hand.position - lower.position, hand.forward), Is.LessThan(60f));
+                Assert.That(Vector3.Distance(upper.position, lower.position), Is.EqualTo(.3f).Within(.0001f));
+                Assert.That(Vector3.Distance(lower.position, hand.position), Is.EqualTo(.3f).Within(.0001f));
+            }
+            finally { Object.DestroyImmediate(root); }
+        }
+
         [TestCaseSource(nameof(PatternNames))]
         public void NetworkRecoilStartsAtAcceptedContactAndReturnsToReady(string patternName)
         {

@@ -227,16 +227,17 @@ namespace Emberdelve.Tests.Visual
 
                 Transform[] bones = skinned.bones;
                 BoneWeight[] weights = mesh.boneWeights;
+                Animator animator = arms.GetComponentInChildren<Animator>(true);
+                Transform leftArm = animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+                Transform rightArm = animator.GetBoneTransform(HumanBodyBones.RightUpperArm);
                 Assert.AreEqual(mesh.vertexCount, weights.Length);
                 for (int v = 0; v < weights.Length; v++)
                 {
-                    string bone = bones[EmberdelveFirstPersonArms.DominantBone(weights[v])].name.ToLowerInvariant();
-                    bool arm = bone.Contains("upperarm") || bone.Contains("lowerarm") || bone.Contains("wrist") || bone.Contains("finger") || bone.Contains("metacarpal") || bone.Contains("upper_arm") || bone.Contains("forearm") || bone.Contains("hand") || bone.Contains("f_index")
-                               || bone.Contains("f_middle") || bone.Contains("f_ring") || bone.Contains("f_pinky") || bone.Contains("thumb");
-                    Assert.IsTrue(arm, "vertex " + v + " is skinned to '" + bone + "': head / torso / legs are not in the mesh");
+                    Transform bone = bones[EmberdelveFirstPersonArms.DominantBone(weights[v])];
+                    bool arm = bone.IsChildOf(leftArm) || bone.IsChildOf(rightArm);
+                    Assert.IsTrue(arm, "vertex " + v + " is skinned to '" + bone.name + "': head / torso / legs are not in the mesh");
                 }
 
-                Animator animator = arms.GetComponentInChildren<Animator>(true);
                 Vector3 head = animator.GetBoneTransform(HumanBodyBones.Head).position;
                 Vector3 hips = animator.GetBoneTransform(HumanBodyBones.Hips).position;
                 Bounds bounds = mesh.bounds;

@@ -14,6 +14,11 @@ namespace Emberdelve.Player
         public int[] muscles = new int[0];
         public float[] values = new float[0];
 
+        [Tooltip("Optional rotations authored for one particular skeleton; Humanoid bone indices.")]
+        public int[] nativeBones = new int[0];
+        public Quaternion[] nativeRotations = new Quaternion[0];
+        public Quaternion[] nativeBowRotations = new Quaternion[0];
+
         private static FpGripPose _cached;
         private static bool _loaded;
 

@@ -177,7 +177,7 @@ namespace Emberdelve.EditorTools
         /// right hand on the weapon pose of <paramref name="pattern"/> at <paramref name="time"/> (seconds into the swing; negative = the guard / rest
         /// pose) and the left hand on the shield. <paramref name="guard"/> raises the shield.
         /// </summary>
-        public static string FirstPersonPattern(string pngPath, string weaponId, string shieldId, Emberdelve.Data.SwingPatternData pattern, float time, float guard, float fov = 70f, int width = 960, int height = 540, bool wall = true, Emberdelve.Data.SwingTiming? timing = null, bool swapFirst = false)
+        public static string FirstPersonPattern(string pngPath, string weaponId, string shieldId, Emberdelve.Data.SwingPatternData pattern, float time, float guard, float fov = 70f, int width = 960, int height = 540, bool wall = true, Emberdelve.Data.SwingTiming? timing = null, bool swapFirst = false, GameObject armsPrefab = null)
         {
             return Capture(pngPath, width, height, fov, true, (root, camera) =>
             {
@@ -195,7 +195,7 @@ namespace Emberdelve.EditorTools
                 }
 
                 Emberdelve.Player.WeaponViewModelSet set = Emberdelve.Player.WeaponViewModelSet.Load();
-                GameObject arms = (GameObject)PrefabUtility.InstantiatePrefab(set.armsPrefab);
+                GameObject arms = (GameObject)PrefabUtility.InstantiatePrefab(armsPrefab != null ? armsPrefab : set.armsPrefab);
                 arms.transform.SetParent(camera.transform, false);
                 Emberdelve.Player.FirstPersonArmsDriver driver = arms.GetComponent<Emberdelve.Player.FirstPersonArmsDriver>();
                 driver.Bind(null, camera, set);
@@ -231,7 +231,7 @@ namespace Emberdelve.EditorTools
                 Emberdelve.Player.WeaponVisualRig.SamplePresentation(pattern, timing ?? pattern.Timing, time,
                     Emberdelve.Player.FirstPersonArmsDriver.PatternRest, Emberdelve.Player.WeaponVisualRig.ReadyRotation,
                     guard > .5f, out Vector3 position, out Quaternion rotation);
-                driver.Pose(camera.transform, camera, position, rotation, guard, Vector3.zero, Vector3.zero);
+                driver.Pose(camera.transform, camera, position, rotation, guard, Vector3.zero, Vector3.zero, swingBlend: 1f);
             }
             else driver.Pose(camera.transform, camera, Emberdelve.Player.FirstPersonArmsDriver.PatternRest,
                 Emberdelve.Player.WeaponVisualRig.ReadyRotation, guard, Vector3.zero, Vector3.zero);
