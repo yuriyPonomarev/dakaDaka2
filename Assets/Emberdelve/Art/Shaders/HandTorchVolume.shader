@@ -13,7 +13,7 @@ Shader "Emberdelve/HandTorchVolume"
         Pass
         {
             Tags { "LightMode"="SRPDefaultUnlit" }
-            Blend One One
+            Blend One OneMinusSrcAlpha
             ZWrite Off
             Cull Back
             HLSLPROGRAM
@@ -61,37 +61,45 @@ Shader "Emberdelve/HandTorchVolume"
                               min(min(farPlane.x,farPlane.y),farPlane.z));
             }
 
-            float3 Noise(float3 p){ return SAMPLE_TEXTURE3D_LOD(_NoiseTex,sampler_NoiseTex,p,0).rgb; }
-
-            // A teardrop of burning gas over the pitch head: a wide rounded base, a body that sways more the higher it
-            // goes and a top that tears into separate tongues. Heat is highest in the lower core.
             float FireDensity(float3 p,float time,out float heat)
             {
-                float h=p.y+.5;
-                float hn=saturate((h-.10)/.74);
-                float3 q=float3(p.x*1.7,h*1.25-time*1.25,p.z*1.7);
-                float3 n1=Noise(q*.85+float3(.11,.23,.37));
-                float3 n2=Noise(q*2.2+(n1-.5)*.7+float3(.41,-time*.4,.73));
-                float2 sway=(n1.gb-.5)*(.04+.30*hn*hn)
-                    +float2(sin(time*3.3+h*4.1),cos(time*2.6+h*3.4))*(.03*hn);
-                float r=length(p.xz-sway);
-                float radius=.34*pow(saturate(1-hn),.7)*(.72+.28*smoothstep(0,.14,hn));
-                radius*=.80+.70*(n2.r-.40)*(.25+hn);
-                float shape=saturate(1-r/max(radius,1e-3));
-                float tongues=smoothstep(.30,.62,n2.g+(1-hn)*.55);
-                float density=pow(shape,1.6)*lerp(1,tongues,smoothstep(.25,.85,hn));
-                density*=smoothstep(0,.05,hn)*(1-smoothstep(.95,1,h));
-                // the cloth head stays readable through the base of the fire
-                density*=lerp(.60,1,smoothstep(.04,.22,hn));
-                heat=saturate(shape*1.25*(1-hn*.9)+(n2.b-.5)*.25);
-                return density;
-            }
+                float height=p.y+.5;
+                float3 flow=float3(p.x*1.25,height*1.10-time*.63,p.z*1.25);
+                // Two advected frequencies and one folded detail sample. The same field changes
+                // both the envelope and its interior, avoiding a smooth cone with noise painted on.
+                float3 broad=SAMPLE_TEXTURE3D_LOD(_NoiseTex,sampler_NoiseTex,flow*.63+float3(.13,.27,.51),0).rgb;
+                float3 fine=SAMPLE_TEXTURE3D_LOD(_NoiseTex,sampler_NoiseTex,flow*1.45+float3(.37,-time*.08,.11),0).rgb;
+                float ribbon=SAMPLE_TEXTURE3D_LOD(_NoiseTex,sampler_NoiseTex,
+                    flow*2.15+(broad-.5)*.22+float3(.17,0,.39),0).r;
 
-            float3 FireColour(float heat)
-            {
-                float3 c=lerp(float3(.45,.035,0),float3(2.0,.48,.03),smoothstep(0,.32,heat));
-                c=lerp(c,float3(2.5,1.25,.22),smoothstep(.32,.68,heat));
-                return lerp(c,float3(2.7,2.05,.95),smoothstep(.80,1,heat));
+                float2 centre=float2(sin(height*7.3-time*2.1),cos(height*5.8-time*1.7))
+                    *(.012+.065*height*height);
+                float2 curl=(broad.gb-.5)*(.09+.23*height);
+                float radius=lerp(.22,.035,height)+.085*sin(height*3.14159265);
+                float radial=length(p.xz-centre-curl);
+                float envelope=1-radial/max(radius,.018);
+                float folded=(broad.r-.5)*.90+(fine.r-.5)*.65+(ribbon-.5)*.30;
+                // Fire is a folded reaction surface, not a filled density cone. A narrow
+                // isosurface leaves the inside transparent, and smaller broken folds cross it.
+                // In particular, an on-axis sample is NOT automatically dense or white-hot.
+                float field=envelope+folded;
+                float sheet=1-smoothstep(.06,.22,abs(field-.36));
+                float inside=smoothstep(-.08,.16,envelope);
+                float vein=1-smoothstep(.018,.080,abs(fine.g+(broad.b-.5)*.35-.52));
+                vein*=smoothstep(.35,.65,broad.r)*smoothstep(.1,.35,envelope);
+                float gaps=smoothstep(.18,.38,fine.b+.16*(broad.g-.5));
+                float reaction=sheet*.80+vein*.28;
+                float body=saturate(field-.10)*.09;
+                float density=(reaction+body)*inside*gaps;
+                density*=smoothstep(.065,.16,height)*(1-smoothstep(.87,.99,height));
+
+                // The head occupies height .07Р Р†Р вЂљРІР‚Сљ.35 in the shorter review volume. Leave its
+                // central fabric visible, with a reactive sheath around its outside.
+                float sheath=smoothstep(.13,.17,length(p.xz));
+                density*=lerp(sheath,1,smoothstep(.27,.40,height));
+                density*=lerp(.22,1,smoothstep(.30,.43,height));
+                heat=saturate(((.10+.72*sheet+.24*vein+.14*(ribbon-.5))*reaction+.22*body)/(reaction+body+1e-4));
+                return density;
             }
 
             half4 Frag(Varyings input):SV_Target
@@ -102,27 +110,30 @@ Shader "Emberdelve/HandTorchVolume"
                 float start=max(interval.x,0);
                 float lengthInVolume=max(0,interval.y-start);
                 if(lengthInVolume<=0)return half4(0,0,0,0);
-                const int steps=56;
+                const int steps=96;
                 float stepLength=lengthInVolume/steps;
                 float time=_PreviewTime>=0?_PreviewTime:_Time.y;
                 float3 accumulated=0;
                 float transmittance=1;
-                // per-pixel jitter hides the slicing of the march
-                float jitter=frac(sin(dot(input.positionCS.xy,float2(12.9898,78.233)))*43758.5453);
+                float jitter=.5;
                 [loop] for(int i=0;i<steps;i++)
                 {
                     float3 p=cameraOS+ray*(start+(i+jitter)*stepLength);
                     float heat;
                     float density=FireDensity(p,time,heat);
-                    if(density<=1e-4)continue;
-                    float opacity=1-exp(-density*stepLength*_Density*3.0);
-                    accumulated+=transmittance*opacity*FireColour(heat)*(_Radiance*.75);
-                    // gas glows and only weakly hides its own far side
-                    transmittance*=1-opacity*.45;
-                    if(transmittance<.02)break;
+                    float opacity=1-exp(-density*stepLength*_Density);
+                    // A pale hot interior, gold mid-temperature folds and thin orange/red edges.
+                    // HDR is intentional: scene bloom can soften the brightest small filaments.
+                    float3 cool=float3(1.8,.105,.008);
+                    float3 gold=float3(2.8,1.05,.055);
+                    float3 hot=float3(3.0,2.5,1.25);
+                    float3 emission=lerp(cool,gold,smoothstep(.02,.40,heat));
+                    emission=lerp(emission,hot,smoothstep(.62,.94,heat));
+                    accumulated+=transmittance*opacity*emission*_Radiance;
+                    transmittance*=1-opacity;
+                    if(transmittance<.012)break;
                 }
-                // additive: a flame lights what is behind it, it never darkens it
-                return half4(MixFogColor(accumulated,half3(0,0,0),input.fog),0);
+                return half4(MixFogColor(accumulated,half3(0,0,0),input.fog),1-transmittance);
             }
             ENDHLSL
         }

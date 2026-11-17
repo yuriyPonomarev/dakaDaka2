@@ -16,11 +16,14 @@ namespace Emberdelve.Player
         private Transform _volume;
         private PlayerRig _rig;
         private Vector3 _flameScale;
+        private Vector3 _flameLocal;
+        /// <summary>World-up lift of the whole fire so it burns at the very end of the head.</summary>
+        public const float FlameLift = .085f;
         private GameObject _haze;
         private void Awake()
         {
             _rig = GetComponentInParent<PlayerRig>();
-            if (flame != null) _flameScale = flame.localScale;
+            if (flame != null) { _flameScale = flame.localScale; _flameLocal = flame.localPosition; }
             if (source == null) return;
             WorldLightAppearance.Configure(source);
             source.range = LightRange;
@@ -31,9 +34,11 @@ namespace Emberdelve.Player
         {
             if(flame==null)return;
             flame.rotation=Quaternion.identity;
+            if(_flameLocal==Vector3.zero)_flameLocal=flame.localPosition;
+            flame.position=transform.TransformPoint(_flameLocal)+Vector3.up*FlameLift;
             if(_volume==null)_volume=flame.Find("Flame/FlameVolume");
             // Keep the volume centred on the actual combustible head after the hand pose is applied.
-            if(_volume!=null)_volume.SetPositionAndRotation(transform.TransformPoint(new Vector3(0,.502f,0))+Vector3.up*.13f,Quaternion.identity);
+            if(_volume!=null)_volume.SetPositionAndRotation(transform.TransformPoint(new Vector3(0,.502f,0))+Vector3.up*(.13f+FlameLift),Quaternion.identity);
         }
         private void LateUpdate()
         {

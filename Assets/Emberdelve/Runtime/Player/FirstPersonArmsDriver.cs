@@ -67,8 +67,8 @@ namespace Emberdelve.Player
         public static readonly Vector3 PatternRest = new Vector3(0.26f, -0.20f, 0.30f);
 
         /// <summary>Cosmetic sword ready pose of the first-person hand (aim frame) and its blade direction (rig frame, blade along forward).</summary>
-        public static readonly Vector3 SwordReadyHand = new Vector3(0.25f, -0.23f, 0.44f);
-        public static readonly Quaternion SwordReadyRotation = Quaternion.Euler(-46f, -20f, 6f);
+        public static readonly Vector3 SwordReadyHand = new Vector3(0.27f, -0.21f, 0.52f);
+        public static readonly Quaternion SwordReadyRotation = Quaternion.Euler(-64f, -24f, 0f);
         public static readonly Quaternion ShieldGuardSwordRotation = Quaternion.Euler(-20f, -20f, 0f);
 
         public static readonly Vector3 ShieldRest = new Vector3(-0.40f, -0.30f, 0.50f);
@@ -629,13 +629,13 @@ namespace Emberdelve.Player
                 float ready = 1f - Mathf.SmoothStep(0f, 1f, guardBlend);
                 handLocal = Vector3.Lerp(handLocal,
                     ClampToView(camera, new Vector3(.34f, -.36f, .52f) + offsetRight), ready);
-                localRotation = Quaternion.Slerp(localRotation, Quaternion.Euler(-48f, 25f, 0f), ready);
+                localRotation = Quaternion.Slerp(localRotation, Quaternion.Euler(-74f, 12f, 0f), ready);
             }
             if (_utilityItem != null)
             {
                 bool torch = _utilityItem.itemId == "pitch_torch";
                 handLocal = ClampToView(camera, (torch ? new Vector3(.34f,-.36f,.52f) : new Vector3(.13f,-.22f,.45f)) + offsetRight);
-                localRotation = Quaternion.Euler(torch ? -48f : -82f, torch ? 25f : 15f, 0f);
+                localRotation = Quaternion.Euler(torch ? -74f : -82f, torch ? 12f : 15f, 0f);
                 if (_bottle != null)
                 {
                     bool drinking = _drink != null && _drink.IsDrinking;
@@ -662,6 +662,27 @@ namespace Emberdelve.Player
             if (gripRight != null)
             {
                 SolveArm(_upperR, _lowerR, _handR, gripRight, gripPosition, gripRotation, frame.rotation * RightPole);
+                if (_bottle == null && _bandage == null)
+                {
+                    // A handle is free to turn in the fist. Roll the grip about the handle so the knuckles continue the
+                    // forearm (a straight wrist) instead of keeping a fixed roll that bends the wrist sideways.
+                    for (int pass = 0; pass < 3; pass++)
+                    {
+                        // A fist holds its handle across the palm: keep the handle roughly perpendicular to the forearm
+                        // (25 degrees of wrist deviation allowed) instead of letting it run along the arm.
+                        Vector3 forearm = (_handR.position - _lowerR.position).normalized;
+                        Vector3 handle = gripRotation * Vector3.up;
+                        Vector3 across = Vector3.ProjectOnPlane(handle, forearm);
+                        if (across.sqrMagnitude < .04f) across = Vector3.ProjectOnPlane(frame.up, forearm);
+                        if (across.sqrMagnitude > 1e-6f)
+                        {
+                            Vector3 natural = Vector3.RotateTowards(across.normalized, handle, 25f * Mathf.Deg2Rad, 0f);
+                            gripRotation = Quaternion.FromToRotation(handle, natural) * gripRotation;
+                        }
+                        gripRotation = RollToForearm(gripRotation, forearm, _handR, gripRight);
+                        SolveArm(_upperR, _lowerR, _handR, gripRight, gripPosition, gripRotation, frame.rotation * RightPole);
+                    }
+                }
                 if (_mainHand != null) _mainHand.transform.localScale = Vector3.one * WeaponScale;
             }
 
@@ -722,11 +743,14 @@ namespace Emberdelve.Player
             var little = animator.GetBoneTransform(left ? HumanBodyBones.LeftLittleProximal : HumanBodyBones.RightLittleProximal);
             var middle = animator.GetBoneTransform(left ? HumanBodyBones.LeftMiddleProximal : HumanBodyBones.RightMiddleProximal);
             var curl = animator.GetBoneTransform(left ? HumanBodyBones.LeftMiddleDistal : HumanBodyBones.RightMiddleDistal);
+            var bend = animator.GetBoneTransform(left ? HumanBodyBones.LeftMiddleIntermediate : HumanBodyBones.RightMiddleIntermediate);
             if (hand == null || index == null || little == null || middle == null || curl == null) return false;
             Vector3 axis = (index.position - little.position).normalized;
             Vector3 forward = Vector3.ProjectOnPlane(middle.position - hand.position, axis).normalized;
             if (axis.sqrMagnitude < .5f || forward.sqrMagnitude < .5f) return false;
-            grip.position = Vector3.Lerp(middle.position, curl.position, .5f);
+            // The handle runs through the ring the closed middle finger makes: the centre of its joints.
+            grip.position = bend != null ? (middle.position + bend.position + curl.position) / 3f
+                : Vector3.Lerp(middle.position, curl.position, .5f);
             grip.rotation = Quaternion.LookRotation(forward, axis);
             return true;
         }
@@ -806,8 +830,9 @@ namespace Emberdelve.Player
                     {
                         int index = FingerMuscles[side, finger, joint];
                         if (index < 0) continue;
-                        float curl = joint == 0 ? -.25f : joint == 1 ? -.55f : -.4f;
-                        if (finger == 0) curl = joint == 0 ? .1f : -.25f;
+                        // Closed around a handle: every finger joint flexed, the thumb opposed over the index.
+                        float curl = joint == 0 ? -.85f : joint == 1 ? -1f : -.9f;
+                        if (finger == 0) curl = joint == 0 ? .35f : joint == 1 ? -.55f : -.6f;
                         if (bow && side == 1)
                         {
                             // Index above the arrow, middle/ring below; thumb stays clear of the string.
@@ -925,6 +950,26 @@ namespace Emberdelve.Player
             local.x = Mathf.Clamp(local.x, -local.z * halfH, local.z * halfH);
             local.y = Mathf.Clamp(local.y, -local.z * halfV, local.z * halfV);
             return local;
+        }
+
+        private Vector3 _fingerLocalR;
+
+        /// <summary>Turns <paramref name="target"/> about its handle axis (+Y) so the hand's finger direction follows the forearm.</summary>
+        private Quaternion RollToForearm(Quaternion target, Vector3 forearm, Transform hand, Transform effector)
+        {
+            if (_fingerLocalR == Vector3.zero)
+            {
+                Transform middle = animator != null ? animator.GetBoneTransform(HumanBodyBones.RightMiddleProximal) : null;
+                if (middle == null) return target;
+                _fingerLocalR = Quaternion.Inverse(hand.rotation) * (middle.position - hand.position);
+            }
+            Quaternion effectorLocal = Quaternion.Inverse(hand.rotation) * effector.rotation;
+            Quaternion handRotation = target * Quaternion.Inverse(effectorLocal);
+            Vector3 axis = target * Vector3.up;
+            Vector3 fingers = Vector3.ProjectOnPlane(handRotation * _fingerLocalR, axis);
+            Vector3 wanted = Vector3.ProjectOnPlane(forearm, axis);
+            if (fingers.sqrMagnitude < 1e-8f || wanted.sqrMagnitude < 1e-8f) return target;
+            return Quaternion.AngleAxis(Vector3.SignedAngle(fingers, wanted, axis), axis) * target;
         }
 
         private bool ResolveBones()
