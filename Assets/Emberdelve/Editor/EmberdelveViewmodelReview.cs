@@ -29,5 +29,21 @@ namespace Emberdelve.EditorTools
             property.SetValue(rig.Input, next ? (bool?)true : null);
             Debug.Log("[ViewmodelReview] guard " + (next ? "held" : "released"));
         }
+
+        [MenuItem("Emberdelve/Debug/Hold Pitch Torch (Play Mode)")]
+        public static void HoldTorch()
+        {
+            if (!EditorApplication.isPlaying) return;
+            var hotbar = Emberdelve.Items.HotbarController.Local;
+            if (hotbar == null || hotbar.Bag == null) { Debug.LogError("[ViewmodelReview] no local hotbar"); return; }
+            for (int slot = 0; slot < 6; slot++)
+            {
+                if (!hotbar.Bag.Hotbar.TryGetStack(slot, out var stack) || stack.Item == null || stack.Item.itemId != "pitch_torch") continue;
+                bool ok = hotbar.Bag.RequestQuickStack(stack.StackId, out string reason);
+                Debug.Log("[ViewmodelReview] hold torch slot " + slot + ": " + (ok ? "ok" : reason));
+                return;
+            }
+            Debug.LogError("[ViewmodelReview] no pitch torch on the belt");
+        }
     }
 }
