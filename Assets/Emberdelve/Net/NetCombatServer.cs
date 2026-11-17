@@ -802,6 +802,7 @@ namespace Emberdelve.Net
         private static byte ResolveVisualKind(EnemyAgent agent)
         {
             if (agent == null) return 0;
+            if (agent.UsesCinderClub) return EnemyPresentationWire.CinderWardenKind;
             EnemyVisualDriver driver = agent.GetComponentInChildren<EnemyVisualDriver>(true);
             RuntimeAnimatorController controller = driver != null && driver.Animator != null ? driver.Animator.runtimeAnimatorController : null;
             string name = controller != null ? controller.name : string.Empty;

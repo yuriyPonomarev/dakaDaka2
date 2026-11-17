@@ -84,8 +84,10 @@ namespace Emberdelve.AI
         public EntityKind Kind => EntityKind.Enemy;
         public int CombatId => _combatId;
         public int TeamId => CombatTeams.MonsterTeam;
+        public bool UsesCinderClub => data != null && data.IsCinderWarden;
         public Vector3 CombatCenter => _restHitPose && _restShapes.Count > 1
-            ? (_restShapes[1].A + _restShapes[1].B) * .5f : transform.position + Vector3.up * 1.15f;
+            ? (_restShapes[1].A + _restShapes[1].B) * .5f
+            : transform.position + Vector3.up * (UsesCinderClub ? EnemyData.CinderWardenCenterHeight : 1.15f);
         public Collider HeadCollider => _restHitPose ? _restHead : headCollider;
         public bool IsDormant => _brain != null && _brain.IsDormant;
         public bool IsWaking => _brain != null && _brain.IsWaking;
@@ -99,7 +101,7 @@ namespace Emberdelve.AI
         /// </summary>
         public void CollectHitShapes(List<HitShape> shapes)
         {
-            if (_hitVolumes == null) _hitVolumes = HitVolumeLayout.EnsureHumanoid(gameObject, data != null && data.isElite ? 1.25f : 1f);
+            if (_hitVolumes == null) _hitVolumes = HitVolumeLayout.EnsureHumanoid(gameObject, data != null ? data.BodyScale : 1f);
             if (_restHitPose) { shapes.AddRange(_restShapes); return; }
             HitVolumeLayout.Collect(_hitVolumes, shapes);
         }
@@ -222,7 +224,7 @@ namespace Emberdelve.AI
                         return new EnemyAttackPhase(1, telegraph + status.Elapsed, telegraph + timing.Windup);
                     if (status.Phase == SwingPhase.Active)
                         return new EnemyAttackPhase(2, status.Elapsed - timing.Windup, timing.Active);
-                    return EnemyAttackPhase.Recovery(status);
+                    return EnemyAttackPhase.Recovery(status, UsesCinderClub);
                 }
                 if (_brain != null && _brain.IsWindingUp)
                 {
@@ -297,6 +299,7 @@ namespace Emberdelve.AI
             eye = AttackOrigin;
             Vector3 direction = _swingLatched ? _latchedDirection : TelegraphDirection();
             yawDegrees = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
+            if (UsesCinderClub) yawDegrees = Mathf.DeltaAngle(0f, yawDegrees + EnemyAttackPhase.ClubAimYaw);
             pitchDegrees = 0f;
             return true;
         }
@@ -329,7 +332,7 @@ namespace Emberdelve.AI
             var agent = root.AddComponent<EnemyAgent>();
             agent.data = definition; agent.navGrid = grid; agent.config = gameConfig; agent.lootHost = host;
             agent.groundHeight = position.y;
-            float scale = definition.isElite ? 1.25f : 1f;
+            float scale = definition.BodyScale;
             var body = new GameObject("Body");
             body.transform.SetParent(root.transform, false); body.layer = root.layer;
             body.transform.localPosition = Vector3.up * (.95f * scale);
@@ -344,7 +347,7 @@ namespace Emberdelve.AI
             visual.name = "Visual";
             visual.transform.localPosition = Vector3.zero;
             visual.transform.localRotation = Quaternion.identity;
-            visual.transform.localScale = Vector3.one * scale;
+            visual.transform.localScale = Vector3.one * (definition.IsCinderWarden ? 1f : scale);
             root.SetActive(true); // Parent stays inactive until the destination is activated.
             return agent;
         }
@@ -358,7 +361,7 @@ namespace Emberdelve.AI
             CombatRegistry.Register(_combatId, this);
             _lookRotation = transform.rotation;
             _bodyHomePosition = bodyTransform != null ? bodyTransform.localPosition : Vector3.zero;
-            _hitVolumes = HitVolumeLayout.EnsureHumanoid(gameObject, data != null && data.isElite ? 1.25f : 1f);
+            if (data != null) _hitVolumes = HitVolumeLayout.EnsureHumanoid(gameObject, data.BodyScale);
         }
 
         private void Start()
@@ -383,13 +386,18 @@ namespace Emberdelve.AI
             _health.Damaged += HandleDamaged;
 
             _nav = new NavGridPathfinder(navGrid);
-            _brain = new EnemyBrain(data, _nav, transform.position, config != null ? config.levelMask : Physics.DefaultRaycastLayers, startsDormant: true);
+            _brain = new EnemyBrain(data, _nav, transform.position, config != null ? config.levelMask : Physics.DefaultRaycastLayers,
+                startsDormant: !UsesCinderClub);
             _lookRotation = transform.rotation;
 
             // D1c4: the telegraph is the ground projection of the swing pattern (its yaw range at its effective reach). A weapon
             // without a pattern cannot attack any more (the arc-less claw path is closed for pose providers); warn once.
             SwingPatternData attackPattern = AttackPattern;
-            if (attackPattern != null)
+            if (UsesCinderClub && attackPattern != null)
+            {
+                _telegraph = AttackTelegraphVisual.Create(transform, data.attackTelegraphCone, data.telegraphColor);
+            }
+            else if (attackPattern != null)
             {
                 attackPattern.YawRange(out float minYaw, out float maxYaw);
                 _telegraph = AttackTelegraphVisual.Create(transform, minYaw, maxYaw, data.telegraphColor);
@@ -557,6 +565,14 @@ namespace Emberdelve.AI
 
         private void RotateTowards(Vector3 faceTowards, float dt)
         {
+            if (UsesCinderClub && (_swingLatched || IsWindingUp))
+            {
+                TryGetAimPose(out _, out float yaw, out _);
+                Quaternion committed = Quaternion.Euler(0f, yaw, 0f);
+                _lookRotation = _swingLatched ? committed : Quaternion.RotateTowards(_lookRotation, committed, data.turnRate * dt);
+                transform.rotation = _lookRotation;
+                return;
+            }
             Vector3 delta = faceTowards - transform.position;
             delta.y = 0f;
 

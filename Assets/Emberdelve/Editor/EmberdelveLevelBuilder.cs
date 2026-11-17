@@ -825,7 +825,7 @@ namespace Emberdelve.EditorTools
                 HealthComponent health = enemy.AddComponent<HealthComponent>();
                 EnemyAgent agent = enemy.AddComponent<EnemyAgent>();
 
-                float bodyScale = spec.enemy.isElite ? 1.25f : 1f;
+                float bodyScale = spec.enemy.BodyScale;
 
                 GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 body.name = "Body";

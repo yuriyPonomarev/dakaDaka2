@@ -44,7 +44,7 @@ namespace Emberdelve.Tests.NetInventory
             Assert.That(state.IsDead, Is.False);
         }
 
-        [TestCase(4)]
+        [TestCase(5)]
         [TestCase(255)]
         public void RejectsUnsupportedVisualKinds(byte kind)
         {
@@ -54,13 +54,14 @@ namespace Emberdelve.Tests.NetInventory
         }
 
         [Test]
-        public void AcceptsAllFourVisualKinds()
+        public void AcceptsAllNamedVisualKinds()
         {
-            for (byte kind = 0; kind <= 3; kind++)
+            for (byte kind = 0; kind <= EnemyPresentationWire.CinderWardenKind; kind++)
             {
                 var state = Valid();
                 state.VisualKind = kind;
                 Assert.That(state.IsValid, Is.True, "visual kind " + kind + " is a supported zero-based variant");
+                Assert.That(state.VisualKindName, Is.Not.EqualTo("Unknown"));
             }
         }
 

@@ -86,6 +86,7 @@ namespace Emberdelve.EditorTools
         /// </summary>
         public static string VariantFor(EnemyData enemy, int spawnIndex)
         {
+            if (enemy != null && enemy.IsCinderWarden) return EnemyData.CinderWardenVisual;
             if (enemy != null && enemy.isElite) return "Warrior";
             return (spawnIndex & 1) == 0 ? "Minion" : "Rogue";
         }
@@ -706,14 +707,14 @@ namespace Emberdelve.EditorTools
             if (enemy == null) return null;
 
             string name = VariantFor(data, spawnIndex);
-            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath(name));
+            GameObject prefab = LoadVisualPrefab(name);
             if (prefab == null) return null;
 
             GameObject visual = (GameObject)PrefabUtility.InstantiatePrefab(prefab, enemy.transform);
             visual.name = VisualChildName;
             visual.transform.localPosition = Vector3.zero;
             visual.transform.localRotation = Quaternion.identity;
-            visual.transform.localScale = Vector3.one * (data != null && data.isElite ? EliteScale : 1f);
+            visual.transform.localScale = Vector3.one * (data != null && data.isElite && !data.IsCinderWarden ? EliteScale : 1f);
 
             string[] cubes = { "Body", "Head" };
             for (int i = 0; i < cubes.Length; i++)
@@ -725,5 +726,9 @@ namespace Emberdelve.EditorTools
 
             return visual;
         }
+
+        private static GameObject LoadVisualPrefab(string name) => name == EnemyData.CinderWardenVisual
+            ? Resources.Load<GameObject>("Emberdelve/NetEnemyVisuals/EnemyVisual_" + name)
+            : AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath(name));
     }
 }

@@ -876,7 +876,7 @@ namespace Emberdelve.Level
                 {
                     var spec = layout.enemySpawns[i];
                     if (spec == null) continue;
-                    Vector3 size = new Vector3(1.1f, 2.1f, 1.1f) * (spec.enemy != null && spec.enemy.isElite ? 1.25f : 1f);
+                    Vector3 size = new Vector3(1.1f, 2.1f, 1.1f) * (spec.enemy != null ? spec.enemy.BodyScale : 1f);
                     if (!TryContentCell(layout, plan, rooms, i, 4, size, occupied, out spec.cell))
                     { reason = ContentLocationFailure("enemy", i, plan, rooms); return false; }
                 }
@@ -989,6 +989,12 @@ namespace Emberdelve.Level
             { reason = "authored enemy has no placement record"; return false; }
             for (int i = 0; i < loot.Length; i++) if (_runtimeLayout.lootSpawns[i] == null)
             { reason = "authored loot has no placement record"; return false; }
+
+            // The boss reservation uses its larger bounds. FindObjectsByType does not preserve spawn order.
+            int bossActor = System.Array.FindIndex(enemies, enemy => enemy.UsesCinderClub);
+            int bossSlot = _runtimeLayout.enemySpawns?.FindIndex(spec => spec != null && spec.enemy != null && spec.enemy.IsCinderWarden) ?? -1;
+            if (bossActor >= 0 && bossSlot >= 0 && bossSlot < enemies.Length && bossActor != bossSlot)
+                (enemies[bossSlot], enemies[bossActor]) = (enemies[bossActor], enemies[bossSlot]);
             PlayerRig sceneRig = FindFirstObjectByType<PlayerRig>(FindObjectsInactive.Include);
             if (sceneRig != null) sceneRig.transform.position = _runtimeLayout.PlayerSpawnWorld(0) + Vector3.up * 0.15f;
 

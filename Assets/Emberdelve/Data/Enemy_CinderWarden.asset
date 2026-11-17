@@ -1,0 +1,43 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b3fa64b890e112d408f2abdcfe0fdf26, type: 3}
+  m_Name: Enemy_CinderWarden
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.EnemyData
+  enemyId: cinder_warden
+  displayName: Cinder Warden
+  isElite: 1
+  maxHealth: 320
+  attackWeapon: {fileID: 11400000, guid: 4e582ffa312dfe54dad584bbd801023e, type: 2}
+  attackRange: 2.38
+  attackWindup: 0.98
+  attackCooldown: 2.65
+  attackTelegraphHeight: 0.05
+  attackTelegraphCone: 64
+  telegraphColor: {r: 1, g: 0.32, b: 0.18, a: 1}
+  patrolSpeed: 0.85
+  chaseSpeed: 2.85
+  patrolRadius: 3.5
+  turnRate: 240
+  sightRange: 18
+  sightCone: 170
+  hearingRange: 11
+  memoryDuration: 8
+  investigateTime: 4
+  dropTable: {fileID: 11400000, guid: fb4a880500567e14eb1f7a9632302491, type: 2}
+  lootTable:
+  - {fileID: 11400000, guid: 0c59f5f911e934a4e92752eb0e343e3c, type: 2}
+  - {fileID: 11400000, guid: a26d2da41162d874ab729a17979af148, type: 2}
+  - {fileID: 11400000, guid: c6fda9df47fce4e4da019554ee948f03, type: 2}
+  lootRolls: 3
+  lootDropChance: 0.9
+  bodyMaterial: {fileID: 2100000, guid: aae60e9cca418f84bb518b1ce28b5ee4, type: 2}
+  eliteTint: {r: 1, g: 0.4, b: 0.3, a: 1}

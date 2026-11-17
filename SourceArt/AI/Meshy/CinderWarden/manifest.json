@@ -1,0 +1,196 @@
+{
+  "asset": "Cinder Warden",
+  "provider": "Meshy AI",
+  "created_on": "2026-11-17",
+  "rights": {
+    "source": "https://help.meshy.ai/en/articles/10137554-what-is-the-ownership-of-the-generated-models",
+    "note": "Original Meshy outputs generated on a connected paid API account from original AI-generated reference images. Kept private. Meshy terms apply; no CC0 claim."
+  },
+  "references": {
+    "creator": "OpenAI ImageGen",
+    "character": "References/Character.png",
+    "club": "References/Club.png",
+    "note": "Original fantasy designs; no assets or screenshots from Dark and Darker were used as input."
+  },
+  "tasks": [
+    {
+      "id": "01a1eb26-f011-72ce-a692-a17d884af105",
+      "type": "image-to-3d",
+      "input": "References/Character.png",
+      "settings": {
+        "model_type": "smart-topology",
+        "topology": "triangle",
+        "texture_model": "meshy-7",
+        "enable_pbr": true,
+        "should_texture": true,
+        "remove_lighting": true,
+        "symmetry_mode": "off",
+        "origin_at": "bottom",
+        "ai_model": "meshy-t2.5",
+        "target_polycount": 28000,
+        "pose_mode": "a-pose",
+        "target_formats": [
+          "glb"
+        ],
+        "texture_resolution": "4k"
+      },
+      "triangles": 27520,
+      "credits": 15
+    },
+    {
+      "id": "01a1eb27-0983-7060-9c09-c0d27bde5078",
+      "type": "image-to-3d",
+      "input": "References/Club.png",
+      "settings": {
+        "model_type": "smart-topology",
+        "topology": "triangle",
+        "texture_model": "meshy-7",
+        "enable_pbr": true,
+        "should_texture": true,
+        "remove_lighting": true,
+        "symmetry_mode": "off",
+        "origin_at": "bottom",
+        "ai_model": "meshy-t2",
+        "target_polycount": 6500,
+        "target_formats": [
+          "fbx"
+        ],
+        "texture_resolution": "2k"
+      },
+      "triangles": 6731,
+      "credits": 15
+    },
+    {
+      "id": "01a1eb28-ed7c-7516-ba1d-3fe0bfa7b227",
+      "type": "rigging",
+      "input_task_id": "01a1eb26-f011-72ce-a692-a17d884af105",
+      "height_meters": 3.3,
+      "outputs": [
+        "Body.fbx",
+        "Walk.fbx",
+        "Run.fbx"
+      ],
+      "credits": 5
+    },
+    {
+      "id": "01a1eb2a-05fb-7796-afe9-5db2e0718f41",
+      "type": "animation",
+      "rig_task_id": "01a1eb28-ed7c-7516-ba1d-3fe0bfa7b227",
+      "action_ids": [
+        0,
+        128,
+        178
+      ],
+      "clip_names": [
+        "Idle",
+        "Heavy Hammer Swing",
+        "Hit Reaction"
+      ],
+      "output": "Actions.fbx",
+      "credits": 9
+    }
+  ],
+  "credits_total": 44,
+  "unity": {
+    "prefab": "Assets/Emberdelve/Art/Models/AI/Meshy/CinderWarden/CinderWarden.prefab",
+    "controller": "Assets/Emberdelve/Art/Models/AI/Meshy/CinderWarden/CinderWarden.controller",
+    "notes": [
+      "Humanoid avatar with five Meshy motions and the existing Quaternius humanoid death clip. Root motion is disabled.",
+      "URP materials use the Meshy base color and normal maps with roughness converted to smoothness.",
+      "The mesh grip was posed locally because the Meshy rig does not have individual finger bones.",
+      "Rigid club under the right wrist and world-space smoke parented to the head.",
+      "The Modular Crypts encounter uses server-authoritative AI, HP, loot and the baked trajectory of the rigid club head."
+    ],
+    "combat_visual": "Assets/Emberdelve/Resources/Emberdelve/NetEnemyVisuals/EnemyVisual_CinderWarden.prefab",
+    "enemy_data": "Assets/Emberdelve/Data/Enemy_CinderWarden.asset",
+    "swing_pattern": "Assets/Emberdelve/Data/Pattern_CinderClub.asset",
+    "scene": "Assets/Emberdelve/Scenes/Emberdelve_ModularCrypts.unity"
+  },
+  "source_files": [
+    {
+      "path": "01a1eb26-f011-72ce-a692-a17d884af105/Character-preview.png",
+      "bytes": 156412,
+      "sha256": "13abec47e4c1c9ba35b75d23647de81fa7bedb18758945aeac9a396310d3280a"
+    },
+    {
+      "path": "01a1eb26-f011-72ce-a692-a17d884af105/Character.glb",
+      "bytes": 22625436,
+      "sha256": "6c4591da7336f1b18d9039aa4cd3731d47ae9516cf109aeff44f7a87f639a796"
+    },
+    {
+      "path": "01a1eb26-f011-72ce-a692-a17d884af105/Character_textures/BaseColor.jpg",
+      "bytes": 10722266,
+      "sha256": "1fea66b4a75e355c0f5ef475b8e94eecb15a8bdd205acea330d46afecb41b772"
+    },
+    {
+      "path": "01a1eb26-f011-72ce-a692-a17d884af105/Character_textures/MetallicRoughness.jpg",
+      "bytes": 2260926,
+      "sha256": "3e0248db7e2d45271b1e0f4ac7f13db3cd137f7033fae6abf089cd411b4bd1e7"
+    },
+    {
+      "path": "01a1eb26-f011-72ce-a692-a17d884af105/Character_textures/Normal.jpg",
+      "bytes": 8284973,
+      "sha256": "08fd91ee174a0be3f9b8a5cb2a3c554fb890f48d551ce4299fd41357144054e6"
+    },
+    {
+      "path": "01a1eb27-0983-7060-9c09-c0d27bde5078/Club-preview.png",
+      "bytes": 61620,
+      "sha256": "e57cb62c18423cb099d877a86e5f0b699dcc73c4e5ebf009e33ce6cf92017fb5"
+    },
+    {
+      "path": "01a1eb27-0983-7060-9c09-c0d27bde5078/Club.fbx",
+      "bytes": 14870252,
+      "sha256": "9581f76f3606267254705420ab1dc971866a3d1568b54e3e8d3b385ae0bfa823"
+    },
+    {
+      "path": "01a1eb27-0983-7060-9c09-c0d27bde5078/Club_textures/base_color.png",
+      "bytes": 6773797,
+      "sha256": "46e3e93c4db84185a5bf7a220ee2f17d9c9ba323dfe19d0057116dcc2223eb44"
+    },
+    {
+      "path": "01a1eb27-0983-7060-9c09-c0d27bde5078/Club_textures/metallic.png",
+      "bytes": 480878,
+      "sha256": "a6ca8abf570553647c2a258d395bbacf4b71d27544d18f096de9e139a2de50d1"
+    },
+    {
+      "path": "01a1eb27-0983-7060-9c09-c0d27bde5078/Club_textures/normal.png",
+      "bytes": 6040059,
+      "sha256": "e272cbb5c44290ef5551b74b963e4e9ef687187ad7f4c6742abe2a28dc22f678"
+    },
+    {
+      "path": "01a1eb27-0983-7060-9c09-c0d27bde5078/Club_textures/roughness.png",
+      "bytes": 1296207,
+      "sha256": "340c092352555ca190b4308e1855175f3f2df8fb2da25b135f585b06b1843339"
+    },
+    {
+      "path": "01a1eb28-ed7c-7516-ba1d-3fe0bfa7b227/Body.fbx",
+      "bytes": 24067804,
+      "sha256": "32c940e84f15de44f8552e61f73158017351ad33ca5c8b78c87d023be5a7b129"
+    },
+    {
+      "path": "01a1eb28-ed7c-7516-ba1d-3fe0bfa7b227/Run.fbx",
+      "bytes": 24086924,
+      "sha256": "dd4f23d8fba10df8757b5047cd3035d78148e512661a44518a1e89a51100f733"
+    },
+    {
+      "path": "01a1eb28-ed7c-7516-ba1d-3fe0bfa7b227/Walk.fbx",
+      "bytes": 24103916,
+      "sha256": "2de2947cb49ac62039693e7e822b775931ba090267db2f0bb8f7f239ab7dac32"
+    },
+    {
+      "path": "01a1eb2a-05fb-7796-afe9-5db2e0718f41/Actions.fbx",
+      "bytes": 25021740,
+      "sha256": "d96338b172b7a1c06ff537eff7ebd7778003c115a940f19548b8a8b70a6b03b5"
+    },
+    {
+      "path": "References/Character.png",
+      "bytes": 2177105,
+      "sha256": "c5463e6754eed5fd1295fe9eaf5d30626181caf721e18255437ecccac2f57f6f"
+    },
+    {
+      "path": "References/Club.png",
+      "bytes": 1673406,
+      "sha256": "52dd86727216c1dd48ef7e6fd9106878bc6ea314a41aae40806d17be258e9bed"
+    }
+  ]
+}

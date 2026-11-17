@@ -7,10 +7,16 @@ namespace Emberdelve.Data
     [CreateAssetMenu(menuName = "Emberdelve/06 Enemy", fileName = "EnemyData")]
     public class EnemyData : ScriptableObject
     {
+        public const string CinderWardenId = "cinder_warden";
+        public const string CinderWardenVisual = "CinderWarden";
+        public const float CinderWardenCenterHeight = 1.65f;
+
         [Header("Identity")]
         public string enemyId = "enemy";
         public string displayName = "Hollow Servitor";
         public bool isElite = false;
+        public bool IsCinderWarden => enemyId == CinderWardenId;
+        public float BodyScale => IsCinderWarden ? 1.50f : isElite ? 1.25f : 1f;
 
         [Header("Vitals")]
         public int maxHealth = 70;

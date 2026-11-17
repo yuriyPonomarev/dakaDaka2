@@ -168,7 +168,7 @@ namespace Emberdelve.AI
                     _releasing = false;
                 }
 
-                float target = phase.NormalizedTime();
+                float target = phase.NormalizedTime(club: _agent.UsesCinderClub);
                 if (!_phaseDriven)
                 {
                     // Enter the attack with a short blend from whatever locomotion pose the body is in (no first-frame pop).

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using Emberdelve.AI;
+using Emberdelve.Data;
 using Emberdelve.Net.Rules;
 using UnityEngine;
 using Unity.Netcode;
@@ -205,8 +206,7 @@ namespace Emberdelve.Net
 
         private static GameObject LoadVisual(byte visualKind)
         {
-            string[] names = { "Minion", "Rogue", "Warrior", "Mage" };
-            string name = visualKind < names.Length ? names[visualKind] : names[0];
+            string name = EnemyPresentationWire.NameOfVisual(visualKind <= EnemyPresentationWire.CinderWardenKind ? visualKind : (byte)0);
             return Resources.Load<GameObject>(VisualResourcePath + name);
         }
 
@@ -302,7 +302,8 @@ namespace Emberdelve.Net
             }
             GameObject visual = Object.Instantiate(prefab, transform, false);
             visual.name = "SkeletonVisual";
-            visual.transform.localPosition = Vector3.down * 1.15f;
+            visual.transform.localPosition = Vector3.down * (_visualKind == EnemyPresentationWire.CinderWardenKind
+                ? EnemyData.CinderWardenCenterHeight : 1.15f);
             EnemyVisualDriver driver = visual.GetComponent<EnemyVisualDriver>();
             if (driver != null) Object.Destroy(driver);
             Transform blood = visual.transform.Find("BloodHit");
@@ -364,7 +365,7 @@ namespace Emberdelve.Net
                 if (HasParameter(HitHash, AnimatorControllerParameterType.Trigger)) _animator.ResetTrigger(HitHash);
                 _animator.SetFloat(AttackSpeedHash, 0f);
                 // Extrapolate within this phase only. Never predict damage/recovery before the authority announces it.
-                _animator.Play("Attack", 0, _attackPhase.NormalizedTime(age));
+                _animator.Play("Attack", 0, _attackPhase.NormalizedTime(age, _visualKind == EnemyPresentationWire.CinderWardenKind));
             }
             else if (_phaseDriven)
             {
@@ -486,10 +487,6 @@ namespace Emberdelve.Net
 #endif
         }
 
-        private string VisualKindName()
-        {
-            string[] names = { "Minion", "Rogue", "Warrior", "Mage" };
-            return _visualKind < names.Length ? names[_visualKind] : "Unknown";
-        }
+        private string VisualKindName() => EnemyPresentationWire.NameOfVisual(_visualKind);
     }
 }

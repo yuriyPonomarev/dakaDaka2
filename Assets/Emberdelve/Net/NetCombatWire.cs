@@ -295,6 +295,7 @@ namespace Emberdelve.Net
     public struct EnemyPresentationWire : INetworkSerializable
     {
         public const byte CurrentVersion = 4;
+        public const byte CinderWardenKind = 4;
         public const byte WindingUpFlag = 1;
         public const byte DeadFlag = 2;
         public const byte DormantFlag = 4;
@@ -320,8 +321,12 @@ namespace Emberdelve.Net
         public bool IsDormant => (Flags & DormantFlag) != 0;
         public bool IsWaking => (Flags & WakingFlag) != 0;
         public bool IsDead => (Flags & DeadFlag) != 0;
-        public string VisualKindName => VisualKind <= 3 ? new[] { "Minion", "Rogue", "Warrior", "Mage" }[VisualKind] : "Unknown";
-        public bool IsValid => Version == CurrentVersion && Enemy > 0 && VisualKind <= 3 && (Flags & ~KnownFlags) == 0 &&
+        public static string NameOfVisual(byte kind) => kind switch
+        {
+            0 => "Minion", 1 => "Rogue", 2 => "Warrior", 3 => "Mage", CinderWardenKind => "CinderWarden", _ => "Unknown"
+        };
+        public string VisualKindName => NameOfVisual(VisualKind);
+        public bool IsValid => Version == CurrentVersion && Enemy > 0 && VisualKind <= CinderWardenKind && (Flags & ~KnownFlags) == 0 &&
                                !((IsDormant || IsWaking) && (IsDead || IsWindingUp || AttackPhase != 0)) && !(IsDormant && IsWaking) &&
                                float.IsFinite(WakeElapsed) && WakeElapsed >= 0f && WakeElapsed <= 5f &&
                                !float.IsNaN(WindupSeconds) && !float.IsInfinity(WindupSeconds) && WindupSeconds >= 0f && WindupSeconds <= 10f &&

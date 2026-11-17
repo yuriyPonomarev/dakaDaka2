@@ -24,8 +24,12 @@ namespace Emberdelve.AI
         public const float SweepStart = 5f / 13f;
         public const float SweepEnd = 9f / 13f;
         public const float RecoveryEnd = 0.89f;
+        public const float ClubAimYaw = 45f;
+        public const float ClubSweepStart = 0.83f;
+        public const float ClubSweepEnd = 0.90f;
+        public const float ClubRecoveryEnd = 0.99f;
 
-        public static EnemyAttackPhase Recovery(in MeleeSwingStatus status)
+        public static EnemyAttackPhase Recovery(in MeleeSwingStatus status, bool club = false)
         {
             if (status.Recoiled)
             {
@@ -34,19 +38,21 @@ namespace Emberdelve.AI
                     Mathf.Max(1, status.SampleCount);
                 float contact = Mathf.Clamp01((float)status.WallContactSample / Mathf.Max(1, status.SampleCount));
                 return new EnemyAttackPhase(4, status.Elapsed - stoppedAt, status.Timing.WallRecoil,
-                    Mathf.Lerp(SweepStart, SweepEnd, contact));
+                    Mathf.Lerp(club ? ClubSweepStart : SweepStart, club ? ClubSweepEnd : SweepEnd, contact));
             }
             return new EnemyAttackPhase(3, status.Elapsed - status.Timing.ActiveEnd, status.Timing.Recovery);
         }
 
-        public float NormalizedTime(float age = 0f)
+        public float NormalizedTime(float age = 0f, bool club = false)
         {
             float fraction = Mathf.Clamp01((Elapsed + Mathf.Max(0f, age)) / Mathf.Max(0.02f, Duration));
+            float start = club ? ClubSweepStart : SweepStart;
+            float end = club ? ClubSweepEnd : SweepEnd;
             switch (Phase)
             {
-                case 1: return Mathf.Lerp(0f, SweepStart, fraction);
-                case 2: return Mathf.Lerp(SweepStart, SweepEnd, fraction);
-                case 3: return Mathf.Lerp(SweepEnd, RecoveryEnd, fraction);
+                case 1: return Mathf.Lerp(0f, start, fraction);
+                case 2: return Mathf.Lerp(start, end, fraction);
+                case 3: return Mathf.Lerp(end, club ? ClubRecoveryEnd : RecoveryEnd, fraction);
                 case 4: return Mathf.Lerp(RecoilStart, 0f, fraction);
                 default: return 0f;
             }

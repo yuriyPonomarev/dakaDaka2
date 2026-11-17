@@ -242,6 +242,11 @@ namespace Emberdelve.EditorTools
             SetReference(agent, "data", data);
             SetReference(agent, "navGrid", _navGrid);
             SetReference(agent, "config", _config);
+            if (data.IsCinderWarden)
+            {
+                var visual = Resources.Load<GameObject>("Emberdelve/NetEnemyVisuals/EnemyVisual_CinderWarden");
+                if (visual != null) Instantiate(visual, go.transform, false);
+            }
             Physics.SyncTransforms();
             yield return null;
             yield return null;
@@ -333,6 +338,7 @@ namespace Emberdelve.EditorTools
             {
                 RealAttack(_servitor, _claw, 15f, "claw"),
                 RealAttack(_warden, _maul, 26f, "maul"),
+                CinderWardenFight(),
                 LegacyRefused(),
                 WallStops(),
                 OutsideArc(),
@@ -480,6 +486,51 @@ namespace Emberdelve.EditorTools
             Check(_authority.AcceptedCount == acceptedBefore + 1 && _authority.RejectedCount == rejectedBefore,
                 $"{label}: one accepted hit, nothing refused ({_authority.AcceptedCount - acceptedBefore} / {_authority.RejectedCount - rejectedBefore})");
             Check(!enemy.LastAttackWhiffed, $"{label}: a landed swing is not a whiff");
+        }
+
+        private IEnumerator CinderWardenFight()
+        {
+            var data = AssetDatabase.LoadAssetAtPath<EnemyData>(EmberdelvePaths.Data + "/Enemy_CinderWarden.asset");
+            Check(data != null && data.IsCinderWarden, "Cinder Warden has an authored boss definition");
+            if (data == null) yield break;
+            FakePlayer fighter = NewPlayer(new Vector3(0f, 0f, 2.05f));
+            FakePlayer behind = NewPlayer(new Vector3(0f, 0f, -2.65f));
+            EnemyAgent boss = null;
+            yield return Spawn(data, Vector3.zero, 0f, false, enemy => boss = enemy);
+
+            Check(boss != null && !boss.IsDormant && boss.MaxHealth == 320f && boss.CurrentHealth == 320f,
+                "Cinder Warden starts awake at 320 HP");
+            if (boss == null) yield break;
+            var driver = boss.GetComponentInChildren<EnemyVisualDriver>();
+            Check(driver != null && driver.Animator != null && driver.Animator.isHuman, "the encounter has its animated Humanoid visual");
+            Check(boss.AttackPattern != null && boss.AttackPattern.keys.Length == 13 && boss.AttackPattern.Validate(out _),
+                "the club uses a valid 13-sample swept contact path");
+            var hitVolumes = new List<HitShape>();
+            boss.CollectHitShapes(hitVolumes);
+            Check(hitVolumes.Exists(shape => shape.Location == HitLocation.Head && shape.A.y > 2.7f),
+                "the standing head hit volume reaches the boss's head");
+
+            yield return WaitFor(() => boss.IsWindingUp, Timeout);
+            Check(boss.IsWindingUp && boss.CurrentTargetCombatId == fighter.CombatId, "the boss acquires the player and telegraphs");
+            Check(fighter.Received.Count == 0, "no club damage during the telegraph");
+            yield return WaitFor(() => boss.SwingsBegun > 0, Timeout);
+            int swingId = boss.LastSwingId;
+            Check(swingId > 0, "the authority accepts the committed club attack");
+            if (swingId == 0) yield break;
+            yield return WaitSwingFinished(swingId);
+            Check(Status(swingId, out MeleeSwingStatus swing) && swing.Finished && swing.Hits.Count == 1,
+                "only one target is hit by the club's active window");
+            Check(fighter.Received.Count == 1 && fighter.Received[0].SourceCombatId == boss.CombatId &&
+                  fighter.Received[0].Amount > 0f, "the player in the club path receives one damage event");
+            Check(behind.Received.Count == 0, "a player behind the club is unharmed");
+
+            boss.ApplyDamage(new DamageInfo(90f, boss.CombatCenter, Vector3.forward, fighter.CombatCenter,
+                fighter.CombatId, EntityKind.LocalPlayer, DamageType.Physical, false, false, 0f, HitLocation.Body));
+            Near(230f, boss.CurrentHealth, .01f, "Cinder Warden loses HP to the player");
+            boss.ApplyDamage(new DamageInfo(230f, boss.CombatCenter, Vector3.forward, fighter.CombatCenter,
+                fighter.CombatId, EntityKind.LocalPlayer, DamageType.Physical, false, false, 0f, HitLocation.Body));
+            yield return null;
+            Check(boss.IsDead && !boss.TryBeginAttack(Vector3.forward, out _), "a defeated boss cannot swing again");
         }
 
         // ------------------------------------------------------------------------------------------------
