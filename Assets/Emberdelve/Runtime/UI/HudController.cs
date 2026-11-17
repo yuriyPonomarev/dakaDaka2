@@ -92,6 +92,7 @@ namespace Emberdelve.UI
         private sealed class SkillSlotWidget
         {
             public Image Background;
+            public Image Icon;
             public Image CooldownFill;
             public Text KeyLabel;
             public Text NameLabel;
@@ -197,6 +198,11 @@ namespace Emberdelve.UI
                 _vignetteTimer -= Time.unscaledDeltaTime;
                 if (_vignette != null) UiFactory.SetAlphaMask(_vignette, 0.42f * Mathf.Clamp01(_vignetteTimer / VignetteDuration));
             }
+
+            // The caster only raises an event when a slot changes state; the cooldown wedge unwinds every frame.
+            SkillCaster liveCaster = _director != null && _director.Player != null ? _director.Player.Skills : null;
+            if (liveCaster != null)
+                for (int i = 0; i < _skillSlots.Length; i++) ApplySkillState(liveCaster.Snapshot(i));
 
             for (int i = 0; i < _skillSlots.Length; i++)
             {
@@ -613,11 +619,29 @@ namespace Emberdelve.UI
         /// binding actually uses, the name, the mana cost, and a cooldown panel that shrinks as the skill
         /// recharges. A slot the player cannot afford is visibly different from one still on cooldown.
         /// </summary>
+        private const float SkillIconSize = 76f;
+        private static Sprite _radialSprite;
+
+        /// <summary>A white sprite: Image.Type.Filled needs one to draw its radial wedge.</summary>
+        private static Sprite RadialSprite()
+        {
+            if (_radialSprite == null)
+            {
+                Texture2D white = Texture2D.whiteTexture;
+                _radialSprite = Sprite.Create(white, new Rect(0f, 0f, white.width, white.height), new Vector2(0.5f, 0.5f), 100f);
+                _radialSprite.name = "SkillCooldownRadial";
+            }
+            return _radialSprite;
+        }
+
+        /// <summary>
+        /// Active skills as square icons (the same art as the character sheet), the key in the corner, the mana cost under it,
+        /// and the cooldown as a dark clockwise wedge that unwinds over the icon with the seconds left on top.
+        /// </summary>
         private void BuildSkillBar(Color ink, Color dim)
         {
-            const float chipWidth = 178f;
-            const float chipHeight = 78f;
-            const float gap = 14f;
+            const float frame = SkillIconSize + 8f;
+            const float gap = 12f;
 
             RectTransform bar = UiFactory.CreateGroup(_root, "SkillBar");
             // Centred above the quick belt: the bottom-right corner is where the first-person weapon hand sits.
@@ -625,51 +649,52 @@ namespace Emberdelve.UI
 
             for (int i = 0; i < _skillSlots.Length; i++)
             {
-                float x = (i - (_skillSlots.Length - 1) * 0.5f) * (chipWidth + gap);
+                float x = (i - (_skillSlots.Length - 1) * 0.5f) * (frame + gap);
 
-                Image background = UiFactory.CreateImage(bar, "SkillSlot" + i, new Color(0.075f, 0.07f, 0.06f, 0.9f),
-                    new Vector2(chipWidth, chipHeight), new Vector2(x, chipHeight * 0.5f),
+                Image background = UiFactory.CreateImage(bar, "SkillSlot" + i, new Color(0.075f, 0.07f, 0.06f, 0.92f),
+                    new Vector2(frame, frame), new Vector2(x, frame * 0.5f),
                     new Vector2(0.5f, 0f), new Vector2(0.5f, 0f));
-
                 DungeonUiStyle.Surface(background);
                 SkillSlotWidget widget = new SkillSlotWidget { Background = background };
 
-                UiFactory.CreateImage(background.transform, "Accent", new Color(0.5f, 0.45f, 0.38f, 1f),
-                    new Vector2(chipWidth, 4f), new Vector2(0f, chipHeight * 0.5f - 2f),
-                    new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+                widget.Icon = UiFactory.CreateImage(background.transform, "Icon", Color.white,
+                    new Vector2(SkillIconSize, SkillIconSize), Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+                widget.Icon.preserveAspect = true;
+                widget.Icon.raycastTarget = false;
 
-                Image cooldown = UiFactory.CreateImage(background.transform, "CooldownFill", new Color(0.02f, 0.02f, 0.02f, 0.72f),
-                    new Vector2(chipWidth, 0f), Vector2.zero, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f));
-                cooldown.rectTransform.pivot = new Vector2(0.5f, 0f);
+                Image cooldown = UiFactory.CreateImage(background.transform, "CooldownRadial", new Color(0f, 0f, 0f, 0.72f),
+                    new Vector2(SkillIconSize, SkillIconSize), Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
+                cooldown.sprite = RadialSprite();
+                cooldown.type = Image.Type.Filled;
+                cooldown.fillMethod = Image.FillMethod.Radial360;
+                cooldown.fillOrigin = (int)Image.Origin360.Top;
+                cooldown.fillClockwise = false;
+                cooldown.fillAmount = 0f;
+                cooldown.raycastTarget = false;
                 widget.CooldownFill = cooldown;
 
-                widget.KeyLabel = UiFactory.CreateText(background.transform, "KeyLabel", "?", 15,
+                widget.CooldownLabel = UiFactory.CreateText(background.transform, "CooldownLabel", "", 24,
                     new Color(1f, 0.9f, 0.72f, 1f), TextAnchor.MiddleCenter, FontStyle.Bold);
-                UiFactory.SetRect(widget.KeyLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                    new Vector2(46f, 22f), new Vector2(10f, -8f), new Vector2(0f, 1f));
+                UiFactory.SetRect(widget.CooldownLabel.rectTransform, new Vector2(0f, 0f), new Vector2(1f, 1f), Vector2.zero, Vector2.zero);
 
-                // Point anchors with an explicit width. The previous anchors stretched across the chip while
-                // sizeDelta still carried a full chip width, which asked for a rectangle twice as wide as the
-                // chip and pushed the title out of the slot on both sides.
-                widget.NameLabel = UiFactory.CreateText(background.transform, "NameLabel", "", 16, ink, TextAnchor.UpperLeft);
-                UiFactory.SetRect(widget.NameLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                    new Vector2(chipWidth - 66f, 24f), new Vector2(60f, -8f), new Vector2(0f, 1f));
+                // Key badge in the top-left corner and the mana cost along the bottom edge, both outside the wedge's centre.
+                Image keyBack = UiFactory.CreateImage(background.transform, "KeyBadge", new Color(0.05f, 0.045f, 0.04f, 0.9f),
+                    new Vector2(24f, 22f), new Vector2(4f, -4f), new Vector2(0f, 1f), new Vector2(0f, 1f));
+                keyBack.rectTransform.pivot = new Vector2(0f, 1f);
+                keyBack.raycastTarget = false;
+                widget.KeyLabel = UiFactory.CreateText(keyBack.transform, "KeyLabel", "?", 15,
+                    new Color(1f, 0.9f, 0.72f, 1f), TextAnchor.MiddleCenter, FontStyle.Bold);
+                UiFactory.SetRect(widget.KeyLabel.rectTransform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
 
-                widget.CostLabel = UiFactory.CreateText(background.transform, "CostLabel", "", 13, dim, TextAnchor.MiddleLeft);
-                UiFactory.SetRect(widget.CostLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
-                    new Vector2(chipWidth - 20f, 20f), new Vector2(10f, 10f), new Vector2(0f, 0f));
-
-                // Stretch anchors keep the cooldown readout glued to the chip, so sizeDelta is now the inset
-                // rather than a second full size on top of the chip's own.
-                widget.CooldownLabel = UiFactory.CreateText(background.transform, "CooldownLabel", "", 20,
-                    new Color(1f, 0.85f, 0.6f, 1f), TextAnchor.MiddleRight);
-                UiFactory.SetRect(widget.CooldownLabel.rectTransform, new Vector2(0f, 0f), new Vector2(1f, 1f),
-                    new Vector2(-20f, -24f), Vector2.zero);
+                widget.CostLabel = UiFactory.CreateText(background.transform, "CostLabel", "", 13, new Color(0.62f, 0.78f, 1f, 1f),
+                    TextAnchor.LowerRight, FontStyle.Bold);
+                UiFactory.SetRect(widget.CostLabel.rectTransform, new Vector2(0f, 0f), new Vector2(1f, 0f),
+                    new Vector2(-10f, 18f), new Vector2(0f, 5f), new Vector2(0.5f, 0f));
 
                 widget.ReasonLabel = UiFactory.CreateText(background.transform, "RejectLabel", "", 12,
-                    new Color(1f, 0.55f, 0.4f, 0f), TextAnchor.MiddleCenter);
-                UiFactory.SetRect(widget.ReasonLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f),
-                    new Vector2(chipWidth - 16f, 34f), new Vector2(8f, 40f), new Vector2(0f, 0f));
+                    new Color(1f, 0.55f, 0.4f, 0f), TextAnchor.LowerCenter);
+                UiFactory.SetRect(widget.ReasonLabel.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                    new Vector2(220f, 34f), new Vector2(0f, 4f), new Vector2(0.5f, 0f));
                 widget.ReasonLabel.gameObject.SetActive(false);
 
                 _skillSlots[i] = widget;
@@ -974,52 +999,44 @@ namespace Emberdelve.UI
             SkillSlotWidget widget = _skillSlots[snapshot.Slot];
             if (widget == null || widget.Background == null) return;
 
-            const float chipWidth = 178f;
-            const float chipHeight = 78f;
-
             if (!snapshot.HasSkill)
             {
-                widget.Background.color = new Color(0.05f, 0.05f, 0.05f, 0.7f);
+                widget.Background.color = new Color(0.05f, 0.05f, 0.05f, 0.6f);
+                if (widget.Icon != null) { widget.Icon.sprite = null; widget.Icon.enabled = false; }
                 if (widget.KeyLabel != null) widget.KeyLabel.text = string.Empty;
-                if (widget.NameLabel != null) widget.NameLabel.text = "no skill";
                 if (widget.CostLabel != null) widget.CostLabel.text = string.Empty;
                 if (widget.CooldownLabel != null) widget.CooldownLabel.text = string.Empty;
-                if (widget.CooldownFill != null) widget.CooldownFill.rectTransform.sizeDelta = new Vector2(chipWidth, 0f);
+                if (widget.CooldownFill != null) widget.CooldownFill.fillAmount = 0f;
                 return;
             }
 
-            Color accent = snapshot.AccentColor;
-            widget.Background.color = snapshot.Castable
-                ? new Color(Mathf.Lerp(0.075f, accent.r, 0.35f), Mathf.Lerp(0.07f, accent.g, 0.3f), Mathf.Lerp(0.06f, accent.b, 0.22f), 0.94f)
-                : new Color(0.06f, 0.06f, 0.065f, 0.9f);
-
-            Transform accentTransform = widget.Background.transform.Find("Accent");
-            if (accentTransform != null)
+            Sprite icon = SkillIconAtlas.Get(snapshot.SkillId);
+            if (widget.Icon != null)
             {
-                Image accentImage = accentTransform.GetComponent<Image>();
-                if (accentImage != null)
-                {
-                    accentImage.color = snapshot.Ready
-                        ? accent
-                        : new Color(accent.r * 0.4f, accent.g * 0.4f, accent.b * 0.4f, 1f);
-                }
+                if (widget.Icon.sprite != icon) widget.Icon.sprite = icon;
+                widget.Icon.enabled = true;
+                // No art yet: the skill's accent colour fills the square instead of an empty frame.
+                Color baseColor = icon != null ? Color.white : snapshot.AccentColor;
+                // Ready but short of mana: the icon greys out (a cooldown is shown by the wedge instead).
+                widget.Icon.color = snapshot.Castable || !snapshot.Ready
+                    ? baseColor
+                    : new Color(baseColor.r * 0.45f, baseColor.g * 0.5f, baseColor.b * 0.7f, 1f);
             }
+            widget.Background.color = snapshot.Ready && snapshot.Castable
+                ? new Color(0.14f, 0.11f, 0.07f, 0.95f)
+                : new Color(0.06f, 0.06f, 0.065f, 0.92f);
 
             if (widget.KeyLabel != null) widget.KeyLabel.text = snapshot.KeyLabel;
-            if (widget.NameLabel != null) widget.NameLabel.text = snapshot.DisplayName;
-            // Summary already reads "24 MP  |  7s cooldown"; prefixing the cost again printed it twice.
-            if (widget.CostLabel != null) widget.CostLabel.text = snapshot.Summary;
+            if (widget.CostLabel != null) widget.CostLabel.text = snapshot.ManaCost > 0 ? snapshot.ManaCost.ToString() : string.Empty;
 
             float fraction = snapshot.CooldownFraction;
-            if (widget.CooldownFill != null)
-            {
-                widget.CooldownFill.rectTransform.sizeDelta = new Vector2(chipWidth, chipHeight * fraction);
-                widget.CooldownFill.gameObject.SetActive(fraction > 0.001f);
-            }
-
+            if (widget.CooldownFill != null) widget.CooldownFill.fillAmount = fraction;
             if (widget.CooldownLabel != null)
             {
-                widget.CooldownLabel.text = fraction > 0.001f ? Mathf.CeilToInt(snapshot.CooldownRemaining) + "s" : string.Empty;
+                float left = snapshot.CooldownRemaining;
+                widget.CooldownLabel.text = fraction > 0.001f
+                    ? (left < 1f ? left.ToString("0.0") : Mathf.CeilToInt(left).ToString())
+                    : string.Empty;
             }
         }
 
