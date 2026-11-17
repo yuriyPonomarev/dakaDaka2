@@ -62,6 +62,15 @@ namespace Emberdelve.Player
         public bool IsRanged => _isRanged;
         public float DrawProgress { get; private set; }
         public bool IsSwinging => _swinging || _recoiling;
+
+        /// <summary>True while the current swing is in its damaging (active) phase.</summary>
+        public bool InActivePhase { get; private set; }
+
+        /// <summary>The trail material of the pattern being played (null when none).</summary>
+        public Material ActiveTrailMaterial => _pattern != null ? _pattern.trailMaterial : null;
+
+        /// <summary>Set by the first-person arms: they draw the ribbon along the visible blade instead of the far damage segment.</summary>
+        public bool ExternalTrail { get; set; }
         public float BladeLength => _bladeLength;
 
         /// <summary>B2: the length of the bar / ribbon actually drawn: the blade clipped where it meets level geometry (visual only; the authority clips its own segment).</summary>
@@ -254,6 +263,7 @@ namespace Emberdelve.Player
             _recoilStart = Time.time;
             _recoiling = true;
             _swinging = false;
+            InActivePhase = false;
             if (_trail != null) _trail.EndStroke();
         }
 
@@ -398,7 +408,9 @@ namespace Emberdelve.Player
                         Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldSound.Swing, transform.position, .7f);
                 }
                 float activeEnd = _timing.ActiveEnd;
-                if (t >= _timing.Windup && t <= activeEnd)
+                InActivePhase = t >= _timing.Windup && t <= activeEnd;
+                if (ExternalTrail) { }
+                else if (t >= _timing.Windup && t <= activeEnd)
                 {
                     // The ribbon is drawn along the outer third of the segment (the striking edge): the whole blade
                     // fan seen edge-on from the eye would fill the lower screen.
@@ -429,6 +441,7 @@ namespace Emberdelve.Player
 
         private void EndSwing()
         {
+            InActivePhase = false;
             _swinging = false;
             _recoiling = false;
             transform.localPosition = _restLocalPosition;

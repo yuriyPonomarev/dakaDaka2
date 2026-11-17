@@ -62,9 +62,14 @@ namespace Emberdelve.Player
 
         /// <summary>The right hand at the pattern's rest base is shown here; offsets from the rest base are scaled by <see cref="HandScale"/>.</summary>
         public static readonly Vector3 HandCenter = new Vector3(0.22f, -0.15f, 0.40f);
-        public static readonly Vector3 HandScale = new Vector3(0.42f, 0.35f, 0.4f);
+        public static readonly Vector3 HandScale = new Vector3(0.62f, 0.52f, 0.5f);
         /// <summary>The pattern's guard base (every melee pattern authors the same rest base).</summary>
         public static readonly Vector3 PatternRest = new Vector3(0.26f, -0.20f, 0.30f);
+
+        /// <summary>Cosmetic sword ready pose of the first-person hand (aim frame) and its blade direction (rig frame, blade along forward).</summary>
+        public static readonly Vector3 SwordReadyHand = new Vector3(0.25f, -0.23f, 0.44f);
+        public static readonly Quaternion SwordReadyRotation = Quaternion.Euler(-46f, -20f, 6f);
+        public static readonly Quaternion ShieldGuardSwordRotation = Quaternion.Euler(-20f, -20f, 0f);
 
         public static readonly Vector3 ShieldRest = new Vector3(-0.40f, -0.30f, 0.50f);
         public static readonly Vector3 ShieldRaised = new Vector3(-0.17f, -0.17f, 0.52f);
@@ -86,7 +91,7 @@ namespace Emberdelve.Player
         public static readonly Vector3 ShieldMountOffset = new Vector3(0f, -0.115f, 0f);
 
         public const float MinModelScale = 0.9f;
-        public const float MaxModelScale = 1.5f;
+        public const float MaxModelScale = 1.1f;
         /// <summary>Fraction of the half field of view the hand may use before it is pulled back inside.</summary>
         public const float FrustumFill = 0.9f;
 
@@ -192,7 +197,38 @@ namespace Emberdelve.Player
         }
 
         /// <summary>The weapon rig whose pose the right hand follows (rebuilt by the loadout whenever the weapon changes).</summary>
-        public void SetVisual(WeaponVisualRig visual) { _visual = visual; }
+        public void SetVisual(WeaponVisualRig visual)
+        {
+            _visual = visual;
+            if (_visual != null) _visual.ExternalTrail = true;
+        }
+
+        private SwingTrail _trail;
+        private bool _trailOn;
+        private float _swingWeight;
+
+        /// <summary>The swing ribbon follows the sword the player actually sees, not the far damage segment.</summary>
+        private void UpdateViewTrail()
+        {
+            bool active = _visual != null && _visual.InActivePhase && _mainHand != null && gripRight != null && _mainEntry != null;
+            if (active)
+            {
+                if (!_trailOn)
+                {
+                    if (_trail == null) _trail = SwingTrail.Create();
+                    _trail.Begin(_visual.ActiveTrailMaterial);
+                    _trailOn = true;
+                }
+                float length = Mathf.Max(0.2f, _mainEntry.length * WeaponScale);
+                Vector3 grip = gripRight.position, along = gripRight.up;
+                _trail.Add(grip + along * (length * 0.82f), grip + along * length);
+            }
+            else if (_trailOn)
+            {
+                _trail.EndStroke();
+                _trailOn = false;
+            }
+        }
 
         private void OnDestroy()
         {
@@ -493,6 +529,15 @@ namespace Emberdelve.Player
                 localRotation = Quaternion.Inverse(frame.rotation) * _visual.transform.rotation;
             }
 
+            bool swinging = _visual != null && _visual.IsSwinging;
+            _swingWeight = Mathf.MoveTowards(_swingWeight, swinging ? 1f : 0f, (swinging ? 14f : 4f) * dt);
+            // A shield does the blocking: the sword stays lowered at the side instead of crossing in front of the shield.
+            if (_offHand != null && _blockHeld && !swinging)
+            {
+                localBase = PatternRest;
+                localRotation = ShieldGuardSwordRotation;
+            }
+
             float guardTarget = _blockHeld ? 1f : 0f;
             _guardBlend = Mathf.MoveTowards(_guardBlend, guardTarget, 7f * dt);
             // Ease only the rendered hands when entering/leaving guard. The weapon rig also
@@ -508,6 +553,7 @@ namespace Emberdelve.Player
             _presentedRotation = localRotation;
             _hasPresentedPose = true;
             Pose(frame, _camera, localBase, localRotation, _guardBlend, bob + _joltRight, bob + _joltLeft);
+            UpdateViewTrail();
         }
 
         // ---- the solver -----------------------------------------------------------------------------------
@@ -567,7 +613,14 @@ namespace Emberdelve.Player
             Vector3 handLocal = ClampToView(camera, ViewHand(localBase) + offsetRight);
             // Keep the sword hilt mostly below frame; guard still raises it to its defensive pose.
             if (_mainData != null && (_mainData.weaponId.Contains("sword") || _mainData.weaponId.Contains("rapier")))
-                handLocal.y -= .20f * (1f - Mathf.SmoothStep(0f, 1f, guardBlend));
+            {
+                // Ready framing only: low and to the right with the forearm in view, blade leaning forward
+                // instead of standing up through the whole screen. Swings and the blade guard keep the rig's pose.
+                float ready = (1f - Mathf.SmoothStep(0f, 1f, guardBlend)) * (1f - Mathf.SmoothStep(0f, 1f, _swingWeight));
+                if (_offHand != null && _blockHeld) ready = Mathf.Max(ready, 1f - Mathf.SmoothStep(0f, 1f, _swingWeight));
+                handLocal = Vector3.Lerp(handLocal, ClampToView(camera, SwordReadyHand + offsetRight), ready);
+                localRotation = Quaternion.Slerp(localRotation, SwordReadyRotation, ready);
+            }
             // A long burning head needs its own ready framing: the sword's leftward yaw
             // sends it through the top edge. Keep this cosmetic offset out of swing/guard poses.
             if (_mainData != null && _mainData.weaponId == HandheldTorchVisual.WeaponId &&
