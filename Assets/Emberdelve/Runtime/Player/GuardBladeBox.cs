@@ -89,12 +89,17 @@ namespace Emberdelve.Player
     {
         public static readonly Vector3 RootRestPosition = new Vector3(0.26f, -0.20f, 0.30f);
         public static readonly Quaternion RootRestRotation = Quaternion.Euler(-8f, 12f, 14f);
-        public static readonly Vector3 RootGuardOffset = new Vector3(0f, 0.08f, 0f);
-        public static readonly Quaternion RootGuardRotation = Quaternion.Euler(-22f, -5f, 0f);
-        // The metal tip mesh ends at local z=0.80, so the shared contact box covers the complete
-        // visible blade while stopping at the hand guard rather than extending over the grip.
-        public static readonly Vector3 BladeLocalCenter = new Vector3(0f, 0f, 0.40f);
-        public static readonly Vector3 BladeSize = new Vector3(0.055f, 0.018f, 0.80f);
+        // Guard stance (a high "ox" ward): the hilt is held beside the head, the blade points forward and down so the tip
+        // is about waist height straight ahead. The first-person hand is placed exactly here, so the visible sword
+        // and the authority's block volume are the same thing.
+        public static readonly Vector3 GuardHandPosition = new Vector3(0.24f, -0.02f, 0.42f);
+        public static readonly Quaternion GuardBladeRotation = Quaternion.Euler(30f, -14f, 0f);
+        public static readonly Vector3 RootGuardOffset = GuardHandPosition - RootRestPosition;
+        public static readonly Quaternion RootGuardRotation = Quaternion.Inverse(RootRestRotation) * GuardBladeRotation;
+        // The first-person sword model is held at its grip (the root) and its blade runs about 1.05 m along +forward, so the
+        // shared contact box covers that blade, starting just above the cross-guard and ending at the tip.
+        public static readonly Vector3 BladeLocalCenter = new Vector3(0f, 0f, 0.55f);
+        public static readonly Vector3 BladeSize = new Vector3(0.055f, 0.03f, 1.0f);
 
         public static readonly Vector3 GripLocalCenter = new Vector3(0f, -0.02f, -0.07f);
         public static readonly Vector3 GripSize = new Vector3(0.035f, 0.035f, 0.15f);

@@ -620,6 +620,14 @@ namespace Emberdelve.Player
                 handLocal += Vector3.down * (.20f * poseSwingWeight * (1f - guardBlend));
                 localRotation = Quaternion.Slerp(localRotation, SwordReadyRotation, ready);
             }
+            // A raised blade guard puts the hand exactly where the authority's block volume is (the arm-reach compression above
+            // would otherwise slide the visible sword away from it).
+            if (_utilityItem == null && _mainData != null && !_mainData.IsRanged && _mainData.CanBlock &&
+                _rig != null && !_rig.Defense.HasShield)
+            {
+                float exact = Mathf.SmoothStep(0f, 1f, guardBlend) * (1f - Mathf.SmoothStep(0f, 1f, poseSwingWeight));
+                handLocal = Vector3.Lerp(handLocal, localBase + offsetRight, exact);
+            }
             // A long burning head needs its own ready framing: the sword's leftward yaw
             // sends it through the top edge. Keep this cosmetic offset out of swing/guard poses.
             if (_mainData != null && _mainData.weaponId == HandheldTorchVisual.WeaponId &&
