@@ -626,7 +626,11 @@ namespace Emberdelve.Player
     {
         private const float FadeSeconds = 0.2f;
         private const int MaxPoints = 256;
-        private const float PeakAlpha = 0.4f;
+        private const float DefaultPeakAlpha = 0.4f;
+
+        /// <summary>Ribbon colour (the player's stroke is amber; an enemy's committed attack line is red).</summary>
+        public Color Tint = new Color(1f, 0.74f, 0.32f);
+        public float PeakAlpha = DefaultPeakAlpha;
 
         private readonly Vector3[] _vertices = new Vector3[MaxPoints * 2];
         private readonly int[] _indices = new int[(MaxPoints - 1) * 12];
@@ -727,7 +731,7 @@ namespace Emberdelve.Player
         private void ApplyAlpha(float alpha)
         {
             if (_material == null) return;
-            Color c = new Color(1f, 0.74f, 0.32f, alpha);
+            Color c = new Color(Tint.r, Tint.g, Tint.b, alpha);
             if (_material.HasProperty("_BaseColor")) _material.SetColor("_BaseColor", c);
             if (_material.HasProperty("_Color")) _material.SetColor("_Color", c);
         }

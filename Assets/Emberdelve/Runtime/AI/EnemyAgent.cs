@@ -59,6 +59,8 @@ namespace Emberdelve.AI
         private Vector3 _bodyHomePosition;
         private Quaternion _lookRotation;
         private AttackTelegraphVisual _telegraph;
+        private Emberdelve.Player.SwingTrail _attackLine;
+        private bool _attackLineShown;
         private StatusComponent _status;
         private float _whiffTimer;
         private float _enemyDoorCooldown;
@@ -413,6 +415,7 @@ namespace Emberdelve.AI
 
         private void OnDestroy()
         {
+            if (_attackLine != null) Destroy(_attackLine.gameObject);
             CombatRegistry.Unregister(_combatId, this);
             if (_health != null)
             {
@@ -467,6 +470,8 @@ namespace Emberdelve.AI
             _status?.ClearStatuses();
             _path.Clear();
             _telegraph?.SetState(false, 0f, Vector3.zero, 1f, false);
+            _attackLine?.EndStroke();
+            _attackLineShown = false;
 
             if (bodyTransform != null)
             {
@@ -707,6 +712,8 @@ namespace Emberdelve.AI
             float height = Mathf.Max(0.05f, data.attackTelegraphHeight);
             if (bodyTransform != null) bodyTransform.localPosition = _bodyHomePosition + Vector3.up * (progress * height);
 
+            UpdateAttackLine(_brain.IsWindingUp || (_swingId != 0 && _swingPhase != SwingPhase.Recovery));
+
             if (_telegraph == null) return;
 
             if (_whiffTimer > 0f) _whiffTimer -= Time.deltaTime;
@@ -720,6 +727,48 @@ namespace Emberdelve.AI
                 _swingLatched ? _latchedDirection : TelegraphDirection(),
                 TelegraphReach,
                 whiffed && !winding && !striking);
+        }
+
+        /// <summary>
+        /// The enemy's own red attack line, the counterpart of the player's amber swing ribbon: the committed blade path of the swing
+        /// (the very path the authority sweeps, from <see cref="BladeWarning"/>) is drawn in the world from the start of the windup until
+        /// the active phase ends, so the direction of the blow (side, overhead, thrust) can be read before it lands.
+        /// </summary>
+        private void UpdateAttackLine(bool show)
+        {
+            if (!show)
+            {
+                if (_attackLineShown) { _attackLine?.EndStroke(); _attackLineShown = false; }
+                return;
+            }
+
+            if (_attackLineShown) return;
+            WeaponData weapon = data != null ? data.attackWeapon : null;
+            SwingPatternData pattern = AttackPattern;
+            if (weapon == null || pattern == null || !TryGetAimPose(out Vector3 eye, out float yaw, out float pitch)) return;
+
+            BladeWarning warning = BladeWarning.Describe(pattern, weapon, eye, yaw, pitch, null, 16);
+            if (!warning.IsValid) return;
+            if (_attackLine == null)
+            {
+                _attackLine = Emberdelve.Player.SwingTrail.Create();
+                _attackLine.Tint = new Color(1f, 0.12f, 0.08f);
+                _attackLine.PeakAlpha = 0.6f;
+            }
+
+            _attackLine.Begin(pattern.trailMaterial);
+            for (int s = 0; s <= warning.SampleCount; s++)
+            {
+                warning.SegmentAt(s, out Vector3 b, out Vector3 t);
+                _attackLine.Add(Vector3.Lerp(b, t, 0.7f), t);
+            }
+
+            _attackLineShown = true;
+        }
+
+        private void OnDisable()
+        {
+            if (_attackLine != null) _attackLine.EndStroke();
         }
 
         /// <summary>Ground-plane direction the brain committed at the start of the windup.</summary>
