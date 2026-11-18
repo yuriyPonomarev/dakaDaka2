@@ -34,14 +34,14 @@ MonoBehaviour:
   - patternIndex: 0
     damageMultiplier: 1
     windupScale: 1
-    recoveryScale: 1
+    recoveryScale: 0.25
   - patternIndex: 1
     damageMultiplier: 1.05
-    windupScale: 0.85
-    recoveryScale: 1
+    windupScale: 0.35
+    recoveryScale: 0.25
   - patternIndex: 2
     damageMultiplier: 1.15
-    windupScale: 1
+    windupScale: 0.35
     recoveryScale: 1
   comboWindow: 0.8
   comboFinisherRecovery: 0.5
