@@ -94,7 +94,7 @@ namespace Emberdelve.Player
 
         /// <summary>The shield model is shown a little smaller than its world size so that it frames the view instead of filling it.</summary>
         /// <summary>Sideways shift of a held weapon in the grip so the handle sits in the middle of the palm.</summary>
-        public const float HeldPalmCentre = 0.025f;
+        public const float HeldPalmCentre = 0.05f;
         public const float ShieldScale = GuardShieldPose.Scale / ModelScale; // same world size as the authority shape under the scaled arms
         // The kite shield's rear straps sit above its geometric centre.
         public static readonly Vector3 ShieldMountOffset = new Vector3(0f, -0.1415f, 0f);
