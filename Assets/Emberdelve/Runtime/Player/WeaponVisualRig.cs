@@ -43,6 +43,12 @@ namespace Emberdelve.Player
         private bool _swingSoundPlayed;
         private bool _recoiling;
         private float _recoilStart;
+        // Combo chain: between steps the weapon stays where the strike ended (until the combo window lapses), then eases to rest.
+        private bool _chainHold, _holding, _releasing;
+        private float _holdSeconds, _holdUntil, _releaseStart;
+        private Vector3 _holdBase;
+        private Quaternion _holdRotation;
+        private const float ReleaseSeconds = 0.30f;
         private Vector3 _transitionBase;
         private Quaternion _transitionRotation;
         private Vector3 _restLocalPosition;
@@ -241,6 +247,10 @@ namespace Emberdelve.Player
             _swingSoundPlayed = false;
             _swinging = true;
             _recoiling = false;
+            _holding = false;
+            _releasing = false;
+            _holdSeconds = Mathf.Max(0.05f, weapon.comboWindow);
+            _chainHold = ContinuesChain(weapon, pattern);
 
             if (_edge != null)
             {
@@ -278,6 +288,12 @@ namespace Emberdelve.Player
             bool active = swingTime >= _timing.Windup && swingTime <= _timing.ActiveEnd;
             SamplePresentation(_pattern, _timing, swingTime, _transitionBase, _transitionRotation, _guardHeld,
                 out Vector3 position, out Quaternion rotation);
+            if (_chainHold && swingTime > _timing.ActiveEnd)
+            {
+                SwingPose end = _pattern.Evaluate(_timing.ActiveEnd, _timing);
+                position = end.Base;
+                rotation = end.LocalRotation;
+            }
             ApplyPresentation(position, rotation, active);
         }
 
@@ -396,6 +412,7 @@ namespace Emberdelve.Player
                 float t = Time.time - _swingStart;
                 if (t >= _timing.Total)
                 {
+                    if (_chainHold && !_guardHeld && BeginChainHold()) return;
                     EndSwing();
                     return;
                 }
@@ -436,7 +453,51 @@ namespace Emberdelve.Player
                 ApplyPresentation(Vector3.Lerp(_transitionBase, endBase, eased),
                     Quaternion.Slerp(_transitionRotation, endRotation, eased), false);
             }
+            else if (_holding)
+            {
+                if (_guardHeld || Time.time >= _holdUntil) BeginRelease();
+                else ApplyPresentation(_holdBase, _holdRotation, false);
+            }
+            else if (_releasing)
+            {
+                float k = (Time.time - _releaseStart) / ReleaseSeconds;
+                if (k >= 1f) { EndSwing(); return; }
+                float eased = k * k * (3f - 2f * k);
+                ReadyPose(_guardHeld, out Vector3 endBase, out Quaternion endRotation);
+                ApplyPresentation(Vector3.Lerp(_holdBase, endBase, eased), Quaternion.Slerp(_holdRotation, endRotation, eased), false);
+            }
             else ApplyGuardPose();
+        }
+
+        /// <summary>True when another step follows this pattern in the weapon's chain (the last step, and any weapon without a chain, returns to rest as before).</summary>
+        private static bool ContinuesChain(WeaponData weapon, SwingPatternData pattern)
+        {
+            if (weapon == null || !weapon.HasComboChain || weapon.comboSteps.Length < 2 || weapon.swingPatterns == null) return false;
+            int lastIndex = weapon.comboSteps[weapon.comboSteps.Length - 1].patternIndex;
+            return lastIndex < 0 || lastIndex >= weapon.swingPatterns.Length || weapon.swingPatterns[lastIndex] != pattern;
+        }
+
+        private bool BeginChainHold()
+        {
+            SwingPose end = _pattern.Evaluate(_timing.ActiveEnd, _timing);
+            _holdBase = end.Base;
+            _holdRotation = end.LocalRotation;
+            _holdUntil = _swingStart + _timing.ActiveEnd + _holdSeconds;
+            if (Time.time >= _holdUntil) return false;
+            _swinging = false;
+            _holding = true;
+            InActivePhase = false;
+            if (_edge != null) _edge.gameObject.SetActive(false);
+            if (_trail != null) _trail.EndStroke();
+            ApplyPresentation(_holdBase, _holdRotation, false);
+            return true;
+        }
+
+        private void BeginRelease()
+        {
+            _holding = false;
+            _releasing = true;
+            _releaseStart = Time.time;
         }
 
         private void EndSwing()
@@ -444,6 +505,8 @@ namespace Emberdelve.Player
             InActivePhase = false;
             _swinging = false;
             _recoiling = false;
+            _holding = false;
+            _releasing = false;
             transform.localPosition = _restLocalPosition;
             transform.localRotation = _restLocalRotation;
             if (_edge != null) _edge.gameObject.SetActive(false);
