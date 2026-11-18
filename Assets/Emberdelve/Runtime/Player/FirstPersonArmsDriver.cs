@@ -67,12 +67,15 @@ namespace Emberdelve.Player
         public static readonly Vector3 PatternRest = new Vector3(0.26f, -0.20f, 0.30f);
 
         /// <summary>Cosmetic sword ready pose of the first-person hand (aim frame) and its blade direction (rig frame, blade along forward).</summary>
-        public static readonly Vector3 SwordReadyHand = new Vector3(0.24f, -0.15f, 0.56f);
+        public static readonly Vector3 SwordReadyHand = new Vector3(0.22f, -0.30f, 0.48f);
         public static readonly Quaternion SwordReadyRotation = Quaternion.Euler(-64f, -24f, 0f);
         public static readonly Quaternion ShieldGuardSwordRotation = Quaternion.Euler(-20f, -20f, 0f);
+    /// <summary>Where the sword hand sits while a shield blocks: low and to the right, blade cocked up and slightly inward, clear of the shield.</summary>
+    public static readonly Vector3 SwordShieldGuardHand = new Vector3(0.28f, -0.32f, 0.44f);
+    public static readonly Quaternion SwordShieldGuardRotation = Quaternion.Euler(-72f, -10f, 0f);
 
         public static readonly Vector3 ShieldRest = new Vector3(-0.40f, -0.30f, 0.50f);
-        public static readonly Vector3 ShieldRaised = new Vector3(-0.17f, -0.17f, 0.52f);
+        public static readonly Vector3 ShieldRaised = new Vector3(-0.14f, -0.10f, 0.40f);
         public static readonly Vector3 ShieldRestEuler = new Vector3(0f, 14f, 0f);
         public static readonly Vector3 ShieldRaisedEuler = new Vector3(-6f, 4f, 0f);
 
@@ -86,9 +89,9 @@ namespace Emberdelve.Player
         public static readonly Quaternion GripFromRig = Quaternion.Euler(90f, 0f, 0f);
 
         /// <summary>The shield model is shown a little smaller than its world size so that it frames the view instead of filling it.</summary>
-        public const float ShieldScale = 0.72f;
+        public const float ShieldScale = 0.885f;
         // The kite shield's rear straps sit above its geometric centre.
-        public static readonly Vector3 ShieldMountOffset = new Vector3(0f, -0.115f, 0f);
+        public static readonly Vector3 ShieldMountOffset = new Vector3(0f, -0.1415f, 0f);
 
         public const float MinModelScale = 0.8f;
         public const float MaxModelScale = 0.92f;
@@ -618,9 +621,13 @@ namespace Emberdelve.Player
                 // Ready framing only: low and to the right with the forearm in view, blade leaning forward
                 // instead of standing up through the whole screen. Swings and the blade guard keep the rig's pose.
                 float ready = (1f - Mathf.SmoothStep(0f, 1f, swordGuard)) * (1f - Mathf.SmoothStep(0f, 1f, poseSwingWeight));
-                handLocal = Vector3.Lerp(handLocal, ClampToView(camera, SwordReadyHand + offsetRight), ready);
+                // With a shield up the sword takes its own, more guarded placement instead of the plain ready one.
+                float shieldGuard = _rig != null && _rig.Defense.HasShield ? guardBlend : 0f;
+                Vector3 readyHand = Vector3.Lerp(SwordReadyHand, SwordShieldGuardHand, Mathf.SmoothStep(0f, 1f, shieldGuard));
+                Quaternion readyRotation = Quaternion.Slerp(SwordReadyRotation, SwordShieldGuardRotation, Mathf.SmoothStep(0f, 1f, shieldGuard));
+                handLocal = Vector3.Lerp(handLocal, ClampToView(camera, readyHand + offsetRight), ready);
                 handLocal += Vector3.down * (.20f * poseSwingWeight * (1f - swordGuard));
-                localRotation = Quaternion.Slerp(localRotation, SwordReadyRotation, ready);
+                localRotation = Quaternion.Slerp(localRotation, readyRotation, ready);
             }
             // A raised blade guard puts the hand exactly where the authority's block volume is (the arm-reach compression above
             // would otherwise slide the visible sword away from it).
