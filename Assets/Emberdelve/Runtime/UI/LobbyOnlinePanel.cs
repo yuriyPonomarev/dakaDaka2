@@ -50,10 +50,10 @@ namespace Emberdelve.UI
             _classProvider = classProvider;
 
             RectTransform root = UiFactory.CreateGroup(canvas.transform.Find("LobbyRoot") ?? canvas.transform, "OnlinePanel");
-            UiFactory.SetRect(root, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(340f, 225f), new Vector2(40f, -140f), new Vector2(0f, 1f));
+            UiFactory.SetRect(root, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(340f, 292f), new Vector2(40f, -140f), new Vector2(0f, 1f));
 
-            var background = UiFactory.CreateImage(root, "Bg", new Color(0.05f, 0.04f, 0.03f, 0.9f), new Vector2(340f, 225f),
-                new Vector2(170f, -112.5f), new Vector2(0f, 1f), new Vector2(0f, 1f));
+            var background = UiFactory.CreateImage(root, "Bg", new Color(0.05f, 0.04f, 0.03f, 0.9f), new Vector2(340f, 292f),
+                new Vector2(170f, -146f), new Vector2(0f, 1f), new Vector2(0f, 1f));
             DungeonUiStyle.Surface(background);
 
             Text header = UiFactory.CreateText(root, "Header", "PLAY ONLINE", 17, new Color(0.95f, 0.78f, 0.4f, 1f), TextAnchor.MiddleLeft);
@@ -84,6 +84,15 @@ namespace Emberdelve.UI
             _statusText.horizontalOverflow = HorizontalWrapMode.Wrap;
             _statusText.verticalOverflow = VerticalWrapMode.Truncate;
             UiFactory.SetRect(_statusText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(320f, 46f), new Vector2(170f, -174f));
+
+            // The skill kit for this class is part of the connection: pick it here, before Host or Join, with the same screen as offline.
+            _kitText = UiFactory.CreateText(root, "Kit", "", 13, new Color(0.78f, 0.74f, 0.66f, 1f), TextAnchor.UpperLeft);
+            _kitText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _kitText.verticalOverflow = VerticalWrapMode.Truncate;
+            UiFactory.SetRect(_kitText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(320f, 44f), new Vector2(170f, -226f));
+            Button kitButton = UiFactory.CreateButton(root, "KitButton", "PERKS & SKILLS", OpenKitScreen,
+                new Vector2(320f, 34f), new Color(0.18f, 0.16f, 0.12f, 1f), new Color(0.96f, 0.9f, 0.8f, 1f), 17);
+            PlaceTopLeft(kitButton, new Vector2(320f, 34f), new Vector2(170f, -268f));
 
             NetLobbyBridge.Changed += Refresh;
             Refresh();
@@ -118,6 +127,7 @@ namespace Emberdelve.UI
         {
             if (!_built) return;
             NetLobbyBridge.StartPendingRetry();
+            if (Time.unscaledTime >= _nextKitRefresh) { _nextKitRefresh = Time.unscaledTime + 0.5f; RefreshKit(); }
 
             if (_autoJoinAt > 0f && Time.unscaledTime >= _autoJoinAt)
             {
@@ -267,6 +277,35 @@ namespace Emberdelve.UI
             _host.gameObject.SetActive(!busy);
             _cancel.gameObject.SetActive(busy);
             RefreshAddress();
+            RefreshKit();
+        }
+
+        private Text _kitText;
+        private float _nextKitRefresh;
+
+        private void OpenKitScreen()
+        {
+            CharacterClassData cls = _classProvider != null ? _classProvider() : null;
+            if (cls == null) { GameEvents.RaiseToast("Choose a class first"); return; }
+            SetFocus(false);
+            SkillLoadoutScreen screen = GetComponent<SkillLoadoutScreen>();
+            if (screen == null) screen = gameObject.AddComponent<SkillLoadoutScreen>();
+            screen.Open(cls, RefreshKit);
+        }
+
+        private void RefreshKit()
+        {
+            if (_kitText == null) return;
+            CharacterClassData cls = _classProvider != null ? _classProvider() : null;
+            if (cls == null) { _kitText.text = ""; return; }
+            Emberdelve.Skills.SkillLoadoutStore.Get(cls, out SkillData[] actives, out SkillData[] passives);
+            string Names(SkillData[] list)
+            {
+                var names = new System.Collections.Generic.List<string>();
+                foreach (SkillData skill in list) if (skill != null) names.Add(skill.displayName);
+                return string.Join(", ", names);
+            }
+            _kitText.text = "Active: " + Names(actives) + "\nPassive: " + Names(passives);
         }
 
         private void RefreshAddress()

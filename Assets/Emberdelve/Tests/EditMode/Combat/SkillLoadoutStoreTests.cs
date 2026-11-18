@@ -91,5 +91,47 @@ namespace Emberdelve.Combat.Tests
             SkillLoadoutStore.Get(_class, out var actives, out _);
             Assert.That(actives[0], Is.Not.SameAs(actives[1]));
         }
+
+        [Test]
+        public void ApplyKit_ValidatesAnUntrustedString_AgainstTheClassPool()
+        {
+            var pool = SkillPool.Load();
+            Assume.That(pool != null && pool.universalActives.Length > 0 && pool.universalPassives.Length > 0);
+            SkillData extra = pool.universalActives[0];
+            SkillData passive = pool.universalPassives[0];
+
+            CharacterClassData ok = SkillLoadoutStore.ApplyKit(_class, extra.skillId + "," + _a2.skillId + ";" + passive.skillId + "," + _p2.skillId);
+            Assert.That(ok.activeSkills, Is.EqualTo(new[] { extra, _a2 }));
+            Assert.That(ok.passiveSkills, Is.EqualTo(new[] { passive, _p2 }));
+            Assert.That(_class.activeSkills, Is.EqualTo(new[] { _a1, _a2 }), "the shipped class is never modified");
+            Object.DestroyImmediate(ok);
+
+            // A passive id in an active slot, an unknown id and a repeat all fall back to the class kit for that slot.
+            CharacterClassData bad = SkillLoadoutStore.ApplyKit(_class, passive.skillId + ",nonsense;" + _p1.skillId + "," + _p1.skillId);
+            Assert.That(bad.activeSkills ?? _class.activeSkills, Is.EqualTo(new[] { _a1, _a2 }));
+            Assert.That(bad.passiveSkills[0], Is.Not.SameAs(bad.passiveSkills[1]));
+            if (!ReferenceEquals(bad, _class)) Object.DestroyImmediate(bad);
+        }
+
+        [Test]
+        public void ApplyKit_WithNothing_IsTheClassItself()
+        {
+            Assert.That(SkillLoadoutStore.ApplyKit(_class, ""), Is.SameAs(_class));
+            Assert.That(SkillLoadoutStore.ApplyKit(_class, null), Is.SameAs(_class));
+            Assert.That(SkillLoadoutStore.ApplyKit(_class, ";"), Is.SameAs(_class));
+        }
+
+        [Test]
+        public void KitString_RoundTripsThroughApplyKit()
+        {
+            var pool = SkillPool.Load();
+            Assume.That(pool != null && pool.universalActives.Length > 0);
+            SkillLoadoutStore.Save(_class, new[] { pool.universalActives[0], _a2 }, new[] { _p1, _p2 });
+            string saved = SkillLoadoutStore.SavedKitString(_class.classId);
+            Assert.That(saved, Does.Contain(pool.universalActives[0].skillId));
+            CharacterClassData applied = SkillLoadoutStore.ApplyKit(_class, saved);
+            Assert.That(SkillLoadoutStore.KitString(applied), Is.EqualTo(saved));
+            Object.DestroyImmediate(applied);
+        }
     }
 }

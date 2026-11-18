@@ -232,7 +232,7 @@ namespace Emberdelve.Net
                 ConnectionApproval = true,
                 PlayerPrefab = null,
                 EnableSceneManagement = true, // U3A3: the server loads the dungeon, clients follow (NetServer.RequestDungeonScene)
-                ConnectionData = NetConnectPayload.Encode(protocol, _args.Slot, RequestedClass())
+                ConnectionData = NetConnectPayload.Encode(protocol, _args.Slot, RequestedClass(), Emberdelve.Skills.SkillLoadoutStore.SavedKitString(RequestedClass()))
             };
             _nm.NetworkConfig = config;
             gameObject.AddComponent<NetBreakableWorld>().Configure(_nm);

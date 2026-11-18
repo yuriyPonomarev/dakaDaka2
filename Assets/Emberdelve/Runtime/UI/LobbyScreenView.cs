@@ -48,7 +48,7 @@ namespace Emberdelve.UI
                 new Vector2(680f, 40f), new Vector2(0f, -99f));
 
             var modePanel = UiFactory.CreateGroup(root, "RoyaleModePanel");
-            UiFactory.SetRect(modePanel, new Vector2(0,1), new Vector2(0,1), new Vector2(340,176), new Vector2(40,-400), new Vector2(0,1));
+            UiFactory.SetRect(modePanel, new Vector2(0,1), new Vector2(0,1), new Vector2(340,176), new Vector2(40,-444), new Vector2(0,1));
             var modeBackground = UiFactory.CreateImage(modePanel,"Background",new Color(.05f,.04f,.03f,.95f),new Vector2(340,176),new Vector2(170,-88),new Vector2(0,1),new Vector2(0,1));
             DungeonUiStyle.Surface(modeBackground);
             var modeTitle = UiFactory.CreateText(modePanel,"Heading","TEAM SIZE",17,new Color(.95f,.78f,.4f),TextAnchor.MiddleCenter);

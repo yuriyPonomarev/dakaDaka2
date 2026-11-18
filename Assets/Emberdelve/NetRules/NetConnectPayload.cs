@@ -15,15 +15,37 @@ namespace Emberdelve.Net.Rules
         /// <summary>Longest slot / class id the server accepts (the encoder truncates to this).</summary>
         public const int MaxField = 32;
 
-        public static byte[] Encode(int protocolVersion, string slot, string classId)
+        public static byte[] Encode(int protocolVersion, string slot, string classId, string kit = "")
         {
             string text = Magic + "|" + protocolVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) +
                           "|" + Clean(slot) + "|" + Clean(classId);
+            // The chosen skill kit rides along as an optional fifth field; an older client simply sends none.
+            string cleanKit = CleanKit(kit);
+            if (cleanKit.Length > 0) text += "|" + cleanKit;
             return Encoding.UTF8.GetBytes(text);
         }
 
-        public static bool TryDecode(byte[] payload, out int protocolVersion, out string slot, out string classId)
+        /// <summary>Longest kit string accepted: two active ids, two passive ids, separators.</summary>
+        public const int MaxKit = 120;
+
+        /// <summary>Lowercase ids, digits, underscore, comma and semicolon only; anything else (or too long) is dropped, never trusted.</summary>
+        public static string CleanKit(string kit)
         {
+            if (string.IsNullOrEmpty(kit) || kit.Length > MaxKit) return "";
+            for (int i = 0; i < kit.Length; i++)
+            {
+                char c = kit[i];
+                if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == ',' || c == ';')) return "";
+            }
+            return kit;
+        }
+
+        public static bool TryDecode(byte[] payload, out int protocolVersion, out string slot, out string classId) =>
+            TryDecode(payload, out protocolVersion, out slot, out classId, out _);
+
+        public static bool TryDecode(byte[] payload, out int protocolVersion, out string slot, out string classId, out string kit)
+        {
+            kit = "";
             protocolVersion = -1;
             slot = "";
             classId = "";
@@ -34,12 +56,13 @@ namespace Emberdelve.Net.Rules
             catch (Exception) { return false; }
 
             string[] parts = text.Split('|');
-            if (parts.Length != 4 || parts[0] != Magic) return false;
+            if ((parts.Length != 4 && parts.Length != 5) || parts[0] != Magic) return false;
             if (!int.TryParse(parts[1], System.Globalization.NumberStyles.Integer,
                     System.Globalization.CultureInfo.InvariantCulture, out protocolVersion)) return false;
 
             slot = parts[2];
             classId = parts[3];
+            if (parts.Length == 5) kit = CleanKit(parts[4]);
             return true;
         }
 
@@ -57,9 +80,12 @@ namespace Emberdelve.Net.Rules
         public readonly string Reason;
         public readonly string Slot;
         public readonly string ClassId;
+        /// <summary>The requested skill kit ("a1,a2;p1,p2"), sanitised; empty when none was sent. The server still validates it against the class pool.</summary>
+        public readonly string Kit;
 
-        public NetApprovalResult(bool approved, string reason, string slot, string classId)
+        public NetApprovalResult(bool approved, string reason, string slot, string classId, string kit = "")
         {
+            Kit = kit ?? "";
             Approved = approved;
             Reason = reason;
             Slot = slot ?? "";
@@ -96,7 +122,7 @@ namespace Emberdelve.Net.Rules
         {
             if (payload == null || payload.Length == 0 || payload.Length > NetConnectPayload.MaxBytes)
                 return new NetApprovalResult(false, ReasonBadPayload, "", "");
-            if (!NetConnectPayload.TryDecode(payload, out int protocol, out string slot, out string classId))
+            if (!NetConnectPayload.TryDecode(payload, out int protocol, out string slot, out string classId, out string kit))
                 return new NetApprovalResult(false, ReasonBadPayload, "", "");
 
             // A hostile payload must not reach the logs or the tables as anything but a short printable token.
@@ -113,7 +139,7 @@ namespace Emberdelve.Net.Rules
             if (connectedCount >= maxPlayers)
                 return new NetApprovalResult(false, ReasonServerFull, slot, classId);
 
-            return new NetApprovalResult(true, "", slot, classId);
+            return new NetApprovalResult(true, "", slot, classId, kit);
         }
 
         /// <summary>Printable ASCII, at most MaxField chars; the slot may not be empty (the class may: the class rule rejects it).</summary>

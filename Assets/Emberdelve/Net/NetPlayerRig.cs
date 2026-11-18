@@ -70,6 +70,10 @@ namespace Emberdelve.Net
         public readonly NetworkVariable<int> ServerPartyId = new NetworkVariable<int>(
             0, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
+        /// <summary>The skill kit this player runs ("active,active;passive,passive" ids), set by the server after validating the player's request. Clients use it to show the same skills.</summary>
+        public readonly NetworkVariable<FixedString128Bytes> ServerKit = new NetworkVariable<FixedString128Bytes>(
+            default(FixedString128Bytes), NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+
         /// <summary>The class the server admitted this player as (the id string only; the numbers stay the server's).</summary>
         public readonly NetworkVariable<FixedString32Bytes> ServerClassId = new NetworkVariable<FixedString32Bytes>(
             default(FixedString32Bytes), NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
@@ -295,6 +299,7 @@ namespace Emberdelve.Net
                 ServerPlayerId.Value = _rig.PlayerId;
                 ServerPartyId.Value = _rig.PartyId;
                 ServerClassId.Value = new FixedString32Bytes(ClassIdForWire(_rig));
+                ServerKit.Value = new FixedString128Bytes(Emberdelve.Skills.SkillLoadoutStore.KitString(_rig.Class));
                 AvatarCombat.Value = new AvatarCombatWire { InFloorTransit = _rig.IsInFloorTransit,
                     Aim = Quaternion.LookRotation(_rig.AimDirection, Vector3.up),
                     EyeOffset = _rig.AimOrigin - _rig.transform.position };
@@ -1032,7 +1037,11 @@ namespace Emberdelve.Net
             ApplyReplicatedIdentity();
             var director = FindFirstObjectByType<Emberdelve.Flow.RunDirector>(FindObjectsInactive.Include);
             if (director != null && director.TryResolveClass(ClassIdText, out var data))
+            {
+                // The server's kit for this player (their chosen skills), so icons, passives and the sidebar match what the server runs.
+                data = Emberdelve.Skills.SkillLoadoutStore.ApplyKit(data, ServerKit.Value.ToString());
                 _rig.InitializeReplicatedClass(data, director.Config);
+            }
 
             if (_rig.Movement != null) _rig.Movement.ExternalDriven = true;
             _rig.SetInputEnabled(false);

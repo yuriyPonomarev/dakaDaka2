@@ -46,6 +46,8 @@ namespace Emberdelve.Net
         {
             public string Slot;
             public string ClassId;
+            /// <summary>The skill kit the client asked for ("a1,a2;p1,p2"); validated against the class pool at spawn.</summary>
+            public string Kit;
             public float ApprovedAt;
             public bool Connected;
             public bool ModulePlanReady;
@@ -2118,7 +2120,7 @@ namespace Emberdelve.Net
             response.Reason = r.Approved ? "" : r.Reason;
 
             if (r.Approved)
-                _approved[clientId] = new Approved { Slot = r.Slot, ClassId = r.ClassId, ApprovedAt = Time.unscaledTime };
+                _approved[clientId] = new Approved { Slot = r.Slot, ClassId = r.ClassId, Kit = r.Kit, ApprovedAt = Time.unscaledTime };
 
             _log("approval id=" + clientId + " approved=" + r.Approved +
                  " slot=" + (r.Slot.Length == 0 ? "-" : r.Slot) + " class=" + (r.ClassId.Length == 0 ? "-" : r.ClassId) +
@@ -2324,7 +2326,13 @@ namespace Emberdelve.Net
             bool joined;
             try
             {
-                joined = _director.TrySpawnNetworkPlayer(_playerPrefab, info.ClassId, local, out rig, out reason);
+                if (_director.TryResolveClass(info.ClassId, out CharacterClassData approvedClass))
+                {
+                    // The client's chosen skills, checked against what that class may take; anything else falls back to the class kit.
+                    CharacterClassData withKit = Emberdelve.Skills.SkillLoadoutStore.ApplyKit(approvedClass, info.Kit);
+                    joined = _director.TrySpawnNetworkPlayer(_playerPrefab, withKit, local, out rig, out reason);
+                }
+                else joined = _director.TrySpawnNetworkPlayer(_playerPrefab, info.ClassId, local, out rig, out reason);
             }
             catch (Exception e)
             {

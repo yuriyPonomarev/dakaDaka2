@@ -77,6 +77,64 @@ namespace Emberdelve.Skills
             return copy;
         }
 
+        /// <summary>The kit as a short wire/save string: "active,active;passive,passive" (skill ids).</summary>
+        public static string KitString(SkillData[] actives, SkillData[] passives) => Join(actives) + ";" + Join(passives);
+
+        /// <summary>The kit a class currently carries, as a <see cref="KitString(SkillData[],SkillData[])"/>.</summary>
+        public static string KitString(CharacterClassData cls) => cls == null ? "" : KitString(cls.activeSkills, cls.passiveSkills);
+
+        /// <summary>The kit this player saved for a class id (what the lobby screen chose), or empty when nothing was chosen. Used by the online connection.</summary>
+        public static string SavedKitString(string classId)
+        {
+            if (string.IsNullOrEmpty(classId)) return "";
+            try
+            {
+                string actives = PlayerPrefs.GetString(KeyPrefix + classId + ".active", string.Empty);
+                string passives = PlayerPrefs.GetString(KeyPrefix + classId + ".passive", string.Empty);
+                return actives.Length == 0 && passives.Length == 0 ? "" : actives + ";" + passives;
+            }
+            catch (System.Exception) { return ""; }
+        }
+
+        /// <summary>
+        /// The class with a requested kit applied, validated against what this class may take (its own skills plus the universal pool). Ids that do not
+        /// resolve, belong to the wrong slot type or repeat fall back to the class default for that slot. A runtime copy is returned only when the result
+        /// differs from the shipped kit. Safe to call with an untrusted string: nothing in it is used except as an id lookup.
+        /// </summary>
+        public static CharacterClassData ApplyKit(CharacterClassData cls, string kit)
+        {
+            if (cls == null) return null;
+            string[] halves = (kit ?? "").Split(';');
+            SkillData[] actives = ResolveIds(cls, SkillSlot.Active, ActiveSlots, halves.Length > 0 ? halves[0] : "");
+            SkillData[] passives = ResolveIds(cls, SkillSlot.Passive, PassiveSlots, halves.Length > 1 ? halves[1] : "");
+            if (Same(actives, cls.activeSkills) && Same(passives, cls.passiveSkills)) return cls;
+            CharacterClassData copy = Object.Instantiate(cls);
+            copy.name = cls.name;
+            copy.activeSkills = actives;
+            copy.passiveSkills = passives;
+            return copy;
+        }
+
+        private static SkillData[] ResolveIds(CharacterClassData cls, SkillSlot slot, int count, string idList)
+        {
+            SkillData[] defaults = slot == SkillSlot.Active ? cls.activeSkills : cls.passiveSkills;
+            string[] ids = string.IsNullOrEmpty(idList) ? new string[0] : idList.Split(',');
+            List<SkillData> pool = Pool(cls, slot);
+            var result = new SkillData[count];
+            for (int i = 0; i < count; i++)
+            {
+                SkillData pick = null;
+                if (i < ids.Length && !string.IsNullOrEmpty(ids[i])) pick = pool.Find(s => s.skillId == ids[i]);
+                if (pick == null && defaults != null && i < defaults.Length) pick = defaults[i];
+                result[i] = pick;
+            }
+            for (int i = 0; i < count; i++)
+                for (int j = i + 1; j < count; j++)
+                    if (result[i] != null && result[i] == result[j])
+                        result[j] = defaults != null && j < defaults.Length && defaults[j] != result[i] ? defaults[j] : null;
+            return result;
+        }
+
         private static SkillData[] Resolve(CharacterClassData cls, SkillSlot slot, int count)
         {
             SkillData[] defaults = cls != null ? (slot == SkillSlot.Active ? cls.activeSkills : cls.passiveSkills) : null;
