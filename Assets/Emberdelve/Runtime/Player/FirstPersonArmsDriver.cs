@@ -67,7 +67,7 @@ namespace Emberdelve.Player
         public static readonly Vector3 PatternRest = new Vector3(0.26f, -0.20f, 0.30f);
 
         /// <summary>Cosmetic sword ready pose of the first-person hand (aim frame) and its blade direction (rig frame, blade along forward).</summary>
-        public static readonly Vector3 SwordReadyHand = new Vector3(0.22f, -0.30f, 0.48f);
+        public static readonly Vector3 SwordReadyHand = new Vector3(0.22f, -0.34f, 0.48f);
         public static readonly Quaternion SwordReadyRotation = Quaternion.Euler(-64f, -24f, 0f);
         public static readonly Quaternion ShieldGuardSwordRotation = Quaternion.Euler(-20f, -20f, 0f);
     /// <summary>Where the sword hand sits while a shield blocks: low and to the right, blade cocked up and slightly inward, clear of the shield.</summary>
@@ -89,7 +89,7 @@ namespace Emberdelve.Player
         public static readonly Quaternion GripFromRig = Quaternion.Euler(90f, 0f, 0f);
 
         /// <summary>The shield model is shown a little smaller than its world size so that it frames the view instead of filling it.</summary>
-        public const float ShieldScale = 0.885f;
+        public const float ShieldScale = GuardShieldPose.Scale / ModelScale; // same world size as the authority shape under the scaled arms
         // The kite shield's rear straps sit above its geometric centre.
         public static readonly Vector3 ShieldMountOffset = new Vector3(0f, -0.1415f, 0f);
 
@@ -293,6 +293,7 @@ namespace Emberdelve.Player
                     _bladeLength = DamageBladeLength(main);
                     WeaponScale = ModelScaleFor(_bladeLength, entry.length);
                     if (_mainHand != null) _mainHand.transform.localScale = Vector3.one * WeaponScale;
+                    if (_mainHand != null) _mainHand.transform.localPosition = new Vector3(0f, -GuardHoldShift(main.weaponId) * WeaponScale, 0f);
                     if (_mainHand != null && main.CanBlock) _guardDirectionMarker = CreateGuardDirectionMarker(_mainHand.transform);
                 }
             }
@@ -318,6 +319,22 @@ namespace Emberdelve.Player
             }
 
             return 0f;
+        }
+
+        /// <summary>
+        /// How far (prefab units, along the blade) the model is slid down through the grip so the fist sits right under the cross-guard
+        /// instead of mid-handle. Measured from each model's mesh: the guard is at ~0.17 for the short sword, rapier and two-hander,
+        /// and the handle runs from about -0.157 to the guard, so the hold point becomes about 0.06 below the guard.
+        /// </summary>
+        public static float GuardHoldShift(string weaponId)
+        {
+            switch (weaponId)
+            {
+                case "ashen_short_sword":
+                case "ember_rapier": return 0.11f;
+                case "two_handed_sword": return 0.10f;
+                default: return 0f;
+            }
         }
 
         public static float ModelScaleFor(float damageLength, float modelLength)
@@ -567,6 +584,7 @@ namespace Emberdelve.Player
             float? swingBlend = null)
         {
             if (!ResolveBones() || frame == null) return;
+            CaptureRestHands();
             float poseSwingWeight = swingBlend ?? _swingWeight;
             // With a shield up the sword stays in its natural ready pose: only a blade-only guard takes the high ward.
             float swordGuard = _rig != null && _rig.Defense.HasShield ? 0f : guardBlend;
@@ -750,6 +768,12 @@ namespace Emberdelve.Player
                 // handle throughout the swing instead of preserving the idle wrist rotation.
                 SolveArmWithWrist(_upperL, _lowerL, _handL, _leftWeaponGrip, second, gripRight.rotation, frame.rotation * LeftPole);
             }
+
+            // Spread the grip roll along each solved forearm so the wrist is not wrung (a held weapon or a utility item in the right hand).
+            if (gripRight != null && (_mainData == null || !_mainData.IsRanged))
+                ShareForearmTwist(_lowerR, _handR, _restHandInForearmR);
+            if (gripLeft != null && (_offHand != null || (_mainData != null && _mainData.twoHanded)))
+                ShareForearmTwist(_lowerL, _handL, _restHandInForearmL);
         }
 
         // Handle axis is the knuckle row (little -> index), not an arbitrary world axis
@@ -1082,6 +1106,44 @@ namespace Emberdelve.Player
 
             upper.rotation = Quaternion.FromToRotation(lower.position - a, elbow - a) * upper.rotation;
             lower.rotation = Quaternion.FromToRotation(hand.position - lower.position, wrist - lower.position) * lower.rotation;
+
+            hand.rotation = handRotation;
+        }
+
+        // ---- forearm twist ---------------------------------------------------------------------------------
+
+        private const float ForearmTwistShare = 0.6f;
+        private Quaternion _restHandInForearmR = Quaternion.identity, _restHandInForearmL = Quaternion.identity;
+        private bool _restHandsCaptured;
+
+        /// <summary>Remembers each hand's natural orientation relative to its forearm, from the animator's idle pose (before any solve).</summary>
+        private void CaptureRestHands()
+        {
+            if (_restHandsCaptured) return;
+            _restHandInForearmR = Quaternion.Inverse(_lowerR.rotation) * _handR.rotation;
+            _restHandInForearmL = Quaternion.Inverse(_lowerL.rotation) * _handL.rotation;
+            _restHandsCaptured = true;
+        }
+
+        /// <summary>
+        /// Run once per frame after an arm is solved. The solver puts the hand on its exact target rotation, but the forearm only swings, so the
+        /// whole roll of the grip is wrung out at the wrist. Twisting the forearm about its own axis (which moves neither elbow nor hand) takes a
+        /// share of that roll, and the hand keeps its target rotation.
+        /// </summary>
+        private static void ShareForearmTwist(Transform lower, Transform hand, Quaternion restInForearm)
+        {
+            Vector3 axis = Quaternion.Inverse(lower.rotation) * (hand.position - lower.position);
+            if (axis.sqrMagnitude < 1e-8f) return;
+            axis.Normalize();
+            Quaternion handRotation = hand.rotation;
+            Quaternion excess = Quaternion.Inverse(lower.rotation) * handRotation * Quaternion.Inverse(restInForearm);
+            if (excess.w < 0f) excess = new Quaternion(-excess.x, -excess.y, -excess.z, -excess.w);
+            float along = excess.x * axis.x + excess.y * axis.y + excess.z * axis.z;
+            var twist = new Quaternion(axis.x * along, axis.y * along, axis.z * along, excess.w);
+            float length = Mathf.Sqrt(twist.x * twist.x + twist.y * twist.y + twist.z * twist.z + twist.w * twist.w);
+            if (length < 1e-6f) return;
+            twist = new Quaternion(twist.x / length, twist.y / length, twist.z / length, twist.w / length);
+            lower.rotation = lower.rotation * Quaternion.Slerp(Quaternion.identity, twist, ForearmTwistShare);
             hand.rotation = handRotation;
         }
     }

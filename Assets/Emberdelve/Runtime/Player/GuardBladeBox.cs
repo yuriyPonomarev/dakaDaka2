@@ -98,8 +98,9 @@ namespace Emberdelve.Player
         public static readonly Quaternion RootGuardRotation = Quaternion.Inverse(RootRestRotation) * GuardBladeRotation;
         // The first-person sword model is held at its grip (the root) and its blade runs about 1.05 m along +forward, so the
         // shared contact box covers that blade, starting just above the cross-guard and ending at the tip.
-        public static readonly Vector3 BladeLocalCenter = new Vector3(0f, 0f, 0.55f);
-        public static readonly Vector3 BladeSize = new Vector3(0.055f, 0.03f, 1.0f);
+        // The fist sits right under the cross-guard, so the blade runs from just above the root to about 0.96 m.
+        public static readonly Vector3 BladeLocalCenter = new Vector3(0f, 0f, 0.52f);
+        public static readonly Vector3 BladeSize = new Vector3(0.055f, 0.03f, 0.88f);
 
         public static readonly Vector3 GripLocalCenter = new Vector3(0f, -0.02f, -0.07f);
         public static readonly Vector3 GripSize = new Vector3(0.035f, 0.035f, 0.15f);
