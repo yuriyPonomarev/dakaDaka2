@@ -1,0 +1,45 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d6368fa56cc2f7e449660703232b2aa3, type: 3}
+  m_Name: Skill_AdrenalineRush
+  m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.SkillData
+  skillId: skill_adrenaline_rush
+  displayName: Adrenaline Rush
+  description: Your pulse hammers. For a few seconds everything you swing hits much
+    harder.
+  iconColor: {r: 0.85, g: 0.3, b: 0.25, a: 1}
+  slot: 0
+  effect: 2
+  manaCost: 22
+  cooldownSeconds: 18
+  requiresRangedWeapon: 0
+  requiresMeleeWeapon: 0
+  consumesAmmoPerProjectile: 0
+  radius: 0.5
+  maxTargets: 1
+  dashDistance: 4.5
+  dashDuration: 0.22
+  projectileCount: 1
+  spreadDegrees: 24
+  projectileMaxTargets: 1
+  projectileSpeedMultiplier: 1
+  projectileGravityMultiplier: 1
+  damageMultiplier: 1
+  flatDamage: 0
+  targetStatus: 0
+  targetStatusDuration: 4
+  targetStatusMagnitude: 0.6
+  affectsSelf: 1
+  selfStatus: 2
+  selfStatusDuration: 9
+  selfStatusMagnitude: 1.4
+  modifiers: []

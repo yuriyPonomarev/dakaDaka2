@@ -48,7 +48,7 @@ namespace Emberdelve.Flow
 
             Canvas canvas = UiFactory.EnsureCanvas("Emberdelve_Lobby", 20);
             RunContext.SelectRoyaleMode(RunContext.SelectedRoyaleMode ?? RoyalePartyMode.Solo);
-            _view.Build(canvas, classes, HandleSelect, HandleStart, RunContext.LastResult, RunContext.HasResult, HandleMode);
+            _view.Build(canvas, classes, HandleSelect, HandleStart, RunContext.LastResult, RunContext.HasResult, HandleMode, HandleSkills);
 
             if (classes != null && classes.Length > 0) HandleSelect(classes[0]);
 
@@ -79,6 +79,14 @@ namespace Emberdelve.Flow
             RunContext.SelectClass(classData);
             _view.SetSelected(classData);
             GameEvents.RaiseToast($"{classData.displayName} selected");
+        }
+
+        private void HandleSkills()
+        {
+            if (_selected == null) { GameEvents.RaiseToast("Choose a class first"); return; }
+            SkillLoadoutScreen screen = GetComponent<SkillLoadoutScreen>();
+            if (screen == null) screen = gameObject.AddComponent<SkillLoadoutScreen>();
+            screen.Open(_selected, null);
         }
 
         private void HandleStart()
@@ -119,7 +127,7 @@ namespace Emberdelve.Flow
                 return;
             }
 
-            RunContext.SelectClass(_selected);
+            RunContext.SelectClass(Emberdelve.Skills.SkillLoadoutStore.Apply(_selected)); // the chosen skill kit rides on the class that enters the raid
             RunContext.SelectRoyaleMode(RunContext.SelectedRoyaleMode ?? RoyalePartyMode.Solo);
             RunContext.ClearNextRaidSeed();
             if (!Emberdelve.Items.OfflineProfileSession.Depart(out string reason))

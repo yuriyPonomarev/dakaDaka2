@@ -28,7 +28,7 @@ namespace Emberdelve.UI
         }
 
         public void Build(Canvas canvas, IReadOnlyList<CharacterClassData> classes,
-            System.Action<CharacterClassData> onSelected, System.Action onStart, RunResult lastResult, bool hasResult, System.Action<RoyalePartyMode> onModeSelected = null)
+            System.Action<CharacterClassData> onSelected, System.Action onStart, RunResult lastResult, bool hasResult, System.Action<RoyalePartyMode> onModeSelected = null, System.Action onSkills = null)
         {
             RectTransform root = UiFactory.CreateGroup(canvas.transform, "LobbyRoot");
             root.sizeDelta = new Vector2(1440,800);
@@ -135,6 +135,14 @@ namespace Emberdelve.UI
                 new Vector2(300f, 62f), new Color(0.32f, 0.12f, 0.075f, 1f), new Color(1f, 0.95f, 0.85f, 1f), 24);
             UiFactory.SetRect(((Image)descend.targetGraphic).rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
                 new Vector2(300f, 62f), new Vector2(180f, 82f));
+
+            if (onSkills != null)
+            {
+                Button skills = UiFactory.CreateButton(root, "SkillsButton", "PERKS & SKILLS", () => onSkills(),
+                    new Vector2(300f, 62f), new Color(0.15f, 0.13f, 0.1f, 1f), new Color(1f, 0.95f, 0.85f, 1f), 24);
+                UiFactory.SetRect(((Image)skills.targetGraphic).rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                    new Vector2(300f, 62f), new Vector2(-150f, 82f));
+            }
 
             Text controls = UiFactory.CreateText(root, "Controls",
                 "WASD move  |  Mouse look  |  Shift sprint  |  Ctrl crouch  |  Space jump\n" +
