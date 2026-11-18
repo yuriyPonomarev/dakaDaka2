@@ -157,7 +157,18 @@ namespace Emberdelve.Net
             if (_session.StateRequestSequence == 0) _stateStartedAt = 0.0;
             if (_session.NeedsRefresh) _refreshAt = Time.realtimeSinceStartupAsDouble + 0.35;
             Render();
+            if (_pendingEquipUid != System.Guid.Empty && _session.TransferSequence == 0)
+            {
+                // The item was dragged from this window onto a worn slot: now that it is in the bag, wear it.
+                System.Guid uid = _pendingEquipUid;
+                EquipmentSlot slot = _pendingEquipSlot;
+                _pendingEquipUid = System.Guid.Empty;
+                if (accepted) _inventoryScreen?.TryEquipBagInstance(uid, slot);
+            }
         }
+
+        private System.Guid _pendingEquipUid;
+        private EquipmentSlot _pendingEquipSlot;
 
         public void Close(bool relockCursor = true)
         {
@@ -260,8 +271,9 @@ namespace Emberdelve.Net
             OnResult(corpseId, sequence, accepted, corpseRevision, reason);
         }
 
-        private void Take(int rowIndex, bool all, Vector2Int? destinationCell = null)
+        private void Take(int rowIndex, bool all, Vector2Int? destinationCell = null, EquipmentSlot? equipAfter = null)
         {
+            _pendingEquipUid = System.Guid.Empty;
             if (!IsOpen || _bag == null || _presenter == null || _session.Document == null || _session.IsTransferPending) return;
             int entryIndex = rowIndex;
             if (entryIndex < 0 || entryIndex >= _session.Document.entries.Length) return;
@@ -277,7 +289,10 @@ namespace Emberdelve.Net
             }
 
             _lastFailure = null;
+            if (equipAfter.HasValue && !string.IsNullOrEmpty(entry.item.uid) && System.Guid.TryParseExact(entry.item.uid, "N", out System.Guid gearUid))
+            { _pendingEquipUid = gearUid; _pendingEquipSlot = equipAfter.Value; }
             bool sent = _presenter.RequestTransfer(request, _session.AttachTransferSequence, out _);
+            if (!sent) _pendingEquipUid = System.Guid.Empty;
             if (!sent)
             {
                 _session.CancelTransfer("Could not send item transfer");
@@ -363,7 +378,12 @@ namespace Emberdelve.Net
                 bool releasedDrag = Mouse.current.leftButton.wasReleasedThisFrame && (pointer - _carryStart).sqrMagnitude > 36f;
                 if (releasedDrag || Mouse.current.leftButton.wasPressedThisFrame)
                 {
-                    if (_inventoryScreen != null && _inventoryScreen.TryCellAt(pointer, out Vector2Int cell))
+                    if (_inventoryScreen != null && _inventoryScreen.TryEquipSlotAt(pointer, out EquipmentSlot wornSlot))
+                    {
+                        Take(index, true, null, wornSlot);   // taken into the bag, then worn
+                        ClearCarry();
+                    }
+                    else if (_inventoryScreen != null && _inventoryScreen.TryCellAt(pointer, out Vector2Int cell))
                     {
                         Take(index, true, cell);
                         ClearCarry();

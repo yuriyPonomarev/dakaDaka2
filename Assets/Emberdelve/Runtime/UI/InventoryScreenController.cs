@@ -689,6 +689,33 @@ namespace Emberdelve.UI
             // cancel a selection and it does not move anything.
         }
 
+        /// <summary>
+        /// Wears the gear instance with this uid, which must already be in the bag, in <paramref name="slot"/> (swapping what is worn there).
+        /// Used when an item is dragged from the loot window onto a worn slot: it is taken into the bag first, then equipped.
+        /// A refusal is toasted and the item simply stays in the bag.
+        /// </summary>
+        public bool TryEquipBagInstance(Guid uid, EquipmentSlot slot)
+        {
+            if (_inventory == null || _equipment == null || uid == Guid.Empty || !_model.CommandsAllowed) return false;
+            for (int i = 0; i < _inventory.Slots.Count; i++)
+            {
+                InventorySlot source = _inventory.Slots[i];
+                if (source.Instance == null || source.Instance.Uid != uid) continue;
+                if (source.Item == null || !EquipmentSlots.Accepts(source.Item.equipSlot, slot))
+                {
+                    GameEvents.RaiseToast(ToastOwner, $"{source.Item?.displayName ?? "Item"} does not fit the {slot} slot; it is in your bag");
+                    return false;
+                }
+                ItemInstance worn = _equipment.EquippedInstance(slot);
+                bool ok = SubmitInventoryCommand(InventoryCommandKind.Equip, source, default, Vector2Int.zero, slot,
+                    Guid.Empty, worn != null ? worn.Uid : Guid.Empty, out string reason);
+                if (!ok) GameEvents.RaiseToast(ToastOwner, reason + " (it is in your bag)");
+                Rebuild();
+                return ok;
+            }
+            return false;
+        }
+
         private void ClickEquipSlot(EquipmentSlot slot)
         {
             if (_equipment == null)
@@ -1385,7 +1412,7 @@ namespace Emberdelve.UI
             return false;
         }
 
-        private bool TryEquipSlotAt(Vector2 screen, out EquipmentSlot slot)
+        public bool TryEquipSlotAt(Vector2 screen, out EquipmentSlot slot)
         {
             slot = EquipmentSlot.None;
 
