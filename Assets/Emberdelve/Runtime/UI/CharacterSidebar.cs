@@ -53,9 +53,7 @@ namespace Emberdelve.UI
             for(int i=0;i<4;i++)
             {
                 float x=i%2==0 ? -84 : 84, y=i<2 ? -31 : -120;
-                var card=UiFactory.CreateImage(transform,"SelectedSkill"+i,new Color(.11f,.105f,.085f),new Vector2(160,60),new Vector2(x,y),Vector2.one*.5f,Vector2.one*.5f);
-                card.raycastTarget=false; LootPanelStyle.Frame(card,new Color(.27f,.25f,.19f));
-                _icons[i]=UiFactory.CreateImage(transform,"SkillIcon"+i,Color.white,new Vector2(48,48),new Vector2(x-53,y),Vector2.one*.5f,Vector2.one*.5f);
+                _icons[i]=UiFactory.CreateImage(transform,"SkillIcon"+i,Color.white,new Vector2(56,56),new Vector2(x-50,y),Vector2.one*.5f,Vector2.one*.5f);
                 _icons[i].raycastTarget=false;
                 _skills[i]=Label("Skill"+i,"",11,new Vector2(x+26,y),new Vector2(99,56));
             }

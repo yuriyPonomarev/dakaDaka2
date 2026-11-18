@@ -654,7 +654,7 @@ namespace Emberdelve.UI
                 Image background = UiFactory.CreateImage(bar, "SkillSlot" + i, new Color(0.075f, 0.07f, 0.06f, 0.92f),
                     new Vector2(frame, frame), new Vector2(x, frame * 0.5f),
                     new Vector2(0.5f, 0f), new Vector2(0.5f, 0f));
-                DungeonUiStyle.Surface(background);
+                background.color = new Color(0f, 0f, 0f, 0f); // icons only: the icon art carries its own frame, so no socket is drawn behind it
                 SkillSlotWidget widget = new SkillSlotWidget { Background = background };
 
                 widget.Icon = UiFactory.CreateImage(background.transform, "Icon", Color.white,
@@ -678,7 +678,7 @@ namespace Emberdelve.UI
                 UiFactory.SetRect(widget.CooldownLabel.rectTransform, new Vector2(0f, 0f), new Vector2(1f, 1f), Vector2.zero, Vector2.zero);
 
                 // Key badge in the top-left corner and the mana cost along the bottom edge, both outside the wedge's centre.
-                Image keyBack = UiFactory.CreateImage(background.transform, "KeyBadge", new Color(0.05f, 0.045f, 0.04f, 0.9f),
+                Image keyBack = UiFactory.CreateImage(background.transform, "KeyBadge", new Color(0.05f, 0.045f, 0.04f, 0.55f),
                     new Vector2(24f, 22f), new Vector2(4f, -4f), new Vector2(0f, 1f), new Vector2(0f, 1f));
                 keyBack.rectTransform.pivot = new Vector2(0f, 1f);
                 keyBack.raycastTarget = false;
@@ -1178,6 +1178,8 @@ namespace Emberdelve.UI
         private void OnKitChanged(SkillCaster caster)
         {
             if (_kitLabel == null || caster == null) return;
+            _kitLabel.gameObject.SetActive(false); // the passives are shown with their icons in the inventory window, not as a HUD list
+            return;
 
             System.Text.StringBuilder builder = new System.Text.StringBuilder();
             builder.Append("PASSIVES\n");
