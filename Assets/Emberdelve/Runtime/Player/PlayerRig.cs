@@ -473,6 +473,7 @@ namespace Emberdelve.Player
         private void Awake()
         {
             WireRig();
+            if (GetComponent<GuardZoneVisual>() == null) gameObject.AddComponent<GuardZoneVisual>();
             if (GetComponent<Emberdelve.Feedback.WorldFootsteps>() == null) gameObject.AddComponent<Emberdelve.Feedback.WorldFootsteps>();
         }
 

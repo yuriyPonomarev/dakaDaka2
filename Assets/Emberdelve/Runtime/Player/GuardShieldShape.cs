@@ -54,6 +54,8 @@ namespace Emberdelve.Player
             new Vector2(-.059575f,.388672f), new Vector2(-.084207f,.375487f),
             new Vector2(-.116988f,.350510f), new Vector2(-.153720f,.314424f)
         };
+        /// <summary>The trim outline in shield space (read-only), so a presentation can draw the same silhouette the sweep uses.</summary>
+        public static System.Collections.Generic.IReadOnlyList<Vector2> OutlinePoints => Outline;
         public const float Back = -.023780f;
         public const float Front = .053537f;
 
