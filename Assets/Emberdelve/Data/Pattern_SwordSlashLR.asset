@@ -14,9 +14,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.SwingPatternData
   patternId: sword_slash_lr
   kind: 0
-  windupTime: 0.24
+  windupTime: 0.28
   activeTime: 0.3
-  recoveryTime: 0.3
+  recoveryTime: 0.34
   wallRecoilTime: 0.35
   damageMultiplier: 1
   impactPowerScale: 1

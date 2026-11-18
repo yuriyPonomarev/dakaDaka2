@@ -5,9 +5,10 @@ namespace Emberdelve.Player
     /// <summary>One raised shield pose for authority, owner view and remote presentation.</summary>
     public static class GuardShieldPose
     {
-        public static readonly Vector3 Grip = new Vector3(-.04f, -.05f, .36f);
+        // Raised like the Dark and Darker shield guard: centred, its top edge a little above the crosshair, rolled slightly clockwise.
+        public static readonly Vector3 Grip = new Vector3(-.03f, -.28f, .40f);
         public static readonly Vector3 Mount = new Vector3(0f, -.2f, 0f);
-        public static readonly Quaternion LocalRotation = Quaternion.Euler(-6f, 4f, 0f);
+        public static readonly Quaternion LocalRotation = Quaternion.Euler(-6f, 4f, -8f);
         public const float Scale = 1.3f; // Larger than the original first-person size so the shield reads as a real shield; the block volume uses the same number.
 
         public static GuardShieldShape Resolve(Vector3 eye, Quaternion aim)

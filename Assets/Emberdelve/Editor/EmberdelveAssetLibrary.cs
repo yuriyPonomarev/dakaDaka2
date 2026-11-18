@@ -1919,6 +1919,12 @@ namespace Emberdelve.EditorTools
                 new SwingKey(0.5f, new Vector3(0.15f, 0.15f, 0.80f), 2f, -25f),
                 new SwingKey(1f, new Vector3(0.15f, -0.25f, 0.90f), 2f, 35f));
             SetPatternTiming(SwordOverhead, 0.34f, 0.32f, 0.38f);
+            SwordRiposteCut = AuthorPattern("Pattern_SwordRiposteCut", "sword_riposte_cut", SwingKind.Overhead, Sword,
+                0.79f, 0.94f, 0.15f, 0.018f, 3, 1f,
+                new SwingKey(0f, new Vector3(0.45f, 0.50f, 0.40f), 35f, -60f),
+                new SwingKey(0.5f, new Vector3(0.10f, 0.10f, 0.90f), -10f, 5f),
+                new SwingKey(1f, new Vector3(-0.35f, -0.30f, 0.75f), -45f, 40f));
+            SetPatternTiming(SwordRiposteCut, 0.36f, 0.30f, 0.36f);
             SetPatternTiming(SwordSlashLeftToRight, 0.24f, 0.30f, 0.30f);
             SetPatternTiming(SwordSlashRightToLeft, 0.24f, 0.30f, 0.30f);
 
@@ -1929,7 +1935,7 @@ namespace Emberdelve.EditorTools
                 new SwingKey(0f, new Vector3(0.20f, -0.22f, 0.30f), -6f, -5f),
                 new SwingKey(1f, new Vector3(0.20f, -0.22f, 1.08f), -6f, -5f));
 
-            AssignPatterns(Sword, SwordSlashLeftToRight, SwordSlashRightToLeft, SwordOverhead);
+            AssignPatterns(Sword, SwordSlashRightToLeft, SwordSlashLeftToRight, SwordOverhead, SwordRiposteCut); // Dark and Darker order: the chain opens right-to-left; 3 = riposte cut
             AssignPatterns(Rapier, RapierThrust);
 
             // U5A: the fist punch, a short straight thrust (our own tunables), and the hand rule of the ranged weapons: they fill both hands.
@@ -2117,11 +2123,12 @@ namespace Emberdelve.EditorTools
                 // U3C: a sword guard holds against sword hits (Dark and Darker): resist above the strongest sword pattern (overhead 10 x 1.2 = 12),
                 // below the heavy weapons (maul 30). Plain assignment, so existing assets are updated on every build.
                 Sword.impactResist = 15f;
-                // U3C3: a sword block opens a riposte window; two horizontal slashes (patterns 0 and 1) at x1.5, impact power unchanged.
+                // U3C3: a sword block opens a riposte window; the Dark and Darker riposte: a high diagonal cut from over the right
+                // shoulder (pattern 3), then the left-to-right back slash (pattern 1), at x1.5, impact power unchanged.
                 Sword.canRiposte = true;
                 Sword.riposteWindow = 1.0f;
                 Sword.riposteDamageMultiplier = 1.5f;
-                Sword.riposteSwingPatterns = new[] { 0, 1 };
+                Sword.riposteSwingPatterns = new[] { 3, 1 };
                 Sword.riposteStrikeGap = 0.10f;
                 // FIX2: the warrior carries a shield in the off hand; the parry is the sword's, so the shield must not refuse it.
                 Sword.riposteWithOffhandShield = false;
@@ -2271,6 +2278,9 @@ namespace Emberdelve.EditorTools
         public static ItemData ArmingSwordItem;
         public static ItemData TwoHandedSwordItem;
         public static SwingPatternData ArmingThrust;
+        /// <summary>Riposte cut (Dark and Darker): wound up high over the right shoulder, cut diagonally down to the left.</summary>
+        public static SwingPatternData SwordRiposteCut;
+        public static SwingPatternData GreatRiposteCut;
         public static SwingPatternData GreatSlashLeftToRight;
         public static SwingPatternData GreatSlashRightToLeft;
         public static SwingPatternData GreatOverhead;
@@ -2373,7 +2383,7 @@ namespace Emberdelve.EditorTools
                     new SwingKey(0f, new Vector3(0.20f, -0.22f, 0.30f), -6f, -5f),
                     new SwingKey(1f, new Vector3(0.20f, -0.22f, 1.10f), -6f, -5f));
                 SetPatternTiming(ArmingThrust, 0.22f, 0.14f, 0.30f);
-                AssignPatterns(ArmingSword, SwordSlashLeftToRight, SwordSlashRightToLeft, SwordOverhead, ArmingThrust);
+                AssignPatterns(ArmingSword, SwordSlashRightToLeft, SwordSlashLeftToRight, SwordOverhead, ArmingThrust, SwordRiposteCut); // chain opens right-to-left; 4 = riposte cut
 
                 // slash / slash / thrust / overhead finisher
                 ArmingSword.comboSteps = new[]
@@ -2394,7 +2404,7 @@ namespace Emberdelve.EditorTools
                 ArmingSword.canRiposte = true;
                 ArmingSword.riposteWindow = 1.0f;
                 ArmingSword.riposteDamageMultiplier = 1.5f;
-                ArmingSword.riposteSwingPatterns = new[] { 3, 1 };   // thrust, then the right-to-left slash
+                ArmingSword.riposteSwingPatterns = new[] { 4, 1 };   // the high diagonal riposte cut, then the left-to-right back slash
                 ArmingSword.riposteStrikeGap = 0.10f;
                 ArmingSword.riposteWithOffhandShield = false;
                 SetDefense(ArmingSword, DefenseRole.Weapon, DefenseCapability.Block, -1f, -1f, false);
@@ -2428,7 +2438,13 @@ namespace Emberdelve.EditorTools
                 SetPatternTiming(GreatSlashRightToLeft, 0.42f, 0.34f, 0.50f);
                 SetPatternTiming(GreatOverhead, 0.55f, 0.36f, 0.60f);
                 SetPatternTiming(GreatThrust, 0.34f, 0.20f, 0.45f);
-                AssignPatterns(TwoHandedSword, GreatSlashLeftToRight, GreatSlashRightToLeft, GreatOverhead, GreatThrust);
+                GreatRiposteCut = AuthorPattern("Pattern_GreatRiposteCut", "great_riposte_cut", SwingKind.Overhead, TwoHandedSword,
+                    0.79f, 0.94f, 0.15f, 0.018f, 3, 1f,
+                    new SwingKey(0f, new Vector3(0.45f, 0.55f, 0.40f), 35f, -60f),
+                    new SwingKey(0.5f, new Vector3(0.10f, 0.10f, 1.00f), -10f, 5f),
+                    new SwingKey(1f, new Vector3(-0.40f, -0.32f, 0.85f), -45f, 40f));
+                SetPatternTiming(GreatRiposteCut, 0.48f, 0.34f, 0.55f);
+                AssignPatterns(TwoHandedSword, GreatSlashLeftToRight, GreatSlashRightToLeft, GreatOverhead, GreatThrust, GreatRiposteCut);
 
                 // slash / slash / overhead finisher; the follow-up slash winds up a little quicker
                 TwoHandedSword.comboSteps = new[]
@@ -2448,7 +2464,7 @@ namespace Emberdelve.EditorTools
                 TwoHandedSword.canRiposte = true;
                 TwoHandedSword.riposteWindow = 1.0f;
                 TwoHandedSword.riposteDamageMultiplier = 1.5f;
-                TwoHandedSword.riposteSwingPatterns = new[] { 3, 0 };   // thrust, then the left-to-right slash
+                TwoHandedSword.riposteSwingPatterns = new[] { 4, 0 };   // the high diagonal riposte cut, then the left-to-right slash
                 TwoHandedSword.riposteStrikeGap = 0.12f;
                 TwoHandedSword.riposteWithOffhandShield = false;
                 SetDefense(TwoHandedSword, DefenseRole.Weapon, DefenseCapability.Block, -1f, -1f, true);

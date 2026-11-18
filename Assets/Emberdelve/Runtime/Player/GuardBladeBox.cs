@@ -89,11 +89,11 @@ namespace Emberdelve.Player
     {
         public static readonly Vector3 RootRestPosition = new Vector3(0.26f, -0.20f, 0.30f);
         public static readonly Quaternion RootRestRotation = Quaternion.Euler(-8f, 12f, 14f);
-        // Guard stance (a high "ox" ward): the hilt is held beside the head, the blade points forward and down so the tip
-        // is about waist height straight ahead. The first-person hand is placed exactly here, so the visible sword
-        // and the authority's block volume are the same thing.
-        public static readonly Vector3 GuardHandPosition = new Vector3(0.24f, -0.02f, 0.42f);
-        public static readonly Quaternion GuardBladeRotation = Quaternion.Euler(30f, -14f, 0f);
+        // Guard stance (the Dark and Darker hanging parry): the hilt is held high on the LEFT, the blade slants forward, right and
+        // down across the view so the tip ends just right of and below the crosshair. The first-person hand is placed exactly here,
+        // so the visible sword and the authority's block volume are the same thing.
+        public static readonly Vector3 GuardHandPosition = new Vector3(-0.30f, 0.24f, 0.42f);
+        public static readonly Quaternion GuardBladeRotation = Quaternion.Euler(22f, 62f, 0f);
         public static readonly Vector3 RootGuardOffset = GuardHandPosition - RootRestPosition;
         public static readonly Quaternion RootGuardRotation = Quaternion.Inverse(RootRestRotation) * GuardBladeRotation;
         // The first-person sword model is held at its grip (the root) and its blade runs about 1.05 m along +forward, so the

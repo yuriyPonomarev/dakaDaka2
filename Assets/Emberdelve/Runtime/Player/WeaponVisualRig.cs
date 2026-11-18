@@ -43,12 +43,19 @@ namespace Emberdelve.Player
         private bool _swingSoundPlayed;
         private bool _recoiling;
         private float _recoilStart;
-        // Combo chain: between steps the weapon stays where the strike ended (until the combo window lapses), then eases to rest.
+        // Combo chain: while the attack button is held the weapon stays where a strike ended until the next step starts from there;
+        // with the button released it goes straight back to rest (no waiting for the combo window).
         private bool _chainHold, _holding, _releasing;
-        private float _holdSeconds, _holdUntil, _releaseStart;
+        private float _holdUntil, _releaseStart, _holdBlend;
         private Vector3 _holdBase;
         private Quaternion _holdRotation;
-        private const float ReleaseSeconds = 0.30f;
+        public const float ReleaseSeconds = 0.16f;
+        /// <summary>A held button never keeps the end pose longer than this past the strike (a refused or blocked next step).</summary>
+        public const float MaxChainHoldSeconds = 2f;
+        private const float HoldBlendRate = 10f;
+
+        /// <summary>The local attack button is held (set every frame by the first-person arms): the chain keeps the end pose.</summary>
+        public bool ChainInputHeld { get; set; }
         private Vector3 _transitionBase;
         private Quaternion _transitionRotation;
         private Vector3 _restLocalPosition;
@@ -68,6 +75,8 @@ namespace Emberdelve.Player
         public bool IsRanged => _isRanged;
         public float DrawProgress { get; private set; }
         public bool IsSwinging => _swinging || _recoiling;
+        /// <summary>True between combo steps while the weapon stays where the last strike ended: the arms must keep the swing pose, not drop to idle.</summary>
+        public bool IsChainHolding => _holding && !_guardHeld;
 
         /// <summary>True while the current swing is in its damaging (active) phase.</summary>
         public bool InActivePhase { get; private set; }
@@ -200,7 +209,9 @@ namespace Emberdelve.Player
                 }
                 return;
             }
-            if (_swinging || _recoiling || _guardBlade == null) return;
+            // Between combo steps (held end pose, or easing back) the rest/guard pose must not be written: the per-frame guard
+            // update runs before the next swing captures its start pose, and would make it start from rest (a one-frame idle flash).
+            if (_swinging || _recoiling || _holding || _releasing || _guardBlade == null) return;
             if (_guardHeld && _aimFrame != null)
             {
                 Quaternion aimRotation = Quaternion.LookRotation(_aimFrame.forward, Vector3.up);
@@ -249,8 +260,8 @@ namespace Emberdelve.Player
             _recoiling = false;
             _holding = false;
             _releasing = false;
-            _holdSeconds = Mathf.Max(0.05f, weapon.comboWindow);
             _chainHold = ContinuesChain(weapon, pattern);
+            _holdBlend = ChainInputHeld ? 1f : 0f;
 
             if (_edge != null)
             {
@@ -288,11 +299,12 @@ namespace Emberdelve.Player
             bool active = swingTime >= _timing.Windup && swingTime <= _timing.ActiveEnd;
             SamplePresentation(_pattern, _timing, swingTime, _transitionBase, _transitionRotation, _guardHeld,
                 out Vector3 position, out Quaternion rotation);
-            if (_chainHold && swingTime > _timing.ActiveEnd)
+            if (_chainHold && swingTime > _timing.ActiveEnd && _holdBlend > 0f)
             {
+                // Button held: stay at the strike's end pose; released: the ordinary recovery back to rest (blended, no pop).
                 SwingPose end = _pattern.Evaluate(_timing.ActiveEnd, _timing);
-                position = end.Base;
-                rotation = end.LocalRotation;
+                position = Vector3.Lerp(position, end.Base, _holdBlend);
+                rotation = Quaternion.Slerp(rotation, end.LocalRotation, _holdBlend);
             }
             ApplyPresentation(position, rotation, active);
         }
@@ -318,7 +330,29 @@ namespace Emberdelve.Player
             ApplyPresentation(position, rotation, false);
         }
 
-        public void CancelNetworkSwing() => EndSwing();
+        /// <summary>
+        /// The server reports the swing over. It is NOT a snap to rest: a held chain keeps the end pose for the next step, otherwise
+        /// the weapon eases back from wherever it is (the server's end usually arrives right at the recovery's end anyway).
+        /// </summary>
+        public void CancelNetworkSwing()
+        {
+            if (_swinging && _chainHold && !_guardHeld && ChainInputHeld && BeginChainHold()) return;
+            if (_swinging || _holding) { ReleaseFromCurrentPose(); return; }
+            if (_releasing) return;
+            EndSwing();
+        }
+
+        private void ReleaseFromCurrentPose()
+        {
+            Transform frame = _aimFrame != null ? _aimFrame : transform.parent;
+            _holdBase = frame != null ? frame.InverseTransformPoint(transform.position) : transform.localPosition;
+            _holdRotation = frame != null ? Quaternion.Inverse(frame.rotation) * transform.rotation : transform.localRotation;
+            _swinging = false;
+            InActivePhase = false;
+            if (_edge != null) _edge.gameObject.SetActive(false);
+            if (_trail != null) _trail.EndStroke();
+            BeginRelease();
+        }
 
         public static void SampleRecoil(SwingPatternData pattern, float stopFraction, float progress,
             bool guarding, out Vector3 position, out Quaternion rotation)
@@ -410,9 +444,12 @@ namespace Emberdelve.Player
             if (_swinging)
             {
                 float t = Time.time - _swingStart;
+                _holdBlend = Mathf.MoveTowards(_holdBlend, ChainInputHeld && !_guardHeld ? 1f : 0f, HoldBlendRate * Time.deltaTime);
                 if (t >= _timing.Total)
                 {
-                    if (_chainHold && !_guardHeld && BeginChainHold()) return;
+                    if (_chainHold && !_guardHeld && ChainInputHeld && BeginChainHold()) return;
+                    // Released at the very end while still near the end pose: ease back instead of snapping.
+                    if (_chainHold && _holdBlend > 0.05f) { ReleaseFromCurrentPose(); return; }
                     EndSwing();
                     return;
                 }
@@ -455,7 +492,7 @@ namespace Emberdelve.Player
             }
             else if (_holding)
             {
-                if (_guardHeld || Time.time >= _holdUntil) BeginRelease();
+                if (_guardHeld || !ChainInputHeld || Time.time >= _holdUntil) BeginRelease();
                 else ApplyPresentation(_holdBase, _holdRotation, false);
             }
             else if (_releasing)
@@ -482,8 +519,7 @@ namespace Emberdelve.Player
             SwingPose end = _pattern.Evaluate(_timing.ActiveEnd, _timing);
             _holdBase = end.Base;
             _holdRotation = end.LocalRotation;
-            _holdUntil = _swingStart + _timing.ActiveEnd + _holdSeconds;
-            if (Time.time >= _holdUntil) return false;
+            _holdUntil = _swingStart + _timing.Total + MaxChainHoldSeconds;
             _swinging = false;
             _holding = true;
             InActivePhase = false;
@@ -516,7 +552,7 @@ namespace Emberdelve.Player
 
         private void OnDestroy()
         {
-            if (_trail != null) Destroy(_trail.gameObject);
+            if (_trail != null) { if (Application.isPlaying) Destroy(_trail.gameObject); else DestroyImmediate(_trail.gameObject); }
         }
 
         /// <summary>Cosmetic state from the authoritative magazine and reload clock; never changes the muzzle or ammunition.</summary>
@@ -729,7 +765,7 @@ namespace Emberdelve.Player
 
         public void Begin(Material material = null)
         {
-            if (_material != null && _ownsMaterial) Destroy(_material);
+            if (_material != null && _ownsMaterial) { if (Application.isPlaying) Destroy(_material); else DestroyImmediate(_material); }
             _material = null;
 
             if (material != null)
@@ -809,8 +845,8 @@ namespace Emberdelve.Player
 
         private void OnDestroy()
         {
-            if (_mesh != null) Destroy(_mesh);
-            if (_material != null && _ownsMaterial) Destroy(_material);
+            if (_mesh != null) { if (Application.isPlaying) Destroy(_mesh); else DestroyImmediate(_mesh); }
+            if (_material != null && _ownsMaterial) { if (Application.isPlaying) Destroy(_material); else DestroyImmediate(_material); }
         }
     }
 }

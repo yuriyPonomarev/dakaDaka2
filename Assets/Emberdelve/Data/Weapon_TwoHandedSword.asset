@@ -30,6 +30,7 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 84d834a3ebee19f49ab95d359c6685a2, type: 2}
   - {fileID: 11400000, guid: 052636fb75f97094b9a608692b4b4cec, type: 2}
   - {fileID: 11400000, guid: 7abe382814556c443a9e3d552aaf2008, type: 2}
+  - {fileID: 11400000, guid: e92d097c5fce949478ddb74047af5ffc, type: 2}
   comboSteps:
   - patternIndex: 0
     damageMultiplier: 1
@@ -61,7 +62,7 @@ MonoBehaviour:
   riposteWithOffhandShield: 0
   riposteWindow: 1
   riposteDamageMultiplier: 1.5
-  riposteSwingPatterns: 0300000000000000
+  riposteSwingPatterns: 0400000000000000
   riposteStrikeGap: 0.12
   twoHanded: 1
   isUnarmed: 0

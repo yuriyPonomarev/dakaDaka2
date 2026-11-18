@@ -96,8 +96,11 @@ namespace Emberdelve.Combat.Tests
         [Test]
         public void Patterns_AreTheAuthoredCombos_AndAllValid()
         {
-            Assert.That(_arming.swingPatterns.Length, Is.EqualTo(4), "left-right, right-left, overhead, thrust");
-            Assert.That(_great.swingPatterns.Length, Is.EqualTo(4), "wide left-right, wide right-left, overhead, thrust");
+            Assert.That(_arming.swingPatterns.Length, Is.EqualTo(5), "right-left, left-right, overhead, thrust, riposte cut");
+            Assert.That(_great.swingPatterns.Length, Is.EqualTo(5), "wide left-right, wide right-left, overhead, thrust, riposte cut");
+            Assert.That(_arming.swingPatterns[_arming.riposteSwingPatterns[0]].patternId, Is.EqualTo("sword_riposte_cut"), "the riposte opens with the high diagonal cut");
+            Assert.That(_great.swingPatterns[_great.riposteSwingPatterns[0]].patternId, Is.EqualTo("great_riposte_cut"));
+            Assert.That(_short.swingPatterns[_short.riposteSwingPatterns[0]].patternId, Is.EqualTo("sword_riposte_cut"));
             foreach (WeaponData w in new[] { _arming, _great })
             {
                 Assert.That(w.UsesSweptMelee, Is.True, w.weaponId);

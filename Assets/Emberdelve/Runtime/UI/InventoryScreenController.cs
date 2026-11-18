@@ -410,7 +410,7 @@ namespace Emberdelve.UI
             }
             SelectReturnedStack(worn.Uid);
             if (overLoot) PutSelectedIntoLoot();
-            else ClickCell(cell);
+            else ClickCell(cell, CarryOrigin(screen, cell));
             if (HasSelection) ClearSelection(); // the item is safely in the bag, wherever it landed
             Rebuild();
         }
@@ -674,7 +674,7 @@ namespace Emberdelve.UI
 
             if (TryCellAt(screen, out Vector2Int cell))
             {
-                ClickCell(cell);
+                ClickCell(cell, CarryOrigin(screen, cell));
                 return;
             }
 
@@ -781,7 +781,30 @@ namespace Emberdelve.UI
             }
         }
 
-        private void ClickCell(Vector2Int cell)
+        /// <summary>
+        /// The carried ghost is drawn centred on the pointer, so the item lands where the ghost shows it: the move origin is the
+        /// cell under the ghost's top-left cell, not the cell under the pointer (they differ for anything larger than 1x1).
+        /// </summary>
+        private Vector2Int CarryOrigin(Vector2 screen, Vector2Int pointerCell)
+        {
+            ItemData item = HasSelection ? _model.SelectedItem : null;
+            if (item == null && _equipDragSlot != EquipmentSlot.None && _equipment != null)
+            {
+                item = _equipment.Equipped(_equipDragSlot);
+            }
+            Vector2Int footprint = item != null ? item.EffectiveFootprint : Vector2Int.one;
+            if (footprint.x <= 1 && footprint.y <= 1) return pointerCell;
+            float pitch = CellSize + CellGap;
+            if (_root != null && RectTransformUtility.ScreenPointToLocalPointInRectangle(_root, screen, CanvasCamera, out Vector2 local))
+            {
+                Vector2 topLeftCentre = local + new Vector2(-(footprint.x - 1) * 0.5f * pitch, (footprint.y - 1) * 0.5f * pitch);
+                Vector2 topLeftScreen = RectTransformUtility.WorldToScreenPoint(CanvasCamera, _root.TransformPoint(topLeftCentre));
+                if (TryCellAt(topLeftScreen, out Vector2Int origin)) return origin;
+            }
+            return new Vector2Int(pointerCell.x - (footprint.x - 1) / 2, pointerCell.y - (footprint.y - 1) / 2);
+        }
+
+        private void ClickCell(Vector2Int cell, Vector2Int? moveOrigin = null)
         {
             if (_inventory == null) return;
 
@@ -827,7 +850,7 @@ namespace Emberdelve.UI
 
             // Empty-cell moves resolve the selected ID at command time, so a prior move, resize or index
             // compaction cannot redirect this click to a lookalike definition.
-            if (SubmitInventoryCommand(InventoryCommandKind.Move, source, default, cell, EquipmentSlot.None,
+            if (SubmitInventoryCommand(InventoryCommandKind.Move, source, default, moveOrigin ?? cell, EquipmentSlot.None,
                     Guid.Empty, Guid.Empty, out string moveReason))
             {
                 ClearSelection();

@@ -1115,6 +1115,9 @@ namespace Emberdelve.Player
         /// Shields and blades share the rule and neither parries. With the shipped tuning (no pool, bands only differ for a lowered
         /// guard against an overhead) the outcome is the D1b outcome.
         /// </summary>
+        /// <summary>Radius of the line an instant (non-swept, non-projectile) hit is tested with against the raised defence.</summary>
+        public const float InstantHitGuardRadius = 0.05f;
+
         public bool TryResolveGuard(in DamageInfo incoming, CombatFlowTuning tuning, out GuardResult result)
         {
             result = default;
@@ -1128,7 +1131,16 @@ namespace Emberdelve.Player
                 if (!contact) return false;
             }
 
-            bool physicalGuard = incoming.GuardShieldContact || incoming.GuardWeaponContact || (incoming.GuardBladeContact && !defense.HasShield);
+            else
+            {
+                // Every other hit (a skill's direct damage, a legacy instant hit) is blocked by the same physics: only when its line
+                // from the source to the struck point passes through the raised shield or blade. Facing alone never blocks.
+                if (!IsGuardingWithDefense(defense)
+                    || !TrySweepGuard(incoming.SourcePosition, incoming.Point, InstantHitGuardRadius, out _, out _, out _)) return false;
+            }
+
+            bool physicalGuard = incoming.GuardShieldContact || incoming.GuardWeaponContact || (incoming.GuardBladeContact && !defense.HasShield)
+                || !(incoming.RangedProjectile || incoming.MeleeGuardChecked);
 
             CombatFlowTuning flow = tuning ?? CombatFlowTuning.Default;
             bool enduranceOn = flow.GuardEnduranceEnabled;

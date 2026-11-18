@@ -1183,12 +1183,15 @@ namespace Emberdelve.EditorTools
                 .WithAttackHeight(Emberdelve.BladeDefense.BladeHeight.High).WithReduction(.5f, out _), 10f);
             Check(transformed.GuardShieldContact && !transformed.GuardBladeContact,
                 "shield provenance survives damage transforms");
-            Shooter exposed = MakeShooter(_defender.CombatCenter + _defender.transform.forward * 3f, -_defender.transform.forward);
+            // The raised shield covers the middle of the chest (Dark and Darker guard height); the right flank beside it stays exposed.
+            Vector3 flank = _defender.CombatCenter + _defender.transform.right * 0.30f;
+            Shooter exposed = MakeShooter(flank + _defender.transform.forward * 3f, -_defender.transform.forward);
             ResetHealth();
             Check(Launch(exposed, 1), "uncovered body projectile accepted");
             DamageInfo body = ResolveDamage(exposed, 1f);
             Check(body.IsValid && !body.Blocked && !body.GuardShieldContact,
-                "projectile through uncovered body bypasses raised shield");
+                "projectile through uncovered body bypasses raised shield (valid=" + body.IsValid + " blocked=" + body.Blocked
+                + " shield=" + body.GuardShieldContact + " at " + body.Location + ")");
 
             WeaponData weapon = Instantiate(_sword);
             SwingPatternData pattern = ScriptableObject.CreateInstance<SwingPatternData>();

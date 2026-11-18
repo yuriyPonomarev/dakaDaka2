@@ -446,8 +446,8 @@ namespace Emberdelve.EditorTools
             Near(1.10f, _sword.comboSteps[2].damageMultiplier, 1e-6f, "sword step 3 multiplier 1.10");
             Near(0.70f, _sword.comboWindow, 1e-6f, "sword combo window 0.70 s after the recovery begins");
             Near(0.35f, _sword.comboFinisherRecovery, 1e-6f, "sword finisher recovery +0.35 s");
-            Check(_sword.swingPatterns[0].kind == SwingKind.HorizontalLeftToRight && _sword.swingPatterns[1].kind == SwingKind.HorizontalRightToLeft
-                  && _sword.swingPatterns[2].kind == SwingKind.Overhead, "the chain's patterns are the slash, the back slash and the overhead");
+            Check(_sword.swingPatterns[0].kind == SwingKind.HorizontalRightToLeft && _sword.swingPatterns[1].kind == SwingKind.HorizontalLeftToRight
+                  && _sword.swingPatterns[2].kind == SwingKind.Overhead, "the chain's patterns are the slash R->L, the back slash L->R and the overhead (Dark and Darker order)");
             foreach (SwingPatternData p in _sword.swingPatterns)
             {
                 Near(1f, p.damageMultiplier, 1e-6f, p.patternId + ": the pattern shape is x1 (the multiplier is the chain's)");
@@ -1317,6 +1317,7 @@ namespace Emberdelve.EditorTools
             {
                 MovePhases();
                 GuardBreak();
+                BladeGuardCatchesByTurning();
                 GuardExclusion();
                 BladeDefenseOnRig();
                 EnemyClawAgainstTheRig();
@@ -1416,13 +1417,13 @@ namespace Emberdelve.EditorTools
 
         // ---- guard break -----------------------------------------------------------------------------
 
-        private DamageInfo? SwingAtRig(WeaponData weapon, bool front, int pattern = 0, bool legacyPattern = false)
+        private DamageInfo? SwingAtRig(WeaponData weapon, bool front, int pattern = 0, bool legacyPattern = false, float distance = 1.5f)
         {
             Scenario s = NewScenario(weapon);
             s.Who.Kind = EntityKind.Enemy;
             s.Who.TeamId = CombatTeams.MonsterTeam;
             Vector3 p = _rig.transform.position;
-            s.Who.Eye = p + new Vector3(0f, 1.65f, front ? 1.5f : -1.5f);
+            s.Who.Eye = p + new Vector3(0f, 1.65f, front ? distance : -distance);
             s.Who.Yaw = front ? 180f : 0f;
             _rig.Health.Heal(1000f);
             _playerHits.Clear();
@@ -1446,7 +1447,7 @@ namespace Emberdelve.EditorTools
             ZonesOff();
             // Face the raised shield into the incoming slash, as in the live shield review.
             // Holding guard alone no longer intercepts a trajectory beside the visible shield.
-            _rig.Look.ApplyAimPose(35f, 0f);
+            _rig.Look.ApplyAimPose(-35f, 0f); // the chain opens with the right-to-left slash (Dark and Darker order): meet it on the other side
             _rig.SetGuardHeld(false);
             Check(_rig.Defense.CanBlock && !_rig.CanParry, "guard: the warrior blocks and cannot parry");
             Near(20f, _rig.Defense.ImpactResist, 1e-4f, "guard: the kit's impact resist is the heater shield's 20");
@@ -1528,7 +1529,7 @@ namespace Emberdelve.EditorTools
             DamageInfo? over17 = SwingAtRig(borderline, true, pattern: 2, legacyPattern: true);
             Check(over17.HasValue && over17.Value.GuardShieldContact && over17.Value.Blocked && !over17.Value.GuardBroken,
                 $"impact 17 overhead (x1.2 = 20.4): still held (contact={over17?.GuardShieldContact}, location={over17?.Location}, impact={over17?.ImpactPower})");
-            _rig.Look.ApplyAimPose(35f, 0f);
+            _rig.Look.ApplyAimPose(-35f, 0f);
             Cooldown(3f);
             _clock += 2f;
 
@@ -1556,7 +1557,9 @@ namespace Emberdelve.EditorTools
             Cooldown(3f);
 
             // 7. skills carry no impact power and never break a guard; the guard answers per hit
-            DamageInfo skillLike = new DamageInfo(20f, _rig.CombatCenter, Vector3.back, _rig.transform.position + Vector3.forward * 2f, 999, EntityKind.Enemy, DamageType.Holy, false, false, 0f, HitLocation.Unspecified, 0f);
+            // Blocks are physical: the skill's line comes in where the defender has turned its raised shield.
+            Vector3 facing = _rig.AimDirection; facing.y = 0f; facing = facing.sqrMagnitude > 1e-4f ? facing.normalized : _rig.transform.forward;
+            DamageInfo skillLike = new DamageInfo(20f, _rig.CombatCenter, -facing, _rig.CombatCenter + facing * 2f, 999, EntityKind.Enemy, DamageType.Holy, false, false, 0f, HitLocation.Unspecified, 0f);
             Check(_rig.TryResolveGuard(skillLike, CombatFlowTuning.Default, out GuardResult gr) && !gr.Broken && Mathf.Abs(gr.Reduction - BladeGuardRules.HeldGuardReduction) < 1e-4f,
                 "a hit with no impact power (a skill's flat damage) is blocked normally and never breaks the guard");
             DamageInfo heavyLike = skillLike.WithImpactPower(99f);
@@ -1576,6 +1579,47 @@ namespace Emberdelve.EditorTools
             string[] damageFields = Array.ConvertAll(typeof(DamageInfo).GetFields(BindingFlags.Instance | BindingFlags.Public), x => x.Name.ToLowerInvariant());
             Check(Array.TrueForAll(damageFields, x => !x.Contains("parry")), "DamageInfo has no parry state: guard break did not introduce one");
 
+            _rig.Look.ApplyAimPose(0f, 0f);
+            _clock += 2f;
+        }
+
+        // ---- blocks are physical: the defender catches the strike on the blade by turning to meet it ------------------------
+        // The chain opens with the right-to-left slash, which reaches a bare-sword defender's left side first. Facing the attacker
+        // squarely is not what blocks it: turning the body/view into the incoming edge puts the blade in its path.
+        private void BladeGuardCatchesByTurning()
+        {
+            ZonesOff();
+            int bladeOpenerCaught = 0;
+            foreach (bool shield in new[] { false, true })
+            {
+                _rig.SetOffhandWeapon(shield ? _rig.Class.offhandShield : null);
+                if (!shield) Check(!_rig.Defense.HasShield && _rig.Defense.CanBlock, "blade guard: the bare sword kit blocks with its blade");
+                for (int pattern = 0; pattern < 2; pattern++)
+                foreach (float distance in new[] { 1.1f, 1.5f })
+                {
+                    var caught = new List<string>();
+                    foreach (float pitch in new[] { 0f, 20f })
+                    {
+                        for (float yaw = -80f; yaw <= 80f; yaw += 5f)
+                        {
+                            _rig.Look.ApplyAimPose(yaw, pitch);
+                            _rig.SetGuardHeld(true);
+                            DamageInfo? hit = SwingAtRig(_sword, true, pattern, legacyPattern: pattern != 0, distance: distance);
+                            bool contact = shield ? hit.HasValue && hit.Value.GuardShieldContact : hit.HasValue && hit.Value.GuardBladeContact;
+                            if (hit.HasValue && hit.Value.Blocked && contact)
+                            {
+                                caught.Add(yaw.ToString("0") + "/" + pitch.ToString("0"));
+                                if (!shield && pattern == 0) bladeOpenerCaught++;
+                            }
+                            _rig.SetGuardHeld(false);
+                            Cooldown(3f);
+                        }
+                    }
+                    Debug.Log(Tag + " " + (shield ? "shield" : "blade") + " guard catches " + _sword.swingPatterns[pattern].kind + " at " + distance.ToString("0.0") + " m, yaw/pitch: " + string.Join(", ", caught));
+                }
+            }
+            Check(bladeOpenerCaught > 0, "blade guard: turning into the right-to-left opener catches it on the blade");
+            _rig.SetOffhandWeapon(_rig.Class.offhandShield);
             _rig.Look.ApplyAimPose(0f, 0f);
             _clock += 2f;
         }
@@ -1684,22 +1728,20 @@ namespace Emberdelve.EditorTools
             Near(BladeGuardRules.HeldGuardReduction, held.Reduction, 1e-4f, "U3C rig: ... taking the whole hit");
             Check(_rig.LastGuardOutcome == GuardOutcome.Blocked, "U3C rig: outcome Blocked (" + _rig.LastGuardOutcome + ")");
 
-            // back: the guard is ignored, in every band
+            // back: the raised defence is in front, a line from behind never meets it (blocks are physical, in every band)
             foreach (BladeHeight attack in new[] { BladeHeight.Low, BladeHeight.Mid, BladeHeight.High })
-            {
                 Check(!_rig.TryResolveGuard(U3cHit(behind, _rig.transform.forward, impact, attack), free, out _), "U3C rig: a hit from behind is not blocked (" + attack + ")");
-                Check(_rig.LastGuardOutcome == GuardOutcome.OutsideArc, "U3C rig: ... outcome OutsideArc (" + _rig.LastGuardOutcome + ")");
-            }
 
-            // wrong height: with zero tolerance any other band goes through, the same band is held
+            // physical, not facing: a frontal hit whose line passes beside the raised defence is not blocked, and a hit that meets it
+            // is held whatever height label it carries (the contact decides, not the band)
+            Vector3 beside = _rig.CombatCenter + _rig.transform.right * 1.2f + _rig.transform.forward * 0.2f;
+            Check(!_rig.TryResolveGuard(U3cHit(beside, -_rig.transform.right, impact, band), free, out _), "U3C rig: a hit from the flank, beside the defence, is not blocked though the guard is up");
             CombatFlowTuning strict = new CombatFlowTuning();
             strict.bladeHeightTolerance = 0;
             strict.shieldHeightTolerance = 0;
             BladeHeight other = band == BladeHeight.High ? BladeHeight.Low : BladeHeight.High;
-            Check(!_rig.TryResolveGuard(U3cHit(ahead, -_rig.transform.forward, impact, other), strict, out _), "U3C rig: a frontal hit in another band goes through (" + band + " guard vs " + other + ")");
-            Check(_rig.LastGuardOutcome == GuardOutcome.WrongHeight, "U3C rig: ... outcome WrongHeight (" + _rig.LastGuardOutcome + ")");
-            Check(_rig.TryResolveGuard(U3cHit(ahead, -_rig.transform.forward, impact, band), strict, out _), "U3C rig: the guard's own band is still held with zero tolerance");
-            Check(_rig.TryResolveGuard(U3cHit(ahead, -_rig.transform.forward, impact, BladeHeight.Unspecified), strict, out _), "U3C rig: a hit with no height (skill, arrow) is covered");
+            Check(_rig.TryResolveGuard(U3cHit(ahead, -_rig.transform.forward, impact, other), strict, out _), "U3C rig: a frontal hit that meets the defence is held in any band (" + band + " guard vs " + other + ")");
+            Check(_rig.TryResolveGuard(U3cHit(ahead, -_rig.transform.forward, impact, BladeHeight.Unspecified), strict, out _), "U3C rig: a hit with no height (skill) that meets the defence is held");
 
             // free blocking (the shipped tuning): the pool is never touched, however many hits land
             for (int i = 0; i < 6; i++)

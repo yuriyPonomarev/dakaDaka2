@@ -67,21 +67,31 @@ namespace Emberdelve.Player
         public static readonly Vector3 PatternRest = new Vector3(0.26f, -0.20f, 0.30f);
 
         /// <summary>Cosmetic sword ready pose of the first-person hand (aim frame) and its blade direction (rig frame, blade along forward).</summary>
-        public static readonly Vector3 SwordReadyHand = new Vector3(0.22f, -0.23f, 0.52f);
-        public static readonly Quaternion SwordReadyRotation = Quaternion.Euler(-28f, -18f, 0f);
+        public static readonly Vector3 SwordReadyHand = new Vector3(0.25f, -0.36f, 0.52f);
+        public static readonly Quaternion SwordReadyRotation = Quaternion.Euler(-28f, -8f, 0f);
         public static readonly Quaternion ShieldGuardSwordRotation = Quaternion.Euler(-20f, -20f, 0f);
-    /// <summary>Where the sword hand sits while a shield blocks: low and to the right, blade cocked up and slightly inward, clear of the shield.</summary>
-    public static readonly Vector3 SwordShieldGuardHand = new Vector3(0.26f, -0.24f, 0.50f);
-    public static readonly Quaternion SwordShieldGuardRotation = Quaternion.Euler(-42f, -14f, 0f);
+        /// <summary>Where the sword hand goes while a shield blocks: down and to the right, out of the frame (the shield alone is seen).</summary>
+        public static readonly Vector3 SwordShieldGuardHand = new Vector3(0.40f, -0.70f, 0.36f);
+        public static readonly Quaternion SwordShieldGuardRotation = Quaternion.Euler(15f, 35f, 0f);
 
-        public static readonly Vector3 ShieldRest = new Vector3(-0.40f, -0.30f, 0.50f);
-        public static readonly Vector3 ShieldRaised = new Vector3(-0.04f, -0.05f, 0.36f);
-        /// <summary>How the left fist sits on the shield strap, relative to the shield (tuned in the game view).</summary>
-        /// <summary>The fist sits this far behind the shield face (shield-local), so the shield itself covers the hand.</summary>
-        public static readonly Vector3 ShieldHandBehind = new Vector3(0f, 0f, 0.12f);
-        public static readonly Quaternion ShieldGripLocal = Quaternion.Euler(90f, -25f, -90f);
-        public static readonly Vector3 ShieldRestEuler = new Vector3(0f, 14f, 0f);
-        public static readonly Vector3 ShieldRaisedEuler = new Vector3(-6f, 4f, 0f);
+        // ---- the shield (aim frame; the pose of the shield MODEL ROOT, the fist is placed on its strap) ----
+        /// <summary>Shield at rest: low on the left, only its upper part rises into the frame, the face turned a little towards the view.</summary>
+        public static readonly Vector3 ShieldRestRoot = new Vector3(-0.43f, -0.61f, 0.34f);
+        public static readonly Vector3 ShieldRestEuler = new Vector3(12f, -20f, -18f);
+        /// <summary>Shield while the sword swings: dropped out of the frame below the left edge.</summary>
+        public static readonly Vector3 ShieldLoweredRoot = new Vector3(-0.56f, -1.10f, 0.40f);
+        public static readonly Vector3 ShieldLoweredEuler = new Vector3(30f, -25f, -25f);
+        /// <summary>The fist sits this far from the strap (shield-local, -Z faces the eye): low on the shield's back, below the frame, so
+        /// the shield is seen and the hand is not.</summary>
+        public static readonly Vector3 ShieldHandBehind = new Vector3(0f, -0.24f, -0.05f);
+        public static readonly Quaternion ShieldGripLocal = Quaternion.Euler(90f, -25f, 90f);
+        /// <summary>Where the left fist (strap) is at rest, aim frame (derived from the rest pose of the shield).</summary>
+        public static Vector3 ShieldRest => ShieldRestRoot + Quaternion.Euler(ShieldRestEuler) * (ShieldHandBehind - GuardShieldPose.Mount);
+
+        /// <summary>Block entry is a quick snap (about 0.14 s), the return to rest slower (about 0.3 s).</summary>
+        public const float GuardRaiseRate = 7f, GuardLowerRate = 3.3f;
+        /// <summary>The shield drops while the sword attacks and comes back after the combo.</summary>
+        public const float ShieldDropRate = 4.5f, ShieldReturnRate = 2.6f;
 
         /// <summary>Elbow hints (aim frame): below and a little outwards.</summary>
         private static readonly Vector3 RightPole = new Vector3(0.7f, -1f, -0.4f);
@@ -98,6 +108,42 @@ namespace Emberdelve.Player
         public const float ShieldScale = GuardShieldPose.Scale / ModelScale; // same world size as the authority shape under the scaled arms
         // The kite shield's rear straps sit above its geometric centre.
         public static readonly Vector3 ShieldMountOffset = new Vector3(0f, -0.1415f, 0f);
+
+        /// <summary>
+        /// Sword swings in first person (the Dark and Darker look): the hand follows the pattern on a wide arc close to the camera, and
+        /// outside the damaging phase it leaves the frame (down/outwards for slashes, up for an overhead), so a combo shows the strikes
+        /// sweeping through the view and nothing in between. Pattern offsets from the rest base are scaled by <see cref="SwingScale"/>.
+        /// </summary>
+        public static readonly Vector3 SwingScale = new Vector3(1.0f, 0.6f, 0.2f);
+        public static readonly Vector3 SwingCenter = new Vector3(0.22f, -0.26f, 0.40f);
+        public const float SwingOutward = 0.16f, SwingOffscreenDown = 0.26f, SwingOffscreenUp = 0.36f;
+        /// <summary>The drawn blade is lifted this much (degrees, about its own right axis) while swinging, so it crosses the view instead of pointing at the horizon.</summary>
+        public const float SwingBladeLift = 28f;
+        /// <summary>The drawn blade trails the hand's sideways motion (degrees of yaw per m/s of the pattern base, and the limit), so a slash
+        /// reads as a sweep across the view rather than a sword carried sideways upright.</summary>
+        public const float SwingTrailGain = 14f, SwingTrailMax = 65f;
+        /// <summary>Two-handed swords keep the framed swing (hand lowered a little, never below / beside these limits, aim frame).</summary>
+        public const float TwoHandedSwingLowering = 0.05f, TwoHandedSwingFloorY = -0.27f, TwoHandedSwingMinX = -0.12f, TwoHandedSwingMaxX = 0.34f;
+
+        /// <summary>Cosmetic orientation of the drawn blade while swinging: trailing yaw about the aim frame's up, and a lift of flat (slashing) blades.</summary>
+        public static Quaternion SwingBladeRotation(Quaternion localRotation, float trail, float weight)
+        {
+            float flat = Mathf.Clamp01(1f - Mathf.Abs((localRotation * Vector3.forward).y) / 0.6f);
+            return Quaternion.AngleAxis(trail * weight, Vector3.up) * localRotation * Quaternion.Euler(-SwingBladeLift * flat * weight, 0f, 0f);
+        }
+
+        public static float TrailFromVelocity(float baseVelocityX) => Mathf.Clamp(-baseVelocityX * SwingTrailGain, -SwingTrailMax, SwingTrailMax);
+
+        public static Vector3 SwingHand(Vector3 localBase, float strike)
+        {
+            Vector3 hand = SwingCenter + Vector3.Scale(localBase - PatternRest, SwingScale);
+            float away = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(strike));
+            hand.x += Mathf.Clamp((hand.x - 0.08f) / 0.15f, -1f, 1f) * SwingOutward * away;
+            float vertical = Mathf.Clamp((hand.y - 0.05f) / 0.15f, -1f, 1f);
+            hand.y += (vertical > 0f ? vertical * SwingOffscreenUp : vertical * SwingOffscreenDown) * away;
+            hand.z = Mathf.Max(hand.z, 0.25f);
+            return hand;
+        }
 
         public const float MinModelScale = 0.8f;
         public const float MaxModelScale = 0.92f;
@@ -129,6 +175,7 @@ namespace Emberdelve.Player
         private Camera _camera;
         private Transform _frame;
         private WeaponVisualRig _visual;
+        private MeleeCombat _melee;
         private HealthComponent _health;
         private GameObject _mainHand;
         private GameObject _offHand;
@@ -170,7 +217,7 @@ namespace Emberdelve.Player
         public float WeaponScale { get; private set; } = 1f;
 
         /// <summary>U5B: the second hand of a two-handed weapon sits this far (metres at model scale 1) behind the right grip, along the weapon's own long axis.</summary>
-        public const float SecondGripOffset = 0.1f;
+        public const float SecondGripOffset = 0.16f;
 
         /// <summary>
         /// Creates the arms for the local player under <paramref name="anchor"/> (the weapon anchor of the look pivot), or returns null
@@ -221,7 +268,7 @@ namespace Emberdelve.Player
 
         private SwingTrail _trail;
         private bool _trailOn;
-        private float _swingWeight;
+        private float _swingWeight, _strikeBlend, _shieldLower, _swingTrail, _lastSwingBaseX;
 
         /// <summary>The swing ribbon follows the sword the player actually sees, not the far damage segment.</summary>
         private void UpdateViewTrail()
@@ -512,6 +559,13 @@ namespace Emberdelve.Player
             if (!_rig.IsLocallyControlled) { Destroy(gameObject); return; }
 
             float dt = Mathf.Max(1e-4f, Time.deltaTime);
+            // A held attack button keeps the combo's end pose between steps; released, the weapon goes straight back to rest.
+            if (_visual != null)
+            {
+                if (_melee == null) _melee = _rig.GetComponentInChildren<MeleeCombat>();
+                bool input = _rig.Input != null && _rig.Input.GameplayInputEnabled && !_rig.IsDead;
+                _visual.ChainInputHeld = input && (_rig.Input.PrimaryHeld || _rig.Input.PrimaryPressed || (_melee != null && _melee.HasQueuedPress));
+            }
             Vector3 delta = _rig.transform.position - _lastRigPosition;
             _lastRigPosition = _rig.transform.position;
             delta.y = 0f;
@@ -564,13 +618,21 @@ namespace Emberdelve.Player
                 localRotation = Quaternion.Inverse(frame.rotation) * _visual.transform.rotation;
             }
 
-            bool swinging = _visual != null && _visual.IsSwinging;
-            _swingWeight = Mathf.MoveTowards(_swingWeight, swinging ? 1f : 0f, (swinging ? 14f : 4f) * dt);
+            bool swinging = _visual != null && (_visual.IsSwinging || _visual.IsChainHolding);
+            _swingWeight = Mathf.MoveTowards(_swingWeight, swinging ? 1f : 0f, (swinging ? 10f : 6f) * dt);
+            float baseVelocityX = (localBase.x - _lastSwingBaseX) / dt;
+            _lastSwingBaseX = localBase.x;
+            float trailTarget = swinging ? TrailFromVelocity(baseVelocityX) : 0f;
+            _swingTrail = Mathf.Lerp(_swingTrail, trailTarget, 1f - Mathf.Exp(-20f * dt));
+            bool striking = _visual != null && _visual.InActivePhase;
+            _strikeBlend = Mathf.MoveTowards(_strikeBlend, striking ? 1f : 0f, 14f * dt);
+            bool dropShield = swinging && !_blockHeld;
+            _shieldLower = Mathf.MoveTowards(_shieldLower, dropShield ? 1f : 0f, (dropShield ? ShieldDropRate : ShieldReturnRate) * dt);
             float guardTarget = _blockHeld ? 1f : 0f;
-            _guardBlend = Mathf.MoveTowards(_guardBlend, guardTarget, 7f * dt);
+            _guardBlend = Mathf.MoveTowards(_guardBlend, guardTarget, (guardTarget > _guardBlend ? GuardRaiseRate : GuardLowerRate) * dt);
             // Ease only the rendered hands when entering/leaving guard. The weapon rig also
             // supplies the authority's guard volume, so its transform must remain immediate.
-            if (_visual == null || !_visual.IsSwinging)
+            if (_visual == null || !(_visual.IsSwinging || _visual.IsChainHolding))
             {
                 float blend = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((Time.time - _guardChangedAt) / GuardTransitionSeconds));
                 localBase = Vector3.Lerp(_guardFromBase, localBase, blend);
@@ -592,13 +654,18 @@ namespace Emberdelve.Player
         /// <paramref name="localBase"/> / <paramref name="localRotation"/> are the weapon rig's pose in the aim frame.
         /// </summary>
         public void Pose(Transform frame, Camera camera, Vector3 localBase, Quaternion localRotation, float guardBlend, Vector3 offsetRight, Vector3 offsetLeft,
-            float? swingBlend = null)
+            float? swingBlend = null, float? strikeBlend = null, float? shieldLower = null, float? swingTrail = null)
         {
             if (!ResolveBones() || frame == null) return;
             CaptureRestHands();
             float poseSwingWeight = swingBlend ?? _swingWeight;
+            float trail = swingTrail ?? _swingTrail;
+            float strike = strikeBlend ?? _strikeBlend;
+            float lowerShield = shieldLower ?? _shieldLower;
+            // A held shield model is the shield defense (the rig's defense says the same in the game; edit-mode previews have no rig).
+            bool shieldHeld = _offHand != null || (_rig != null && _rig.Defense.HasShield);
             // With a shield up the sword stays in its natural ready pose: only a blade-only guard takes the high ward.
-            float swordGuard = _rig != null && _rig.Defense.HasShield ? 0f : guardBlend;
+            float swordGuard = shieldHeld ? 0f : guardBlend;
 
             if (_utilityItem != null || (_mainData != null && !_mainData.IsRanged)) PoseFingers(false, 0f);
 
@@ -649,19 +716,32 @@ namespace Emberdelve.Player
             {
                 // Ready framing only: low and to the right with the forearm in view, blade leaning forward
                 // instead of standing up through the whole screen. Swings and the blade guard keep the rig's pose.
-                float ready = (1f - Mathf.SmoothStep(0f, 1f, swordGuard)) * (1f - Mathf.SmoothStep(0f, 1f, poseSwingWeight));
-                // With a shield up the sword takes its own, more guarded placement instead of the plain ready one.
-                float shieldGuard = _rig != null && _rig.Defense.HasShield ? guardBlend : 0f;
-                Vector3 readyHand = Vector3.Lerp(SwordReadyHand, SwordShieldGuardHand, Mathf.SmoothStep(0f, 1f, shieldGuard));
-                Quaternion readyRotation = Quaternion.Slerp(SwordReadyRotation, SwordShieldGuardRotation, Mathf.SmoothStep(0f, 1f, shieldGuard));
-                handLocal = Vector3.Lerp(handLocal, ClampToView(camera, readyHand + offsetRight), ready);
-                handLocal += Vector3.down * (.20f * poseSwingWeight * (1f - swordGuard));
+                float swing = Mathf.SmoothStep(0f, 1f, poseSwingWeight);
+                float ready = (1f - Mathf.SmoothStep(0f, 1f, swordGuard)) * (1f - swing);
+                // Swings: a wide arc close to the camera that leaves the frame between strikes (not clamped into the view).
+                float swingShown = swing * (1f - Mathf.SmoothStep(0f, 1f, swordGuard));
+                if (!_mainData.twoHanded)
+                {
+                    handLocal = Vector3.Lerp(handLocal, SwingHand(localBase, strike) + offsetRight, swingShown);
+                    localRotation = SwingBladeRotation(localRotation, trail * Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(strike)), swingShown);
+                }
+                else
+                {
+                    // Two-handed swords keep their framed swing: both hands must stay on the handle.
+                    handLocal += Vector3.down * (TwoHandedSwingLowering * swingShown);
+                    handLocal.y = Mathf.Max(handLocal.y, Mathf.Lerp(handLocal.y, TwoHandedSwingFloorY, swingShown));
+                    handLocal.x = Mathf.Lerp(handLocal.x, Mathf.Clamp(handLocal.x, TwoHandedSwingMinX, TwoHandedSwingMaxX), swingShown);
+                }
+                // With a shield up the sword drops out of the frame; the plain ready pose otherwise.
+                float shieldGuard = shieldHeld ? Mathf.SmoothStep(0f, 1f, guardBlend) : 0f;
+                Vector3 readyHand = Vector3.Lerp(SwordReadyHand, SwordShieldGuardHand, shieldGuard);
+                Quaternion readyRotation = Quaternion.Slerp(SwordReadyRotation, SwordShieldGuardRotation, shieldGuard);
+                handLocal = Vector3.Lerp(handLocal, readyHand + offsetRight, ready);
                 localRotation = Quaternion.Slerp(localRotation, readyRotation, ready);
             }
             // A raised blade guard puts the hand exactly where the authority's block volume is (the arm-reach compression above
             // would otherwise slide the visible sword away from it).
-            if (_utilityItem == null && _mainData != null && !_mainData.IsRanged && _mainData.CanBlock &&
-                _rig != null && !_rig.Defense.HasShield)
+            if (_utilityItem == null && _mainData != null && !_mainData.IsRanged && _mainData.CanBlock && !shieldHeld)
             {
                 float exact = Mathf.SmoothStep(0f, 1f, guardBlend) * (1f - Mathf.SmoothStep(0f, 1f, poseSwingWeight));
                 handLocal = Vector3.Lerp(handLocal, localBase + offsetRight, exact);
@@ -704,9 +784,10 @@ namespace Emberdelve.Player
             }
             Quaternion gripRotation = frame.rotation * localRotation * GripFromRig;
             Vector3 gripPosition = frame.TransformPoint(handLocal);
+            Vector3 rightPole = RightPole;
             if (gripRight != null)
             {
-                SolveArmWithWrist(_upperR, _lowerR, _handR, gripRight, gripPosition, gripRotation, frame.rotation * RightPole);
+                SolveArmWithWrist(_upperR, _lowerR, _handR, gripRight, gripPosition, gripRotation, frame.rotation * rightPole);
                 if (_bottle == null && _bandage == null)
                 {
                     // A handle is free to turn in the fist. Roll the grip about the handle so the knuckles continue the
@@ -728,7 +809,7 @@ namespace Emberdelve.Player
                             gripRotation = Quaternion.FromToRotation(handle, natural) * gripRotation;
                         }
                         gripRotation = RollToForearm(gripRotation, forearm, _handR, gripRight);
-                        SolveArmWithWrist(_upperR, _lowerR, _handR, gripRight, gripPosition, gripRotation, frame.rotation * RightPole);
+                        SolveArmWithWrist(_upperR, _lowerR, _handR, gripRight, gripPosition, gripRotation, frame.rotation * rightPole);
                     }
                 }
                 if (_mainHand != null) _mainHand.transform.localScale = Vector3.one * HeldScale;
@@ -756,20 +837,18 @@ namespace Emberdelve.Player
             // Left hand: on the shield (rest / raised), or on the second grip of a two-handed weapon, otherwise left to the idle pose.
             if (_offHand != null && gripLeft != null)
             {
-                _offHand.transform.localScale = Vector3.one * (GuardShieldPose.Scale / modelScale);
-                _offHand.transform.localPosition = new Vector3(0f, GuardShieldPose.Mount.y / modelScale, 0f);
-                Vector3 shieldPosition = Vector3.Lerp(ShieldRest, ShieldRaised, guardBlend) + offsetLeft;
-                Quaternion shieldRotation = Quaternion.Euler(Vector3.Lerp(ShieldRestEuler, ShieldRaisedEuler, guardBlend));
-                SolveArmWithWrist(_upperL, _lowerL, _handL, gripLeft, frame.TransformPoint(ClampToView(camera, shieldPosition)), frame.rotation * shieldRotation * ShieldGripLocal, frame.rotation * LeftPole);
-                if (_blockHeld)
-                {
-                    GuardShieldShape shield = GuardShieldPose.Resolve(frame.position, frame.rotation);
-                    // Raised defense follows the physical surface immediately; cosmetic bob/clamping
-                    // must not make the shield appear somewhere the server cannot block.
-                    SolveArmWithWrist(_upperL, _lowerL, _handL, gripLeft,
-                        frame.TransformPoint(GuardShieldPose.Grip) + shield.Rotation * ShieldHandBehind, shield.Rotation * ShieldGripLocal, frame.rotation * LeftPole);
-                    GuardShieldPose.ApplyModel(_offHand.transform, shield);
-                }
+                // The shield itself is posed (rest / lowered for an attack / raised), then the fist is put on its strap: the hand follows
+                // the shield instead of the shield hanging off a wrist angle. Fully raised it is exactly the authority's block surface.
+                float raise = Mathf.SmoothStep(0f, 1f, guardBlend);
+                float lower = Mathf.SmoothStep(0f, 1f, lowerShield) * (1f - raise);
+                Vector3 restRoot = Vector3.Lerp(ShieldRestRoot, ShieldLoweredRoot, lower) + offsetLeft;
+                Quaternion restRotation = Quaternion.Slerp(Quaternion.Euler(ShieldRestEuler), Quaternion.Euler(ShieldLoweredEuler), lower);
+                GuardShieldShape raised = GuardShieldPose.Resolve(frame.position, frame.rotation);
+                Vector3 shieldPosition = Vector3.Lerp(frame.TransformPoint(restRoot), raised.Position + frame.rotation * offsetLeft, raise);
+                Quaternion shieldRotation = Quaternion.Slerp(frame.rotation * restRotation, raised.Rotation, raise);
+                Vector3 strap = shieldPosition + shieldRotation * (ShieldHandBehind - GuardShieldPose.Mount);
+                SolveArmWithWrist(_upperL, _lowerL, _handL, gripLeft, strap, shieldRotation * ShieldGripLocal, frame.rotation * LeftPole);
+                GuardShieldPose.ApplyModel(_offHand.transform, new GuardShieldShape(shieldPosition, shieldRotation, GuardShieldPose.Scale));
             }
             else if (_mainData != null && _mainData.twoHanded && gripRight != null && gripLeft != null)
             {

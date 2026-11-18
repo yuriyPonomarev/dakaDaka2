@@ -527,8 +527,10 @@ namespace Emberdelve.Net
         // reported (or Hold seconds), then it drops the guard and takes hits until dead; after death it tries to act (all must be refused).
         private void MeleeDefender(NetPlayerRig other)
         {
-            // Put the left-hand shield into the incoming slash using ordinary aim intent.
-            Drive(0f, YawTo(_owner.transform.position, other.transform.position) + (_phase == 2 ? 35f : 0f), 0f);
+            // Blocks are physical: put the left-hand shield into the incoming slash by turning towards the side it comes from
+            // (right-to-left: turn left, left-to-right: turn right; the CombatFlow gate measures both windows).
+            _turnIntoStrike = TurnIntoStrike(other, _turnIntoStrike, ShieldTurnIntoStrike, ShieldTurnIntoStrike);
+            Drive(0f, YawTo(_owner.transform.position, other.transform.position) + (_phase == 2 ? _turnIntoStrike : 0f), 0f);
             bool dead = _rig != null && _rig.IsDead;
             int myId = _owner.ServerPlayerId.Value;
 
@@ -577,6 +579,34 @@ namespace Emberdelve.Net
 
         // melee-parry, defender (FIX2): guards at once; after the first blocked hit was reported it releases the guard and presses it again
         // (the riposte press, well inside the window), then waits for the two strikes to play out.
+        // Turn (degrees) that puts the blade / the shield into a horizontal slash; the sign follows the side the slash comes from.
+        // Measured by the CombatFlow gate at 1.1 m and 1.5 m: a right-hand blade needs a deep left turn against a right-to-left slash.
+        private const float BladeTurnLeft = 70f, BladeTurnRight = 50f, ShieldTurnIntoStrike = 40f;
+        // The sword chain opens right-to-left, so a defender expecting the opener starts turned to its left.
+        private float _turnIntoStrike = float.NaN;
+
+        /// <summary>Which way to turn for the attacker's current swing: left for a right-to-left slash, right for a left-to-right one.</summary>
+        private static float TurnIntoStrike(NetPlayerRig attacker, float current, float leftTurn, float rightTurn)
+        {
+            if (float.IsNaN(current)) current = -leftTurn;
+            if (attacker == null) return current;
+            AvatarCombatWire pose = attacker.AvatarCombat.Value;
+            if (!pose.Swing) return current;
+            string id = pose.Pattern.ToString();
+            Emberdelve.Data.WeaponData weapon = attacker.Rig != null ? attacker.Rig.ActiveWeapon : null;
+            if (weapon != null && weapon.swingPatterns != null)
+                foreach (Emberdelve.Data.SwingPatternData p in weapon.swingPatterns)
+                {
+                    if (p == null || p.patternId != id) continue;
+                    if (p.kind == Emberdelve.Data.SwingKind.HorizontalRightToLeft) return -leftTurn;
+                    if (p.kind == Emberdelve.Data.SwingKind.HorizontalLeftToRight) return rightTurn;
+                    return current;
+                }
+            if (id.EndsWith("_rl")) return -leftTurn;
+            if (id.EndsWith("_lr")) return rightTurn;
+            return current;
+        }
+
         private void ParryDefender(NetPlayerRig other)
         {
             // Use the same inventory request as the UI: the response must come from blade contact.
@@ -590,7 +620,10 @@ namespace Emberdelve.Net
                     inventory.Submit(_rig, command);
                 return;
             }
-            Drive(0f, YawTo(_owner.transform.position, other.transform.position), _phase <= 2 ? 21.6f : 0f);
+            // Blocks are physical: the defender catches the chain's right-to-left opener on its blade by turning into the strike
+            // (the CombatFlow gate measures the catching window, about 35-80 degrees to the left); squarely facing takes it in the side.
+            _turnIntoStrike = TurnIntoStrike(other, _turnIntoStrike, BladeTurnLeft, BladeTurnRight);
+            Drive(0f, YawTo(_owner.transform.position, other.transform.position) + (_phase <= 2 ? _turnIntoStrike : 0f), _phase <= 2 ? 21.6f : 0f);
             int myId = _owner.ServerPlayerId.Value;
             switch (_phase)
             {

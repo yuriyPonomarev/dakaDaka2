@@ -75,8 +75,8 @@ namespace Emberdelve.EditorTools
         private WeaponData _claw;
         private HitLocationTable _table;
 
-        private const int Slash = 0;       // sword patterns: 0 = left to right, 1 = right to left, 2 = overhead
-        private const int SlashBack = 1;
+        private const int Slash = 1;       // sword patterns (Dark and Darker order): 0 = right to left, 1 = left to right, 2 = overhead
+        private const int SlashBack = 0;
         private const int Overhead = 2;
 
         // ------------------------------------------------------------------------------------------------
@@ -424,12 +424,12 @@ namespace Emberdelve.EditorTools
             _authority.ImpactZonesEnabled = false;
 
             // ---- pattern data
-            Check(_sword.UsesSweptMelee && _sword.swingPatterns.Length == 3, "the sword has three swing patterns");
+            Check(_sword.UsesSweptMelee && _sword.swingPatterns.Length == 4, "the sword has four swing patterns (three chain patterns and the riposte cut)");
             Check(_rapier.UsesSweptMelee && _rapier.swingPatterns.Length == 1, "the rapier has one swing pattern");
             Check(_claw.UsesSweptMelee && _claw.swingPatterns.Length == 1 && !_crossbow.UsesSweptMelee, "D1c4: the enemy claw has one swing pattern (the telegraph wedge swept) and the crossbow has none");
-            Check(_sword.swingPatterns[0].kind == SwingKind.HorizontalLeftToRight && _sword.swingPatterns[1].kind == SwingKind.HorizontalRightToLeft
+            Check(_sword.swingPatterns[0].kind == SwingKind.HorizontalRightToLeft && _sword.swingPatterns[1].kind == SwingKind.HorizontalLeftToRight
                   && _sword.swingPatterns[2].kind == SwingKind.Overhead && _rapier.swingPatterns[0].kind == SwingKind.Thrust,
-                "sword = slash L->R, slash R->L, overhead; rapier = thrust");
+                "sword = slash R->L, slash L->R, overhead (Dark and Darker order); rapier = thrust");
 
             foreach (WeaponData w in new[] { _sword, _rapier })
             {
@@ -1460,8 +1460,8 @@ namespace Emberdelve.EditorTools
                     AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                     bool ok = _authority.TryBeginMeleeSwingAsOwner(Intent(s.Who, Overhead), out int id, out string why);
                     Check(!ok && id == 0 && why.Contains("chain"), $"production: the overhead is refused at combo step 0 ({why})");
-                    ok = _authority.TryBeginMeleeSwingAsOwner(Intent(s.Who, SlashBack), out id, out why);
-                    Check(!ok && why.Contains("chain"), $"production: the back slash is refused at combo step 0 ({why})");
+                    ok = _authority.TryBeginMeleeSwingAsOwner(Intent(s.Who, Slash), out id, out why);
+                    Check(!ok && why.Contains("chain"), $"production: the left-to-right back slash is refused at combo step 0 ({why})");
                     Cooldown(3f);
                     s.Dispose();
                 }
@@ -1471,7 +1471,7 @@ namespace Emberdelve.EditorTools
                     Scenario s = NewScenario(_sword);
                     Dummy d = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                     float[] step = { 1.00f, 1.05f, 1.10f };
-                    int[] pattern = { Slash, SlashBack, Overhead };
+                    int[] pattern = { SlashBack, Slash, Overhead };   // the chain opens right-to-left (Dark and Darker order)
                     for (int i = 0; i < 3; i++)
                     {
                         d.Received.Clear();
@@ -1514,7 +1514,7 @@ namespace Emberdelve.EditorTools
                     {
                         Scenario s = NewScenario(_sword);
                         Dummy d = AddBody(s, new Vector3(0f, 1.5f, c.z), 0.3f);
-                        MeleeSwingStatus st = RunSwing(s, Slash);
+                        MeleeSwingStatus st = RunSwing(s, SlashBack);   // the chain's opening slash (right-to-left)
                         bool hit = d.Received.Count == 1 && st.Hits.Count == 1;
                         Check(hit, $"production: the slash hits a body {c.z:F1} m ahead");
                         if (hit)
@@ -1693,10 +1693,10 @@ namespace Emberdelve.EditorTools
             Check(!visual.IsSwinging, "the visual returned to rest");
             // D1b: this used to wait 0.6 s and expect the alternating slash from ChoosePatternIndex (and the overhead for a
             // sprinting press). The pattern order is now the weapon's combo chain, owned by the authority: a second press
-            // INSIDE the combo window continues it at step 1 (the right-to-left slash). The sprint-overhead placeholder is gone.
+            // INSIDE the combo window continues it at step 1 (the left-to-right back slash; the chain opens right-to-left). The sprint-overhead placeholder is gone.
             yield return new WaitForSeconds(0.1f);
             Check(_authority.TryGetExpectedComboStep(rig.CombatId, out int expectedStep) && expectedStep == 1, "the authority expects combo step 1 next");
-            Check(melee.TryBeginSwing() && melee.ComboStep == 1 && melee.ActivePattern.kind == SwingKind.HorizontalRightToLeft, "the next press is combo step 1, the right-to-left slash");
+            Check(melee.TryBeginSwing() && melee.ComboStep == 1 && melee.ActivePattern.kind == SwingKind.HorizontalLeftToRight, "the next press is combo step 1, the left-to-right back slash");
             guard = 0f;
             while (melee.IsSwinging && guard < 3f) { guard += Time.deltaTime; yield return null; }
             Check(target.Received.Count == 2, "the reverse slash hits the same target again (a new swing)");

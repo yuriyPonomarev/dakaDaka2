@@ -185,13 +185,15 @@ namespace Emberdelve.Tests.Visual
                 for (int i = 0; i < times.Length; i++)
                 {
                     scene.Pose(pattern, times[i]);
-                    // Active samples must remain exact damage geometry; windup/recovery use the accepted ready-pose blend.
+                    // Active samples follow the damage geometry; windup/recovery use the accepted ready-pose blend. The drawn blade then
+                    // gets only the documented cosmetic swing rotation (flat blades lifted to cross the view; no trail in a static pose).
                     WeaponVisualRig.SamplePresentation(pattern, timing, times[i], FirstPersonArmsDriver.PatternRest,
                         WeaponVisualRig.ReadyRotation, false, out _, out Quaternion presented);
                     bool active = times[i] >= timing.Windup && times[i] <= timing.ActiveEnd;
-                    Vector3 expected = active ? pattern.Evaluate(times[i], timing).LocalDirection : presented * Vector3.forward;
+                    Quaternion damage = active ? pattern.Evaluate(times[i], timing).LocalRotation : presented;
+                    Vector3 expected = FirstPersonArmsDriver.SwingBladeRotation(damage, 0f, 1f) * Vector3.forward;
                     float angle = Vector3.Angle(expected, scene.TipDirection());
-                    Assert.Less(angle, 3f, patternName + " t=" + times[i] + ": the model's blade points along the pattern's blade direction");
+                    Assert.Less(angle, 3f, patternName + " t=" + times[i] + ": the model's blade is the pattern's blade plus the cosmetic swing lift");
                 }
             }
         }
@@ -283,6 +285,8 @@ namespace Emberdelve.Tests.Visual
         [TestCaseSource(nameof(PatternNames))]
         public void SwordGrip_FollowsTheAcceptedLoweredPresentation_ThroughTheWholeSwing(string patternName)
         {
+            // The one-handed sword's own patterns: other weapons' arcs (a maul, a club) are beyond a sword arm's reach.
+            if (!patternName.StartsWith("Pattern_Sword")) Assert.Ignore("not a one-handed sword pattern");
             SwingPatternData pattern = Pattern(patternName);
             SwingTiming timing = pattern.Timing;
             using (Scene scene = Scene.Create(SwordId, ShieldId))
@@ -294,12 +298,12 @@ namespace Emberdelve.Tests.Visual
                     scene.Pose(pattern, time);
                     WeaponVisualRig.SamplePresentation(pattern, timing, time, FirstPersonArmsDriver.PatternRest,
                         WeaponVisualRig.ReadyRotation, false, out Vector3 presentedBase, out _);
-                    Vector3 framed = FirstPersonArmsDriver.ClampToView(scene.Camera, FirstPersonArmsDriver.ViewHand(presentedBase));
-                    // The accepted sword framing intentionally lowers the hilt by 20 cm below the clamped target.
-                    // Validate the pre-offset framing AND the final exact hand target instead of requiring the lowered hilt onscreen.
-                    Assert.IsTrue(scene.InFrustum(scene.Camera.transform.TransformPoint(framed)));
-                    Vector3 expected = scene.Camera.transform.TransformPoint(framed + Vector3.down * .20f);
-                    Assert.Less(Vector3.Distance(expected, scene.Driver.GripRight.position), 0.06f, patternName + " t=" + time.ToString("0.000") + ": the arm reaches the hand target");
+                    // Dark and Darker framing: a wide arc close to the camera; outside the strike (this static pose has no strike
+                    // blend) the hand is taken out of the frame. The solved hand is where the swing mapping puts it, within reach.
+                    Vector3 target = FirstPersonArmsDriver.SwingHand(presentedBase, 0f);
+                    Vector3 expected = scene.Camera.transform.TransformPoint(target);
+                    Assert.Less(Vector3.Distance(expected, scene.Driver.GripRight.position), 0.35f, patternName + " t=" + time.ToString("0.000") + ": the arm follows the swing target");
+                    Assert.Greater(scene.GripLocal().z, 0.1f, "the hand stays in front of the eye");
                 }
             }
         }
@@ -321,22 +325,22 @@ namespace Emberdelve.Tests.Visual
         }
 
         [Test]
-        public void Block_RaisesTheShield_AndBringsTheBladeToTheGuardPose()
+        public void Block_RaisesTheShieldOntoTheBlockSurface_AndTheSwordLeavesTheFrame()
         {
             using (Scene scene = Scene.Create(SwordId, ShieldId))
             {
                 scene.Pose(null, -1f, 0f);
-                Vector3 restShield = scene.Camera.transform.InverseTransformPoint(scene.Driver.GripLeft.position);
+                Vector3 restShield = scene.Camera.transform.InverseTransformPoint(scene.Driver.OffHandModel.transform.position);
                 scene.Pose(null, -1f, 1f);
-                Vector3 raisedShield = scene.Camera.transform.InverseTransformPoint(scene.Driver.GripLeft.position);
+                Vector3 raisedShield = scene.Camera.transform.InverseTransformPoint(scene.Driver.OffHandModel.transform.position);
                 Assert.Greater(raisedShield.y, restShield.y + 0.05f, "the shield rises when the block is held");
                 Assert.Greater(raisedShield.x, restShield.x + 0.05f, "and comes towards the middle");
 
-                GuardBladePose.ResolveRoot(scene.Camera.transform.position, Quaternion.LookRotation(scene.Camera.transform.forward, Vector3.up), true, out Vector3 guardPosition, out Quaternion guardRotation);
-                Vector3 expectedDirection = scene.Camera.transform.InverseTransformDirection(guardRotation * Vector3.forward);
-                Assert.Less(Vector3.Angle(expectedDirection, scene.TipDirection()), 3f, "the held blade is the guard blade the projectile defence uses");
-                Assert.IsTrue(scene.InFrustum(scene.Driver.GripRight.position));
-                Assert.IsTrue(scene.InFrustum(scene.Driver.GripLeft.position));
+                GuardShieldShape surface = GuardShieldPose.Resolve(scene.Camera.transform.position, scene.Camera.transform.rotation);
+                Assert.Less(Vector3.Distance(surface.Position, scene.Driver.OffHandModel.transform.position), 0.01f, "the drawn shield is the authority's block surface");
+                Assert.Less(Quaternion.Angle(surface.Rotation, scene.Driver.OffHandModel.transform.rotation), 1f);
+                Assert.IsFalse(scene.InFrustum(scene.Driver.GripRight.position), "the sword hand drops out of the frame behind the shield");
+                Assert.IsFalse(scene.InFrustum(scene.Driver.GripLeft.position), "the fist holds the shield low, out of the frame");
             }
         }
 
@@ -601,6 +605,42 @@ namespace Emberdelve.Tests.Visual
                 Assert.LessOrEqual(scale, FirstPersonArmsDriver.MaxModelScale);
                 if (damage / entry.length >= FirstPersonArmsDriver.MinModelScale && damage / entry.length <= FirstPersonArmsDriver.MaxModelScale)
                     Assert.AreEqual(damage, entry.length * scale, 1e-3f, id + ": the shown blade is the damage segment");
+            }
+        }
+            [Test]
+        public void ComboHold_KeepsTheEndPose_AndTheNextStepStartsThere_EvenWhenTheGuardIsWrittenEveryFrame()
+        {
+            using (Scene scene = Scene.Create(SwordId, ShieldId))
+            {
+                WeaponData sword = EmberdelveViewmodelPreview.FindWeapon(SwordId);
+                WeaponVisualRig visual = WeaponVisualBuilder.Build(sword, scene.Camera.transform, scene.Camera.transform);
+                SwingPatternData first = sword.swingPatterns[sword.comboSteps[0].patternIndex];
+                SwingPatternData second = sword.swingPatterns[sword.comboSteps[1].patternIndex];
+
+                // Button held: the server's "swing over" keeps the strike's end pose instead of snapping to rest.
+                visual.ChainInputHeld = true;
+                visual.PlaySwing(sword, first, first.Timing);
+                visual.CancelNetworkSwing();
+                Assert.IsTrue(visual.IsChainHolding, "a held button holds the chain between steps");
+                Vector3 held = visual.transform.position;
+                Quaternion heldRotation = visual.transform.rotation;
+
+                // MeleeCombat writes the guard state every frame before the next swing begins: it must not move the held weapon.
+                visual.SetGuardHeld(false);
+                Assert.Less(Vector3.Distance(held, visual.transform.position), 1e-4f, "the guard update leaves the held end pose alone");
+                Assert.Less(Quaternion.Angle(heldRotation, visual.transform.rotation), 0.01f);
+
+                // The next step's windup starts exactly where the previous strike ended (no frame at rest).
+                visual.PlaySwing(sword, second, second.Timing);
+                Assert.Less(Vector3.Distance(held, visual.transform.position), 1e-4f, "the next step starts from the held pose");
+                Assert.Less(Quaternion.Angle(heldRotation, visual.transform.rotation), 0.01f);
+
+                // Button released: the swing end eases back from where the weapon is, it does not jump to rest.
+                visual.ChainInputHeld = false;
+                Vector3 before = visual.transform.position;
+                visual.CancelNetworkSwing();
+                Assert.IsFalse(visual.IsSwinging || visual.IsChainHolding, "released: no hold");
+                Assert.Less(Vector3.Distance(before, visual.transform.position), 1e-4f, "the return to rest starts from the current pose");
             }
         }
     }

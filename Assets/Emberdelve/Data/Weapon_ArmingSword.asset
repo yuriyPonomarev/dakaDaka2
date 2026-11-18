@@ -26,26 +26,27 @@ MonoBehaviour:
   arcAngle: 120
   hitSphereRadius: 0.6
   swingPatterns:
-  - {fileID: 11400000, guid: 8fbc6866b582f2c49b352eb2f0940258, type: 2}
   - {fileID: 11400000, guid: f92bd604f752381419b12cc34e62da40, type: 2}
+  - {fileID: 11400000, guid: 8fbc6866b582f2c49b352eb2f0940258, type: 2}
   - {fileID: 11400000, guid: b4dfd12693cf8af43813a792e31eb4f7, type: 2}
   - {fileID: 11400000, guid: 4ff850148d0bb6e4b968e16ee9d283d4, type: 2}
+  - {fileID: 11400000, guid: 820063adc0321f14c9b4205fdd4441de, type: 2}
   comboSteps:
   - patternIndex: 0
     damageMultiplier: 1
     windupScale: 1
-    recoveryScale: 0.25
+    recoveryScale: 0.5
   - patternIndex: 1
     damageMultiplier: 1.05
-    windupScale: 0.35
-    recoveryScale: 0.25
+    windupScale: 0.6
+    recoveryScale: 0.5
   - patternIndex: 3
     damageMultiplier: 1.1
-    windupScale: 0.35
-    recoveryScale: 0.25
+    windupScale: 0.6
+    recoveryScale: 0.5
   - patternIndex: 2
     damageMultiplier: 1.15
-    windupScale: 0.35
+    windupScale: 0.6
     recoveryScale: 1
   comboWindow: 0.7
   comboFinisherRecovery: 0.38
@@ -65,7 +66,7 @@ MonoBehaviour:
   riposteWithOffhandShield: 0
   riposteWindow: 1
   riposteDamageMultiplier: 1.5
-  riposteSwingPatterns: 0300000001000000
+  riposteSwingPatterns: 0400000001000000
   riposteStrikeGap: 0.1
   twoHanded: 0
   isUnarmed: 0

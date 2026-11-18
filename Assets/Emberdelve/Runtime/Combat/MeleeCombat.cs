@@ -62,6 +62,8 @@ namespace Emberdelve.Combat
 
         public WeaponData Weapon => _weapon;
         public bool IsSwinging => _phase != Phase.Idle;
+        /// <summary>A press made during the recovery is waiting to start the next step (presentation: keep the combo pose).</summary>
+        public bool HasQueuedPress => Time.time <= _bufferedUntil;
 
         /// <summary>U3B3: true on the server rig of a remote player. The guard level then comes from <see cref="SetRemoteGuard"/>, not from the input device.</summary>
         public bool RemoteDriven { get; set; }

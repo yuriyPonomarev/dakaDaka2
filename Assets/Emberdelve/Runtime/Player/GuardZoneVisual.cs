@@ -34,9 +34,9 @@ namespace Emberdelve.Player
             if (_rig == null || !_rig.IsLocallyControlled || !_rig.IsGuarding || _rig.IsDead) return;
             if (!EnsureAssets()) return;
 
-            if (_rig.TryGetGuardShield(out GuardShieldShape shield))
+            if (_rig.TryGetGuardShield(out GuardShieldShape _))
             {
-                Draw(_shieldMesh, Matrix4x4.TRS(shield.Position, shield.Rotation, Vector3.one * shield.Scale));
+                // The real shield model is the block surface (Dark and Darker draws no overlay on it).
             }
             else if (_rig.TryGetCrossbowGuard(out CrossbowGuardShape crossbow))
             {
