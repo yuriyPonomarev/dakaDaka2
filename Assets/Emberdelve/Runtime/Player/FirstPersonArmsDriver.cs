@@ -67,12 +67,12 @@ namespace Emberdelve.Player
         public static readonly Vector3 PatternRest = new Vector3(0.26f, -0.20f, 0.30f);
 
         /// <summary>Cosmetic sword ready pose of the first-person hand (aim frame) and its blade direction (rig frame, blade along forward).</summary>
-        public static readonly Vector3 SwordReadyHand = new Vector3(0.22f, -0.34f, 0.48f);
-        public static readonly Quaternion SwordReadyRotation = Quaternion.Euler(-64f, -24f, 0f);
+        public static readonly Vector3 SwordReadyHand = new Vector3(0.22f, -0.23f, 0.52f);
+        public static readonly Quaternion SwordReadyRotation = Quaternion.Euler(-28f, -18f, 0f);
         public static readonly Quaternion ShieldGuardSwordRotation = Quaternion.Euler(-20f, -20f, 0f);
     /// <summary>Where the sword hand sits while a shield blocks: low and to the right, blade cocked up and slightly inward, clear of the shield.</summary>
-    public static readonly Vector3 SwordShieldGuardHand = new Vector3(0.28f, -0.32f, 0.44f);
-    public static readonly Quaternion SwordShieldGuardRotation = Quaternion.Euler(-72f, -10f, 0f);
+    public static readonly Vector3 SwordShieldGuardHand = new Vector3(0.26f, -0.24f, 0.50f);
+    public static readonly Quaternion SwordShieldGuardRotation = Quaternion.Euler(-42f, -14f, 0f);
 
         public static readonly Vector3 ShieldRest = new Vector3(-0.40f, -0.30f, 0.50f);
         public static readonly Vector3 ShieldRaised = new Vector3(-0.14f, -0.10f, 0.40f);
@@ -107,6 +107,9 @@ namespace Emberdelve.Player
         [SerializeField] private float supportGripRoll;
         [SerializeField] private bool alignWristToGrip;
         [SerializeField] private float modelScale = ModelScale;
+        /// <summary>The arms scale the held weapons were authored against; a smaller arms model keeps the weapon the same world size.</summary>
+        private const float ReferenceArmsScale = 1.4f;
+        private float HeldScale => WeaponScale * (ReferenceArmsScale / modelScale);
         [SerializeField] private FpGripPose gripPoseOverride;
         [Tooltip("Where the arms root sits relative to the aim frame (camera pivot) when nothing is in front of the player.")]
         [SerializeField] private Vector3 restPosition = Vector3.zero;
@@ -292,8 +295,8 @@ namespace Emberdelve.Player
                     _mainEntry = entry;
                     _bladeLength = DamageBladeLength(main);
                     WeaponScale = ModelScaleFor(_bladeLength, entry.length);
-                    if (_mainHand != null) _mainHand.transform.localScale = Vector3.one * WeaponScale;
-                    if (_mainHand != null) _mainHand.transform.localPosition = new Vector3(0f, -GuardHoldShift(main.weaponId) * WeaponScale, 0f);
+                    if (_mainHand != null) _mainHand.transform.localScale = Vector3.one * HeldScale;
+                    if (_mainHand != null) _mainHand.transform.localPosition = new Vector3(0f, -GuardHoldShift(main.weaponId) * HeldScale, 0f);
                     if (_mainHand != null && main.CanBlock) _guardDirectionMarker = CreateGuardDirectionMarker(_mainHand.transform);
                 }
             }
@@ -720,7 +723,7 @@ namespace Emberdelve.Player
                         SolveArmWithWrist(_upperR, _lowerR, _handR, gripRight, gripPosition, gripRotation, frame.rotation * RightPole);
                     }
                 }
-                if (_mainHand != null) _mainHand.transform.localScale = Vector3.one * WeaponScale;
+                if (_mainHand != null) _mainHand.transform.localScale = Vector3.one * HeldScale;
             }
 
             if (_bottle != null && _drink != null && _drink.IsDrinking && gripLeft != null)
@@ -745,8 +748,8 @@ namespace Emberdelve.Player
             // Left hand: on the shield (rest / raised), or on the second grip of a two-handed weapon, otherwise left to the idle pose.
             if (_offHand != null && gripLeft != null)
             {
-                _offHand.transform.localScale = Vector3.one * ShieldScale;
-                _offHand.transform.localPosition = ShieldMountOffset;
+                _offHand.transform.localScale = Vector3.one * (GuardShieldPose.Scale / modelScale);
+                _offHand.transform.localPosition = new Vector3(0f, GuardShieldPose.Mount.y / modelScale, 0f);
                 Vector3 shieldPosition = Vector3.Lerp(ShieldRest, ShieldRaised, guardBlend) + offsetLeft;
                 Quaternion shieldRotation = Quaternion.Euler(Vector3.Lerp(ShieldRestEuler, ShieldRaisedEuler, guardBlend));
                 SolveArmWithWrist(_upperL, _lowerL, _handL, gripLeft, frame.TransformPoint(ClampToView(camera, shieldPosition)), frame.rotation * shieldRotation, frame.rotation * LeftPole);

@@ -2082,7 +2082,7 @@ MonoBehaviour:
   gripLeft: {fileID: 5526512257728855783}
   supportGripRoll: -90
   alignWristToGrip: 1
-  modelScale: 1.4
+  modelScale: 1.1
   gripPoseOverride: {fileID: 11400000, guid: 072948fe6914daf44b97d12853a911ae, type: 2}
   restPosition: {x: 0, y: 0, z: 0}
   wallReach: 1.1

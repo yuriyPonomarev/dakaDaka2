@@ -298,7 +298,7 @@ namespace Emberdelve.EditorTools
                 var driver = new SerializedObject(root.GetComponent<FirstPersonArmsDriver>());
                 driver.FindProperty("supportGripRoll").floatValue = -90f;
                 driver.FindProperty("alignWristToGrip").boolValue = true;
-                driver.FindProperty("modelScale").floatValue = 1.4f;
+                driver.FindProperty("modelScale").floatValue = 1.1f;
                 driver.FindProperty("gripPoseOverride").objectReferenceValue = grip;
                 driver.ApplyModifiedPropertiesWithoutUndo();
                 PrefabUtility.SaveAsPrefabAsset(root, ArmsPrefab);
