@@ -77,7 +77,7 @@ namespace Emberdelve.Player
         public static readonly Vector3 ShieldRest = new Vector3(-0.40f, -0.30f, 0.50f);
         public static readonly Vector3 ShieldRaised = new Vector3(-0.14f, -0.10f, 0.40f);
         /// <summary>How the left fist sits on the shield strap, relative to the shield (tuned in the game view).</summary>
-        public static readonly Quaternion ShieldGripLocal = Quaternion.Euler(90f, 0f, 0f);
+        public static readonly Quaternion ShieldGripLocal = Quaternion.Euler(90f, -25f, -90f);
         public static readonly Vector3 ShieldRestEuler = new Vector3(0f, 14f, 0f);
         public static readonly Vector3 ShieldRaisedEuler = new Vector3(-6f, 4f, 0f);
 
