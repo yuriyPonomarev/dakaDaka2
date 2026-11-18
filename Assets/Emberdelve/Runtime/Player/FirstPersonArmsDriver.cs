@@ -75,8 +75,10 @@ namespace Emberdelve.Player
     public static readonly Quaternion SwordShieldGuardRotation = Quaternion.Euler(-42f, -14f, 0f);
 
         public static readonly Vector3 ShieldRest = new Vector3(-0.40f, -0.30f, 0.50f);
-        public static readonly Vector3 ShieldRaised = new Vector3(-0.14f, -0.10f, 0.40f);
+        public static readonly Vector3 ShieldRaised = new Vector3(-0.04f, -0.05f, 0.36f);
         /// <summary>How the left fist sits on the shield strap, relative to the shield (tuned in the game view).</summary>
+        /// <summary>The fist sits this far behind the shield face (shield-local), so the shield itself covers the hand.</summary>
+        public static readonly Vector3 ShieldHandBehind = new Vector3(0f, 0f, 0.12f);
         public static readonly Quaternion ShieldGripLocal = Quaternion.Euler(90f, -25f, -90f);
         public static readonly Vector3 ShieldRestEuler = new Vector3(0f, 14f, 0f);
         public static readonly Vector3 ShieldRaisedEuler = new Vector3(-6f, 4f, 0f);
@@ -761,7 +763,7 @@ namespace Emberdelve.Player
                     // Raised defense follows the physical surface immediately; cosmetic bob/clamping
                     // must not make the shield appear somewhere the server cannot block.
                     SolveArmWithWrist(_upperL, _lowerL, _handL, gripLeft,
-                        frame.TransformPoint(GuardShieldPose.Grip), shield.Rotation * ShieldGripLocal, frame.rotation * LeftPole);
+                        frame.TransformPoint(GuardShieldPose.Grip) + shield.Rotation * ShieldHandBehind, shield.Rotation * ShieldGripLocal, frame.rotation * LeftPole);
                     GuardShieldPose.ApplyModel(_offHand.transform, shield);
                 }
             }
