@@ -825,7 +825,7 @@ namespace Emberdelve.Player
 
         public void SetGuardHeldVisual(bool held)
         {
-            if (_visual != null) _visual.SetGuardHeld(held);
+            if (_visual != null) _visual.SetGuardHeld(held && !(_rig != null && _rig.Defense.HasShield));
             if (_arms != null) _arms.SetBlock(held);
         }
 

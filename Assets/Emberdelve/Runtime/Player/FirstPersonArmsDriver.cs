@@ -565,6 +565,8 @@ namespace Emberdelve.Player
         {
             if (!ResolveBones() || frame == null) return;
             float poseSwingWeight = swingBlend ?? _swingWeight;
+            // With a shield up the sword stays in its natural ready pose: only a blade-only guard takes the high ward.
+            float swordGuard = _rig != null && _rig.Defense.HasShield ? 0f : guardBlend;
 
             if (_utilityItem != null || (_mainData != null && !_mainData.IsRanged)) PoseFingers(false, 0f);
 
@@ -615,9 +617,9 @@ namespace Emberdelve.Player
             {
                 // Ready framing only: low and to the right with the forearm in view, blade leaning forward
                 // instead of standing up through the whole screen. Swings and the blade guard keep the rig's pose.
-                float ready = (1f - Mathf.SmoothStep(0f, 1f, guardBlend)) * (1f - Mathf.SmoothStep(0f, 1f, poseSwingWeight));
+                float ready = (1f - Mathf.SmoothStep(0f, 1f, swordGuard)) * (1f - Mathf.SmoothStep(0f, 1f, poseSwingWeight));
                 handLocal = Vector3.Lerp(handLocal, ClampToView(camera, SwordReadyHand + offsetRight), ready);
-                handLocal += Vector3.down * (.20f * poseSwingWeight * (1f - guardBlend));
+                handLocal += Vector3.down * (.20f * poseSwingWeight * (1f - swordGuard));
                 localRotation = Quaternion.Slerp(localRotation, SwordReadyRotation, ready);
             }
             // A raised blade guard puts the hand exactly where the authority's block volume is (the arm-reach compression above
@@ -684,7 +686,7 @@ namespace Emberdelve.Player
                         if (across.sqrMagnitude > 1e-6f)
                         {
                             // Swings keep the blade exactly where the pattern sends it; only the ready pose is straightened.
-                            float committed = Mathf.Max(poseSwingWeight, guardBlend);
+                            float committed = Mathf.Max(poseSwingWeight, swordGuard);
                             Vector3 natural = Vector3.RotateTowards(across.normalized, handle,
                                 Mathf.Lerp(25f, 180f, Mathf.SmoothStep(0f, 1f, committed)) * Mathf.Deg2Rad, 0f);
                             gripRotation = Quaternion.FromToRotation(handle, natural) * gripRotation;
