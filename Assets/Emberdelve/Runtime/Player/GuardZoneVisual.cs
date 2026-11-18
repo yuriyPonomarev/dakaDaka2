@@ -25,7 +25,11 @@ namespace Emberdelve.Player
             if (Application.isBatchMode) enabled = false;
         }
 
-        private void LateUpdate()
+        // Just before rendering, after every Update/LateUpdate that moves the camera and the sword, so a fast mouse turn cannot leave this a frame behind.
+        private void OnEnable() => Application.onBeforeRender += RenderZone;
+        private void OnDisable() => Application.onBeforeRender -= RenderZone;
+
+        private void RenderZone()
         {
             if (_rig == null || !_rig.IsLocallyControlled || !_rig.IsGuarding || _rig.IsDead) return;
             if (!EnsureAssets()) return;
