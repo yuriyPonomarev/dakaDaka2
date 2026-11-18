@@ -245,7 +245,8 @@ namespace Emberdelve.Interaction
                 return false;
             }
 
-            if (!Emberdelve.Core.NetRole.IsClientOnly && _rolled && RemainingUnits == 0)
+            // A chest that has been opened through the loot window stays openable, showing an empty window.
+            if (!Emberdelve.Core.NetRole.IsClientOnly && _rolled && RemainingUnits == 0 && LootContainer == null)
             {
                 blockedReason = "This chest is empty";
                 return false;

@@ -16,6 +16,7 @@ namespace Emberdelve.Net
         private NetInventoryClient _client;
         private NetPlayerRig _hostOwner;
         private OfflineLootService _offline;
+        private readonly HashSet<ulong> _bodyLoot = new HashSet<ulong>();
         private CorpseContainerScreenController _containerUi;
         private PlayerRig _rig;
         private float _interactionReach = 3f;
@@ -201,10 +202,30 @@ namespace Emberdelve.Net
             view.SetPresence(state.Position, state.Revision);
         }
 
+        /// <summary>Presence for loot that sits on a visible body: the interaction volume is invisible, never a placeholder shape.</summary>
+        public void OnBodyPresence(ulong corpseId, Vector3 position, ulong revision, bool removed)
+        {
+            _bodyLoot.Add(corpseId);
+            OnPresence(corpseId, position, revision, removed);
+        }
+
         public void CloseContainerUi(bool relockCursor = true) => _containerUi?.Close(relockCursor);
 
         private CorpseWorldInteractable CreateView(ulong corpseId)
         {
+            if (_bodyLoot.Contains(corpseId))
+            {
+                // The searchable thing is the body itself, so this is only an invisible trigger around it.
+                var volume = new GameObject("CorpseLoot_" + corpseId);
+                int volumeLayer = LayerMask.NameToLayer(GameConfig.InteractLayerName);
+                if (volumeLayer >= 0) volume.layer = volumeLayer;
+                var box = volume.AddComponent<BoxCollider>();
+                box.isTrigger = true;
+                box.size = new Vector3(1.5f, 0.8f, 1.5f);
+                var bodyView = volume.AddComponent<CorpseWorldInteractable>();
+                bodyView.Configure(this, corpseId);
+                return bodyView;
+            }
             GameObject body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             body.name = "CorpseLoot_" + corpseId;
             int layer = LayerMask.NameToLayer(GameConfig.InteractLayerName);

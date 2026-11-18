@@ -18,8 +18,9 @@ namespace Emberdelve.Net
     /// The service only runs for an interactive offline player. Batch-mode gates keep the direct-grant behavior.
     /// </summary>
     [DisallowMultipleComponent]
-    public sealed class OfflineLootService : MonoBehaviour, IWorldLootContainerHost
+    public sealed class OfflineLootService : MonoBehaviour, IWorldLootContainerHost, ICorpseDeathCustodian
     {
+        private readonly HashSet<int> _committedDeaths = new HashSet<int>();
         private const float PollSeconds = 0.25f;
         private static OfflineLootService _instance;
 
@@ -68,17 +69,68 @@ namespace Emberdelve.Net
             {
                 if (GameServices.TryGet<IWorldLootContainerHost>(out var other) && !ReferenceEquals(other, this)) return;
                 GameServices.Register<IWorldLootContainerHost>(this);
+                GameServices.Register<ICorpseDeathCustodian>(this);
                 _registered = true;
             }
         }
 
         private void Detach()
         {
-            if (_registered) GameServices.Unregister<IWorldLootContainerHost>(this);
+            if (_registered)
+            {
+                GameServices.Unregister<IWorldLootContainerHost>(this);
+                GameServices.Unregister<ICorpseDeathCustodian>(this);
+            }
             _registered = false;
             _presenter = null;
             _rig = null;
             _containers.Clear();
+            _committedDeaths.Clear();
+        }
+
+        /// <summary>
+        /// A bot that dies offline leaves its whole loadout (equipment and bag) in a corpse container, searched in
+        /// the same player-style window as a networked corpse. The source is emptied only after the container has
+        /// been validated and can no longer fail to publish.
+        /// </summary>
+        public bool TryCommitDeath(int playerId, Vector3 position, Inventory bag, Equipment equipment, out string reason)
+        {
+            if (_presenter == null || playerId < 0 || bag == null || equipment == null || !equipment.IsPairedWith(bag))
+            {
+                reason = "offline corpse custody needs a ready loot window and a paired loadout";
+                return false;
+            }
+            if (!_committedDeaths.Add(playerId)) { reason = null; return true; }
+            if (!CorpseLootManifest.TryCapture(playerId, position, bag, equipment, out CorpseLootManifest manifest, out reason) ||
+                !CorpseContainerModel.TryCreate(manifest, out CorpseContainerModel model, out reason))
+            {
+                _committedDeaths.Remove(playerId);
+                return false;
+            }
+            LoadoutSnapshot captured = manifest.CopyLoadout();
+            bool hasItems = captured.bag.entries.Length > 0 || captured.equipment.entries.Length > 0;
+            if (hasItems && !CorpseContainerWire.TryCreate(_nextId, model, out _, out reason))
+            {
+                _committedDeaths.Remove(playerId);
+                return false;
+            }
+            LoadoutSnapshot empty = captured.Clone();
+            empty.bag.entries = System.Array.Empty<ContainerEntry>();
+            empty.equipment.entries = System.Array.Empty<ContainerEntry>();
+            empty.weaponSet = 0;
+            empty.belt = new string[HotbarBindings.SlotCount];
+            for (int i = 0; i < empty.belt.Length; i++) empty.belt[i] = "";
+            empty.Seal();
+            if (!manifest.StillMatches(bag, equipment) || !LoadoutSnapshot.TryRestore(empty, bag, equipment, null, out reason))
+            {
+                _committedDeaths.Remove(playerId);
+                if (string.IsNullOrEmpty(reason)) reason = "source loadout changed before death custody commit";
+                return false;
+            }
+            if (hasItems && !TryPublishLoot(model, out _, out reason))
+                Debug.LogError("[Emberdelve][OfflineLoot] corpse for player " + playerId + " could not be published after the loadout was emptied: " + reason);
+            reason = null;
+            return true;
         }
 
         private void OnDestroy()
@@ -90,7 +142,7 @@ namespace Emberdelve.Net
         public bool TryPublishLoot(CorpseContainerModel model, out ulong id, out string reason)
         {
             id = 0;
-            if (_presenter == null || model == null || model.EntryCount <= 0)
+            if (_presenter == null || model == null)
             {
                 reason = "Loot window is unavailable";
                 return false;
@@ -98,8 +150,11 @@ namespace Emberdelve.Net
             if (!CorpseContainerWire.TryCreate(_nextId, model, out _, out reason)) return false;
             id = _nextId++;
             _containers.Add(id, model);
-            // A chest is its own world object; only a dead enemy needs a searchable body.
-            if (model.Kind != "chest") _presenter.OnPresence(id, model.WorldPosition, model.Revision, false);
+            // A chest is its own world object; a dead enemy or bot is searched on its own body.
+            if (model.Kind != "chest")
+            {
+                _presenter.OnBodyPresence(id, model.WorldPosition, model.Revision, false);
+            }
             reason = null;
             return true;
         }
@@ -163,12 +218,8 @@ namespace Emberdelve.Net
                 foreach (ChestInteractable chest in FindObjectsByType<ChestInteractable>(FindObjectsSortMode.None))
                     if (ReferenceEquals(chest.LootContainer, model)) chest.NotifyLootChanged();
 
-            if (model.EntryCount == 0)
-            {
-                _containers.Remove(request.CorpseId);
-                presenter.OnPresence(request.CorpseId, model.WorldPosition, model.Revision, true);
-            }
-            else if (CorpseContainerWire.TryCreate(request.CorpseId, model, out CorpseContainerWire wire, out _))
+            // A searched-out body and an emptied chest stay in the world; they simply open an empty window.
+            if (CorpseContainerWire.TryCreate(request.CorpseId, model, out CorpseContainerWire wire, out _))
             {
                 presenter.OnCorpseState(wire);
             }

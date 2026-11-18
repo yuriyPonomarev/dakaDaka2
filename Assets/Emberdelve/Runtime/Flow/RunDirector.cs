@@ -1179,7 +1179,10 @@ namespace Emberdelve.Flow
         private void HandlePlayerDeath(PlayerSession session)
         {
             if (session == null || !session.IsRunning) return;
-            if (NetRole.IsNetworked)
+            // Offline bots leave a searchable corpse when a loot window is running; the local player's raid just ends.
+            bool offlineBotCorpse = NetRole.IsOffline && !session.IsLocal &&
+                GameServices.TryGet<ICorpseDeathCustodian>(out _);
+            if (NetRole.IsNetworked || offlineBotCorpse)
             {
                 session.DeathCustodyPending = true;
                 session.NextDeathCustodyAttemptAt = 0f;
@@ -1665,11 +1668,12 @@ namespace Emberdelve.Flow
                 return;
             }
 
-            if (drops.Count > 0 && GameServices.TryGet<IWorldLootContainerHost>(out var containers))
+            // Every body is searchable; a body that dropped nothing opens an empty loot window.
+            if (GameServices.TryGet<IWorldLootContainerHost>(out var containers))
             {
                 if (CorpseContainerModel.TryCreateLoot("enemy", enemy.displayName, position + Vector3.up * 0.35f,
                         drops, catalog, out var container, out reason) && containers.TryPublishLoot(container, out _, out reason)) return;
-                Debug.LogWarning("[Emberdelve][EnemyDrop] Container unavailable; preserving loot as pickups: " + reason);
+                if (drops.Count > 0) Debug.LogWarning("[Emberdelve][EnemyDrop] Container unavailable; preserving loot as pickups: " + reason);
             }
 
             DeterministicRng scatter = Session.ScatterRng(dropKey);

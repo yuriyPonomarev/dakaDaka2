@@ -486,8 +486,8 @@ namespace Emberdelve.AI
             if (_lastAggressorId != 0 && CombatRegistry.TryGet(_lastAggressorId, out ICombatEntity last) && last is IPlayerOwned owner) killer = owner.PlayerId;
             GameEvents.RaiseToast(killer, $"{(data != null ? data.displayName : "Enemy")} slain");
 
+            // The body stays on the floor for the rest of the raid; it is searchable when it dropped loot.
             DropLoot();
-            Destroy(gameObject, 6f);
         }
 
         /// <summary>
