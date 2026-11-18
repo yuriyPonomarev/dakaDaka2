@@ -321,6 +321,51 @@ namespace Emberdelve.Items
             return true;
         }
 
+        /// <summary>
+        /// Adds one item (a whole stack or one gear instance, exactly as a bag snapshot holds it) to a loot container
+        /// (chest or enemy body). The first free origin that fits is used. Dead players' loadouts are never added to.
+        /// The caller removes the item from its source only after this succeeds, and calls <see cref="TryRemoveEntry"/>
+        /// to undo it if that removal is then refused.
+        /// </summary>
+        public bool TryAddFromBag(ItemSnapshot item, ItemCatalog catalog, out ulong entryId, out string reason)
+        {
+            entryId = 0;
+            if (_busy) { reason = "container contents are already being changed"; return false; }
+            if (Kind != "chest" && Kind != "enemy") { reason = "items can only be put into chests and bodies"; return false; }
+            if (item == null || item.quantity <= 0 || catalog == null) { reason = "nothing to put here"; return false; }
+            if (_entries.Count >= ContainerSnapshot.MaxEntries) { reason = "this container is full"; return false; }
+            if (_nextEntryId == 0 || Revision == ulong.MaxValue) { reason = "container revision space is exhausted"; return false; }
+            if (!catalog.TryResolveItem(item.itemId, out ItemData definition, out reason)) return false;
+            if (!string.IsNullOrEmpty(item.uid))
+                for (int i = 0; i < _entries.Count; i++)
+                    if (string.Equals(_entries[i].Item.uid, item.uid, StringComparison.Ordinal))
+                    { reason = "that item is already in this container"; return false; }
+
+            var rows = new ContainerEntry[_entries.Count];
+            for (int i = 0; i < rows.Length; i++)
+                rows[i] = new ContainerEntry { slot = _entries[i].Slot, x = _entries[i].X, y = _entries[i].Y, item = _entries[i].Item };
+            var packed = new ContainerSnapshot { width = 10, height = 64, entries = rows };
+            if (!TryFindFreeOrigin(packed, catalog, definition, out Vector2Int origin, out reason)) return false;
+
+            var entry = new Entry { Id = _nextEntryId++, Item = item.Clone(), Slot = string.Empty, X = origin.x, Y = origin.y };
+            _entries.Add(entry);
+            Height = Math.Max(Height, origin.y + definition.EffectiveFootprint.y);
+            Revision++;
+            entryId = entry.Id;
+            reason = null;
+            return true;
+        }
+
+        /// <summary>Undoes a <see cref="TryAddFromBag"/> whose source removal was refused.</summary>
+        public bool TryRemoveEntry(ulong entryId)
+        {
+            int index = IndexOf(entryId);
+            if (index < 0) return false;
+            _entries.RemoveAt(index);
+            Revision++;
+            return true;
+        }
+
         private int IndexOf(ulong entryId)
         {
             for (int i = 0; i < _entries.Count; i++)

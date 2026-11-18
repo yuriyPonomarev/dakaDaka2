@@ -122,6 +122,13 @@ namespace Emberdelve.Net
             return true;
         }
 
+        /// <summary>Puts one bag item into the open chest/body. Only offline play has this; networked containers are take-only for now.</summary>
+        public bool RequestPut(ulong corpseId, Vector2Int bagOrigin, string itemId, out string reason)
+        {
+            if (_offline == null) { reason = "Putting items into a container is only available offline"; return false; }
+            return _offline.PutFromBag(this, _rig, corpseId, bagOrigin, itemId, out reason);
+        }
+
         public bool RequestTransfer(Rules.CorpseTransferUiRequest request, System.Func<uint, bool> beforeSend,
             out uint sequence)
         {

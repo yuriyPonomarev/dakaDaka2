@@ -226,6 +226,45 @@ namespace Emberdelve.Net
             return true;
         }
 
+        /// <summary>Moves one bag stack or gear instance into an open chest/body. The bag is restored from a snapshot without that entry and the container is undone if that is refused, so nothing is created, lost or duplicated.</summary>
+        internal bool PutFromBag(CorpseLootWorldPresenter presenter, PlayerRig rig, ulong id, Vector2Int origin,
+            string itemId, out string reason)
+        {
+            if (!_containers.TryGetValue(id, out CorpseContainerModel model)) { reason = "Container is unavailable"; return false; }
+            if (!Validate(rig, model, out reason)) return false;
+            Inventory bag = rig.Inventory;
+            if (bag == null || bag.Catalog == null) { reason = "Your bag is unavailable"; return false; }
+
+            ContainerSnapshot snapshot = bag.ToContainerSnapshot().Clone();
+            int index = -1;
+            for (int i = 0; i < snapshot.entries.Length; i++)
+            {
+                ContainerEntry e = snapshot.entries[i];
+                if (e != null && e.item != null && e.x == origin.x && e.y == origin.y && e.item.itemId == itemId) { index = i; break; }
+            }
+            if (index < 0) { reason = "That item is no longer in your bag"; return false; }
+
+            ItemSnapshot moved = snapshot.entries[index].item.Clone();
+            if (!model.TryAddFromBag(moved, bag.Catalog, out ulong entryId, out reason)) return false;
+
+            var remaining = new List<ContainerEntry>(snapshot.entries);
+            remaining.RemoveAt(index);
+            snapshot.entries = remaining.ToArray();
+            snapshot.Seal();
+            if (!bag.TryRestore(snapshot, out reason))
+            {
+                model.TryRemoveEntry(entryId);
+                return false;
+            }
+
+            if (model.Kind == "chest")
+                foreach (ChestInteractable chest in FindObjectsByType<ChestInteractable>(FindObjectsSortMode.None))
+                    if (ReferenceEquals(chest.LootContainer, model)) chest.NotifyLootChanged();
+            if (CorpseContainerWire.TryCreate(id, model, out CorpseContainerWire wire, out _)) presenter.OnCorpseState(wire);
+            reason = null;
+            return true;
+        }
+
         private bool Validate(PlayerRig rig, CorpseContainerModel model, out string reason)
         {
             if (rig == null || model == null) { reason = "Player or loot is unavailable"; return false; }

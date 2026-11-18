@@ -340,6 +340,104 @@ namespace Emberdelve.UI
         private Vector2 _dragStart;
         public void CancelCarry() => CancelSelection();
 
+        /// <summary>Set by the loot window while it is open: its screen rectangle and the handler that puts a carried bag item into it (returns null on success, else the reason).</summary>
+        public RectTransform LootPanelRect { get; set; }
+        public Func<InventorySlot, string> LootPutHandler { get; set; }
+
+        // A worn item picked up with the left button: it stays worn until it is dropped somewhere, so this is a pure drag.
+        private EquipmentSlot _equipDragSlot = EquipmentSlot.None;
+        private bool _equipDragSticky;
+
+        private bool OverLootPanel(Vector2 screen) =>
+            LootPanelRect != null && LootPanelRect.gameObject.activeInHierarchy &&
+            RectTransformUtility.RectangleContainsScreenPoint(LootPanelRect, screen, CanvasCamera);
+
+        /// <summary>True when the pointer is over neither the bag panel nor the loot window: letting go of a carried item here lays it on the ground.</summary>
+        private bool OutsidePanels(Vector2 screen) =>
+            _panel != null && !RectTransformUtility.RectangleContainsScreenPoint(_panel, screen, CanvasCamera) && !OverLootPanel(screen);
+
+        private void EndEquipDrag()
+        {
+            _equipDragSlot = EquipmentSlot.None;
+            _equipDragSticky = false;
+            if (_carryGhost != null && !HasSelection) { _carryGhost.enabled = false; _carryGhost.gameObject.SetActive(false); }
+        }
+
+        private void BeginEquipDrag(EquipmentSlot slot, Vector2 screen)
+        {
+            ItemData worn = _equipment != null ? _equipment.Equipped(slot) : null;
+            if (worn == null || _carryGhost == null) return;
+            _equipDragSlot = slot;
+            _equipDragSticky = false;
+            _dragStart = screen;
+            Vector2Int shape = worn.EffectiveFootprint;
+            Color ghostColor = worn.iconColor;
+            ghostColor.a = 0.62f;
+            _carryGhost.gameObject.SetActive(true);
+            _carryGhost.enabled = true;
+            _carryGhost.color = ghostColor;
+            _carryGhost.rectTransform.sizeDelta = new Vector2(shape.x * CellSize + (shape.x - 1) * CellGap,
+                shape.y * CellSize + (shape.y - 1) * CellGap);
+        }
+
+        private void FinishEquipDrag(Vector2 screen)
+        {
+            EquipmentSlot slot = _equipDragSlot;
+            EndEquipDrag();
+            ItemInstance worn = _equipment != null ? _equipment.EquippedInstance(slot) : null;
+            if (worn == null) return;
+
+            if (TryEquipSlotAt(screen, out _)) return; // dropped back onto a worn slot: nothing moves
+
+            if (OutsidePanels(screen))
+            {
+                if (!SubmitInventoryCommand(InventoryCommandKind.Drop, default, default, Vector2Int.zero, slot, worn.Uid,
+                        Guid.Empty, out string dropReason)) GameEvents.RaiseToast(ToastOwner, dropReason);
+                RefreshAfterRefusal();
+                return;
+            }
+
+            bool overLoot = OverLootPanel(screen);
+            bool overCell = TryCellAt(screen, out Vector2Int cell);
+            if (!overLoot && !overCell) return;
+
+            if (!SubmitInventoryCommand(InventoryCommandKind.Unequip, default, default, Vector2Int.zero, slot, worn.Uid,
+                    Guid.Empty, out string reason))
+            {
+                GameEvents.RaiseToast(ToastOwner, reason);
+                RefreshAfterRefusal();
+                return;
+            }
+            SelectReturnedStack(worn.Uid);
+            if (overLoot) PutSelectedIntoLoot();
+            else ClickCell(cell);
+            if (HasSelection) ClearSelection(); // the item is safely in the bag, wherever it landed
+            Rebuild();
+        }
+
+        /// <summary>Lays the carried bag stack on the ground (the same Drop command as Q), or a single unit with Ctrl.</summary>
+        private void DropSelected()
+        {
+            if (!TryResolveSelection(out int index)) { CancelSelection(); return; }
+            InventorySlot source = _inventory.Slots[index];
+            InventoryCommandKind kind = source.Instance != null ? InventoryCommandKind.Drop
+                : (Keyboard.current != null && Keyboard.current.ctrlKey.isPressed ? InventoryCommandKind.DropOne : InventoryCommandKind.DropStack);
+            if (!SubmitInventoryCommand(kind, source, default, Vector2Int.zero, EquipmentSlot.None, Guid.Empty, Guid.Empty, out string reason))
+                GameEvents.RaiseToast(ToastOwner, reason);
+            ClearSelection();
+            Rebuild();
+        }
+
+        private void PutSelectedIntoLoot()
+        {
+            if (LootPutHandler == null) return;
+            if (!TryResolveSelection(out int index)) { CancelSelection(); return; }
+            string reason = LootPutHandler(_inventory.Slots[index]);
+            if (reason != null) GameEvents.RaiseToast(ToastOwner, reason);
+            ClearSelection();
+            Rebuild();
+        }
+
         public void HandlePointer()
         {
             if (!IsOpen) return;
@@ -403,9 +501,30 @@ namespace Emberdelve.UI
             // selection is re-resolved before anything is done with it.
             ValidateSelection();
 
+            if (_equipDragSlot != EquipmentSlot.None)
+            {
+                // A worn item is being dragged: the left button drops it (on release after a drag, or on the next click), the right button or Esc cancels.
+                if (mouse.rightButton.wasPressedThisFrame) EndEquipDrag();
+                else if (mouse.leftButton.wasPressedThisFrame && _equipDragSticky) FinishEquipDrag(screen);
+                else if (mouse.leftButton.wasReleasedThisFrame)
+                {
+                    if ((screen - _dragStart).sqrMagnitude > 36f) FinishEquipDrag(screen);
+                    else _equipDragSticky = true;
+                }
+                HandleHotbarKeys(screen);
+                HandleDropKey(screen);
+                return;
+            }
+
             if (mouse.leftButton.wasPressedThisFrame)
             {
                 bool wasCarrying = HasSelection;
+                if (!wasCarrying && !_showCharacter && TryEquipSlotAt(screen, out EquipmentSlot pickedSlot) &&
+                    _equipment != null && _equipment.Equipped(pickedSlot) != null)
+                {
+                    BeginEquipDrag(pickedSlot, screen);
+                    return;
+                }
                 HandleClick(screen, false);
                 _dragArmed = !wasCarrying && HasSelection;
                 _dragStart = screen;
@@ -534,7 +653,7 @@ namespace Emberdelve.UI
 
             // The ghost names a stack in the grid. The character tab switches the grid - and with it the
             // ghost - off, so a selection that survived the tab switch must not bring it back over the pane.
-            bool carrying = HasSelection && !_showCharacter;
+            bool carrying = (HasSelection || _equipDragSlot != EquipmentSlot.None) && !_showCharacter;
             _carryGhost.gameObject.SetActive(carrying);
             if (!carrying) return;
 
@@ -557,6 +676,13 @@ namespace Emberdelve.UI
             {
                 ClickCell(cell);
                 return;
+            }
+
+            // A carried bag item released over the loot window goes into it; released outside every panel it is laid on the ground.
+            if (HasSelection && !_showCharacter)
+            {
+                if (OverLootPanel(screen)) { PutSelectedIntoLoot(); return; }
+                if (OutsidePanels(screen)) { DropSelected(); return; }
             }
 
             // A click on the panel, on a gap between cells or outside the screen is a no-op. It does not
@@ -749,10 +875,10 @@ namespace Emberdelve.UI
                 }
 
                 Guid returnedUid = worn.Uid;
+                // Right click is the quick move: the item goes straight to the bag and nothing is left in the hand.
                 if (SubmitInventoryCommand(InventoryCommandKind.Unequip, default, default, Vector2Int.zero,
                         slot, returnedUid, Guid.Empty, out string reason))
                 {
-                    SelectReturnedStack(returnedUid);
                     Rebuild();
                 }
                 else
@@ -1205,6 +1331,8 @@ namespace Emberdelve.UI
 
         private void ClearSelection()
         {
+            _equipDragSlot = EquipmentSlot.None;
+            _equipDragSticky = false;
             CancelSplit();
             _model.Clear();
 
@@ -1757,6 +1885,10 @@ namespace Emberdelve.UI
                     // nothing to follow, so it sits over the stack it names instead of at a stale position.
                     if (Mouse.current == null && hasSelectedCenter)
                         _carryGhost.rectTransform.anchoredPosition = selectedCenter;
+                }
+                else if (_equipDragSlot != EquipmentSlot.None && !_showCharacter)
+                {
+                    // A worn item is being dragged: its ghost stays up through a rebuild.
                 }
                 else
                 {

@@ -101,6 +101,7 @@ namespace Emberdelve.Net
             foreach (var screen in Object.FindObjectsByType<InventoryScreenController>(FindObjectsInactive.Include, FindObjectsSortMode.None))
                 if (screen.BoundRig == _rig) { _inventoryScreen = screen; break; }
             _inventoryScreen?.SetLootCompanion(true);
+            if (_inventoryScreen != null) { _inventoryScreen.LootPanelRect = _panel; _inventoryScreen.LootPutHandler = PutIntoContainer; }
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
             GetComponent<NetInputSender>()?.ClearPendingMovement();
@@ -163,7 +164,13 @@ namespace Emberdelve.Net
             if (!IsOpen) return;
             ClearCarry();
             _session.Close();
-            if (_inventoryScreen != null) { _inventoryScreen.Close(false); _inventoryScreen.SetLootCompanion(false); }
+            if (_inventoryScreen != null)
+            {
+                _inventoryScreen.LootPanelRect = null;
+                _inventoryScreen.LootPutHandler = null;
+                _inventoryScreen.Close(false);
+                _inventoryScreen.SetLootCompanion(false);
+            }
             _lastFailure = null;
             _page = 0;
             _stateStartedAt = 0.0;
@@ -218,6 +225,17 @@ namespace Emberdelve.Net
                 _refreshAt = 0.0;
                 RequestState();
             }
+        }
+
+        /// <summary>Called by the bag screen when a carried bag item is released over this window. Returns null on success, otherwise the reason.</summary>
+        private string PutIntoContainer(InventorySlot slot)
+        {
+            if (!IsOpen || _session.Document == null || _presenter == null || slot.Item == null)
+                return "The loot window is not open";
+            if (_session.IsTransferPending || _session.StateRequestSequence != 0) return "Wait for the window to finish updating";
+            if (_session.Document.kind == "player") return "You cannot put items into a fallen adventurer's gear";
+            _lastFailure = null;
+            return _presenter.RequestPut(_session.ActiveCorpseId, slot.Origin, slot.Item.itemId, out string reason) ? null : (reason ?? "Cannot put that here");
         }
 
         private bool RequestState()
@@ -375,6 +393,7 @@ namespace Emberdelve.Net
                     _tip.transform.SetAsLastSibling();
                 }
                 if (_session.IsTransferPending || _session.StateRequestSequence != 0) return;
+                if (_inventoryScreen != null && _inventoryScreen.HasSelection) return; // a bag item is being carried: it must not also pick up a loot row
                 if (Mouse.current.rightButton.wasPressedThisFrame) Take(row.Index, true);
                 else if (Mouse.current.leftButton.wasPressedThisFrame)
                 {
