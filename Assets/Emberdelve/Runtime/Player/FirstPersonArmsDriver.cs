@@ -93,6 +93,8 @@ namespace Emberdelve.Player
         public static readonly Quaternion GripFromRig = Quaternion.Euler(90f, 0f, 0f);
 
         /// <summary>The shield model is shown a little smaller than its world size so that it frames the view instead of filling it.</summary>
+        /// <summary>Sideways shift of a held weapon in the grip so the handle sits in the middle of the palm.</summary>
+        public const float HeldPalmCentre = 0.025f;
         public const float ShieldScale = GuardShieldPose.Scale / ModelScale; // same world size as the authority shape under the scaled arms
         // The kite shield's rear straps sit above its geometric centre.
         public static readonly Vector3 ShieldMountOffset = new Vector3(0f, -0.1415f, 0f);
@@ -300,7 +302,7 @@ namespace Emberdelve.Player
                     _bladeLength = DamageBladeLength(main);
                     WeaponScale = ModelScaleFor(_bladeLength, entry.length);
                     if (_mainHand != null) _mainHand.transform.localScale = Vector3.one * HeldScale;
-                    if (_mainHand != null) _mainHand.transform.localPosition = new Vector3(0f, -GuardHoldShift(main.weaponId) * HeldScale, 0f);
+                    if (_mainHand != null) _mainHand.transform.localPosition = new Vector3(HeldPalmCentre, -GuardHoldShift(main.weaponId) * HeldScale, 0f);
                     if (_mainHand != null && main.CanBlock) _guardDirectionMarker = CreateGuardDirectionMarker(_mainHand.transform);
                 }
             }
@@ -515,6 +517,7 @@ namespace Emberdelve.Player
             delta.y = 0f;
             float measured = Mathf.Min(12f, delta.magnitude / dt); // a teleport / respawn is not a sprint
             _speed = Mathf.Lerp(_speed, measured, 1f - Mathf.Exp(-12f * dt));
+            animator.speed = 0f; // the base pose is frozen: no clip motion at all, the only idle motion is the slow procedural breathing below
             animator.SetFloat(SpeedParameter, 0f); // the base pose stays the calm idle: walking is the procedural bob below
             animator.SetFloat(WalkPlaybackParameter, Mathf.Clamp(_speed / WalkReferenceSpeed, 0.6f, 1.8f));
         }
@@ -543,7 +546,8 @@ namespace Emberdelve.Player
             float walk = Mathf.Clamp01(_speed / WalkReferenceSpeed);
             _bobPhase += dt * (4.5f + 5f * walk);
             Vector3 bob = new Vector3(Mathf.Sin(_bobPhase * 0.5f) * 0.012f, -Mathf.Abs(Mathf.Sin(_bobPhase * 0.5f)) * 0.014f, 0f) * walk;
-            bob += new Vector3(0f, Mathf.Sin(Time.time * 1.4f) * 0.003f, 0f);
+            float breath = Mathf.Sin(Time.time * 1.7f);
+            bob += new Vector3(0f, breath * 0.005f, breath * 0.003f); // light breathing, the whole idle
             bob += new Vector3(0f, _push * 0.25f, -_push);
 
             float decay = Mathf.Exp(-9f * dt);
