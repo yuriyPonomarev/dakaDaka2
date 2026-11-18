@@ -76,6 +76,8 @@ namespace Emberdelve.Player
 
         public static readonly Vector3 ShieldRest = new Vector3(-0.40f, -0.30f, 0.50f);
         public static readonly Vector3 ShieldRaised = new Vector3(-0.14f, -0.10f, 0.40f);
+        /// <summary>How the left fist sits on the shield strap, relative to the shield (tuned in the game view).</summary>
+        public static readonly Quaternion ShieldGripLocal = Quaternion.Euler(0f, 0f, 90f);
         public static readonly Vector3 ShieldRestEuler = new Vector3(0f, 14f, 0f);
         public static readonly Vector3 ShieldRaisedEuler = new Vector3(-6f, 4f, 0f);
 
@@ -752,14 +754,14 @@ namespace Emberdelve.Player
                 _offHand.transform.localPosition = new Vector3(0f, GuardShieldPose.Mount.y / modelScale, 0f);
                 Vector3 shieldPosition = Vector3.Lerp(ShieldRest, ShieldRaised, guardBlend) + offsetLeft;
                 Quaternion shieldRotation = Quaternion.Euler(Vector3.Lerp(ShieldRestEuler, ShieldRaisedEuler, guardBlend));
-                SolveArmWithWrist(_upperL, _lowerL, _handL, gripLeft, frame.TransformPoint(ClampToView(camera, shieldPosition)), frame.rotation * shieldRotation, frame.rotation * LeftPole);
+                SolveArmWithWrist(_upperL, _lowerL, _handL, gripLeft, frame.TransformPoint(ClampToView(camera, shieldPosition)), frame.rotation * shieldRotation * ShieldGripLocal, frame.rotation * LeftPole);
                 if (_blockHeld)
                 {
                     GuardShieldShape shield = GuardShieldPose.Resolve(frame.position, frame.rotation);
                     // Raised defense follows the physical surface immediately; cosmetic bob/clamping
                     // must not make the shield appear somewhere the server cannot block.
                     SolveArmWithWrist(_upperL, _lowerL, _handL, gripLeft,
-                        frame.TransformPoint(GuardShieldPose.Grip), shield.Rotation, frame.rotation * LeftPole);
+                        frame.TransformPoint(GuardShieldPose.Grip), shield.Rotation * ShieldGripLocal, frame.rotation * LeftPole);
                     GuardShieldPose.ApplyModel(_offHand.transform, shield);
                 }
             }
