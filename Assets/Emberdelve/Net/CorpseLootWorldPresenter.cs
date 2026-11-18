@@ -15,6 +15,7 @@ namespace Emberdelve.Net
         private readonly Rules.CorpsePresenceStateTable _states = new Rules.CorpsePresenceStateTable();
         private NetInventoryClient _client;
         private NetPlayerRig _hostOwner;
+        private OfflineLootService _offline;
         private CorpseContainerScreenController _containerUi;
         private PlayerRig _rig;
         private float _interactionReach = 3f;
@@ -49,6 +50,19 @@ namespace Emberdelve.Net
             EnsureContainerUi();
         }
 
+        /// <summary>Offline play has no server: a local loot service answers the same state/transfer requests.</summary>
+        public void ConfigureOffline(OfflineLootService service, PlayerRig rig, float interactionReach)
+        {
+            if (_client != null) _client.CorpsePresenceReceived -= OnPresence;
+            _client = null;
+            _hostOwner = null;
+            _offline = service;
+            _rig = rig;
+            _interactionReach = !float.IsNaN(interactionReach) && !float.IsInfinity(interactionReach) && interactionReach > 0f
+                ? interactionReach : 3f;
+            EnsureContainerUi();
+        }
+
         public bool IsContainerUiOpen => _containerUi != null && _containerUi.IsOpen;
         public bool IsContainerUiOpenFor(ulong corpseId) => _containerUi != null && _containerUi.IsOpenFor(corpseId);
 
@@ -62,6 +76,11 @@ namespace Emberdelve.Net
 
         public bool CanInteract(IInteractionActor actor, out string reason)
         {
+            if (_offline != null)
+            {
+                if (actor == null || !ReferenceEquals(actor, _rig)) { reason = "Not your loot"; return false; }
+                return InteractionRules.Validate(actor, this, _interactionReach, out reason);
+            }
             bool isClientOwner = _client != null && _client.IsOwnerReady;
             bool isHostOwner = _hostOwner != null && _hostOwner.IsServer && _hostOwner.IsOwner &&
                                _hostOwner.Role == NetPlayerRole.HostPlayer && _hostOwner.IsSpawned &&
@@ -85,6 +104,7 @@ namespace Emberdelve.Net
         {
             sequence = 0;
             if (corpseId == 0) return false;
+            if (_offline != null) return _offline.RequestState(this, _rig, corpseId, beforeSend, out sequence);
             if (_client != null) return _client.RequestCorpseState(corpseId, beforeSend, out sequence);
             if (_hostOwner == null || !_hostOwner.IsServer || !_hostOwner.IsOwner || !_hostOwner.IsSpawned ||
                 _nextHostSequence == 0 || _nextHostSequence > Rules.CorpseRequestSequenceGate.MaximumSequence) return false;
@@ -106,6 +126,7 @@ namespace Emberdelve.Net
         {
             sequence = 0;
             if (request.CorpseId == 0 || request.EntryId == 0 || request.Amount <= 0) return false;
+            if (_offline != null) return _offline.RequestTransfer(this, _rig, request, beforeSend, out sequence);
             if (_client != null)
                 return _client.RequestCorpseTransfer(request.CorpseId, request.EntryId, request.Amount,
                     request.CorpseRevision, request.BagRevision, beforeSend, out sequence, request.DestinationCell);

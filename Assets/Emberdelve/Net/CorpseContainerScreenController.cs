@@ -104,7 +104,7 @@ namespace Emberdelve.Net
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
             GetComponent<NetInputSender>()?.ClearPendingMovement();
-            if (_hostOwner != null)
+            if (_client == null) // host or offline: this process drives the rig, so it pauses its own input
             {
                 _rig.SetInputEnabled(false);
                 _hostInputPaused = true;

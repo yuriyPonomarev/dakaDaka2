@@ -112,6 +112,7 @@ namespace Emberdelve.AI
         // Normal upright collision stays untouched and is restored after the rise.
         public void RefreshDormantHitPose(Animator posedAnimator)
         {
+            if (IsDead) return; // the body's colliders were switched off at death and must stay off
             bool resting = (IsDormant || IsWaking) && !IsDead;
             if (!resting)
             {
@@ -464,7 +465,8 @@ namespace Emberdelve.AI
         private void HandleDeath()
         {
             _brain?.MarkDead();
-            if (_restColliders != null) foreach (var collider in _restColliders) collider.enabled=false;
+            // A corpse is scenery: nothing may block movement, shots or interaction rays while it lies there.
+            foreach (var collider in GetComponentsInChildren<Collider>(true)) collider.enabled = false;
             _swingId = 0;
             _swingLatched = false;
             _status?.ClearStatuses();

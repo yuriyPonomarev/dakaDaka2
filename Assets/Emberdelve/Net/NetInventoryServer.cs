@@ -1124,7 +1124,7 @@ namespace Emberdelve.Net
             return true;
         }
 
-        private static bool TryBuildProfileUidRegistry(Emberdelve.Player.PlayerRig rig,
+        internal static bool TryBuildProfileUidRegistry(Emberdelve.Player.PlayerRig rig,
             out ItemUidRegistry registry, out string reason)
         {
             registry = null;
