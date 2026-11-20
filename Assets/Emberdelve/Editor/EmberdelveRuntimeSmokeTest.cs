@@ -842,6 +842,11 @@ namespace Emberdelve.EditorTools
                     // D1c4: the hit is a swept swing; its damage direction runs from the eye to the contact point, which is somewhere
                     // inside the warned wedge (the telegraph IS the pattern arc), not necessarily along the committed centre line.
                     float wedgeLimit = enemy.TelegraphHalfAngle + 10f;
+                    if (enemy.AttackPattern != null)
+                    {
+                        enemy.AttackPattern.YawRange(out float lowest, out float highest);
+                        wedgeLimit = Mathf.Max(Mathf.Abs(lowest), Mathf.Abs(highest)) + 10f;
+                    }
                     Check(directionError < wedgeLimit,
                         $"the hit arrived inside the warned wedge ({directionError:F1} deg between telegraph centre line and damage direction, limit {wedgeLimit:F0})");
                 }
@@ -1062,8 +1067,12 @@ namespace Emberdelve.EditorTools
                 Vector3 enemyHome = enemy.transform.position;
                 float standoff = Mathf.Min(1.8f, enemy.Data.attackRange * 0.85f);
                 float halfCone = enemy.TelegraphHalfAngle;     // D1c4: half the swing pattern's yaw range, the warned wedge that really sweeps
+                // The wedge is the pattern's own yaw range around the committed direction; a diagonal chop is not symmetric
+                // (the baked Sword_Attack blow runs from about +32 on the attacker's right to -78 on the left).
+                float wedgeMin = -halfCone, wedgeMax = halfCone;
+                if (enemy.AttackPattern != null) enemy.AttackPattern.YawRange(out wedgeMin, out wedgeMax);
 
-                float[] angles = { 45f, -45f, halfCone + 40f };
+                float[] angles = { wedgeMax - 15f, wedgeMin + 15f, wedgeMax + 40f };
                 bool[] expectHit = { true, true, false };
                 int levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
                 Vector3 centerOffset = _rig.CombatCenter - _rig.transform.position;
@@ -1165,7 +1174,7 @@ namespace Emberdelve.EditorTools
 
                 for (int i = 0; i < angles.Length; i++)
                 {
-                    string label = $"off-axis windup {angles[i]:F0} deg ({(expectHit[i] ? "inside" : "outside")} the {halfCone * 2f:F0} deg wedge)";
+                    string label = $"off-axis windup {angles[i]:F0} deg ({(expectHit[i] ? "inside" : "outside")} the {wedgeMin:F0}..{wedgeMax:F0} deg wedge)";
 
                     _rig.transform.position = startSpot;
                     _rig.Health.SetHealth(_rig.MaxHealth);

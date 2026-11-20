@@ -74,7 +74,7 @@ namespace Emberdelve.EditorTools
             new[] { "hollow_claw", "enemy-only weapon, there is no claw model; keeps its current visual" },
         };
 
-        /// <summary>Imported weapon models no WeaponData uses (kept for later weapons; the dagger and hatchet are held by enemies).</summary>
+        /// <summary>Imported weapon models no WeaponData uses (kept for later weapons; the war hammer is the Warrior enemy's weapon).</summary>
         public static readonly string[] Spare = { "ornate_medieval_mace", "ornate_war_hammer" };
 
         public static Spec Find(string id)

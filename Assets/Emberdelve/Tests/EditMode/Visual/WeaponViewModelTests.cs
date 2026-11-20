@@ -343,9 +343,12 @@ namespace Emberdelve.Tests.Visual
             Assert.IsNotNull(weapon, childName);
             MeshFilter[] filters = weapon.GetComponentsInChildren<MeshFilter>(true);
             Assert.Greater(filters.Length, 0);
-            for (int i = 0; i < filters.Length; i++) StringAssert.Contains("/PolyHaven/" + modelId + "/", AssetDatabase.GetAssetPath(filters[i].sharedMesh), childName + " mesh is the Poly Haven " + modelId);
-
             EmberdelveWeaponModels.Spec spec = EmberdelveWeaponModels.Find(modelId);
+            Assert.IsNotNull(spec, modelId);
+            // A Poly Haven model lives in its own folder; an OpenGameArt one (U5B) is the spec's own model file.
+            string expected = string.IsNullOrEmpty(spec.ModelPath) ? "/PolyHaven/" + modelId + "/" : spec.ModelPath;
+            for (int i = 0; i < filters.Length; i++) StringAssert.Contains(expected, AssetDatabase.GetAssetPath(filters[i].sharedMesh), childName + " mesh is the model " + modelId);
+
             float scale = size / spec.Length;
             Assert.AreEqual(scale, weapon.lossyScale.y / hand.root.lossyScale.y, scale * 0.12f, childName + " is scaled to " + size + " m");
         }

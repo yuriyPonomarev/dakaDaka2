@@ -6,7 +6,7 @@ using UnityEngine;
 namespace Emberdelve.Combat.Tests
 {
     /// <summary>
-    /// The shared enemy attack clip (Sword_Regular_A) moves the attacker's hand from his right to his left. The damage sweep of every
+    /// The shared enemy attack clip (Sword_Attack) chops from over the attacker's right shoulder across to his left. The damage sweep of every
     /// enemy that plays it must run the same way, or the telegraphed blow and the real hit disagree.
     /// </summary>
     public sealed class EnemySwingDirectionTests
@@ -21,6 +21,7 @@ namespace Emberdelve.Combat.Tests
             SwingKey first = pattern.keys[0];
             SwingKey last = pattern.keys[pattern.keys.Length - 1];
             Assert.That(first.basePos.x, Is.GreaterThan(last.basePos.x), "the hand travels right to left");
+            Assert.That(first.basePos.y, Is.GreaterThan(last.basePos.y), "the chop comes down");
             Assert.That(first.bladeYaw, Is.GreaterThan(last.bladeYaw), "the blade yaw turns right to left");
         }
     }

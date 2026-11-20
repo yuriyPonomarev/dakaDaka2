@@ -19,10 +19,22 @@ namespace Emberdelve.AI
             Elapsed = Mathf.Clamp(elapsed, 0f, Duration);
         }
 
-        // Sword_Regular_A: hand goes from backswing to extension at frames 5..9 of 13.
-        // The authored controller blends out at 0.9; leave that final blend to locomotion.
-        public const float SweepStart = 5f / 13f;
-        public const float SweepEnd = 9f / 13f;
+        // Sword_Attack (the sword-clip enemies' attack): the weapon is raised over the right shoulder until 0.20, then chopped down
+        // across the body (the hand passes the chest in front at 0.27). The sweep window is the part where the weapon is out to the
+        // attacker's right, in front, then out to the left: before it the blade is still over the head, after it it follows through
+        // low. The enemy damage sweep is baked from this same window (EmberdelveEnemyVisualFactory.TryBakeSwing), so the blow and the
+        // hit are one motion. The authored controller blends out at 0.9; leave that final blend to locomotion.
+        public const float SweepStart = 0.2625f;
+        public const float SweepEnd = 0.30f;
+
+        /// <summary>Sword_Attack: the weapon stops raised over the right shoulder here; the chop starts after it.</summary>
+        public const float RaiseEnd = 0.20f;
+
+        /// <summary>
+        /// Seconds the anticipation keeps for the start of the chop (RaiseEnd..SweepStart of the 1.53 s clip at the sweep window's pace,
+        /// x1.5): the long telegraph stretches the raise and the hold over the shoulder, never the blow itself.
+        /// </summary>
+        public const float ChopLeadSeconds = 0.14f;
         public const float RecoveryEnd = 0.89f;
         public const float ClubAimYaw = 45f;
         public const float ClubSweepStart = 0.83f;
@@ -50,7 +62,15 @@ namespace Emberdelve.AI
             float end = club ? ClubSweepEnd : SweepEnd;
             switch (Phase)
             {
-                case 1: return Mathf.Lerp(0f, start, fraction);
+                case 1:
+                {
+                    if (club) return Mathf.Lerp(0f, start, fraction);
+                    float lead = Mathf.Clamp(ChopLeadSeconds / Duration, 0f, 0.5f);
+                    float split = 1f - lead;
+                    return fraction < split
+                        ? Mathf.Lerp(0f, RaiseEnd, fraction / Mathf.Max(1e-4f, split))
+                        : Mathf.Lerp(RaiseEnd, start, (fraction - split) / Mathf.Max(1e-4f, lead));
+                }
                 case 2: return Mathf.Lerp(start, end, fraction);
                 case 3: return Mathf.Lerp(end, club ? ClubRecoveryEnd : RecoveryEnd, fraction);
                 case 4: return Mathf.Lerp(RecoilStart, 0f, fraction);

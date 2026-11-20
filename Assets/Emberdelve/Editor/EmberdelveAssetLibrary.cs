@@ -1981,8 +1981,12 @@ namespace Emberdelve.EditorTools
         /// </summary>
         private static void ApplyEnemySwings()
         {
-            ClawSlash = AuthorEnemyPattern("Pattern_ClawSlash", "claw_slash", Claw, Servitor, 0.60f, 0.18f, -0.20f, 0.40f);
-            MaulSweep = AuthorEnemyPattern("Pattern_MaulSweep", "maul_sweep", ClawElite, Warden, 0.70f, 0.22f, -0.10f, 0.50f);
+            // The sweep is the visible weapon: baked from the enemy's own attack clip, weapon and grip (the Servitor's Minion / Rogue
+            // blade, the Warden's elite-scaled Warrior hammer). Without the art (a stripped checkout) the old authored arcs stay.
+            ClawSlash = BakeEnemyPattern("Pattern_ClawSlash", "claw_slash", Claw, Servitor, "Minion", 1f, 0.16f, 0.40f)
+                ?? AuthorEnemyPattern("Pattern_ClawSlash", "claw_slash", Claw, Servitor, 0.60f, 0.18f, -0.20f, 0.40f);
+            MaulSweep = BakeEnemyPattern("Pattern_MaulSweep", "maul_sweep", ClawElite, Warden, "Warrior", EmberdelveEnemyVisualFactory.EliteScale, 0.20f, 0.50f)
+                ?? AuthorEnemyPattern("Pattern_MaulSweep", "maul_sweep", ClawElite, Warden, 0.70f, 0.22f, -0.10f, 0.50f);
 
             AssignPatterns(Claw, ClawSlash);
             AssignPatterns(ClawElite, MaulSweep);
@@ -2006,6 +2010,62 @@ namespace Emberdelve.EditorTools
         /// around the eye (the pattern's reachInset is that radius, so the tip reaches exactly the weapon's reach) at height
         /// <paramref name="handY"/> below the eye, and the blade points along the arm, from -cone/2 to +cone/2 of the committed direction.
         /// </summary>
+        /// <summary>
+        /// One enemy pattern baked from what the enemy shows (<see cref="EmberdelveEnemyVisualFactory.TryBakeSwing"/>): thirteen keys of the
+        /// held weapon's grip and direction through the attack clip's sweep window. The weapon's reach becomes the farthest tip distance
+        /// and its hit sphere the sweep radius, so the segment length (effective reach - sweep radius - inset) is the weapon's own length;
+        /// the telegraph cone becomes the pattern's yaw range (the warned wedge and the sweep stay one source). Null without the art.
+        /// </summary>
+        private static SwingPatternData BakeEnemyPattern(string assetName, string patternId, WeaponData weapon, EnemyData enemy,
+            string variant, float scale, float sweepRadius, float recovery)
+        {
+            if (weapon == null || enemy == null) return null;
+            if (!EmberdelveEnemyVisualFactory.TryBakeSwing(variant, scale, 13, out SwingKey[] keys, out float reach, out float length,
+                out SwingKey rest, out float activeSeconds)) return null;
+
+            float reachValue = Mathf.Round(reach * 1000f) / 1000f;
+            if (!Mathf.Approximately(weapon.reach, reachValue) || !Mathf.Approximately(weapon.hitSphereRadius, sweepRadius))
+            {
+                weapon.reach = reachValue;
+                weapon.hitSphereRadius = sweepRadius;
+                EditorUtility.SetDirty(weapon);
+            }
+
+            SwingPatternData p = AuthorPattern(assetName, patternId, SwingKind.HorizontalRightToLeft, weapon,
+                1f, reachValue - length, sweepRadius, 0.020f, 2, 1f, keys);
+            if (p == null) return null;
+
+            p.restBase = rest.basePos;
+            p.restYaw = rest.bladeYaw;
+            p.restPitch = rest.bladePitch;
+            p.restRoll = 0f;
+            SetPatternTiming(p, EnemySwingWindup, activeSeconds, recovery);
+            p.wallRecoilTime = 0.30f;
+            EditorUtility.SetDirty(p);
+
+            // The brain starts the blow from where the weapon really reaches (the body it hits is about a capsule radius nearer).
+            float range = Mathf.Round((reachValue + 0.05f) * 20f) / 20f;
+            if (!Mathf.Approximately(enemy.attackRange, range))
+            {
+                enemy.attackRange = range;
+                EditorUtility.SetDirty(enemy);
+            }
+
+            p.YawRange(out float minYaw, out float maxYaw);
+            float cone = Mathf.Round((maxYaw - minYaw) * 100f) / 100f;
+            if (!Mathf.Approximately(enemy.attackTelegraphCone, cone))
+            {
+                enemy.attackTelegraphCone = cone;
+                EditorUtility.SetDirty(enemy);
+            }
+
+            var line = new System.Text.StringBuilder();
+            foreach (SwingKey k in keys) line.Append($" [{k.t:F2} yaw {k.bladeYaw:F0} pitch {k.bladePitch:F0} base y {k.basePos.y:F2}]");
+            Debug.Log($"[Emberdelve][EnemySwing] {patternId}: baked from {variant} x{scale:F2}, weapon {length:F2} m, reach {p.EffectiveReach(weapon):F2} m, " +
+                $"active {activeSeconds:F2} s, blade yaw {minYaw:F0}..{maxYaw:F0}:{line}");
+            return p;
+        }
+
         private static SwingPatternData AuthorEnemyPattern(string assetName, string patternId, WeaponData weapon, EnemyData enemy,
             float handRadius, float sweepRadius, float handY, float recovery)
         {
@@ -2022,7 +2082,7 @@ namespace Emberdelve.EditorTools
             SwingKey[] keys = new SwingKey[5];
             for (int i = 0; i < keys.Length; i++)
             {
-                float yaw = half - cone * (i / 4f);   // the shared Sword_Regular_A attack clip moves the hand from the attacker's right to the left
+                float yaw = half - cone * (i / 4f);   // fallback arc without the art: from the attacker's right to the left, like the baked chop
                 float r = yaw * Mathf.Deg2Rad;
                 keys[i] = new SwingKey(i / 4f, new Vector3(handRadius * Mathf.Sin(r), handY, handRadius * Mathf.Cos(r)), yaw, -2f);
             }

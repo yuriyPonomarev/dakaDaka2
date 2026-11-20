@@ -452,6 +452,7 @@ namespace Emberdelve.Net
             float t = 1f - Mathf.Exp(-Ease * Time.deltaTime);
             transform.position = Vector3.Lerp(transform.position, _target, t);
             transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.Euler(0f, _yaw, 0f), t);
+            EnemyDormantPose.BlendShieldArm(_animator, !_dead && !_dormant && !_waking, Time.deltaTime);
             if (_dead)
             {
                 if (Time.unscaledTime - _deathAt >= _deathDuration + 0.25f) Object.Destroy(gameObject);

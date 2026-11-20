@@ -111,6 +111,7 @@ namespace Emberdelve.AI
             float dt = Time.deltaTime;
             if (dt <= 0f) return;
 
+            EnemyDormantPose.BlendShieldArm(animator, !_agent.IsDead && !_agent.IsDormant && !_agent.IsWaking, dt);
             if (_agent.IsDead)
             {
                 EnemyDormantPose.FinishDead(animator, ref _restDriven);

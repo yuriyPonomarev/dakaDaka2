@@ -5,6 +5,19 @@ namespace Emberdelve.AI
     /// <summary>Same authored collapse pose and reverse rise on host and remote view; no gameplay decisions.</summary>
     public static class EnemyDormantPose
     {
+        /// <summary>
+        /// The shield arm layer (layer 1 of a shield bearer's controller: left arm masked to the guard) holds the shield up while the body
+        /// stands; it lets go (weight to 0) while dead, dormant or waking so the collapse and the rise move the whole body. No-op for a
+        /// controller without that layer.
+        /// </summary>
+        public static void BlendShieldArm(Animator animator, bool held, float dt)
+        {
+            if (animator == null || animator.layerCount < 2) return;
+            float weight = animator.GetLayerWeight(1);
+            float target = held ? 1f : 0f;
+            animator.SetLayerWeight(1, Mathf.MoveTowards(weight, target, dt / 0.2f));
+        }
+
         public static bool Apply(Animator animator, bool dormant, bool waking, float elapsed, ref bool driven)
         {
             if (animator == null) return false;

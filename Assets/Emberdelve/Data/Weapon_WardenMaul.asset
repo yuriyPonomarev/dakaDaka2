@@ -22,9 +22,9 @@ MonoBehaviour:
   activeWindow: 0.18
   recoveryTime: 0.5
   cooldown: 2.5
-  reach: 2.5
+  reach: 1.908
   arcAngle: 160
-  hitSphereRadius: 0.7
+  hitSphereRadius: 0.2
   swingPatterns:
   - {fileID: 11400000, guid: e663c4c7b12ebba49a5e4dc8064666a8, type: 2}
   comboSteps: []
@@ -36,10 +36,16 @@ MonoBehaviour:
   heldMoveSpeedPenalty: 0
   impactPower: 30
   impactResist: 15
+  rangedGuardShape: 0
+  impactGuard: 0
+  impactGuardDuration: 0.35
+  impactGuardResistance: 10
+  impactGuardRearmDelay: 0.65
   canRiposte: 0
   riposteWithOffhandShield: 0
   riposteWindow: 1
   riposteDamageMultiplier: 1.5
+  parryBladeRegion: {x: 0, y: 1}
   riposteSwingPatterns: 
   riposteStrikeGap: 0.1
   twoHanded: 0
@@ -55,6 +61,7 @@ MonoBehaviour:
   minChargeDamageScale: 0.45
   magazineSize: 7
   reloadTime: 1.7
+  reloadWhileHeld: 0
   falloffStartRange: 16
   falloffEndRange: 42
   falloffMinScale: 0.45

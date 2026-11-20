@@ -60,16 +60,31 @@ namespace Emberdelve.EditorTools
 
         public static readonly Variant[] Variants =
         {
-            new Variant { Name = "Minion", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyBlade", MainHandSource = "antique_estoc", MainHandLength = 0.85f,
-                Idle = "Sword_Idle", Walk = "Zombie_Walk_Fwd_Loop", Run = "Zombie_Walk_Fwd_Loop", RunPlayback = 1.7f, Attack = "Sword_Regular_A", Hit = "Hit_Chest", Death = "Death01" },
-            new Variant { Name = "Rogue", Body = FemaleBody, MeshName = "Undead_Mannequin_F", MainHand = "Weapon_RustyDagger", MainHandSource = "ornate_medieval_dagger", MainHandLength = 0.38f,
-                Idle = "Sword_Idle", Walk = "Walk_Loop", Run = "Jog_Fwd_Loop", Attack = "Sword_Regular_A", Hit = "Hit_Head", Death = "Death01" },
-            new Variant { Name = "Warrior", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyAxe", MainHandSource = "hatchet", MainHandLength = 0.4f,
+            // Minion and Rogue share the Hollow Servitor's data, so they hold the same blade (same model, length and grip): the swept path
+            // baked from the Minion (TryBakeSwing) is the path both of them show.
+            new Variant { Name = "Minion", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyBlade", MainHandSource = "knights_sword", MainHandLength = 0.95f,
+                Idle = "Sword_Idle", Walk = "Zombie_Walk_Fwd_Loop", Run = "Zombie_Walk_Fwd_Loop", RunPlayback = 1.7f, Attack = AttackClip, Hit = "Hit_Chest", Death = "Death01" },
+            new Variant { Name = "Rogue", Body = FemaleBody, MeshName = "Undead_Mannequin_F", MainHand = "Weapon_RustyBlade", MainHandSource = "knights_sword", MainHandLength = 0.95f,
+                Idle = "Sword_Idle", Walk = "Walk_Loop", Run = "Jog_Fwd_Loop", Attack = AttackClip, Hit = "Hit_Head", Death = "Death01" },
+            new Variant { Name = "Warrior", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyHammer", MainHandSource = "ornate_war_hammer", MainHandLength = 0.8f,
                 OffHand = "Weapon_RustyShield", OffHandSource = "kite_shield", OffHandSize = 0.7f, Pauldrons = true,
-                Idle = "Idle_Shield_Loop", Walk = "Walk_Formal_Loop", Run = "Jog_Fwd_Loop", Attack = "Sword_Regular_A", Hit = "Hit_Chest", Death = "Death01" },
+                Idle = "Idle_Shield_Loop", Walk = "Walk_Formal_Loop", Run = "Jog_Fwd_Loop", Attack = AttackClip, Hit = "Hit_Chest", Death = "Death01" },
             new Variant { Name = "Mage", Body = MaleBody, MeshName = "Undead_Mannequin_M", GlowingEyes = true,
                 Idle = "Spell_Simple_Idle_Loop", Walk = "Walk_Formal_Loop", Run = "Jog_Fwd_Loop", Attack = "Spell_Simple_Shoot", Hit = "Hit_Chest", Death = "Death01" },
         };
+
+        /// <summary>
+        /// The melee attack of every sword-clip variant: the weapon is raised high over the right shoulder (the telegraph) and chopped down
+        /// across the body from the attacker's right to the left. EnemyAttackPhase.SweepStart..SweepEnd is its fast part, and the damage
+        /// sweep is baked from exactly that part (<see cref="TryBakeSwing"/>).
+        /// </summary>
+        public const string AttackClip = "Sword_Attack";
+
+        /// <summary>Degrees the held weapon is tilted up from the forearm line at the blow (see AttachMainHand).</summary>
+        public const float GripLift = 25f;
+
+        /// <summary>How much slower than the clip itself the sweep window plays (the active phase lasts window x clip length x this).</summary>
+        public const float SweepPlaybackStretch = 1.5f;
 
         public static readonly string[] StateNames = { "Idle", "Walk", "Run", "Attack", "Hit", "Death" };
 
@@ -92,6 +107,9 @@ namespace Emberdelve.EditorTools
         }
 
         public static string PrefabPath(string variant) { return Folder + "/EnemyVisual_" + variant + ".prefab"; }
+        public const string ShieldArmMaskPath = Folder + "/EnemyVisual_ShieldArm.mask";
+
+        public static string NetResourcePath(string variant) { return "Assets/Emberdelve/Resources/Emberdelve/NetEnemyVisuals/EnemyVisual_" + variant + ".prefab"; }
         public static string ControllerPath(string variant) { return Folder + "/EnemyVisual_" + variant + ".controller"; }
         public static string AttackClipPath(string variant) { return Folder + "/EnemyVisual_" + variant + "_Attack.anim"; }
 
@@ -184,6 +202,8 @@ namespace Emberdelve.EditorTools
                 serialized.ApplyModifiedPropertiesWithoutUndo();
 
                 PrefabUtility.SaveAsPrefabAsset(root, PrefabPath(variant.Name));
+                // The network proxies load the same visual from Resources (NetEnemyViews); keep that copy the same build.
+                PrefabUtility.SaveAsPrefabAsset(root, NetResourcePath(variant.Name));
             }
             finally
             {
@@ -345,18 +365,39 @@ namespace Emberdelve.EditorTools
 
             float scale = animator.transform.localScale.x;
             GameObject posed = PosedCopy(fbx, mesh, material, avatar, scale, SwordGripPose);
+            AnimationClip attack = RuntimeAttackClip(variant);
             try
             {
                 Animator posedAnimator = posed.GetComponent<Animator>();
                 Transform hand = posedAnimator.GetBoneTransform(HumanBodyBones.RightHand);
+                Transform elbow = posedAnimator.GetBoneTransform(HumanBodyBones.RightLowerArm);
                 Transform knuckle = posedAnimator.GetBoneTransform(HumanBodyBones.RightMiddleProximal);
                 Transform finalHand = animator.GetBoneTransform(HumanBodyBones.RightHand);
                 if (hand == null || finalHand == null) { Object.DestroyImmediate(weapon); return; }
 
-                // Blade up and forward (in the model's frame), flat side facing the model's right, grip between wrist and knuckles.
-                Vector3 up = Vector3.up, forward = Vector3.forward, right = Vector3.right; // the posed copy stands at the origin; the character faces +Z
-                Vector3 tip = (up + forward * 0.45f).normalized;
-                Vector3 flat = Vector3.ProjectOnPlane(right, tip).normalized;
+                Vector3 tip, flat;
+                if (attack != null && elbow != null)
+                {
+                    // The grip is set at the blow itself (the middle of the attack's sweep window): the weapon continues the forearm, so arm
+                    // and weapon make one line into the target, edge leading (the flat side lies across the hand's path).
+                    float strike = (EnemyAttackPhase.SweepStart + EnemyAttackPhase.SweepEnd) * 0.5f;
+                    EmberdelveFirstPersonArms.Evaluate(posedAnimator, attack, (strike - 0.02f) * attack.length);
+                    Vector3 before = hand.position;
+                    EmberdelveFirstPersonArms.Evaluate(posedAnimator, attack, (strike + 0.02f) * attack.length);
+                    Vector3 travel = hand.position - before;
+                    EmberdelveFirstPersonArms.Evaluate(posedAnimator, attack, strike * attack.length);
+                    // Wrist cocked 25 degrees up from the forearm line: the follow-through stays off the floor.
+                    tip = Vector3.RotateTowards((hand.position - elbow.position).normalized, Vector3.up, GripLift * Mathf.Deg2Rad, 0f);
+                    flat = Vector3.Cross(tip, travel).normalized;
+                    if (flat.sqrMagnitude < 0.5f) flat = Vector3.ProjectOnPlane(Vector3.right, tip).normalized;
+                }
+                else
+                {
+                    // Blade up and forward (in the model's frame), flat side facing the model's right.
+                    tip = (Vector3.up + Vector3.forward * 0.45f).normalized; // the posed copy stands at the origin; the character faces +Z
+                    flat = Vector3.ProjectOnPlane(Vector3.right, tip).normalized;
+                }
+
                 Quaternion world = Quaternion.LookRotation(flat, tip);
                 Vector3 grip = knuckle != null ? Vector3.Lerp(hand.position, knuckle.position, 0.75f) : HandSurfaceCentre(posedAnimator, hand);
 
@@ -368,6 +409,7 @@ namespace Emberdelve.EditorTools
             finally
             {
                 Object.DestroyImmediate(posed);
+                if (attack != null) Object.DestroyImmediate(attack);
             }
         }
 
@@ -624,6 +666,27 @@ namespace Emberdelve.EditorTools
             AddExit(attack, idle, 0.9f, 0.15f);
             AddExit(hit, idle, 0.85f, 0.1f);
 
+            // A shield bearer keeps the shield up through every move: layer 1 holds the left arm in the guard (the drivers let it go
+            // while dead, dormant or waking: EnemyDormantPose.BlendShieldArm). The right-arm attack on layer 0 is untouched.
+            if (!string.IsNullOrEmpty(variant.OffHand))
+            {
+                AvatarMask mask = AssetDatabase.LoadAssetAtPath<AvatarMask>(ShieldArmMaskPath);
+                if (mask == null) { mask = new AvatarMask(); AssetDatabase.CreateAsset(mask, ShieldArmMaskPath); }
+                for (int i = 0; i < (int)AvatarMaskBodyPart.LastBodyPart; i++) mask.SetHumanoidBodyPartActive((AvatarMaskBodyPart)i, false);
+                mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftArm, true);
+                mask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftFingers, true);
+                EditorUtility.SetDirty(mask);
+
+                controller.AddLayer("ShieldArm");
+                AnimatorControllerLayer[] layers = controller.layers;
+                layers[1].avatarMask = mask;
+                layers[1].defaultWeight = 1f;
+                AnimatorState guard = layers[1].stateMachine.AddState("Guard", new Vector3(300f, 0f, 0f));
+                guard.motion = Require(ShieldGripPose);
+                layers[1].stateMachine.defaultState = guard;
+                controller.layers = layers;
+            }
+
             EditorUtility.SetDirty(controller);
             return controller;
         }
@@ -647,6 +710,13 @@ namespace Emberdelve.EditorTools
             string path = AttackClipPath(variant.Name);
             if (AssetDatabase.LoadAssetAtPath<AnimationClip>(path) != null) AssetDatabase.DeleteAsset(path);
 
+            AnimationClip copy = AttackCopyInMemory(source);
+            AssetDatabase.CreateAsset(copy, path);
+            return copy;
+        }
+
+        private static AnimationClip AttackCopyInMemory(AnimationClip source)
+        {
             AnimationClip copy = Object.Instantiate(source);
             copy.name = "Attack";
             AnimationClipSettings settings = AnimationUtility.GetAnimationClipSettings(source);
@@ -657,8 +727,97 @@ namespace Emberdelve.EditorTools
             // Root motion is disabled: authority owns movement and collider placement.
             settings.loopBlendPositionXZ = false;
             AnimationUtility.SetAnimationClipSettings(copy, settings);
-            AssetDatabase.CreateAsset(copy, path);
             return copy;
+        }
+
+        /// <summary>The variant's attack as the runtime plays it (the "Attack" copy's settings), in memory: the caller destroys it.</summary>
+        private static AnimationClip RuntimeAttackClip(Variant variant)
+        {
+            AnimationClip source = string.IsNullOrEmpty(variant.Attack) ? null : FindClip(variant.Attack);
+            return source != null ? AttackCopyInMemory(source) : null;
+        }
+
+        // ---------------------------------------------------------------- swept path from the clip
+
+        /// <summary>
+        /// The damage sweep of a variant's held weapon, read off its own attack: the model is built as the prefab is (same mesh, fit,
+        /// weapon and grip), scaled like the scene instance, and posed by the runtime attack clip at <paramref name="keyCount"/> equal
+        /// steps of EnemyAttackPhase.SweepStart..SweepEnd - the clip window the driver plays while the authority sweeps. Each key is the
+        /// weapon's grip (the segment base, relative to the attack eye) and its grip-to-tip direction, so the swept segment IS the visible
+        /// weapon at every instant. <paramref name="reach"/> is the farthest horizontal tip distance from the eye, <paramref name="length"/>
+        /// the weapon length in the scene, <paramref name="rest"/> the grip in the idle pose, <paramref name="activeSeconds"/> the active
+        /// phase that plays the window at the clip's own pace (x <see cref="SweepPlaybackStretch"/>). False when the art is missing.
+        /// </summary>
+        public static bool TryBakeSwing(string variantName, float scale, int keyCount, out SwingKey[] keys, out float reach,
+            out float length, out SwingKey rest, out float activeSeconds)
+        {
+            keys = null;
+            reach = length = activeSeconds = 0f;
+            rest = default;
+            Variant variant = Find(variantName);
+            if (variant == null || string.IsNullOrEmpty(variant.MainHand) || keyCount < 2) return false;
+            if (!EmberdelveQuaterniusImport.EnsureConfigured() || !EmberdelveSkeletonAssets.EnsureConfigured()) return false;
+            EmberdelveWeaponModels.EnsureAll(false);
+            EmberdelveUndeadMaterials.EnsureAll();
+
+            GameObject fbx = AssetDatabase.LoadAssetAtPath<GameObject>(EmberdelveSkeletonAssets.ModelPath);
+            SkinnedMeshRenderer source = fbx != null ? fbx.GetComponentInChildren<SkinnedMeshRenderer>(true) : null;
+            Material bodyMaterial = EmberdelveSkeletonAssets.MaterialFor(variant.Name);
+            EmberdelveWeaponModels.Spec spec = EmberdelveWeaponModels.Find(variant.MainHandSource);
+            AnimationClip idle = FindClip(variant.Idle);
+            AnimationClip attack = RuntimeAttackClip(variant);
+            if (source == null || source.sharedMesh == null || bodyMaterial == null || spec == null || attack == null || idle == null)
+            {
+                if (attack != null) Object.DestroyImmediate(attack);
+                return false;
+            }
+
+            Avatar avatar = FindAvatar(EmberdelveSkeletonAssets.ModelPath);
+            GameObject root = new GameObject("SwingBake_" + variant.Name);
+            try
+            {
+                GameObject model = CreateModel(fbx, root.transform, source.sharedMesh, bodyMaterial, avatar, null);
+                FitHeight(model.transform, NormalHeight);
+                Animator animator = model.GetComponent<Animator>();
+                AttachMainHand(variant, fbx, source.sharedMesh, bodyMaterial, avatar, animator);
+                model.transform.localRotation = Quaternion.identity;
+                root.transform.localScale = Vector3.one * scale;
+                Transform hand = animator.GetBoneTransform(HumanBodyBones.RightHand);
+                Transform weapon = hand != null ? hand.Find(variant.MainHand) : null;
+                if (weapon == null) return false;
+
+                Vector3 eye = Vector3.up * EnemyAgent.AttackEyeHeight;
+                SwingKey Sample(AnimationClip clip, float normalized, float t, out Vector3 tipPoint, out float weaponLength)
+                {
+                    EmberdelveFirstPersonArms.Evaluate(animator, clip, normalized * clip.length);
+                    Vector3 grip = weapon.position;
+                    tipPoint = weapon.TransformPoint(Vector3.up * spec.Length);
+                    Vector3 delta = tipPoint - grip;
+                    weaponLength = delta.magnitude;
+                    float yaw = Mathf.Atan2(delta.x, delta.z) * Mathf.Rad2Deg;
+                    float pitch = -Mathf.Asin(Mathf.Clamp(delta.y / Mathf.Max(1e-4f, weaponLength), -1f, 1f)) * Mathf.Rad2Deg;
+                    return new SwingKey(t, grip - eye, yaw, pitch);
+                }
+
+                rest = Sample(idle, 0.3f, 0f, out _, out _);
+                activeSeconds = Mathf.Round((EnemyAttackPhase.SweepEnd - EnemyAttackPhase.SweepStart) * attack.length * SweepPlaybackStretch * 100f) / 100f;
+                keys = new SwingKey[keyCount];
+                for (int i = 0; i < keyCount; i++)
+                {
+                    float t = i / (float)(keyCount - 1);
+                    SwingKey key = Sample(attack, Mathf.Lerp(EnemyAttackPhase.SweepStart, EnemyAttackPhase.SweepEnd, t), t, out Vector3 tip, out length);
+                    if (i > 0) key.bladeYaw = keys[i - 1].bladeYaw + Mathf.DeltaAngle(keys[i - 1].bladeYaw, key.bladeYaw);
+                    keys[i] = key;
+                    reach = Mathf.Max(reach, new Vector2(tip.x - eye.x, tip.z - eye.z).magnitude);
+                }
+
+                return true;
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+                Object.DestroyImmediate(attack);
+            }
         }
 
         private static AnimatorState AddState(AnimatorStateMachine machine, string name, AnimationClip clip, Vector3 position)

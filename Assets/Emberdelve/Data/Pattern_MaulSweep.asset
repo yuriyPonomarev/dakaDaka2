@@ -15,7 +15,7 @@ MonoBehaviour:
   patternId: maul_sweep
   kind: 1
   windupTime: 0.1
-  activeTime: 0.18
+  activeTime: 0.09
   recoveryTime: 0.5
   wallRecoilTime: 0.3
   damageMultiplier: 1
@@ -25,32 +25,64 @@ MonoBehaviour:
   recoveryMoveMultiplier: 0.85
   maxTargets: 2
   reachScale: 1
-  reachInset: 0.7
-  sweepRadius: 0.22
+  reachInset: 0.9080012
+  sweepRadius: 0.2
   contactWindow: 0.02
   trailMaterial: {fileID: 2100000, guid: f7920b32ca5c58345afaa7b757cc9827, type: 2}
-  restBase: {x: 0.26, y: -0.2, z: 0.3}
-  restYaw: 12
-  restPitch: -8
-  restRoll: 14
+  restBase: {x: 0.42231876, y: -0.01780498, z: -0.45076504}
+  restYaw: -26.183651
+  restPitch: 25.984365
+  restRoll: 0
   keys:
   - t: 0
-    basePos: {x: 0.6062178, y: -0.1, z: 0.34999996}
-    bladeYaw: 60
-    bladePitch: -2
+    basePos: {x: 0.2763488, y: 0.31288028, z: 0.9300733}
+    bladeYaw: 32.25865
+    bladePitch: -64.62105
+  - t: 0.083333336
+    basePos: {x: 0.13776588, y: 0.20208073, z: 0.9770581}
+    bladeYaw: 15.946426
+    bladePitch: -54.522537
+  - t: 0.16666667
+    basePos: {x: -0.0078027598, y: 0.0870651, z: 0.99085456}
+    bladeYaw: 2.9526825
+    bladePitch: -43.61419
   - t: 0.25
-    basePos: {x: 0.35, y: -0.1, z: 0.60621774}
-    bladeYaw: 30
-    bladePitch: -2
+    basePos: {x: -0.14908569, y: -0.023332596, z: 0.9709321}
+    bladeYaw: -8.238663
+    bladePitch: -32.833466
+  - t: 0.33333334
+    basePos: {x: -0.2768669, y: -0.12228286, z: 0.9231966}
+    bladeYaw: -18.362534
+    bladePitch: -22.917397
+  - t: 0.41666666
+    basePos: {x: -0.38568053, y: -0.20630717, z: 0.85694695}
+    bladeYaw: -27.718582
+    bladePitch: -14.375299
   - t: 0.5
-    basePos: {x: 0, y: -0.1, z: 0.7}
-    bladeYaw: 0
-    bladePitch: -2
+    basePos: {x: -0.47363365, y: -0.275244, z: 0.781795}
+    bladeYaw: -36.33995
+    bladePitch: -7.4840627
+  - t: 0.5833333
+    basePos: {x: -0.5410055, y: -0.3334247, z: 0.70463}
+    bladeYaw: -44.175888
+    bladePitch: -2.1087112
+  - t: 0.6666667
+    basePos: {x: -0.5890022, y: -0.39296055, z: 0.6236502}
+    bladeYaw: -51.632736
+    bladePitch: 2.8547556
   - t: 0.75
-    basePos: {x: -0.35, y: -0.1, z: 0.60621774}
-    bladeYaw: -30
-    bladePitch: -2
+    basePos: {x: -0.6186311, y: -0.45404762, z: 0.54039395}
+    bladeYaw: -58.793747
+    bladePitch: 7.6159377
+  - t: 0.8333333
+    basePos: {x: -0.63132834, y: -0.5140355, z: 0.4579201}
+    bladeYaw: -65.63463
+    bladePitch: 12.125031
+  - t: 0.9166667
+    basePos: {x: -0.6299696, y: -0.5696845, z: 0.3793643}
+    bladeYaw: -72.12895
+    bladePitch: 16.250124
   - t: 1
-    basePos: {x: -0.6062178, y: -0.1, z: 0.34999996}
-    bladeYaw: -60
-    bladePitch: -2
+    basePos: {x: -0.61914223, y: -0.61777776, z: 0.30707964}
+    bladeYaw: -78.2798
+    bladePitch: 19.806044

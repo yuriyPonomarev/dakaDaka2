@@ -17,11 +17,11 @@ MonoBehaviour:
   isElite: 0
   maxHealth: 70
   attackWeapon: {fileID: 11400000, guid: 5c1a46164ef9ab44e83e65d690f7b3a8, type: 2}
-  attackRange: 2.2
+  attackRange: 1.7
   attackWindup: 0.6
   attackCooldown: 2
   attackTelegraphHeight: 0.5
-  attackTelegraphCone: 120
+  attackTelegraphCone: 110.54
   telegraphColor: {r: 1, g: 0.32, b: 0.18, a: 1}
   patrolSpeed: 1.05
   chaseSpeed: 2.7

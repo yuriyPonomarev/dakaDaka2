@@ -401,11 +401,17 @@ namespace Emberdelve.EditorTools
 
         private void PatternData()
         {
-            CheckPattern(_claw, _servitor, "Pattern_ClawSlash", 2.65f, "claw");
-            CheckPattern(_maul, _warden, "Pattern_MaulSweep", 3.2f, "maul");
+            CheckPattern(_claw, _servitor, "Pattern_ClawSlash", "Minion", 1f, "claw");
+            CheckPattern(_claw, _servitor, "Pattern_ClawSlash", "Rogue", 1f, "claw (rogue body)");
+            CheckPattern(_maul, _warden, "Pattern_MaulSweep", "Warrior", EmberdelveEnemyVisualFactory.EliteScale, "maul");
         }
 
-        private void CheckPattern(WeaponData weapon, EnemyData enemy, string assetName, float literalReach, string label)
+        /// <summary>
+        /// The sweep is the visible weapon: the pattern's keys are the held weapon's grip and direction through the attack clip's sweep
+        /// window (re-baked here from the shipped variant: model, clip, weapon, grip), the segment is as long as the weapon, the telegraph
+        /// wedge is the pattern's yaw range and the brain starts the blow inside the weapon's reach.
+        /// </summary>
+        private void CheckPattern(WeaponData weapon, EnemyData enemy, string assetName, string variant, float scale, string label)
         {
             Check(weapon.UsesSweptMelee && weapon.swingPatterns != null && weapon.swingPatterns.Length == 1, $"{label}: the weapon has exactly one swing pattern");
             if (!weapon.UsesSweptMelee || weapon.swingPatterns == null || weapon.swingPatterns.Length != 1) return;
@@ -415,13 +421,30 @@ namespace Emberdelve.EditorTools
             if (pattern == null) return;
 
             Check(pattern.Validate(out string problem), $"{label}: the pattern validates ({problem})");
+            bool baked = EmberdelveEnemyVisualFactory.TryBakeSwing(variant, scale, pattern.keys.Length, out SwingKey[] keys, out float reach,
+                out float length, out _, out float activeSeconds);
+            Check(baked, $"{label}: the {variant} attack can be baked (model, clip and weapon are present)");
+            if (baked)
+            {
+                float worst = 0f;
+                for (int i = 0; i < keys.Length; i++)
+                {
+                    worst = Mathf.Max(worst, (keys[i].basePos - pattern.keys[i].basePos).magnitude);
+                    worst = Mathf.Max(worst, Mathf.Abs(Mathf.DeltaAngle(keys[i].bladeYaw, pattern.keys[i].bladeYaw)) * Mathf.Deg2Rad * length);
+                    worst = Mathf.Max(worst, Mathf.Abs(keys[i].bladePitch - pattern.keys[i].bladePitch) * Mathf.Deg2Rad * length);
+                }
+                Check(worst < 0.01f, $"{label}: every key is the {variant}'s visible weapon at that instant (worst {worst:F3} m)");
+                Near(length, pattern.BladeLength(weapon), 0.01f, $"{label}: the swept segment is as long as the visible weapon ({length:F2} m)");
+                Near(reach, weapon.reach, 0.01f, $"{label}: the weapon reach is the farthest tip distance ({reach:F2} m)");
+                Near(activeSeconds, pattern.activeTime, 1e-3f, $"{label}: the active window plays the clip's sweep window ({activeSeconds:F2} s)");
+            }
+
             pattern.YawRange(out float minYaw, out float maxYaw);
-            Near(-60f, minYaw, 1e-3f, $"{label}: the pattern's lowest blade yaw is -60 degrees");
-            Near(60f, maxYaw, 1e-3f, $"{label}: the pattern's highest blade yaw is +60 degrees");
-            Near(enemy.attackTelegraphCone, maxYaw - minYaw, 1e-3f, $"{label}: the pattern's yaw range equals the enemy's telegraph cone ({enemy.attackTelegraphCone:F0})");
-            Near(literalReach, pattern.EffectiveReach(weapon), 1e-3f, $"{label}: the effective reach is weapon reach + hit sphere ({literalReach:F2})");
+            Check(maxYaw - minYaw >= 40f && maxYaw - minYaw <= 200f, $"{label}: the blade yaw range is a drawable wedge ({minYaw:F0}..{maxYaw:F0})");
+            Check(pattern.keys[0].bladeYaw > pattern.keys[pattern.keys.Length - 1].bladeYaw, $"{label}: the blow travels from the attacker's right to the left");
+            Near(enemy.attackTelegraphCone, maxYaw - minYaw, 0.01f, $"{label}: the pattern's yaw range equals the enemy's telegraph cone ({enemy.attackTelegraphCone:F0})");
+            Check(enemy.attackRange <= pattern.EffectiveReach(weapon) + 0.3f, $"{label}: the brain starts the blow inside the weapon's reach (range {enemy.attackRange:F2}, reach {pattern.EffectiveReach(weapon):F2})");
             Near(0.10f, pattern.windupTime, 1e-4f, $"{label}: the pattern windup is 0.10 s");
-            Near(0.18f, pattern.activeTime, 1e-4f, $"{label}: the pattern active window is 0.18 s");
             Check(weapon.impactZones == null || weapon.impactZones.Length == 0, $"{label}: no impact zones (the contact point does not scale the damage)");
             Check(weapon.comboSteps == null || weapon.comboSteps.Length == 0, $"{label}: no combo chain");
         }
