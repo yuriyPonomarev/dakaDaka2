@@ -63,6 +63,10 @@ namespace Emberdelve.Player
         private Vector3 _restLocalScale;
         private SwingTrail _trail;
         private Transform _guardBlade;
+        private bool _twoHanded; // picks the guard stance: the hanging parry for two-handed swords, the high ward otherwise
+
+        /// <summary>True for a two-handed weapon: its guard is the hanging parry (GuardBladePose), a one-handed one keeps the high ward.</summary>
+        public bool TwoHandedGuard { get => _twoHanded; set => _twoHanded = value; }
         private bool _guardHeld;
         private float _blockImpactUntil;
         private const float BlockImpactDuration = 0.22f;
@@ -216,7 +220,7 @@ namespace Emberdelve.Player
             {
                 Quaternion aimRotation = Quaternion.LookRotation(_aimFrame.forward, Vector3.up);
                 GuardBladePose.ResolveRoot(_aimFrame.position, aimRotation, true,
-                    out Vector3 worldPosition, out Quaternion worldRotation);
+                    out Vector3 worldPosition, out Quaternion worldRotation, _twoHanded);
                 transform.SetPositionAndRotation(worldPosition, worldRotation);
                 ApplyBlockImpactOffset();
                 return;
@@ -298,7 +302,7 @@ namespace Emberdelve.Player
             if (_pattern == null) return;
             bool active = swingTime >= _timing.Windup && swingTime <= _timing.ActiveEnd;
             SamplePresentation(_pattern, _timing, swingTime, _transitionBase, _transitionRotation, _guardHeld,
-                out Vector3 position, out Quaternion rotation);
+                out Vector3 position, out Quaternion rotation, _twoHanded);
             if (_chainHold && swingTime > _timing.ActiveEnd && _holdBlend > 0f)
             {
                 // Button held: stay at the strike's end pose; released: the ordinary recovery back to rest (blended, no pop).
@@ -326,7 +330,7 @@ namespace Emberdelve.Player
             _recoilStart = Time.time - Mathf.Max(0f, elapsed);
             if (_trail != null) _trail.EndStroke();
             SampleRecoil(_pattern, stopFraction, _timing.WallRecoil > 0f ? elapsed / _timing.WallRecoil : 1f,
-                _guardHeld, out Vector3 position, out Quaternion rotation);
+                _guardHeld, out Vector3 position, out Quaternion rotation, _twoHanded);
             ApplyPresentation(position, rotation, false);
         }
 
@@ -355,10 +359,10 @@ namespace Emberdelve.Player
         }
 
         public static void SampleRecoil(SwingPatternData pattern, float stopFraction, float progress,
-            bool guarding, out Vector3 position, out Quaternion rotation)
+            bool guarding, out Vector3 position, out Quaternion rotation, bool twoHanded = false)
         {
             SwingPose contact = pattern.ActivePose(Mathf.Clamp01(stopFraction));
-            ReadyPose(guarding, out Vector3 rest, out Quaternion ready);
+            ReadyPose(guarding, twoHanded, out Vector3 rest, out Quaternion ready);
             float eased = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(progress));
             position = Vector3.Lerp(contact.Base, rest, eased);
             rotation = Quaternion.Slerp(contact.LocalRotation, ready, eased);
@@ -373,7 +377,7 @@ namespace Emberdelve.Player
 
         // Only non-damaging phases are eased. Active blade samples stay identical to the authority.
         public static void SamplePresentation(SwingPatternData pattern, in SwingTiming timing, float time,
-            Vector3 startBase, Quaternion startRotation, bool guarding, out Vector3 position, out Quaternion rotation)
+            Vector3 startBase, Quaternion startRotation, bool guarding, out Vector3 position, out Quaternion rotation, bool twoHanded = false)
         {
             SwingPose pose = pattern.Evaluate(time, timing);
             position = pose.Base;
@@ -389,16 +393,16 @@ namespace Emberdelve.Player
             {
                 SwingPose contact = pattern.Evaluate(timing.ActiveEnd, timing);
                 float k = Mathf.SmoothStep(0f, 1f, timing.Recovery > 0f ? Mathf.Clamp01((time - timing.ActiveEnd) / timing.Recovery) : 1f);
-                ReadyPose(guarding, out Vector3 endBase, out Quaternion endRotation);
+                ReadyPose(guarding, twoHanded, out Vector3 endBase, out Quaternion endRotation);
                 position = Vector3.Lerp(contact.Base, endBase, k);
                 rotation = Quaternion.Slerp(contact.LocalRotation, endRotation, k);
             }
         }
 
-        private static void ReadyPose(bool guarding, out Vector3 position, out Quaternion rotation)
+        private static void ReadyPose(bool guarding, bool twoHanded, out Vector3 position, out Quaternion rotation)
         {
-            position = GuardBladePose.RootRestPosition + (guarding ? GuardBladePose.RootGuardOffset : Vector3.zero);
-            rotation = guarding ? GuardBladePose.RootRestRotation * GuardBladePose.RootGuardRotation : ReadyRotation;
+            position = GuardBladePose.RootRestPosition + (guarding ? GuardBladePose.RootGuardOffset(twoHanded) : Vector3.zero);
+            rotation = guarding ? GuardBladePose.RootRestRotation * GuardBladePose.RootGuardRotation(twoHanded) : ReadyRotation;
         }
 
         private void ApplyPresentation(Vector3 position, Quaternion rotation, bool active)
@@ -486,7 +490,7 @@ namespace Emberdelve.Player
                 }
 
                 float eased = k * k * (3f - 2f * k);
-                ReadyPose(_guardHeld, out Vector3 endBase, out Quaternion endRotation);
+                ReadyPose(_guardHeld, _twoHanded, out Vector3 endBase, out Quaternion endRotation);
                 ApplyPresentation(Vector3.Lerp(_transitionBase, endBase, eased),
                     Quaternion.Slerp(_transitionRotation, endRotation, eased), false);
             }
@@ -500,7 +504,7 @@ namespace Emberdelve.Player
                 float k = (Time.time - _releaseStart) / ReleaseSeconds;
                 if (k >= 1f) { EndSwing(); return; }
                 float eased = k * k * (3f - 2f * k);
-                ReadyPose(_guardHeld, out Vector3 endBase, out Quaternion endRotation);
+                ReadyPose(_guardHeld, _twoHanded, out Vector3 endBase, out Quaternion endRotation);
                 ApplyPresentation(Vector3.Lerp(_holdBase, endBase, eased), Quaternion.Slerp(_holdRotation, endRotation, eased), false);
             }
             else ApplyGuardPose();
@@ -667,14 +671,15 @@ namespace Emberdelve.Player
             }
             else
             {
-                BuildPart(root.transform, "Sword_Blade", GuardBladePose.BladeLocalCenter, GuardBladePose.BladeSize, Quaternion.identity, weapon.edgeMaterial);
+                BuildPart(root.transform, "Sword_Blade", GuardBladePose.BladeLocalCenterFor(weapon.twoHanded), GuardBladePose.BladeSizeFor(weapon.twoHanded), Quaternion.identity, weapon.edgeMaterial);
                 BuildPart(root.transform, "Sword_Tip", new Vector3(0f, 0f, 0.74f), new Vector3(0.03f, 0.014f, 0.12f), Quaternion.identity, weapon.edgeMaterial);
                 BuildPart(root.transform, "Sword_Guard", new Vector3(0f, 0f, 0.02f), new Vector3(0.17f, 0.035f, 0.05f), Quaternion.identity, weapon.gripMaterial);
-                BuildPart(root.transform, "Sword_Grip", GuardBladePose.GripLocalCenter, GuardBladePose.GripSize, Quaternion.identity, weapon.gripMaterial);
+                BuildPart(root.transform, "Sword_Grip", GuardBladePose.GripLocalCenterFor(weapon.twoHanded), GuardBladePose.GripSize, Quaternion.identity, weapon.gripMaterial);
                 muzzle = BuildPart(root.transform, "Sword_Muzzle", new Vector3(0f, 0f, 0.8f), new Vector3(0.001f, 0.001f, 0.001f), Quaternion.identity, null);
             }
 
             WeaponVisualRig rig = root.AddComponent<WeaponVisualRig>();
+            rig.TwoHandedGuard = weapon.twoHanded;
             rig.Configure(muzzle, arrow, bowString, ranged, ranged && weapon.weaponId == "ember_crossbow", weapon.CanBowGuard);
 
             if (!ranged)

@@ -233,7 +233,7 @@ namespace Emberdelve.Player
                 }
                 else if(_recoil && _pattern!=null)
                 {
-                    WeaponVisualRig.SampleRecoil(_pattern,_stopFraction,_recoilProgress,_guard,out var position,out var rotation);
+                    WeaponVisualRig.SampleRecoil(_pattern,_stopFraction,_recoilProgress,_guard,out var position,out var rotation,_main!=null&&_main.twoHanded);
                     Vector3 start=_frame.Eye+_frame.Rotation*position;
                     t.SetPositionAndRotation(start,_frame.Rotation*rotation*Quaternion.Euler(90,0,0));
                     t.localScale=Vector3.one*(_pattern.BladeLength(_main)/_modelLength);
@@ -249,9 +249,9 @@ namespace Emberdelve.Player
                 }
                 else if(_guard && !_main.IsRanged)
                 {
-                    GuardBladePose.ResolveRoot(_frame.Eye,_frame.Rotation,true,out var position,out var rotation);
+                    GuardBladePose.ResolveRoot(_frame.Eye,_frame.Rotation,true,out var position,out var rotation,_main.twoHanded);
                     t.SetPositionAndRotation(position,rotation*Quaternion.Euler(90,0,0));
-                    t.localScale=Vector3.one*(GuardBladePose.BladeSize.z/_modelLength);
+                    t.localScale=Vector3.one*(GuardBladePose.BladeSizeFor(_main.twoHanded).z/_modelLength);
                     Reach(_rightShoulder,_rightElbow,_right,position);
                 }
                 else

@@ -1075,7 +1075,8 @@ namespace Emberdelve.Player
         {
             grip = default;
             if (!TryGetGuardBlade(out _)) return false;
-            grip = GuardBladePose.ResolveGripHitShape(AimOrigin, Quaternion.LookRotation(AimDirection.normalized, Vector3.up));
+            grip = GuardBladePose.ResolveGripHitShape(AimOrigin, Quaternion.LookRotation(AimDirection.normalized, Vector3.up),
+                ActiveWeapon != null && ActiveWeapon.twoHanded);
             return true;
         }
 
@@ -1090,7 +1091,7 @@ namespace Emberdelve.Player
                 && authority is ICombatFlowState flow && flow.IsSwingInProgress(_combatId)) return false;
             Vector3 aim = AimDirection;
             if (aim.sqrMagnitude < 0.0001f) return false;
-            blade = GuardBladePose.Resolve(AimOrigin, Quaternion.LookRotation(aim.normalized, Vector3.up), true);
+            blade = GuardBladePose.Resolve(AimOrigin, Quaternion.LookRotation(aim.normalized, Vector3.up), true, weapon.twoHanded);
             return true;
         }
 

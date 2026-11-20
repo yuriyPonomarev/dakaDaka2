@@ -8,6 +8,48 @@ Updated 17 November 2026. Active slice is the user-requested Meshy warrior and b
 
 ## Latest implementation and proof
 
+**20 Nov, two-handed parry like the D&D capture (uncommitted, in-game unverified).** User screenshot: the 2H block zone was offset from the sword and shorter than it (box 0.88 m vs a 1.39 m drawn blade), and the hilt sat in view.
+- *New 2H guard:* hand (-0.36, 0.20, 0.06), Euler (12, 22, 0). Hands and hilt are above-left out of view; the blade enters at the top-left corner and its tip ends at viewport (0.61, 0.40), like the reference frames.
+- *2H block box = the drawn blade:* GuardBladePose.TwoHandedBladeLocalCenter / TwoHandedBladeSize (1.39 m, offset 0.092 / -0.068 from the root axis, measured from the held model). Also used by the 2H grip hit shape, the rig blockout and the remote model scale.
+- Review: EmberdelveShieldMotionReview.RenderGuardStill / RenderGuardBatch, which draws the box over the guard and reports blade vs box. The 2H ends match within 1 mm.
+- New test FirstPersonSwingTests.TwoHandedGuard_BlockBoxIsTheDrawnBlade_AndTheTipEndsBesideTheCrosshair.
+- *Proof:* run 20261120-185846-383: BladeDefense, ProjectileBlock, Riposte, Hands, Visual and NetCombat 396/0 pass; EditMode 1439/4 (the new test passes; the 4 are pre-existing).
+- No automated catch-window scan exists for the 2H stance. In the user's Editor a FirstPersonSwingTests async run stayed "running" (stale status) and was not cancelled.
+
+**19 Nov, one-handed parry restored (uncommitted, in-game unverified).** The user meant the hanging parry for the two-handed sword only, and one-handed blocks broke. GuardBladePose now has two stances:
+- One-handed swords: back to the high ward (hand 0.24, -0.02, 0.42; Euler 30, -14, 0).
+- Two-handed swords: the hanging parry (TwoHandedGuardHandPosition / TwoHandedGuardBladeRotation).
+
+The stance is picked from WeaponData.twoHanded in every consumer:
+- PlayerRig.TryGetGuardBlade and the grip hit shape;
+- WeaponVisualRig (TwoHandedGuard, set by Build);
+- RemoteWeaponPresentation;
+- the review tool.
+
+Run 20261119-012844-536:
+- Pass: BladeDefense 328/0, ProjectileBlock 193/0, Riposte 144/0, Hands 92/0, Visual 216/0, NetCombat 397/0.
+- CombatFlow 35 failures and SweptMelee timing failures: the same set as baseline 20261118-193247-768 (the player sword timing assets).
+- EditMode 1438/4 (pre-existing).
+- The one-handed catch windows are back to the old values. R→L slash: -35..-80 level at 1.5 m. L→R: 0..+80.
+
+**19 Nov, skeleton attacks (uncommitted, in-game unverified).** User: the skeleton sword looked bad, was visually shorter than the attack zone, and the swing was out of sync with the hit. Measured before: the claw sweep reached 2.65 m from the eye with a 1.87 m segment, the held estoc was 0.85 m, and the R→L arc did not follow the Sword_Regular_A clip.
+- *Clip and weapons:* sword-clip enemies now play Quaternius `Sword_Attack`. The blade is raised over the right shoulder (the telegraph), then chopped diagonally down to the left. Minion and Rogue (both Hollow Servitor) hold the same OpenGameArt knights sword (0.95 m). Warrior holds the war hammer (0.8 m, ×1.25 elite).
+- *Grip:* set at the blow: the weapon continues the forearm, tilted 25° up (GripLift).
+- *Shield arm:* the Warrior's left arm is masked to Idle_Shield_Loop on layer 1, so the shield stays up. EnemyDormantPose.BlendShieldArm releases it while dead, dormant or waking (host and proxy).
+- *Sweep = visible weapon:* EmberdelveEnemyVisualFactory.TryBakeSwing poses the variant with the runtime attack clip. EmberdelveAssetLibrary.BakeEnemyPattern writes from it:
+  - 13 keys (grip + direction) over EnemyAttackPhase.SweepStart..SweepEnd (0.2625..0.30);
+  - weapon reach and hit sphere, so the segment equals the weapon length;
+  - active time: the clip window × 1.5 (0.09 s);
+  - telegraph cone = yaw range (-78..+32, 110.5°);
+  - attackRange: Servitor 2.2 → 1.7, Warden 2.5 → 1.95. Reach is now 1.83 / 2.11 m (was 2.65 / 3.2).
+- *Anticipation:* stretches the raise and the hold over the shoulder; the chop keeps ChopLeadSeconds 0.14.
+- Review: menu Emberdelve/Visual/Review Enemy Swing vs Sweep; batch EmberdelveEnemySwingReview.RebuildBatch on the mirror (rebuilds visuals and library, then renders). Sheets and report.txt are in ../DakaDaka_ci/Logs/review/enemy-swing: grip and tip match the sweep within 0.00 m on every active sample.
+- *Generated assets:* only the enemy assets were copied back from the mirror build. These are the Minion/Rogue/Warrior prefabs, controllers and attack clips, the Resources net copies, the ShieldArm mask, Rusty_OGA_KnightsSword, the two enemy datas, the two weapons and the two patterns. BuildAll also re-authors the player sword timings differently from the committed assets; those were not copied. The rebuilt prefabs carry the builder's current blood-particle settings.
+- *Proof:*
+  - Run 20261119-011019-829: EnemySweep 143/0 (rewritten pattern checks: keys equal a fresh bake, segment = weapon length), BuilderOwnership, Visual 216/0, NetCombat 397/0, NetDoor 37/0.
+  - Run 20261119-012123-981: RunCombatFlow off-axis scenario passes with the real asymmetric wedge (smoke test updated). EditMode 1438/4 (pre-existing).
+  - Remaining RunCombatFlow failures: "HUD names both passives" and "skill slot shows the remaining cooldown". They are in untouched HUD code; not confirmed as pre-existing.
+
 **18 Nov evening, user bug batch (uncommitted, in-game unverified).**
 - *Cloak would not drop into free cells:* the carry ghost is centred on the pointer, but the move used the pointer cell as the item's top-left. InventoryScreenController.CarryOrigin now takes the cell under the ghost's top-left. NetInventory 148/0; the UI path has no automated test.
 - *Two-handed grip:* SecondGripOffset 0.10 → 0.16, so the hands are spaced along the handle.

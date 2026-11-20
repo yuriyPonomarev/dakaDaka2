@@ -40,12 +40,113 @@ namespace Emberdelve.EditorTools
             if (EditorApplication.isPlaying) { Debug.LogError("[ShieldMotionReview] leave Play mode first"); return; }
             WeaponData great = EmberdelveViewmodelPreview.FindWeapon("two_handed_sword");
             WeaponData sword = EmberdelveViewmodelPreview.FindWeapon("ashen_short_sword");
-            RenderSheet("2h-guard", great, null, BlockTimeline(blade: true), 5);
+            RenderSheet("2h-guard", great, null, BlockTimeline(blade: true, twoHanded: true), 5);
             RenderSheet("2h-combo", great, null, ComboTimeline(great), 5);
             RenderSheet("1h-guard", sword, null, BlockTimeline(blade: true), 5);
             RenderSheet("1h-riposte", sword, null, RiposteTimeline(sword), 5);
             RenderSheet("2h-riposte", great, null, RiposteTimeline(great), 5);
             Debug.Log("[ShieldMotionReview] two-handed rendered to " + Folder);
+        }
+
+        /// <summary>
+        /// One still of the full blade guard at 960x540, the authority's guard box drawn over it (translucent blue, like GuardZoneVisual), and a
+        /// report of where the held model's blade (cross-guard to tip) and the box ends are, in metres and in viewport coordinates.
+        /// </summary>
+        public static string RenderGuardStill(string name, WeaponData weapon, bool twoHanded)
+        {
+            var report = new System.Text.StringBuilder();
+            string path = Folder + "/" + name + "-still.png";
+            EmberdelveViewmodelPreview.Capture(path, 960, 540, Fov, true, (root, camera) =>
+            {
+                camera.transform.SetPositionAndRotation(EmberdelveViewmodelPreview.Origin + new Vector3(0f, 1.66f, 0f), Quaternion.identity);
+                GameObject back = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                back.transform.SetParent(root, false);
+                back.transform.localPosition = new Vector3(0f, 1.5f, 3.5f);
+                back.transform.localScale = new Vector3(8f, 3f, 0.3f);
+                Object.DestroyImmediate(back.GetComponent<Collider>());
+
+                WeaponViewModelSet set = WeaponViewModelSet.Load();
+                GameObject arms = (GameObject)PrefabUtility.InstantiatePrefab(set.armsPrefab);
+                arms.transform.SetParent(camera.transform, false);
+                FirstPersonArmsDriver driver = arms.GetComponent<FirstPersonArmsDriver>();
+                driver.Bind(null, camera, set);
+                driver.SetWeapons(weapon, null);
+                driver.SetBlock(true);
+                EmberdelveFirstPersonArms.PoseInstance(arms, AssetDatabase.LoadAssetAtPath<AnimationClip>(EmberdelveFirstPersonArms.ClipPath(FirstPersonArmsDriver.IdleState)), 0.3f);
+                Quaternion aim = Quaternion.LookRotation(camera.transform.forward, Vector3.up);
+                GuardBladePose.ResolveRoot(Vector3.zero, Quaternion.identity, true, out Vector3 guardBase, out Quaternion guardRotation, twoHanded);
+                driver.Pose(camera.transform, camera, guardBase, guardRotation, 1f, Vector3.zero, Vector3.zero);
+
+                GuardBladeBox box = GuardBladePose.Resolve(camera.transform.position, aim, true, twoHanded);
+                GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                Object.DestroyImmediate(cube.GetComponent<Collider>());
+                cube.transform.SetParent(root, true);
+                cube.transform.SetPositionAndRotation(box.Center, box.Rotation);
+                cube.transform.localScale = box.HalfExtents * 2f;
+                Shader unlit = Shader.Find("Universal Render Pipeline/Unlit");
+                var material = new Material(unlit);
+                material.SetFloat("_Surface", 1f);
+                material.SetFloat("_Blend", 0f);
+                material.SetOverrideTag("RenderType", "Transparent");
+                material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                material.SetInt("_ZWrite", 0);
+                material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                material.renderQueue = 3000;
+                material.SetColor("_BaseColor", new Color(0.2f, 0.45f, 1f, 0.45f));
+                cube.GetComponent<Renderer>().sharedMaterial = material;
+
+                Vector3 boxNear = box.Center - box.Rotation * Vector3.forward * box.HalfExtents.z;
+                Vector3 boxFar = box.Center + box.Rotation * Vector3.forward * box.HalfExtents.z;
+                Transform held = null;
+                foreach (Transform t in arms.GetComponentsInChildren<Transform>(true)) if (t.name == "Held_" + weapon.weaponId) { held = t; break; }
+                report.AppendLine($"{name}: box {box.HalfExtents.z * 2f:F2} m, near {Vp(camera, boxNear)} far {Vp(camera, boxFar)}");
+                if (held != null)
+                {
+                    float minY = float.PositiveInfinity, maxY = float.NegativeInfinity;
+                    foreach (MeshFilter f in held.GetComponentsInChildren<MeshFilter>(true))
+                    {
+                        if (f.sharedMesh == null) continue;
+                        foreach (Vector3 v in f.sharedMesh.vertices)
+                        {
+                            float y = held.InverseTransformPoint(f.transform.TransformPoint(v)).y;
+                            minY = Mathf.Min(minY, y); maxY = Mathf.Max(maxY, y);
+                        }
+                    }
+                    Vector3 tip = held.TransformPoint(new Vector3(0f, maxY, 0f));
+                    Vector3 guard = held.TransformPoint(new Vector3(0f, 0.17f, 0f));
+                    Vector3 pommel = held.TransformPoint(new Vector3(0f, minY, 0f));
+                    report.AppendLine($"  model blade {(tip - guard).magnitude:F2} m (whole {(tip - pommel).magnitude:F2}), guard {Vp(camera, guard)} tip {Vp(camera, tip)}");
+                    report.AppendLine($"  guard->box near {(guard - boxNear).magnitude:F3} m, tip->box far {(tip - boxFar).magnitude:F3} m, " +
+                        $"tip off the box axis {Vector3.Cross(box.Rotation * Vector3.forward, tip - boxNear).magnitude:F3} m");
+                    report.AppendLine($"  guard (aim frame) {camera.transform.InverseTransformPoint(guard):F3} tip (aim frame) {camera.transform.InverseTransformPoint(tip):F3}");
+                    GuardBladePose.ResolveRoot(camera.transform.position, aim, true, out Vector3 rootWorld, out Quaternion rootRotation, twoHanded);
+                    Quaternion toRoot = Quaternion.Inverse(rootRotation);
+                    report.AppendLine($"  guard (root frame) {toRoot * (guard - rootWorld):F3} tip (root frame) {toRoot * (tip - rootWorld):F3}");
+                }
+            }, 0.05f);
+            Debug.Log("[GuardStill] " + report);
+            return report.ToString();
+        }
+
+        private static string Vp(Camera camera, Vector3 world)
+        {
+            Vector3 v = camera.WorldToViewportPoint(world);
+            return $"({v.x:F2},{v.y:F2},{v.z:F2})";
+        }
+
+        /// <summary>Batch entry for the CI mirror only: guard stills of the short sword and the two-handed sword.</summary>
+        public static void RenderGuardBatch()
+        {
+            UnityEditor.SceneManagement.EditorSceneManager.OpenScene("Assets/Emberdelve/Scenes/Emberdelve_NetBoot.unity");
+            try
+            {
+                string text = RenderGuardStill("2h", EmberdelveViewmodelPreview.FindWeapon("two_handed_sword"), true)
+                    + RenderGuardStill("1h", EmberdelveViewmodelPreview.FindWeapon("ashen_short_sword"), false);
+                System.IO.File.WriteAllText(Folder + "/guard-report.txt", text);
+            }
+            catch (System.Exception e) { Debug.LogException(e); EditorApplication.Exit(1); return; }
+            EditorApplication.Exit(0);
         }
 
         /// <summary>Batch entry for the CI mirror only: runs the data library build so new authored assets get created, then quits.</summary>
@@ -66,17 +167,17 @@ namespace Emberdelve.EditorTools
             EditorApplication.Exit(0);
         }
 
-        private static void GuardPose(out Vector3 position, out Quaternion rotation)
+        private static void GuardPose(out Vector3 position, out Quaternion rotation, bool twoHanded = false)
         {
             Vector3 eye = Vector3.zero;
-            GuardBladePose.ResolveRoot(eye, Quaternion.identity, true, out Vector3 world, out Quaternion worldRotation);
+            GuardBladePose.ResolveRoot(eye, Quaternion.identity, true, out Vector3 world, out Quaternion worldRotation, twoHanded);
             position = world - eye;
             rotation = worldRotation;
         }
 
-        private static List<Frame> BlockTimeline(bool blade = false)
+        private static List<Frame> BlockTimeline(bool blade = false, bool twoHanded = false)
         {
-            GuardPose(out Vector3 guardBase, out Quaternion guardRotation);
+            GuardPose(out Vector3 guardBase, out Quaternion guardRotation, twoHanded);
             var frames = new List<Frame>();
             float guard = 0f;
             const float dt = 1f / 60f;

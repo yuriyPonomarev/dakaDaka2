@@ -325,6 +325,34 @@ namespace Emberdelve.Tests.Visual
         }
 
         [Test]
+        public void TwoHandedGuard_BlockBoxIsTheDrawnBlade_AndTheTipEndsBesideTheCrosshair()
+        {
+            using (Scene scene = Scene.Create("two_handed_sword", null))
+            {
+                EmberdelveFirstPersonArms.PoseInstance(scene.Arms, AssetDatabase.LoadAssetAtPath<AnimationClip>(EmberdelveFirstPersonArms.ClipPath(FirstPersonArmsDriver.IdleState)), 0.3f);
+                GuardBladePose.ResolveRoot(Vector3.zero, Quaternion.identity, true, out Vector3 guardBase, out Quaternion guardRotation, true);
+                scene.Driver.Pose(scene.Camera.transform, scene.Camera, guardBase, guardRotation, 1f, Vector3.zero, Vector3.zero);
+
+                Transform held = scene.Driver.MainHandModel.transform;
+                float maxY = float.NegativeInfinity;
+                foreach (MeshFilter f in held.GetComponentsInChildren<MeshFilter>(true))
+                    foreach (Vector3 v in f.sharedMesh.vertices) maxY = Mathf.Max(maxY, held.InverseTransformPoint(f.transform.TransformPoint(v)).y);
+                Vector3 tip = held.TransformPoint(new Vector3(0f, maxY, 0f));
+                Vector3 crossGuard = held.TransformPoint(new Vector3(0f, 0.17f, 0f));
+
+                GuardBladeBox box = GuardBladePose.Resolve(scene.Camera.transform.position, scene.Camera.transform.rotation, true, true);
+                Vector3 axis = box.Rotation * Vector3.forward;
+                Assert.Less(Vector3.Distance(crossGuard, box.Center - axis * box.HalfExtents.z), 0.04f, "the block box starts at the drawn cross-guard");
+                Assert.Less(Vector3.Distance(tip, box.Center + axis * box.HalfExtents.z), 0.04f, "the block box ends at the drawn tip");
+
+                Vector3 tipView = scene.Camera.WorldToViewportPoint(tip);
+                Assert.That(tipView.x, Is.InRange(0.5f, 0.7f), "the tip ends just right of the crosshair");
+                Assert.That(tipView.y, Is.InRange(0.3f, 0.5f), "and just below it");
+                Assert.IsFalse(scene.InFrustum(crossGuard), "the hilt is above and left of the view");
+            }
+        }
+
+        [Test]
         public void Block_RaisesTheShieldOntoTheBlockSurface_AndTheSwordLeavesTheFrame()
         {
             using (Scene scene = Scene.Create(SwordId, ShieldId))
