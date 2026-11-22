@@ -140,7 +140,7 @@ namespace Emberdelve.EditorTools
             return anchor;
         }
 
-        private static void Barrel(Transform parent,string name,Vector3 position,Material wood)
+        internal static void Barrel(Transform parent,string name,Vector3 position,Material wood)
         {
             var root=new GameObject(name);root.transform.SetParent(parent,false);root.transform.localPosition=position;
             var intact=Prop(root.transform,"Intact","wine_barrel_01",Vector3.zero,1.15f,0);

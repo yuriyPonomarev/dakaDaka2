@@ -99,11 +99,11 @@ namespace Emberdelve.EditorTools
                 foreach (float x in new[] { -9f, -5f, 5f, 9f })
                     CryptRoomArchitecture.Column(root, new Vector3(x, 0, side * 16.7f), destination == 1 ? 3.8f : 7.9f, stone);
 
-            if (kind == DungeonModuleKind.Ossuary || kind == DungeonModuleKind.Vault || kind == DungeonModuleKind.Hall && variant == 1)
+            if (root.Find("Hidden_Reliquary") == null && (kind == DungeonModuleKind.Ossuary || kind == DungeonModuleKind.Vault || kind == DungeonModuleKind.Hall && variant == 1))
                 SecretChamber(root, stone, paving, metal, wood);
         }
 
-        private static void SecretChamber(Transform root, Material stone, Material paving, Material metal, Material wood)
+        internal static void SecretChamber(Transform root, Material stone, Material paving, Material metal, Material wood)
         {
             Transform chamber = Group(root, "Hidden_Reliquary", Vector3.zero);
             Box(chamber, "Cache_WestWall", new Vector3(11.9f, 2.15f, 14.5f), new Vector3(.5f, 4.3f, 6.5f), stone);

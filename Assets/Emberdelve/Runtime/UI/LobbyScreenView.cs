@@ -34,7 +34,7 @@ namespace Emberdelve.UI
             root.sizeDelta = new Vector2(1440,800);
             root.gameObject.AddComponent<LobbyLayoutScale>();
 
-            UiFactory.CreateImage(root, "Backdrop", new Color(0.03f, 0.022f, 0.016f, 1f),
+            UiFactory.CreateImage(root, "Backdrop", new Color(0.03f, 0.022f, 0.016f, .45f),
                 new Vector2(2400f, 1400f), Vector2.zero, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
 
             Text title = UiFactory.CreateText(root, "Title", "DAKADAKA", 44, new Color(0.95f, 0.78f, 0.4f, 1f), TextAnchor.MiddleCenter);

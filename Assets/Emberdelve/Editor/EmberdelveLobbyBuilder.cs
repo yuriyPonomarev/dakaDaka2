@@ -18,6 +18,7 @@ namespace Emberdelve.EditorTools
     {
         public static Scene Build()
         {
+            LobbyMeshyBraziers.RequireWallTorchSource();
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
             EmberdelveAssetLibrary.BuildAll();
@@ -54,6 +55,7 @@ namespace Emberdelve.EditorTools
 
             // V3a: Poly Haven set dressing along the walls (visual only, no colliders).
             EmberdelvePropFactory.BuildLobbyProps();
+            LobbyMeshyBraziers.Apply(root.transform);
             EmberdelveVisualSetup.PruneMeshes(MeshPrefix);
 
             EmberdelveVisualSetup.AddGlobalVolume("Post_Volume_Lobby");

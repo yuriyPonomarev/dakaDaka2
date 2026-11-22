@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -40,6 +41,8 @@ namespace Emberdelve.EditorTools
 
         public static bool Apply(GameObject root)
         {
+            bool authoredFamily = root.transform.Cast<Transform>().Any(t => t.name.StartsWith("Layout_", StringComparison.Ordinal));
+            if (authoredFamily && root.transform.Find("Western_Gallery") == null) return false;
             var floor = root.transform.Find("Floor");
             if (floor == null || floor.GetComponent<MeshRenderer>() == null) return false;
             if (!AssetDatabase.IsValidFolder(Folder)) AssetDatabase.CreateFolder("Assets/Emberdelve/Art/Generated", "FloorWear");
@@ -78,6 +81,7 @@ namespace Emberdelve.EditorTools
             mesh.SetVertices(vertices); mesh.SetTriangles(indices, 0);
             mesh.RecalculateNormals(); mesh.RecalculateBounds();
             EditorUtility.SetDirty(mesh);
+            AssetDatabase.SaveAssetIfDirty(mesh);
             var child = root.transform.Find(ChildName);
             if (child == null) { var go = new GameObject(ChildName); child = go.transform; child.SetParent(root.transform, false); }
             child.gameObject.layer = 2; // Ignore Raycast: cosmetic relief cannot intercept interactions or combat.

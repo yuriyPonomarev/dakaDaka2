@@ -1,38 +1,33 @@
-# DakaDaka — current work
+# DakaDaka � current work
 
-Updated 22 November 2026. The ONLY development checkout is `C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff`. Legacy `../DakaDaka` is read-only; `../DakaDaka_ci` is the disposable verification mirror. Keep the user's primary Editor open in its current state. Live reviews use isolated saves and an owned mirror Editor, recorded MP4 with game audio and delivery in chat.
+Updated22 November2026. The ONLY development checkout is `C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff`. Legacy `../DakaDaka` is read-only; `../DakaDaka_ci` is the disposable verification mirror. Keep the user's primary Editor open. Reviews use isolated saves and owned mirror Editors; record/deliver MP4 with game audio.
 
-Runner and project rules updated 22 November. The Windows entry points validate the development root and test mirror before writing, preserve Unity locks and serialize runs. Reports and skill text select zero gameplay scenarios. Proof: 28 harness tests in `Logs/harness/editor-guard-20261122-tests.txt`, EditMode 16/16, NetProof 35/35 and NetAdmission 107/107 in `Logs/runs/20261122-050757-383`. Build output copying was checked with temporary player files. The shared visual and asset procedures are linked in AGENTS.md. Its [Unity pipeline rule](../AGENTS.md#unity-pipeline) now gives the named MCP connections priority for interactive Editor work.
+## Completed slice: differentiated modules and lobby
 
-User requirement added 22 November: game-system, module and environment changes must consult the local extracted/decompiled Dark and Darker and record exact evidence/adaptation choices. See [the mandatory reference rule](../AGENTS.md#required-dark-and-darker-reference); mirrored by the always-applied Cursor rule. Documentation-only change; source directory and links verified, no Unity run.
+Report: [LAYOUT_FAMILIES_20261122](../Tasks/LAYOUT_FAMILIES_20261122.md). All30 saved modules now use ten physical circulation families across the existing three themes: arrival court, four chambers, galleries, offset corridors, burial aisles, sunken crypt, chapel dais, inner keep, crossroads and raised crossing. Hall02 alone retains the old universal gallery/undercroft. External36m footprint, socket contract, module IDs/catalog order and existing secret mechanisms are preserved; interiors and navigation deliberately change.
 
-## Current slice: repair depth artifacts and architectural joins
+Mandatory local extracted Dark and Darker evidence: [DARKER_LAYOUT_EVIDENCE_20261122](../Tasks/DARKER_LAYOUT_EVIDENCE_20261122.md). Actor/component relationships and provisional FourRooms placements were inspected. These are original adaptations; exact reference schema/units remain unverified. The requirement is recorded in AGENTS.md and the always-applied Cursor rule (`be169ef44`).
 
-The user rejected the prior result with visible floating/colliding architecture. Earlier traversal-only visual proof was inadequate. Active report: [MODULE_JOINS_20261122](../Tasks/MODULE_JOINS_20261122.md).
+Final repairs: seated imported crowns on260mm tapered capitals; permanent upper masonry over roofed sockets; wall corners meet without overlapping top faces; lower-floor render underlap and closed backing seal below-ground stair joints. The mis-scaled chest-for-sarcophagus substitution is removed. Shared original stone derivatives and already downloaded models/materials are used. No render-priority/depth-bias workaround or new download/generation.
 
-- All 30 saved modules: 2,400 tread renderers now have separated joints; 60 retaining-wall renderers stop below the ground slab instead of duplicating its faces. Shared bevel sources remain; 61 fitted derivatives preserve walking colliders and transforms.
-- Column-fragment wall tiling is replaced by continuous rounded stone surfaces. Closed boundary meshes fit within their owning room's footprint, eliminating duplicated neighbour surfaces while preserving the inner envelope. 90 shared architectural derivatives including the fitted door backing; no open clipped shells or depth/render-queue hack.
-- Arch springlines meet actual supporting columns. Two unsupported overhead ornaments in base Vault/Extraction are omitted with their MeshColliders. 9,204 module colliders otherwise keep exact geometry/ancestor transforms; all 30 catalog references, 83 script components, 1,307 nested instances and 212 light/script identity paths remain unchanged.
-- Door masonry restores its exact arched aperture. The existing Meshy leaf and blocker share a face-mounted hinge at z=−0.435 m, with a measured 5 mm clearance throughout 0–96° motion. Portal veil fits floor-to-lintel in all three saved scenes. Rules, skills and review procedure now explicitly reject depth artifacts, unsupported joins and broken doorway motion.
-- Saved repair/validation passes. Level EditMode 150/150; NetMovement 198/198, NetDoor 49/49, NetInventory 148/148 and NetFinal 172/172 pass in `Logs/runs/20261122-081547-253`. The final visual-only backing delta preserves every door collider/script document.
-- Visible assembly seeds 12345/67890 passed ordinary stair routes and labelled map/door/gate camera inspection; 120 catalog views cover all 30 saved prefabs. Both MP4s fully decoded, frames inspected and delivered. A later door review exposed an oversized backing gap; it was corrected with a uniform 5 mm fitted backing. Final `door-final-sealed` recordings on both seeds show open/closed front/back views, were decoded, inspected and delivered. Final primary/mirror content matches across 348 affected asset/editor files. User acceptance remains separate. Evidence: `Logs/acceptance/module-joins-20261122`.
+Lobby saved scene now has two visible existing Meshy bowl/pedestal assemblies and four migrated Meshy wall torches. The opaque menu backdrop was reduced to45%; card/text behavior remains. Final decorative placements keep both braziers visible outside panels. Primary Play/scene was not opened, stopped or saved by review tools.
 
-AI remains disabled for new raids and later floors by the saved setting from 8d890de8f; re-enable only when requested. Verification processes explicitly override AI on for normal combat. No personal save edits. This pass repairs existing construction; distinct room-layout families and exact reference-game dimensions are not claimed. [Reference audit](../Tasks/DARKER_MODULE_REFERENCE_20261122.md).
+## Verification
 
-Previous audio 4b410795a remains recorded in [NATURAL_AUDIO_20261122](../Tasks/NATURAL_AUDIO_20261122.md). Walls/traversal prior reports remain historical, superseded wherever this repair finds assembly defects.
+`Logs/runs/20261122-152040-906`: **Level198/198**, including48 new family/navigation/controller cases. **NetMovement198, NetDoor49, NetInventory148, NetFinal172** checks; all four scenarios pass (567checks). Final render-only pit repair preserves2,905 exact gameplay component documents and5,862 existing transforms versus tested prefabs. All30 module documents and12 secret-script sets remain unchanged from the pre-slice baseline.
+
+Recorded final geometry seed12345:30 overviews,132 wall corners,60 arch feet,66 stairs,40 live seam angles,8 E/N door states; scoped temporal samples inspected. Diagnostic light is explicitly labelled and only used after native gameplay/map views. Former gaps are closed; no remaining concrete join/clipping defect found in reviewed scope. Long stationary inspection ended alive at40health from zone damage,AI0. Native-light seed67890: ordinary dais walk/return,120health,AI0,second layout/doors and visible lobby braziers. Videos decoded with stereo audio and delivered. Full paths/limits are in the report.
+
+Bots remain disabled in new raids/later floors until the user asks to restore them. Harness processes explicitly enabled normal AI for verification and restored their override. Primary Editor PID8352 remains open; owned mirror Editors have exited. User must reload Play/scenes to view updated saved assets. Inherited material/Oasis/settings drift is excluded from the local commit; no push.
 
 ## Preserved baseline and limitations
 
-Integration19519855b combined Meshy environment/Sol work with36m modules,+3.9m galleries,−1.5m passages and server-owned lever caches; protocol47. Earlier commits0875d13d enforce checkout andcbe51fad4 hold room/cache work. Reports: [HANDOFF_INTEGRATION_20261122](../Tasks/HANDOFF_INTEGRATION_20261122.md), [DOWNLOADED_ARCHITECTURE_20261122](../Tasks/DOWNLOADED_ARCHITECTURE_20261122.md).
+Integration19519855b combined Meshy/Sol work with larger rooms, vertical routes and server-owned lever caches; protocol47. Earlier reports: [HANDOFF_INTEGRATION](../Tasks/HANDOFF_INTEGRATION_20261122.md), [DOWNLOADED_ARCHITECTURE](../Tasks/DOWNLOADED_ARCHITECTURE_20261122.md), [NATURAL_AUDIO](../Tasks/NATURAL_AUDIO_20261122.md). Prior integration had65/71 gates passing and baseline failure groups; this focused slice does not declare the entire repository green. No engine/package upgrades.
 
-Prior integration evidence remains: modules146/146, movement geometry11/11,11 network gates1763checks; combined71gates65pass/6baseline failure groups. Broad EditMode1479total1463pass4baseline failures12skip. Two seeds12345/67890 each14 ambience/lifecycle checks and recorded stereo audio. Full suite is not green; current slices use bounded proof, not a repeat of the76-minute integration run.
-
-Before the earlier sound task, early ambience reviews touched the ordinary Squire profile and may have parked prepared gear in stash. Backups in `Logs/acceptance/ambience-20261122/profile-preservation`; user informed. No pre-run loadout proves a guessed restoration. New live reviews isolate saves; CLI network fixtures cannot enter OfflineProfileSession. Existing user Editor remains open.
-
-Old stash `Preserve audio completion and inherited Unity drift before Sol integration` is retained and must never be blindly popped. Inherited material/Oasis/settings drift is excluded. No engine/package upgrades, legacy writes or push.
+Early ambience reviews may have parked Squire prepared gear in stash; backup/evidence remains in `Logs/acceptance/ambience-20261122/profile-preservation`, user already informed. Do not guess a loadout restoration. The old stash `Preserve audio completion and inherited Unity drift before Sol integration` remains untouched.
 
 ## Next three actions
 
-1. User inspection should start a new raid to instantiate the repaired saved modules; keep AI disabled.
-2. Address any specific remaining visual feedback with the same depth/join checks and isolated recorded review; do not infer a broad room-layout or lighting acceptance.
-3. Preserve unrelated drift, old stash and broad integration debt. No push or full-suite repeat without a relevant reason.
+1. User reviews a newly loaded raid/lobby with AI still disabled.
+2. Address concrete visual feedback with the affected recorded views and focused checks; retain failed evidence.
+3. Resume the authorized unfinished gameplay milestone from ROADMAP; restore raid AI only when explicitly requested.

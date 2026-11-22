@@ -69,6 +69,7 @@ namespace Emberdelve.EditorTools
             if (group == null || room.GetComponent<DungeonModuleDefinition>()?.Kind != DungeonModuleKind.Shrine)
                 return false;
             var altar = room.transform.Find("Ruined_Altar/Altar_Table")
+                ?? room.transform.Find("Layout_Chapel_ProcessionalDais/Ruined_Altar/Altar_Table")
                 ?? room.transform.Find("Sepulchral_Altar") ?? room.transform.Find("Sacrificial_Anvil");
             if (altar == null) return false;
 

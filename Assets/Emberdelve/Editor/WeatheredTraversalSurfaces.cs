@@ -80,7 +80,7 @@ namespace Emberdelve.EditorTools
                 try
                 {
                     MeshFilter[] selected = Selected(root);
-                    if (selected.Length == 0) throw new InvalidOperationException("No traversal kit in " + path);
+                    if (selected.Length == 0 && !DungeonLayoutFamilies.UsesNewTraversal(root)) throw new InvalidOperationException("No traversal kit in " + path);
                     foreach (MeshFilter filter in selected)
                     {
                         Variant variant = Describe(filter, root.transform);
@@ -171,6 +171,7 @@ namespace Emberdelve.EditorTools
                     {
                         int changed = Apply(root);
                         changed += StairSurfaceSeparation.Apply(root);
+                        changed += DungeonPitJointBacking.Apply(root);
                         if (changed == 0) continue;
                         if (PrefabUtility.SaveAsPrefabAsset(root, record.path) == null)
                             throw new InvalidOperationException("Prefab save failed: " + record.path);
@@ -288,6 +289,7 @@ namespace Emberdelve.EditorTools
 
         private static Mesh ResolveOriginalMesh(Mesh source)
         {
+            source = DungeonPitJointBacking.ResolveOriginalMesh(source);
             if (source == null) return null;
             string path = AssetDatabase.GetAssetPath(source);
             if (!path.StartsWith(StairSurfaceSeparation.MeshFolder + "/", StringComparison.Ordinal)) return source;

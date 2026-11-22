@@ -36,6 +36,7 @@ namespace Emberdelve.EditorTools
         {
             if (root == null) throw new ArgumentNullException(nameof(root));
             RequirePrimaryCheckout();
+            if (DungeonLayoutFamilies.UsesNewTraversal(root)) { DungeonLayoutFamilies.ValidateGeometry(root); return 0; }
             Preflight(root);
             var components = Snapshot(root);
             var replacements = new Dictionary<MeshFilter, Mesh>();
@@ -112,13 +113,14 @@ namespace Emberdelve.EditorTools
                 finally { PrefabUtility.UnloadPrefabContents(root); }
             }
             Debug.Log("[TraversalSeparation] QA passed: prefabs=30 steps=" + steps +
-                " retainingWalls=60; tread intervals disjoint, landing clearance >=2mm, original tread top heights retained," +
+                "; family-specific tread intervals disjoint, landing clearance >=2mm, tread top heights retained," +
                 " retaining render faces stop at ground slab underside; no overlapping floor-wall coplanar area.");
         }
 
         /// <summary>Checks actual mesh bounds in authored metres, not merely a particular asset reference.</summary>
         public static int Validate(GameObject root)
         {
+            if (DungeonLayoutFamilies.UsesNewTraversal(root)) return DungeonLayoutFamilies.ValidateGeometry(root);
             Preflight(root);
             int steps = 0, retaining = 0;
             foreach (MeshFilter filter in root.GetComponentsInChildren<MeshFilter>(true))
@@ -151,6 +153,7 @@ namespace Emberdelve.EditorTools
 
         private static void Preflight(GameObject root)
         {
+            if (DungeonLayoutFamilies.UsesNewTraversal(root)) { DungeonLayoutFamilies.ValidateGeometry(root); return; }
             Transform floor = root.transform.Find("Floor"), edge = root.transform.Find("Floor_EastEdge");
             RequireBox(floor, new Vector3(-3, -.3f, 0), new Vector3(30, .6f, 36));
             RequireBox(edge, new Vector3(17.5f, -.3f, -10), new Vector3(1, .6f, 10));

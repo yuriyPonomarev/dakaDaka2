@@ -65,12 +65,10 @@ namespace Emberdelve.EditorTools
                 GameObject root = CreateModule(spec, wall, floor, ceiling);
                 DungeonSurfaceMaterials.Apply(root);
                 DungeonFloorWear.Apply(root);
-                DungeonRoomProps.Apply(root);
-                if (spec.Kind == DungeonModuleKind.Entry) CommunityRuinsTrial.Apply(root);
-                MeshyMapDressing.ApplyWayside(root);
                 DownloadedCryptArchitecture.Apply(root);
                 WeatheredTraversalSurfaces.Apply(root);
-                StairSurfaceSeparation.Apply(root);
+                if (DungeonLayoutFamilies.Gallery(spec.Kind, spec.Variant)) StairSurfaceSeparation.Apply(root);
+                DungeonPitJointBacking.Apply(root);
                 string path = PrefabFolder + "/" + spec.Name + ".prefab";
                 GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, path);
                 UnityEngine.Object.DestroyImmediate(root);
@@ -127,11 +125,10 @@ namespace Emberdelve.EditorTools
                     var root = CreateModule(spec, stone, floor, ceiling, destination);
                     DungeonSurfaceMaterials.Apply(root);
                     DungeonFloorWear.Apply(root);
-                    DungeonRoomProps.Apply(root);
-                    MeshyMapDressing.ApplyWayside(root);
                     DownloadedCryptArchitecture.Apply(root);
                     WeatheredTraversalSurfaces.Apply(root);
-                StairSurfaceSeparation.Apply(root);
+                    if (DungeonLayoutFamilies.Gallery(spec.Kind, spec.Variant)) StairSurfaceSeparation.Apply(root);
+                    DungeonPitJointBacking.Apply(root);
                     try
                     {
                         var prefab = PrefabUtility.SaveAsPrefabAsset(root, PrefabFolder + "/" + theme + "/" + spec.Name + ".prefab");
@@ -196,7 +193,7 @@ namespace Emberdelve.EditorTools
             }
             so.ApplyModifiedPropertiesWithoutUndo();
 
-            DungeonRoomExpansion.BuildFloor(root.transform, floor, wall);
+            DungeonLayoutFamilies.BuildFloor(root.transform, spec.Kind, spec.Variant, floor, wall);
             if (destination > 1 || spec.Kind == DungeonModuleKind.Vault)
                 Box(root.transform, "Roof", new Vector3(0,WallHeight+0.3f,0), new Vector3(Half*2,0.6f,Half*2), ceiling);
             if (destination > 1 || spec.Kind == DungeonModuleKind.Vault)
@@ -219,13 +216,7 @@ namespace Emberdelve.EditorTools
                 Box(root.transform, "Arch_Jamb_"+names[i]+"_B", positions[i] + axis * DoorHalf + Vector3.up*2f, new Vector3(horizontal ? .55f : .7f,4.3f,horizontal ? .7f : .55f), wall);
                 Box(root.transform, "Arch_Lintel_"+names[i], positions[i]+Vector3.up*4f, horizontal ? new Vector3(4.6f,.55f,.8f) : new Vector3(.8f,.55f,4.6f), wall);
             }
-            if (destination == 1)
-            {
-                AddRoomFeature(root.transform, spec, wall, floor);
-                if (spec.Kind == DungeonModuleKind.Entry) MoonlitRuinsContent.AddEnvironment(root.transform);
-            }
-            else RoyaleRoomArchitecture.Build(root.transform, destination, spec.Kind, spec.Variant, wall, floor);
-            DungeonRoomExpansion.Dress(root.transform, spec.Kind, spec.Variant, destination, wall, floor);
+            DungeonLayoutFamilies.Dress(root.transform, spec.Kind, spec.Variant, destination, wall, floor);
             MeshyMapDressing.ApplyRoom(root);
             return root;
         }

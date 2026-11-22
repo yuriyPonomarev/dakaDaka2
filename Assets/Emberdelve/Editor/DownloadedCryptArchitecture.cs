@@ -14,6 +14,7 @@ namespace Emberdelve.EditorTools
         internal const string Folder = "Assets/Emberdelve/Art/Models/AI/Meshy/DownloadedArchitecture";
         private const string Community = "Assets/Emberdelve/Art/Models/AI/Meshy/CommunityRuins";
         private const string VisualName = "Meshy_Architecture_Visual";
+        private const string BrazierVisualName = "Imported_Carved_Brazier";
 
         [MenuItem("Emberdelve/Visual/Rebuild Downloaded Crypt Architecture")]
         public static void RebuildAll()
@@ -34,7 +35,7 @@ namespace Emberdelve.EditorTools
             var masonry = StonePier();
             var crown = ArchCrown();
             var archMaterial = StoneMaterial();
-            ApplyReliquaries(room);
+            RepairPropAdapters(room);
 
             // Snapshot before adding children; authored collider and light sibling identities stay unchanged.
             foreach (var filter in room.GetComponentsInChildren<MeshFilter>(true))
@@ -80,6 +81,7 @@ namespace Emberdelve.EditorTools
                 }
                 // Walls retain a continuous closed masonry surface. Column fragments are not wall tiles.
             }
+            ApplyBraziers(room);
             ArchitecturalJoinRepair.Apply(room);
             long triangles = 0, totalTriangles = 0;
             int draws = 0, totalDraws = 0;
@@ -98,22 +100,193 @@ namespace Emberdelve.EditorTools
             Debug.Log($"[DownloadedArchitecture] {room.name}: {triangles} imported triangles, {draws} renderers; TOTAL enabled {totalTriangles} triangles / {totalDraws} renderers; collider layout preserved.");
         }
 
-        private static void ApplyReliquaries(GameObject room)
+        [MenuItem("Emberdelve/Visual/Repair Saved Carved Braziers")]
+        public static void RepairSavedBraziers()
         {
-            var source = Required<GameObject>(Folder + "/SealedReliquary/Source.fbx");
-            var material = Surface("SealedReliquary", .2f);
+            if (!string.Equals(Application.dataPath.Replace('\\', '/').TrimEnd('/'),
+                "C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff/Assets", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Repair braziers only in the primary clean_handoff checkout.");
+            int bowls = 0, rooms = 0;
+            foreach (string guid in AssetDatabase.FindAssets("t:Prefab", new[] { "Assets/Emberdelve/Prefabs/DungeonModules" }))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                var root = PrefabUtility.LoadPrefabContents(path);
+                try
+                {
+                    int count = ApplyBraziers(root);
+                    if (count == 0) continue;
+                    if (PrefabUtility.SaveAsPrefabAsset(root, path) == null)
+                        throw new InvalidOperationException("Could not save carved braziers: " + path);
+                    bowls += count; rooms++;
+                }
+                finally { PrefabUtility.UnloadPrefabContents(root); }
+            }
+            Debug.Log($"[CarvedBraziers] {bowls} fitted bowls in {rooms} saved modules; existing colliders, lights and gameplay nodes unchanged.");
+        }
+
+        internal static int ApplyBraziers(GameObject room)
+        {
+            var source = Required<GameObject>(Community + "/StoneBrazier/StoneBrazier.prefab");
+            int count = 0;
+            foreach (var filter in room.GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (filter.name != "Brazier_Bowl") continue;
+                Transform bowl = filter.transform, frame = bowl.parent;
+                Transform light = BrazierSibling(bowl, "Brazier_Light"), shaft = BrazierSibling(bowl, "Column_Shaft");
+                Transform anchor = bowl.Find(BrazierVisualName);
+                if (anchor == null)
+                {
+                    anchor = Child(bowl, BrazierVisualName);
+                    PrefabUtility.InstantiatePrefab(source, anchor);
+                }
+                if (anchor.GetComponentsInChildren<Collider>(true).Length != 0)
+                    throw new InvalidOperationException("Imported carved bowl must remain visual-only.");
+                Bounds model = VisibleMeshBounds(anchor, anchor);
+                float bottom = BrazierBearingHeight(shaft, frame, bowl.localPosition) - .003f;
+                float scale = (light.localPosition.y - bottom) / model.size.y;
+                if (scale <= 0f || Mathf.Max(model.size.x, model.size.z) * scale > 1.10f)
+                    throw new InvalidOperationException("Brazier cannot fit its existing flame and column without an oversized bowl.");
+                if (Quaternion.Angle(bowl.localRotation, Quaternion.identity) > .01f)
+                    throw new InvalidOperationException("Unexpected rotated primitive brazier bowl.");
+                Vector3 target = new Vector3(bowl.localPosition.x - model.center.x * scale,
+                    bottom - model.min.y * scale, bowl.localPosition.z - model.center.z * scale);
+                anchor.localPosition = bowl.InverseTransformPoint(frame.TransformPoint(target));
+                anchor.localRotation = Quaternion.identity;
+                // Cancel the primitive cylinder's .85/.13/.85 scaling before applying a
+                // single scale to the carved bowl; retain its hollow rim and proportions.
+                Vector3 primitiveScale = bowl.localScale;
+                anchor.localScale = new Vector3(scale / primitiveScale.x, scale / primitiveScale.y, scale / primitiveScale.z);
+                foreach (var child in anchor.GetComponentsInChildren<Transform>(true)) child.gameObject.layer = bowl.gameObject.layer;
+                filter.GetComponent<MeshRenderer>().enabled = false;
+                count++;
+            }
+            ValidateBraziers(room);
+            return count;
+        }
+
+        internal static void ValidateBraziers(GameObject room)
+        {
+            foreach (var filter in room.GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (filter.name != "Brazier_Bowl") continue;
+                Transform bowl = filter.transform, frame = bowl.parent, anchor = bowl.Find(BrazierVisualName);
+                if (anchor == null || filter.GetComponent<MeshRenderer>().enabled)
+                    throw new InvalidOperationException("Brazier still uses a primitive bowl.");
+                Bounds fitted = VisibleMeshBounds(anchor, frame);
+                float bearing = BrazierBearingHeight(BrazierSibling(bowl, "Column_Shaft"), frame, bowl.localPosition);
+                float flame = BrazierSibling(bowl, "Brazier_Light").localPosition.y;
+                Vector3 scale = Vector3.Scale(anchor.localScale, bowl.localScale);
+                if (Mathf.Abs(fitted.max.y - flame) > .002f || Mathf.Abs(fitted.min.y - (bearing - .003f)) > .002f
+                    || Mathf.Abs(scale.x - scale.y) > .0001f || Mathf.Abs(scale.z - scale.y) > .0001f
+                    || Mathf.Max(fitted.size.x, fitted.size.z) > 1.10f)
+                    throw new InvalidOperationException("Carved brazier has a support/flame gap or distorted proportions.");
+            }
+        }
+
+        private static Transform BrazierSibling(Transform bowl, string name)
+        {
+            foreach (Transform candidate in bowl.parent)
+            {
+                if (candidate.name != name) continue;
+                Vector3 delta = candidate.localPosition - bowl.localPosition; delta.y = 0;
+                if (delta.sqrMagnitude < .0025f) return candidate;
+            }
+            throw new InvalidOperationException("Brazier is missing its aligned " + name);
+        }
+
+        private static float BrazierBearingHeight(Transform shaft, Transform space, Vector3 centre)
+        {
+            // The carved foot spans roughly .62m. Sample the actual upper triangles
+            // under its central .44m bearing area, rather than an unrelated high vertex.
+            var heights = new float[9]; Array.Fill(heights, float.NegativeInfinity);
+            foreach (var filter in shaft.GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (filter.sharedMesh == null || !filter.TryGetComponent<MeshRenderer>(out var renderer) || !renderer.enabled) continue;
+                Matrix4x4 matrix = space.worldToLocalMatrix * filter.transform.localToWorldMatrix;
+                Vector3[] points = filter.sharedMesh.vertices; int[] triangles = filter.sharedMesh.triangles;
+                for (int i = 0; i < points.Length; i++) points[i] = matrix.MultiplyPoint3x4(points[i]);
+                for (int i = 0; i < triangles.Length; i += 3)
+                {
+                    Vector3 a = points[triangles[i]], b = points[triangles[i + 1]], c = points[triangles[i + 2]];
+                    float denominator = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z);
+                    if (Mathf.Abs(denominator) < 1e-10f) continue;
+                    for (int sample = 0; sample < heights.Length; sample++)
+                    {
+                        float x = centre.x + (sample % 3 - 1) * .22f, z = centre.z + (sample / 3 - 1) * .22f;
+                        float u = ((b.z - c.z) * (x - c.x) + (c.x - b.x) * (z - c.z)) / denominator;
+                        float v = ((c.z - a.z) * (x - c.x) + (a.x - c.x) * (z - c.z)) / denominator;
+                        float w = 1f - u - v;
+                        if (u >= -.00001f && v >= -.00001f && w >= -.00001f)
+                            heights[sample] = Mathf.Max(heights[sample], u * a.y + v * b.y + w * c.y);
+                    }
+                }
+            }
+            float minimum = float.PositiveInfinity;
+            foreach (float height in heights)
+            {
+                if (!float.IsFinite(height)) throw new InvalidOperationException("Carved brazier has no solid column beneath its foot.");
+                minimum = Mathf.Min(minimum, height);
+            }
+            return minimum;
+        }
+
+        private static Bounds VisibleMeshBounds(Transform root, Transform space)
+        {
+            bool found = false; Bounds bounds = default;
+            foreach (var filter in root.GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (filter.sharedMesh == null || !filter.TryGetComponent<MeshRenderer>(out var renderer) || !renderer.enabled) continue;
+                Matrix4x4 matrix = space.worldToLocalMatrix * filter.transform.localToWorldMatrix;
+                foreach (Vector3 vertex in filter.sharedMesh.vertices)
+                {
+                    Vector3 point = matrix.MultiplyPoint3x4(vertex);
+                    if (!found) { bounds = new Bounds(point, Vector3.zero); found = true; }
+                    else bounds.Encapsulate(point);
+                }
+            }
+            if (!found) throw new InvalidOperationException("No visible mesh for brazier support/model: " + root.name);
+            return bounds;
+        }
+
+        internal static int RepairPropAdapters(GameObject room)
+        {
+            int repaired = 0;
             foreach (var tomb in room.GetComponentsInChildren<Transform>(true))
             {
-                if (tomb.name != "Sarcophagus" || tomb.Find(VisualName) != null) continue;
-                var lid = tomb.Find("Lid");
-                if (lid == null || !lid.TryGetComponent<BoxCollider>(out var support)) continue;
-                // Keep the same lid top for existing wayside statues/candles supported by this tomb.
-                float top = tomb.InverseTransformPoint(support.transform.TransformPoint(support.center + Vector3.up * support.size.y * .5f)).y;
-                FitPrefab(source, tomb, new Bounds(new Vector3(0, top * .5f, 0), new Vector3(1.8f, top, 3.2f)), material, yaw: 90f, preserveAspect: true);
-                foreach (var piece in tomb.Find(VisualName).GetComponentsInChildren<Transform>(true))
-                    piece.gameObject.layer = support.gameObject.layer;
-                foreach (Transform piece in tomb)
-                    if (piece.name != VisualName && piece.TryGetComponent<MeshRenderer>(out var renderer)) renderer.enabled = false;
+                if (tomb == null || tomb.name != "Sarcophagus") continue;
+                // The downloaded reliquary is an iron chest, not a stone coffin. Scaling
+                // its short end up to this lid made a tall crate and hid the real support.
+                // Restore the authored tomb whose visible lid matches its support collider.
+                Transform replacement = tomb.Find(VisualName);
+                if (replacement != null)
+                {
+                    if (replacement.GetComponentsInChildren<Collider>(true).Length != 0)
+                        throw new InvalidOperationException("Unexpected collider in visual-only tomb replacement");
+                    Object.DestroyImmediate(replacement.gameObject);
+                }
+                foreach (string part in new[] { "Footing", "Casket", "Lid", "Effigy", "Head_Relief" })
+                {
+                    Transform child = tomb.Find(part);
+                    if (child != null && child.TryGetComponent<MeshRenderer>(out var renderer)) renderer.enabled = true;
+                }
+                repaired++;
+            }
+            return repaired;
+        }
+
+        internal static void ValidatePropAdapters(GameObject room)
+        {
+            foreach (var tomb in room.GetComponentsInChildren<Transform>(true))
+            {
+                if (tomb.name != "Sarcophagus") continue;
+                Transform lid = tomb.Find("Lid");
+                if (tomb.Find(VisualName) != null || lid == null
+                    || !lid.TryGetComponent<MeshRenderer>(out var renderer) || !renderer.enabled
+                    || !lid.TryGetComponent<BoxCollider>(out var support)
+                    || !lid.TryGetComponent<MeshFilter>(out var filter) || filter.sharedMesh == null
+                    || (filter.sharedMesh.bounds.center - support.center).sqrMagnitude > .000001f
+                    || (filter.sharedMesh.bounds.size - support.size).sqrMagnitude > .000001f)
+                    throw new InvalidOperationException("Stone tomb presentation does not match its lid support");
             }
         }
 
@@ -407,7 +580,7 @@ namespace Emberdelve.EditorTools
                 || EdgeB == other.EdgeA || EdgeB == other.EdgeB;
         }
 
-        private static void RebuildWeatheredNormals(Mesh mesh)
+        internal static void RebuildWeatheredNormals(Mesh mesh)
         {
             Vector3[] points = mesh.vertices;
             int[] indices = mesh.triangles;
