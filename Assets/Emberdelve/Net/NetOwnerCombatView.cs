@@ -40,8 +40,9 @@ namespace Emberdelve.Net
             _ended = false;
             if (owner != null && !owner.IsServer)
             {
-                if (GetComponent<Emberdelve.Feedback.WorldAudio>() == null)
-                    gameObject.AddComponent<Emberdelve.Feedback.WorldAudio>();
+                var feedback = GetComponent<Emberdelve.Feedback.FeedbackDirector>();
+                if (feedback == null) feedback = gameObject.AddComponent<Emberdelve.Feedback.FeedbackDirector>();
+                feedback.BindPlayer(owner.Rig);
                 _ambience = GetComponent<Emberdelve.Feedback.DungeonAmbience>();
                 if (_ambience == null) _ambience = gameObject.AddComponent<Emberdelve.Feedback.DungeonAmbience>();
                 _ambience.BindPlayer(owner.Rig);

@@ -28,6 +28,7 @@ namespace Emberdelve.Net
         private readonly string[] _skillIds = new string[SkillNetLimits.ActiveSlots];
         private float _nextViewLog;
         private bool _viewLogPending;
+        private uint _lastAudibleCastSequence;
         private RaidClockWire _raidClock;
         private double _raidClockReceivedAt;
         private bool _hasRaidClock;
@@ -81,6 +82,7 @@ namespace Emberdelve.Net
             _owner = owner;
             _interactor = owner != null ? owner.GetComponent<Interactor>() : null;
             _runEnded = false;
+            _lastAudibleCastSequence = 0;
             _map = FindFirstObjectByType<Emberdelve.Level.DungeonModuleSceneAssembler>();
         }
 
@@ -115,6 +117,12 @@ namespace Emberdelve.Net
         {
             ResultsReceived++;
             if (result.OutcomeKind == SkillCastOutcome.Cast) CastResults++; else RefusedResults++;
+            if (NetRole.IsClientOnly && result.OutcomeKind == SkillCastOutcome.Cast &&
+                result.Sequence != 0 && result.Sequence > _lastAudibleCastSequence)
+            {
+                _lastAudibleCastSequence = result.Sequence;
+                NetSkillCastFlash.PlayCastAudio(_owner, result.SkillId);
+            }
 
             SkillStateData state = result.State.ToData();
             _model.Apply(state, Time.unscaledTimeAsDouble);

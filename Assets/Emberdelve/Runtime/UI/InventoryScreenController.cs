@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
 using Emberdelve.Core;
+using Emberdelve.Feedback;
 using Emberdelve.Data;
 using Emberdelve.Flow;
 using Emberdelve.Items;
@@ -234,6 +235,7 @@ namespace Emberdelve.UI
         {
             if (IsOpen || RunEnded) return;
             IsOpen = true;
+            if (!IsLootCompanion) WorldAudio.PlayLocal(WorldSound.UiOpen);
             InventoryInputFocus.Open(this);
 
             if (_root != null) _root.gameObject.SetActive(true);
@@ -256,6 +258,7 @@ namespace Emberdelve.UI
         {
             if (!IsOpen) return;
             IsOpen = false;
+            if (!IsLootCompanion) WorldAudio.PlayLocal(WorldSound.UiClose);
             CancelSplit();
             InventoryInputFocus.Close(this);
 
@@ -1328,8 +1331,10 @@ namespace Emberdelve.UI
             _splitGhost.transform.SetAsLastSibling();
             if (_carryLabel != null) _carryLabel.text="Place "+source.Item.displayName+" x"+_splitAmount+" in a free cell. RMB / Esc: cancel";
             if (!mouse.leftButton.wasPressedThisFrame || !hasCell) return;
+            ulong previousRevision = _inventory.Revision;
             bool accepted = _model.Submit(InventoryCommandKind.Split,source,default,cell,EquipmentSlot.None,
                 Guid.Empty,Guid.Empty,out var reason,_splitAmount);
+            if (accepted && _inventory.Revision != previousRevision) WorldAudio.PlayLocal(WorldSound.ItemMove);
             if (accepted) { CancelSplit(); Rebuild(); }
             else GameEvents.RaiseToast(ToastOwner,reason);
         }
@@ -1355,8 +1360,13 @@ namespace Emberdelve.UI
             Vector2Int destinationCell, EquipmentSlot destinationSlot, Guid expectedSourceGearUid,
             Guid expectedTargetGearUid, out string reason)
         {
-            return _model.Submit(kind, source, target, destinationCell, destinationSlot,
+            ulong previousRevision = _inventory != null ? _inventory.Revision : 0;
+            bool accepted = _model.Submit(kind, source, target, destinationCell, destinationSlot,
                 expectedSourceGearUid, expectedTargetGearUid, out reason);
+            // A remote submission is only queued; its accepted result supplies the cue instead.
+            if (accepted && _inventory != null && _inventory.Revision != previousRevision)
+                WorldAudio.PlayLocal(WorldSound.ItemMove);
+            return accepted;
         }
 
         private void RefreshAfterRefusal()

@@ -712,10 +712,17 @@ namespace Emberdelve.Net
             FloorLootPickupResultRpc(sequence, accepted, new FixedString128Bytes(accepted ? string.Empty : "Pickup request refused"));
         }
 
+        private uint _lastAudibleFloorPickup;
+
         [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
         public void FloorLootPickupResultRpc(uint sequence, bool accepted, FixedString128Bytes reason)
         {
             if (Role != NetPlayerRole.Owner) return;
+            if (accepted && NetRole.IsClientOnly && sequence != 0 && sequence > _lastAudibleFloorPickup)
+            {
+                _lastAudibleFloorPickup = sequence;
+                Emberdelve.Feedback.WorldAudio.PlayLocal(Emberdelve.Feedback.WorldSound.Pickup, .6f);
+            }
             if (!accepted) GameEvents.RaiseToast(_rig != null ? _rig.PlayerId : GameEvents.NoPlayer, reason.ToString());
         }
 

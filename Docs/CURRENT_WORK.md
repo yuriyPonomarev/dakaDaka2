@@ -1,27 +1,29 @@
 # DakaDaka — current work
 
-Updated22 November2026. The ONLY development checkout is `C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff`. Legacy `../DakaDaka` is read-only; `../DakaDaka_ci` is a disposable test/build mirror synchronized only from handoff. Never close or automate Play mode in the user's main Editor. Visual reviews use a separate visible mirror Editor and record an MP4 with game audio.
+Updated 22 November 2026. The ONLY development checkout is `C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff`. Legacy `../DakaDaka` is read-only; `../DakaDaka_ci` is a disposable test/build mirror synchronized only from handoff. Never close or automate Play mode in the user’s main Editor. Visual reviews use a separate visible mirror Editor, MP4 with game audio and isolated `--ember-profile-dir` under mirror Logs/acceptance.
 
-## Current baseline: consolidated Meshy environment and melodic ambience
+## Current slice: cohesive game sound
 
-User authorized combining Sol's models/doors/raid work with enlarged rooms and lever caches, improving the result and committing it. Latest request adds downloaded Meshy architecture and melodic instrumental dark-fantasy ambience. Full record: [HANDOFF_INTEGRATION_20261122](../Tasks/HANDOFF_INTEGRATION_20261122.md).
+User asked for jumping, walking, impacts and the rest of the game’s sounds. Report: [GAME_AUDIO_20261122](../Tasks/GAME_AUDIO_20261122.md).
 
-- Checkout rule committed as `0875d13d`; parent/legacy redirects installed. Room/cache work committed as `cbe51fad4`. Consolidated integration is recorded by the commit containing this page.
-- Preserved primary hands/combat,36m modules,+3.9m galleries,−1.5m passages and server-owned lever caches. Protocol47 combines geometry/wire changes. Unified offline loot custody, preserved put-back/body search and added reservation/duplicate/retired-floor protection; restored authoritative owner Parry feedback.
-- Rebuilt all30 modules and dynamic door with downloaded pillars/barrels, Meshy reliquaries and cropped arch/stone-facing meshes. Shared crypt stone replaces patchy pillar albedo. Floors, stairs and irregular broken walls retain authored forms. [Architecture sources and budget](../Tasks/DOWNLOADED_ARCHITECTURE_20261122.md). Geometry/render counts increased; no FPS claim.
-- New original48s stereo chamber loop: cello/viola, horn, woodwind melody, harp and frame drum. Reproducible, no clipping, circular seam. Missing player AudioListeners repaired; repetitive fire/wind loops removed. Generator/review helper: `Tools/Audio`.
-- Final visible seeds12345/67890 each pass14 playback/lifecycle checks; both5.97s MP4s decode with stereo audio. Ordinary camera/HUD/AI/lighting preserved during recording. Post-recording component lifecycle assertions pause simulation. Videos: `Logs/acceptance/ambience-20261122/melodic-review-{seed}`.
-- Final module suite146/146 and movement geometry11/11 pass. All11 real-process network gates pass1763 checks. Combined71-entry integration coverage:65 pass,6 retain baseline failures, no new failing assertions; one old retro-readability failure resolved. Broad EditMode:1479 total,1463 pass,4 existing failures,12 skipped. Full suite is not green.
-- The final smoke fixture initially failed because new offline player-bots interfered with EnemyAgent measurements. Fixture now waits for real floor admission and parks unrelated bots; runtime combat and existing assertions are unchanged. Failed-seed and12345 reruns each complete264 checks with only2 old HUD failures. Other passing suites were not repeated for this fixture-only correction.
+- 49 original cue families/151 mono 48 kHz PCM16 variants,14.2 MiB. Movement/surfaces/jump/landing, leather/equipment, melee/ranged/guards, actors, doors/chests/cache mechanisms, inventory/UI, consumables, skills and run transitions. Shared cached clips, anti-repeat selection independent of gameplay RNG, bounded 24 spatial + 8 local voices and existing wall occlusion.
+- Gameplay facts and presentation edges drive audio; no protocol, physics, inventory custody or damage changes. Remote owner uses the same feedback/action presenters. Initial chest/door/skill states are silent. Confirmed inventory transfers and coalesced final weapon state prevent snapshot chatter. No guessed consumable completion on cancellation.
+- Original melodic 48 s ambience from 19519855b retained. Generator/provenance: `Tools/Audio/SynthesizeGameSfx.cjs`, `SFX_README.md`, bank manifest. Preview reel and raw evidence: `Logs/acceptance/game-audio-20261122`.
+- Asset generation reproduced byte-for-byte,151 unique hashes, zero endpoints/no clipped samples. New focused audio fixture 8/8 passed. NetCombat 399, NetSkill 127, NetDoor 49, NetInventory 148:723 checks,4/4 passing, run `Logs/runs/20261122-042155-904`.
+- Final visible seed 12345 passes 19 checks:13steps,1jump,1landing,2attacks,32spatial voices;6.97s MP4 has48kHz stereo audio, mean−24.8/peak−8.4dBFS. Ordinary camera/HUD/AI/lighting preserved; paused menu/lifecycle checks happen after recording. No claim of subjective mix acceptance before the user listens. See the report for small presentation fallbacks and intentionally reserved cues.
 
-## Preservation and limitations
+## Preserved baseline and limitations
 
-First three visible checks used the ordinary local Squire profile and may have parked prepared gear in stash. Current Warrior save and backup were preserved under `Logs/acceptance/ambience-20261122/profile-preservation`; no pre-run snapshot establishes the earlier loadout. User informed; no guessed restoration. Subsequent reviews require an isolated mirror `--ember-profile-dir`.
+Integration19519855b combined Meshy environment/Sol work with36m modules,+3.9m galleries,−1.5m passages and server-owned lever caches; protocol47. Earlier commits0875d13d enforce checkout andcbe51fad4 hold room/cache work. Reports: [HANDOFF_INTEGRATION_20261122](../Tasks/HANDOFF_INTEGRATION_20261122.md), [DOWNLOADED_ARCHITECTURE_20261122](../Tasks/DOWNLOADED_ARCHITECTURE_20261122.md).
 
-Original audio/incidental Unity drift remains backed up in stash `Preserve audio completion and inherited Unity drift before Sol integration`. Completed audio has been revised; never blindly pop the stash. Excluded material/Oasis/settings drift is preserved outside the integration commit. No engine/package upgrades or legacy gameplay writes. Final content comparison covers392 staged game/source files; diagnostic legacy-scene regeneration was discarded only in the mirror.
+Prior integration evidence remains: modules146/146, movement geometry11/11,11 network gates1763checks; combined71gates65pass/6baseline failure groups. Broad EditMode1479total1463pass4baseline failures12skip. Two seeds12345/67890 each14 ambience/lifecycle checks and recorded stereo audio. Full suite is not green; this audio slice uses bounded proof, not a repeat of the76-minute integration run.
+
+Before this sound task, early ambience reviews touched the ordinary Squire profile and may have parked prepared gear in stash. Backups in `Logs/acceptance/ambience-20261122/profile-preservation`; user informed. No pre-run loadout proves a guessed restoration. New live reviews isolate saves; CLI network fixtures cannot enter OfflineProfileSession. Existing user Editor remains open.
+
+Old stash `Preserve audio completion and inherited Unity drift before Sol integration` is retained and must never be blindly popped. Inherited material/Oasis/settings drift is excluded. No engine/package upgrades, legacy writes or push.
 
 ## Next three actions
 
-1. User art/mix review of the new environment and full48s arrangement; entry sweeps do not claim every interior/cache close-up or GPU profiling.
-2. Address the existing schema/attribute/weapon/enemy/HUD test debt as a separate requested slice; see the report's exact baseline comparison.
-3. Continue development only in handoff, using isolated saves and bounded checks; do not rerun the entire integration suite without relevant new changes.
+1. User listening/mix review using the 71 s sound reel and actual gameplay recording; tune timbre/gains based on that feedback.
+2. Extend audible close-up review to consumables, cache mechanisms and distinct weapons when requested; the entry video does not claim every cue was auditioned in context.
+3. Address old schema/attribute/weapon/enemy/HUD test debt only as a separate requested slice. Do not rerun all passing integration gates without relevant changes.

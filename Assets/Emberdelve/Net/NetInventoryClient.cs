@@ -4,6 +4,7 @@ using System.Text;
 using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.Flow;
+using Emberdelve.Feedback;
 using Emberdelve.Interaction;
 using Emberdelve.Level;
 using Emberdelve.Items;
@@ -23,6 +24,7 @@ namespace Emberdelve.Net
         private PlayerRig _rig;
         private ulong _nextSequence = 1;
         private ulong _pendingSequence;
+        private ulong _lastAudibleSequence;
         private ulong _awaitRevision;
         private bool _awaitSnapshot;
         private bool _ready;
@@ -609,7 +611,7 @@ namespace Emberdelve.Net
             {
                 ChestInteractable chest = chests[i];
                 if (chest == null || !_chestStates.TryGetValue(chest.ChestId, out ChestReplicaState state) ||
-                    !chest.ApplyReplicatedState(chest.ChestId, state.Rolled, state.Opened, state.RemainingUnits)) return false;
+                    !chest.ApplyReplicatedState(chest.ChestId, state.Rolled, state.Opened, state.RemainingUnits, immediate: true)) return false;
             }
             return true;
         }
@@ -664,11 +666,17 @@ namespace Emberdelve.Net
             if (_pendingSequence == 0 || result.Sequence != _pendingSequence) return;
             if (!result.Accepted)
             {
+                WorldAudio.PlayLocal(WorldSound.UiError, .5f);
                 _pendingSequence = 0;
                 _ready = false;
                 _nextSync = 0;
                 GameEvents.RaiseToast(_rig.PlayerId, "Inventory change refused by the server; refreshing");
                 return;
+            }
+            if (result.Changed && result.Sequence != _lastAudibleSequence)
+            {
+                _lastAudibleSequence = result.Sequence;
+                WorldAudio.PlayLocal(WorldSound.ItemMove);
             }
             if (result.Changed && (!_hasSnapshot || _bag.Revision < result.Revision))
             {

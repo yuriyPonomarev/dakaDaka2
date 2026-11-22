@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.Flow;
+using Emberdelve.Feedback;
 using Emberdelve.Items;
 using Emberdelve.Player;
 using Emberdelve.UI;
@@ -44,6 +45,7 @@ namespace Emberdelve.Net
         private double _refreshAt;
         private string _lastFailure;
         private bool _hostInputPaused;
+        private bool _audioOpen;
         private ulong _carriedEntry;
         private Vector2 _carryStart;
         private UnityEngine.UI.Image _carry;
@@ -116,6 +118,11 @@ namespace Emberdelve.Net
                 Close();
                 return false;
             }
+            if (!_audioOpen)
+            {
+                _audioOpen = true;
+                WorldAudio.PlayLocal(WorldSound.UiOpen);
+            }
             return true;
         }
 
@@ -151,7 +158,10 @@ namespace Emberdelve.Net
 
         public void OnResult(ulong corpseId, uint sequence, bool accepted, ulong corpseRevision, string reason)
         {
+            bool isTransfer = sequence != 0 && sequence == _session.TransferSequence;
             if (!_session.ApplyResult(corpseId, sequence, accepted, corpseRevision, reason)) return;
+            // Authority acquisition already raises ItemCollected; snapshots on a remote client do not.
+            if (accepted && isTransfer && NetRole.IsClientOnly) WorldAudio.PlayLocal(WorldSound.Pickup);
             _lastFailure = accepted ? null : (string.IsNullOrEmpty(reason) ? "Server refused this container request" : reason);
             if (_session.TransferSequence == 0) _transferStartedAt = 0.0;
             if (_session.StateRequestSequence == 0) _stateStartedAt = 0.0;
@@ -173,6 +183,8 @@ namespace Emberdelve.Net
         public void Close(bool relockCursor = true)
         {
             if (!IsOpen) return;
+            if (_audioOpen) WorldAudio.PlayLocal(WorldSound.UiClose);
+            _audioOpen = false;
             ClearCarry();
             _session.Close();
             if (_inventoryScreen != null)
@@ -246,7 +258,10 @@ namespace Emberdelve.Net
             if (_session.IsTransferPending || _session.StateRequestSequence != 0) return "Wait for the window to finish updating";
             if (_session.Document.kind == "player") return "You cannot put items into a fallen adventurer's gear";
             _lastFailure = null;
-            return _presenter.RequestPut(_session.ActiveCorpseId, slot.Origin, slot.Item.itemId, out string reason) ? null : (reason ?? "Cannot put that here");
+            if (!_presenter.RequestPut(_session.ActiveCorpseId, slot.Origin, slot.Item.itemId, out string reason))
+                return reason ?? "Cannot put that here";
+            WorldAudio.PlayLocal(WorldSound.ItemMove);
+            return null;
         }
 
         private bool RequestState()

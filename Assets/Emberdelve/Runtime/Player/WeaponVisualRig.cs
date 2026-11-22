@@ -41,6 +41,7 @@ namespace Emberdelve.Player
         private float _swingStart;
         private bool _swinging;
         private bool _swingSoundPlayed;
+        private string _soundWeaponId;
         private bool _recoiling;
         private float _recoilStart;
         // Combo chain: while the attack button is held the weapon stays where a strike ended until the next step starts from there;
@@ -248,6 +249,7 @@ namespace Emberdelve.Player
         /// <summary>Same, with the resolved timing of this swing (a combo step may stretch its windup or recovery).</summary>
         public void PlaySwing(WeaponData weapon, SwingPatternData pattern, in SwingTiming timing)
         {
+            _soundWeaponId = weapon != null ? weapon.weaponId : null;
             if (_isRanged || pattern == null || weapon == null) return;
 
             CaptureTransitionStart();
@@ -463,7 +465,7 @@ namespace Emberdelve.Player
                 {
                     _swingSoundPlayed = true;
                     if (t <= _timing.ActiveEnd)
-                        Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldSound.Swing, transform.position, .7f);
+                        Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldAudio.SwingFor(_soundWeaponId), transform.position, .7f);
                 }
                 float activeEnd = _timing.ActiveEnd;
                 InActivePhase = t >= _timing.Windup && t <= activeEnd;

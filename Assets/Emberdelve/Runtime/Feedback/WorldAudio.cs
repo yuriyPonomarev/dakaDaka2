@@ -3,18 +3,28 @@ using Emberdelve.Core;
 
 namespace Emberdelve.Feedback
 {
-    public enum WorldSound { Swing, Impact, Metal, Step, Bow, Parry, DoorCreak, DoorThud }
+    public enum WorldSound
+    {
+        // Preserve the original eight identifiers for existing serialized references.
+        Swing, Impact, Metal, Step, Bow, Parry, DoorCreak, DoorThud,
+        StepWood, StepDirt, Jump, Land, LandHeavy, Cloth, Equip, Draw, Reload, DryFire,
+        Hurt, Death, EnemyHurt, EnemyDeath, Pickup, Coins, ChestOpen, ChestClose,
+        Lever, SecretStone, Portal, Extract, Fail,
+        UiHover, UiClick, UiOpen, UiClose, UiError, ItemMove,
+        Potion, Bandage, SkillDash, SkillCry, SkillShot, SkillBuff, ZoneWarning,
+        ArrowImpact, ShieldBreak, BluntSwing, BluntImpact, Stab
+    }
+
 
     /// <summary>Presentation-only, bounded voice pool. Geometry filters sound, never damage or enemy perception.</summary>
     [DisallowMultipleComponent]
     public sealed class WorldAudio : MonoBehaviour
     {
-        private const int VoiceCount = 16;
+        private const int VoiceCount = 24;
         private static WorldAudio _instance;
         private readonly AudioSource[] _voices = new AudioSource[VoiceCount];
         private readonly AudioLowPassFilter[] _filters = new AudioLowPassFilter[VoiceCount];
         private readonly float[] _gains = new float[VoiceCount];
-        private AudioClip[] _clips;
         private Transform _listener;
         private Emberdelve.Combat.LocalCombatAuthority _authority;
         private int _nextVoice;
@@ -36,9 +46,6 @@ namespace Emberdelve.Feedback
         {
             _instance = this;
             _levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
-            _clips = new[] { ProceduralAudio.SwordSwing(), ProceduralAudio.Impact(), ProceduralAudio.Block(),
-                ProceduralAudio.StoneStep(), ProceduralAudio.BowRelease(), ProceduralAudio.Parry(),
-                ProceduralAudio.DoorCreak(), ProceduralAudio.DoorThud() };
             for (int i = 0; i < VoiceCount; i++)
             {
                 var voice = new GameObject("WorldVoice" + i);
@@ -59,11 +66,16 @@ namespace Emberdelve.Feedback
         public static void Play(WorldSound sound, Vector3 position, float gain = 1f, float pitch = 1f)
         {
             if (!CanHear(position) || Time.timeScale <= 0f) return;
+            if (!float.IsFinite(gain) || !float.IsFinite(pitch) || !float.IsFinite(position.sqrMagnitude)) return;
             _instance.Emit(sound, position, gain, pitch);
         }
 
+        public static void PlayLocal(WorldSound sound, float gain = 1f, float pitch = 1f) => LocalGameAudio.Play(sound, gain, pitch);
+
         private void Emit(WorldSound sound, Vector3 position, float gain, float pitch)
         {
+            AudioClip clip = GameSoundBank.Next(sound);
+            if (clip == null) return;
             int index = _nextVoice;
             for (int i = 0; i < VoiceCount; i++)
             {
@@ -74,9 +86,9 @@ namespace Emberdelve.Feedback
             AudioSource source = _voices[index];
             source.Stop();
             source.transform.position = position;
-            source.clip = _clips[(int)sound];
+            source.clip = clip;
             source.pitch = Mathf.Clamp(pitch, .75f, 1.25f);
-            source.maxDistance = sound == WorldSound.Step ? 18f : 24f;
+            source.maxDistance = (sound == WorldSound.Step || sound == WorldSound.StepWood || sound == WorldSound.StepDirt) ? 18f : 24f;
             _gains[index] = Mathf.Clamp01(gain);
             ApplyOcclusion(index);
             source.Play();
@@ -90,6 +102,8 @@ namespace Emberdelve.Feedback
             {
                 _authority = local;
                 _authority.HitResolved += OnHit;
+                _authority.ProjectileEnded += OnProjectileEnded;
+                _authority.ProjectileLaunched += OnProjectileLaunched;
             }
             if (_listener == null || Time.unscaledTime < _nextOcclusion) return;
             _nextOcclusion = Time.unscaledTime + .12f;
@@ -108,12 +122,32 @@ namespace Emberdelve.Feedback
         private void OnHit(Emberdelve.Combat.CombatHitReport hit)
         {
             if (hit.Blocked && !hit.GuardBroken && hit.Amount == 0f) return; // FeedbackDirector plays the confirmed guard contact.
-            Play(hit.Blocked ? WorldSound.Metal : WorldSound.Impact, hit.Point);
+            if (hit.Amount <= 0f && !hit.Blocked) return;
+            Play(hit.GuardBroken ? WorldSound.ShieldBreak : hit.Blocked ? WorldSound.Metal :
+                hit.Source != Emberdelve.Combat.CombatHitSource.Melee ? WorldSound.ArrowImpact : ImpactFor(hit.WeaponId), hit.Point);
+        }
+
+        public static WorldSound SwingFor(string weaponId) => ImpactFor(weaponId) == WorldSound.BluntImpact ? WorldSound.BluntSwing : WorldSound.Swing;
+
+        public static WorldSound ImpactFor(string weaponId)
+        {
+            string id = weaponId ?? "";
+            return id.IndexOf("club", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("mace", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("hammer", System.StringComparison.OrdinalIgnoreCase) >= 0 ? WorldSound.BluntImpact :
+                id.IndexOf("dagger", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                id.IndexOf("rapier", System.StringComparison.OrdinalIgnoreCase) >= 0 ? WorldSound.Stab : WorldSound.Impact;
+        }
+        private void OnProjectileLaunched(Emberdelve.Combat.CombatLaunchReport shot) => Play(WorldSound.Bow, shot.Origin, .8f);
+
+        private void OnProjectileEnded(Emberdelve.Combat.ProjectileEndReport end)
+        {
+            if (end.Reason == Emberdelve.Combat.ProjectileEndReason.Wall) Play(WorldSound.ArrowImpact, end.ImpactPoint, .55f);
         }
 
         private void OnDisable()
         {
-            if (_authority != null) _authority.HitResolved -= OnHit;
+            if (_authority != null) { _authority.HitResolved -= OnHit; _authority.ProjectileEnded -= OnProjectileEnded; _authority.ProjectileLaunched -= OnProjectileLaunched; }
             _authority = null;
             foreach (var voice in _voices) if (voice != null) voice.Stop();
         }
@@ -121,7 +155,11 @@ namespace Emberdelve.Feedback
         private void OnDestroy()
         {
             if (_instance == this) _instance = null;
-            if (_clips != null) foreach (AudioClip clip in _clips) if (clip != null) Destroy(clip);
+            foreach (var voice in _voices)
+            {
+                if (voice == null) continue;
+                if (Application.isPlaying) Destroy(voice.gameObject); else DestroyImmediate(voice.gameObject);
+            }
         }
     }
 }

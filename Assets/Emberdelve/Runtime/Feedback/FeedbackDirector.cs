@@ -25,37 +25,20 @@ namespace Emberdelve.Feedback
         public float hitFlashSize = 0.16f;
         public float blockFlashSize = 0.22f;
 
-        private AudioSource _source;
-
-        private AudioClip _draw;
-        private AudioClip _hurt;
-        private AudioClip _pickup;
-        private AudioClip _dry;
-        private AudioClip _extract;
-        private AudioClip _death;
+        private WeaponData _lastWeapon;
+        private bool _weaponSeeded;
+        private bool _weaponDirty;
 
         private PlayerRig _player;
         private MeleeCombat _melee;
-        private RangedCombat _ranged;
         private WallStopFeedback _wallFeedback;
         private bool _subscribedToPlayer;
 
         private void Awake()
         {
-            _source = gameObject.AddComponent<AudioSource>();
-            _source.playOnAwake = false;
-            _source.spatialBlend = 0f;
-            _source.volume = 1f;
-            _source.reverbZoneMix = 0f;
             if (GetComponent<DungeonAmbience>() == null) gameObject.AddComponent<DungeonAmbience>();
             if (GetComponent<WorldAudio>() == null) gameObject.AddComponent<WorldAudio>();
 
-            _draw = ProceduralAudio.BowDraw();
-            _hurt = ProceduralAudio.Hurt();
-            _pickup = ProceduralAudio.Pickup();
-            _dry = ProceduralAudio.DryFire();
-            _extract = ProceduralAudio.Extract();
-            _death = ProceduralAudio.Death();
         }
 
         private void OnEnable()
@@ -64,8 +47,9 @@ namespace Emberdelve.Feedback
             GameEvents.PlayerDamaged += OnPlayerDamaged;
             GameEvents.GuardContact += OnGuardContact;
             GameEvents.ItemCollected += OnItemCollected;
-            GameEvents.AmmoChanged += OnAmmoChanged;
+            GameEvents.ActiveWeaponChanged += OnActiveWeaponChanged;
             GameEvents.RunEnded += OnRunEnded;
+            GameEvents.SkillCastRejected += OnSkillRejected;
         }
 
         private void OnDisable()
@@ -74,19 +58,29 @@ namespace Emberdelve.Feedback
             GameEvents.PlayerDamaged -= OnPlayerDamaged;
             GameEvents.GuardContact -= OnGuardContact;
             GameEvents.ItemCollected -= OnItemCollected;
-            GameEvents.AmmoChanged -= OnAmmoChanged;
+            GameEvents.ActiveWeaponChanged -= OnActiveWeaponChanged;
             GameEvents.RunEnded -= OnRunEnded;
+            GameEvents.SkillCastRejected -= OnSkillRejected;
             UnhookPlayer();
         }
 
         private void Update()
         {
+            LocalGameAudio.MasterVolume = masterVolume;
+            LocalGameAudio.UiVolume = uiVolume;
             var worldAudio = GetComponent<WorldAudio>();
             if (worldAudio != null) worldAudio.Volume = masterVolume;
-            WorldAudio.BindListener(_player != null && _player.Look != null ? _player.Look.AimTransform : null);
+            WorldAudio.BindListener(_player != null && !_player.IsDead && !_player.IsExtracted && _player.Look != null ? _player.Look.AimTransform : null);
             if (_subscribedToPlayer && _player == null) UnhookPlayer();
             if (_subscribedToPlayer) return;
             if (GameServices.TryGet<RunDirector>(out RunDirector director)) HookPlayer(director.Player);
+        }
+
+        public void BindPlayer(PlayerRig player)
+        {
+            if (_player == player && _subscribedToPlayer) return;
+            UnhookPlayer();
+            HookPlayer(player);
         }
 
         private void HookPlayer(PlayerRig player)
@@ -94,19 +88,15 @@ namespace Emberdelve.Feedback
             if (player == null || _subscribedToPlayer) return;
 
             _player = player;
+            var actionAudio = player.GetComponent<PlayerActionAudio>();
+            if (actionAudio == null) actionAudio = player.gameObject.AddComponent<PlayerActionAudio>();
+            actionAudio.Bind(player);
             _melee = player.GetComponent<MeleeCombat>();
-            _ranged = player.GetComponent<RangedCombat>();
 
             if (_melee != null)
             {
 
                 _melee.WallStopped += OnMeleeWallStopped;
-            }
-
-            if (_ranged != null)
-            {
-                _ranged.AttackStarted += OnAttackStarted;
-                _ranged.ShotFired += OnShotFired;
             }
 
             // B2: wall-stop spark and camera kick for the local player's own swings (visual only).
@@ -126,13 +116,8 @@ namespace Emberdelve.Feedback
                 _melee.WallStopped -= OnMeleeWallStopped;
             }
 
-            if (_ranged != null)
-            {
-                _ranged.AttackStarted -= OnAttackStarted;
-                _ranged.ShotFired -= OnShotFired;
-            }
-
             _subscribedToPlayer = false;
+            _player = null; _melee = null; _weaponSeeded = false;
         }
 
 
@@ -141,19 +126,6 @@ namespace Emberdelve.Feedback
         {
             if (_wallFeedback != null) _wallFeedback.Play(status);
             WorldAudio.Play(WorldSound.Metal, _player != null ? _player.AimOrigin : transform.position, .65f);
-        }
-
-        private void OnAttackStarted(AttackIntent intent)
-        {
-            if (intent.Weapon == null) return;
-
-            if (intent.Weapon.IsRanged) Play(_draw);
-        }
-
-        private void OnShotFired()
-        {
-            if (NetRole.IsClientOnly) return;
-            WorldAudio.Play(WorldSound.Bow, _player != null ? _player.AimOrigin : transform.position, .8f);
         }
 
         private void OnDamageDealt(int playerId, HitFeedback feedback)
@@ -178,7 +150,7 @@ namespace Emberdelve.Feedback
         {
             if (!float.IsFinite(info.Amount) || info.Amount <= 0f) return;
             // The flash is a world effect anyone can see (a hit on a teammate or a rival); the grunt is the local player's own.
-            if (PlayerView.Shows(playerId)) Play(_hurt);
+            if (PlayerView.Shows(playerId)) WorldAudio.PlayLocal(WorldSound.Hurt, .65f);
             ImpactFlash.Spawn(info.Point, new Color(1f, 0.3f, 0.25f), info.Blocked ? blockFlashSize : hitFlashSize);
         }
 
@@ -194,32 +166,34 @@ namespace Emberdelve.Feedback
         private void OnItemCollected(int playerId, ItemData item, int totalCollected)
         {
             if (!PlayerView.Shows(playerId)) return;
-            Play(_pickup);
+            WorldAudio.PlayLocal(item != null && item.kind == ItemKind.Currency ? WorldSound.Coins : WorldSound.Pickup, .6f);
         }
 
-        private void OnAmmoChanged(int playerId, int current, int reserve)
+        private void OnActiveWeaponChanged(int playerId, WeaponData weapon)
         {
-            if (!PlayerView.Shows(playerId)) return;
-            if (current == 0) Play(_dry);
+            if (PlayerView.Shows(playerId)) _weaponDirty = true;
         }
+
+        private void LateUpdate()
+        {
+            if (!_weaponDirty || _player == null) return;
+            _weaponDirty = false;
+            // Snapshot restores briefly remove/reapply hands. Compare their final state, not those transient callbacks.
+            WeaponData weapon = _player.ActiveWeapon;
+            bool changed = _weaponSeeded && _lastWeapon != weapon;
+            _weaponSeeded = true; _lastWeapon = weapon;
+            if (changed) WorldAudio.PlayLocal(WorldSound.Equip, .5f);
+        }
+
+        private void OnSkillRejected(int playerId, SkillSnapshot skill, string reason)
+        { if (PlayerView.Shows(playerId)) WorldAudio.PlayLocal(WorldSound.UiError, .5f); }
 
         private void OnRunEnded(int playerId, RunResult result)
         {
             if (!PlayerView.Shows(playerId)) return;
-            if (result.Outcome == RunState.Extracted) Play(_extract);
-            else Play(_death);
+            if (result.Outcome == RunState.Extracted) WorldAudio.PlayLocal(WorldSound.Extract, .8f);
+            else WorldAudio.PlayLocal(result.Outcome == RunState.Dead ? WorldSound.Death : WorldSound.Fail, .8f);
         }
 
-        private void OnDestroy()
-        {
-            foreach (AudioClip clip in new[] { _draw, _hurt, _pickup, _dry, _extract, _death })
-                if (clip != null) Destroy(clip);
-        }
-
-        private void Play(AudioClip clip)
-        {
-            if (clip == null || _source == null) return;
-            _source.PlayOneShot(clip, masterVolume);
-        }
     }
 }

@@ -28,6 +28,7 @@ namespace Emberdelve.Net
         private static readonly Dictionary<int, int> HitsOnPlayer = new Dictionary<int, int>();
         private static readonly Dictionary<int, int> BlockedOnPlayer = new Dictionary<int, int>();
         private static readonly BloodHitWindow BloodEvents = new BloodHitWindow();
+        private static readonly Emberdelve.Feedback.SoundEventWindow SoundEvents = new Emberdelve.Feedback.SoundEventWindow();
         private const string BloodPrefabPath = "Emberdelve/NetBloodHit";
 
         public static int Swings { get; private set; }
@@ -42,6 +43,7 @@ namespace Emberdelve.Net
             HitsOnPlayer.Clear();
             BlockedOnPlayer.Clear();
             BloodEvents.Clear();
+            SoundEvents.Clear();
             Swings = Shots = Hits = EnemyHits = 0;
         }
 
@@ -51,7 +53,7 @@ namespace Emberdelve.Net
         /// <summary>Server-reported BLOCKED hits on a player this client has seen.</summary>
         public static int BlockedOn(int playerId) { BlockedOnPlayer.TryGetValue(playerId, out int n); return n; }
 
-        public static void ClearBloodHistory() { BloodEvents.Clear(); }
+        public static void ClearBloodHistory() { BloodEvents.Clear(); SoundEvents.Clear(); }
 
         public static void OnSwing(NetPlayerRig carrier, in CombatSwingWire swing)
         {
@@ -97,7 +99,12 @@ namespace Emberdelve.Net
             if (Replicas.TryGetValue(end.Serial, out NetArrowReplica replica) && replica != null)
             {
                 replicaAir = replica.Elapsed;
-                replica.Finish(new Vector3(end.X, end.Y, end.Z));
+                Vector3 stop = new Vector3(end.X, end.Y, end.Z);
+                // The wire reports the exact stop but no reason. Only audible contact with local level geometry
+                // supplies a client wall cue; a range/time endpoint in open air stays silent.
+                if (Physics.CheckSphere(stop, .08f, LayerMask.GetMask(GameConfig.LevelLayerName), QueryTriggerInteraction.Ignore))
+                    Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldSound.ArrowImpact, stop, .55f);
+                replica.Finish(stop);
             }
 
             Replicas.Remove(end.Serial);
@@ -123,14 +130,26 @@ namespace Emberdelve.Net
                 }
             }
             Hits++;
+            bool newSound = SoundEvents.Accept(hit.EventId);
             if (float.IsFinite(hit.PointX) && float.IsFinite(hit.PointY) && float.IsFinite(hit.PointZ))
             {
                 Vector3 point = new Vector3(hit.PointX, hit.PointY, hit.PointZ);
                 if (hit.Blocked && !hit.GuardBroken && hit.Amount == 0f)
-                    Emberdelve.Feedback.FeedbackDirector.PlayGuardContact(point, hit.Parried);
+                {
+                    if (newSound) Emberdelve.Feedback.FeedbackDirector.PlayGuardContact(point, hit.Parried);
+                }
                 else if (hit.Blocked || (float.IsFinite(hit.Amount) && hit.Amount > 0f))
                 {
-                    Emberdelve.Feedback.WorldAudio.Play(hit.Blocked ? Emberdelve.Feedback.WorldSound.Metal : Emberdelve.Feedback.WorldSound.Impact, point);
+                    if (newSound)
+                    {
+                        Emberdelve.Feedback.WorldAudio.Play(hit.GuardBroken ? Emberdelve.Feedback.WorldSound.ShieldBreak :
+                            hit.Blocked ? Emberdelve.Feedback.WorldSound.Metal : hit.Source != (byte)CombatHitSource.Melee
+                            ? Emberdelve.Feedback.WorldSound.ArrowImpact : PlayerImpactSound(hit.Attacker), point);
+                        if (hit.Amount > 0f && hit.TargetIsEnemy)
+                            Emberdelve.Feedback.WorldAudio.Play(hit.Killed ? Emberdelve.Feedback.WorldSound.EnemyDeath : Emberdelve.Feedback.WorldSound.EnemyHurt, point, .6f);
+                        else if (hit.Amount > 0f && PlayerView.Shows(hit.Target))
+                            Emberdelve.Feedback.WorldAudio.PlayLocal(Emberdelve.Feedback.WorldSound.Hurt, .65f);
+                    }
                     Color color = hit.Blocked ? new Color(.55f, .75f, 1f)
                         : hit.TargetIsEnemy ? new Color(1f, .85f, .45f) : new Color(1f, .4f, .35f);
                     Emberdelve.Feedback.ImpactFlash.Spawn(point, color, hit.Blocked ? .22f : .16f);
@@ -174,6 +193,14 @@ namespace Emberdelve.Net
             Debug.Log(NetTuning.LogPrefix + "[client] server-hit src=" + SourceName(hit.Source) + " attacker=" + hit.Attacker + " target=" + hit.Target +
                       " enemy=" + hit.TargetIsEnemy + " amount=" + F(hit.Amount) + " loc=" + LocationName(hit.Location) + " blocked=" + hit.Blocked +
                       " guardBroken=" + hit.GuardBroken + " killed=" + hit.Killed + " parried=" + hit.Parried);
+        }
+
+        private static Emberdelve.Feedback.WorldSound PlayerImpactSound(int attacker)
+        {
+            foreach (NetPlayerRig actor in NetPlayerRig.Spawned)
+                if (actor != null && actor.ServerPlayerId.Value == attacker && actor.Rig != null)
+                    return Emberdelve.Feedback.WorldAudio.ImpactFor(actor.AvatarCombat.Value.IsValid ? actor.AvatarCombat.Value.Main.ToString() : null);
+            return Emberdelve.Feedback.WorldSound.Impact;
         }
 
         // The wire carries bytes; the report names the enums exactly as the server's combat-hit line does (src=Melee, loc=Arms).

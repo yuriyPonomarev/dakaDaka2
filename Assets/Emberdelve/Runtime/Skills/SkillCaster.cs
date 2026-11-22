@@ -3,6 +3,7 @@ using UnityEngine;
 using Emberdelve.Combat;
 using Emberdelve.Core;
 using Emberdelve.Data;
+using Emberdelve.Feedback;
 using Emberdelve.InputLayer;
 using Emberdelve.Net.Rules;
 using Emberdelve.Player;
@@ -459,7 +460,27 @@ namespace Emberdelve.Skills
             _readyCache[slot] = false;
 
             GameEvents.RaiseSkillState(OwnerId, Snapshot(slot));
+            PlayCastAudio(skill, rig.transform.position);
             return true;
+        }
+
+        /// <summary>Presentation shared by authority casts and accepted network cast messages; never called for state snapshots.</summary>
+        public static void PlayCastAudio(SkillData skill, Vector3 position)
+        {
+            if (skill == null || !skill.IsActive) return;
+            WorldSound sound;
+            switch (skill.effect)
+            {
+                case SkillEffectKind.Dash: sound = WorldSound.SkillDash; break;
+                case SkillEffectKind.AreaCry:
+                    sound = skill.affectsSelf && skill.flatDamage == 0f && skill.targetStatus == StatusKind.None
+                        ? WorldSound.SkillBuff : WorldSound.SkillCry;
+                    break;
+                case SkillEffectKind.SpreadShot:
+                case SkillEffectKind.PiercingShot: sound = WorldSound.SkillShot; break;
+                default: return;
+            }
+            WorldAudio.Play(sound, position);
         }
 
         public bool TryCast(string skillId)

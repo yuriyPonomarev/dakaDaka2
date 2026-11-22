@@ -49,6 +49,7 @@ namespace Emberdelve.UI
             canvas.sortingOrder = sortingOrder;
 
             if (canvas.GetComponent<GraphicRaycaster>() == null) canvas.gameObject.AddComponent<GraphicRaycaster>();
+            UiSoundFeedback.Attach(canvas);
             EnsureEventSystem();
 
             return canvas;
@@ -169,6 +170,7 @@ namespace Emberdelve.UI
             text.raycastTarget = false;
             if (fontSize >= 17) DungeonUiStyle.Heading(text);
 
+            UiSoundFeedback.Attach(button);
             if (onClick != null) button.onClick.AddListener(onClick);
 
             return button;

@@ -36,6 +36,7 @@ namespace Emberdelve.Interaction
         [SerializeField] private BoxCollider secretRoomVolume;
         [SerializeField, Min(.05f)] private float swingDuration = .43f;
         private bool _open;
+        private bool _replicatedStateKnown;
         private int _boundFloor;
         private float _swing;
 
@@ -60,6 +61,7 @@ namespace Emberdelve.Interaction
         public void Configure(string id)
         {
             secret = false;
+            _replicatedStateKnown = false;
             doorId = id;
             _boundFloor = 0;
             SetOpen(false, immediate: true);
@@ -70,6 +72,7 @@ namespace Emberdelve.Interaction
             Collider interactionProbe, Vector3 openLocalOffset)
         {
             secret = true;
+            _replicatedStateKnown = false;
             secretLocalKey = localKey;
             doorId = string.Empty; // Assigned from the plan cell before network publication.
             _boundFloor = 0;
@@ -171,7 +174,8 @@ namespace Emberdelve.Interaction
         public bool ApplyReplicatedState(string id, bool open, bool immediate = false)
         {
             if (!string.Equals(doorId, id, StringComparison.Ordinal) || !IsValidDoorId(id)) return false;
-            SetOpen(open, immediate);
+            SetOpen(open, immediate || !_replicatedStateKnown);
+            _replicatedStateKnown = true;
             return true;
         }
 
@@ -204,6 +208,11 @@ namespace Emberdelve.Interaction
             if (blocker != null && blocker.enabled == open) blocker.enabled = !open;
             if (secret)
             {
+                if (startsOpening && !immediate && Application.isPlaying && isActiveAndEnabled)
+                {
+                    WorldAudio.Play(WorldSound.Lever, transform.position);
+                    WorldAudio.Play(WorldSound.SecretStone, hinge != null ? hinge.position : transform.position);
+                }
                 // Cache panels retain their authoritative lift; only regular hinged doors swing.
                 if (hinge != null) hinge.localPosition = closedPanelPosition + (open ? openPanelOffset : Vector3.zero);
                 if (leverHandle != null) leverHandle.localRotation = Quaternion.Euler(open ? 35f : -35f, 0f, 0f);

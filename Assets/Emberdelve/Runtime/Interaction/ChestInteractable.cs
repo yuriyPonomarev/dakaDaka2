@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using Emberdelve.Core;
+using Emberdelve.Feedback;
 using Emberdelve.Data;
 using Emberdelve.Items;
 using Emberdelve.Stats;
@@ -337,14 +338,16 @@ namespace Emberdelve.Interaction
         }
 
         /// <summary>Applies only server-authored presentation state; clients never receive or grant the chest's loot objects.</summary>
-        public bool ApplyReplicatedState(string chestId, bool rolled, bool opened, int remainingUnits)
+        public bool ApplyReplicatedState(string chestId, bool rolled, bool opened, int remainingUnits, bool immediate = false)
         {
             if (!string.Equals(ChestId, chestId, System.StringComparison.Ordinal) || remainingUnits < 0 || (opened && !rolled)) return false;
+            bool startsOpening = !immediate && _replicatedStateKnown && !_replicatedOpened && opened;
             _replicatedStateKnown = true;
             _replicatedRolled = rolled;
             _replicatedOpened = opened;
             _replicatedRemainingUnits = remainingUnits;
             _opened = opened;
+            if (startsOpening) WorldAudio.Play(WorldSound.ChestOpen, transform.position);
             return true;
         }
 
@@ -439,6 +442,7 @@ namespace Emberdelve.Interaction
                 }
                 LootContainer = model;
                 _remaining.Clear(); // Registry now owns the exact roll, never roll or grant it a second time.
+                if (!_opened) WorldAudio.Play(WorldSound.ChestOpen, transform.position);
                 _opened = true;
                 AdvanceStateRevision();
                 containers.OpenLoot(actor, _containerId);
@@ -503,6 +507,7 @@ namespace Emberdelve.Interaction
                 leftUnits += unpaid;
             }
 
+            if (!_opened) WorldAudio.Play(WorldSound.ChestOpen, transform.position);
             _opened = true;
             AdvanceStateRevision();
 
