@@ -45,6 +45,8 @@ Readiness is separate: implemented -> automated proof -> visual proof -> accepte
 
 For every visual check follow [the shared visual verification procedure](Tools/LocalTesting/unity-tester/references/graphical-review.md), including save isolation, recording and delivery.
 
+Architecture/model changes also require the [depth and joins checks](Tools/LocalTesting/unity-tester/references/graphical-review.md#architecture-depth-and-joins). Do not leave coplanar duplicate opaque surfaces or hide defective joins with render priority. Inspect actual Play camera sweeps at near/far distances, both sides and connector orientations, across affected module types and multiple seeds. A screenshot or recording showing flicker, gaps, floating support or intersecting parts blocks visual acceptance even when automated tests pass; keep the defect open until corrected evidence exists.
+
 ## Harness commands (read Docs/HARNESS.md for details)
 
 - Before a slice: `python Tools/harness.py checkpoint Logs/harness/before-<slice>.json` (content comparison, NEVER acceptance).

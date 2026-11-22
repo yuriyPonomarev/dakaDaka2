@@ -53,7 +53,7 @@ namespace Emberdelve.EditorTools
                     HideSiblingAt(filter.transform, "Column_Capital");
                     renderer.enabled = false;
                 }
-                else if (name == "Stone_Arch" || name == "Reused_Stone_Arch" || name == "StoneArch")
+                else if (name == "Stone_Arch" || name == "Reused_Stone_Arch")
                 {
                     var visual = Child(filter.transform, VisualName);
                     Bounds fit = filter.sharedMesh.bounds;
@@ -78,39 +78,9 @@ namespace Emberdelve.EditorTools
                     if (name == "Funerary_Urn") HideSiblingAt(filter.transform, "Urn_Lip");
                     renderer.enabled = false;
                 }
-                else if (IsWall(name))
-                {
-                    var visual = Child(filter.transform, VisualName);
-                    Bounds fit = filter.sharedMesh.bounds;
-                    // Reuse solid stone from the downloaded arch jamb, never timber or an open arch
-                    // over a closed collider. Imported tiles remain inside the authored wall envelope.
-                    bool alongZ = fit.size.z * Mathf.Abs(filter.transform.lossyScale.z)
-                        > fit.size.x * Mathf.Abs(filter.transform.lossyScale.x);
-                    var facing = Child(visual, "Imported_Stone_Facing");
-                    if (alongZ) facing.localRotation = Quaternion.Euler(0, 90, 0);
-                    Bounds wall = alongZ
-                        ? new Bounds(new Vector3(-fit.center.z, fit.center.y, fit.center.x), new Vector3(fit.size.z, fit.size.y, fit.size.x))
-                        : fit;
-                    float width = wall.size.x * Mathf.Abs(alongZ ? filter.transform.lossyScale.z : filter.transform.lossyScale.x);
-                    float height = wall.size.y * Mathf.Abs(filter.transform.lossyScale.y);
-                    int columns = Mathf.Max(1, Mathf.CeilToInt(width / 1.5f));
-                    int rows = Mathf.Max(1, Mathf.CeilToInt(height / 2f));
-                    for (int x = 0; x < columns; x++)
-                    for (int y = 0; y < rows; y++)
-                    {
-                        float left = Mathf.Max(wall.min.x, wall.min.x + wall.size.x * (x - .08f) / columns);
-                        float right = Mathf.Min(wall.max.x, wall.min.x + wall.size.x * (x + 1.08f) / columns);
-                        float bottom = Mathf.Max(wall.min.y, wall.min.y + wall.size.y * (y - .08f) / rows);
-                        float top = Mathf.Min(wall.max.y, wall.min.y + wall.size.y * (y + 1.08f) / rows);
-                        var tile = Child(facing, "Downloaded_Stone_" + x + "_" + y);
-                        tile.gameObject.AddComponent<MeshFilter>().sharedMesh = masonry;
-                        tile.gameObject.AddComponent<MeshRenderer>().sharedMaterial = archMaterial;
-                        Fit(tile, masonry.bounds, new Bounds(new Vector3((left + right) * .5f, (bottom + top) * .5f, wall.center.z),
-                            new Vector3(right - left, top - bottom, wall.size.z)));
-                    }
-                    renderer.enabled = false;
-                }
+                // Walls retain a continuous closed masonry surface. Column fragments are not wall tiles.
             }
+            ArchitecturalJoinRepair.Apply(room);
             long triangles = 0, totalTriangles = 0;
             int draws = 0, totalDraws = 0;
             foreach (var filter in room.GetComponentsInChildren<MeshFilter>(true))

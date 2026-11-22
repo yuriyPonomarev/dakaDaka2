@@ -15,6 +15,8 @@ Read [project art defaults](../../../Docs/Art/AI_3D_PROMPTING.md) and the releva
 - Keep palette, proportions and wear consistent across a set. Make variants by changing named features, not by rewriting the entire style.
 - For moving lids, bow limbs or equipment layers, specify the part requirement in the brief and choose a supported parts/editing workflow. Text alone cannot guarantee segmentation.
 
+For architecture, make join geometry part of the brief: solid masonry spans, exact arch springline/support contact, stair tread/riser/landing transitions, door leaf/frame clearance through motion, and adjacent module seams in both connector orientations. For overlapping opaque meshes require removal of duplicate faces or real geometric depth separation; renderQueue/sorting priority is not a repair. Follow the [architecture acceptance checks](../../../Tools/LocalTesting/unity-tester/references/graphical-review.md#architecture-depth-and-joins) on integration; failed image evidence blocks game-ready claims even with passing tests.
+
 ## Return three distinct deliverables
 
 1. **Visual prompt** and, when needed, a reference-image prompt. Keep exclusions as plain language unless the selected API exposes a negative-prompt field.

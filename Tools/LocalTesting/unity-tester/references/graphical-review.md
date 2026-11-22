@@ -13,6 +13,17 @@
 3. Open the MP4, verify that it shows the action and its result, and check the game audio track. Attach the video in the current chat after each run with the scenario and outcome. If display or recording fails, diagnose and retry on the mirror. Report the blocker if a usable recording cannot be produced.
 4. Restore transient settings and window changes. Stop Play and gracefully close only the verified review Editor owned by the run. Confirm its exit and lock release. Leave Unity lock files intact. Report measured results and any visual or listening judgement actually performed.
 
+## Architecture depth and joins
+
+Apply this checklist when geometry, imported models, placements or architectural materials change. Scope the review to affected joins; this does not require a new broad automated suite.
+
+- **Depth / z priority:** no coplanar duplicate opaque surfaces. Locate competing faces and remove redundant geometry or give the intended layers real geometric separation. Do not mask a bad join with renderQueue, sorting priority or material depth bias. Inspect moving camera views for z-fighting/flicker, including oblique angles and distant views.
+- **Stairs:** inspect each tread/riser boundary, stair underside where visible, and top/bottom landing transitions. Remove exposed overlapping faces, gaps and protrusions; internal construction overlap must not create competing visible surfaces.
+- **Arches and walls:** fit each arch's actual left/right springline to the supporting masonry tops and depth. Overall renderer bounds alone cannot establish contact. Reject floating ends, cut-through supports and unsupported spans. Wall spans must read as solid masonry, not columns tiled as a substitute for a wall.
+- **Doors and module seams:** view the leaf/frame/adjacent masonry closed, open and throughout motion. Check adjacent module floor, wall and opening joins in both connector orientations; reject clipping, doubled surfaces and unintended cracks.
+- **Actual Play evidence:** orbit or sweep the game camera close and far, from both sides and oblique angles while real frames advance. Visit multiple affected module instances/types and more than one generated seed, including both connector orientations. Record module IDs, seed, view direction and inspected joins with the video and representative screenshots. A static prefab view or one favorable screenshot is insufficient.
+- **Acceptance:** inspect the saved screenshots and recording. Any visible flicker, gap, floating support, intersecting part or broken join is a failed visual result even when geometry tests and gameplay gates pass. Preserve the failed artifact and name the defect; correct it and repeat the affected views before claiming acceptance. Missing/unreadable evidence leaves visual verification incomplete.
+
 ## Existing D4c1 viewport probe
 
 Call Prepare and Measure separately, allowing real frames to advance between them. Use the CLI examples below when the evidence checker requires its JSON envelopes or when the mirror MCP tool is unavailable.

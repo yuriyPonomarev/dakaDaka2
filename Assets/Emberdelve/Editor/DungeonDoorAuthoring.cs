@@ -23,6 +23,9 @@ namespace Emberdelve.EditorTools
         private const float SocketHalf = 2.02f;
         private const float FrameTop = 3.86f;
         private const float FrameDepth = .65f;
+        // Positive local yaw swings toward -Z. Mount the complete leaf on that face,
+        // with its rear surface 5mm clear of the masonry throughout the 0..96 degree swing.
+        private const float HingeFaceZ = -(FrameDepth + Thickness) * .5f - .005f;
 
         [MenuItem("Emberdelve/Visual/Build Dungeon Door Prefab")]
         public static void Build()
@@ -48,14 +51,14 @@ namespace Emberdelve.EditorTools
                 lintel.gameObject.AddComponent<MeshCollider>().sharedMesh = lintel.GetComponent<MeshFilter>().sharedMesh;
 
                 var doorRoot = Child(root.transform, "Door", new Vector3(LaneOffset, 0, 0));
-                var hinge = Child(doorRoot, "Hinge", new Vector3(-Width * .5f, 0, 0));
+                var hinge = Child(doorRoot, "Hinge", new Vector3(-Width * .5f, 0, HingeFaceZ));
                 var panel = Child(hinge, "LeafCollider", new Vector3(Width * .5f, Height * .5f, 0));
                 panel.gameObject.layer = levelLayer;
                 var blocker = panel.gameObject.AddComponent<BoxCollider>();
                 blocker.size = new Vector3(Width, Height, Thickness);
 
-                AddArchedPiece(hinge, "DarkWoodBacking", new Vector3(Width * .5f, 0, 0),
-                    ArchMesh("DoorBacking", Width - .055f, SpringLine - .04f, Height - .055f, .14f, .068f, cutout: false),
+                AddArchedPiece(hinge, "DarkWoodBacking", new Vector3(Width * .5f, 0, Thickness * .5f - .034f),
+                    FittedBackingMesh(),
                     Load<Material>("Assets/Emberdelve/Art/Materials/Wood_Planks.mat"));
 
                 var visual = Child(hinge, "RustboundLeaf", Vector3.zero);
@@ -81,12 +84,104 @@ namespace Emberdelve.EditorTools
                 var door = doorRoot.gameObject.AddComponent<DungeonDoorInteractable>();
                 door.Configure("door_unbound", hinge, blocker, 96f);
                 DownloadedCryptArchitecture.Apply(root);
+                RepairVisuals(root);
                 if (PrefabUtility.SaveAsPrefabAsset(root, PrefabPath) == null)
                     throw new InvalidOperationException("Could not save " + PrefabPath);
                 AssetDatabase.SaveAssets();
                 Debug.Log($"[DungeonDoorAuthoring] Saved {Width:F2} x {Height:F2} m doorway with {renderers.Length} Rustbound mesh renderers.");
             }
             finally { Object.DestroyImmediate(root); }
+        }
+
+        [MenuItem("Emberdelve/Visual/Repair Saved Dungeon Door Visuals")]
+        public static void RepairSavedVisuals()
+        {
+            const string primaryAssets = "C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff/Assets";
+            if (!string.Equals(Application.dataPath.Replace('\\', '/').TrimEnd('/'), primaryAssets,
+                StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Repair the saved door only in the primary DakaDaka_clean_handoff checkout.");
+            // Isolated prefab contents only: never touch the user's open scene or Play state.
+            var root = PrefabUtility.LoadPrefabContents(PrefabPath);
+            try
+            {
+                RepairVisuals(root);
+                if (PrefabUtility.SaveAsPrefabAsset(root, PrefabPath) == null)
+                    throw new InvalidOperationException("Could not save " + PrefabPath);
+                Debug.Log("[DungeonDoorAuthoring] Restored fitted masonry and face-mounted hinge at z=" + HingeFaceZ
+                    + "; leaf and blocker move together; collider dimensions and interaction wiring preserved.");
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+        }
+
+        internal static void RepairVisuals(GameObject root)
+        {
+            var hinge = root.transform.Find("Door/Hinge");
+            var door = root.GetComponentInChildren<DungeonDoorInteractable>(true);
+            if (hinge == null || door == null || door.BlockerCollider == null
+                || !door.BlockerCollider.transform.IsChildOf(hinge))
+                throw new InvalidOperationException("Door leaf and blocker must share the authored hinge.");
+            var wiring = new SerializedObject(door);
+            float yaw = wiring.FindProperty("openYaw").floatValue;
+            if (wiring.FindProperty("hinge").objectReferenceValue != hinge || yaw <= 0f || yaw > 180f)
+                throw new InvalidOperationException("Face mounting requires the authored positive-yaw door swing.");
+            Vector3 hingePosition = hinge.localPosition;
+            if (Mathf.Abs(hingePosition.x + Width * .5f) > .0001f || Mathf.Abs(hingePosition.y) > .0001f
+                || (Mathf.Abs(hingePosition.z) > .0001f && Mathf.Abs(hingePosition.z - HingeFaceZ) > .0001f))
+                throw new InvalidOperationException("Unexpected door hinge placement; refuse to overwrite it.");
+            // Keep the closed blocker and visible leaf coincident. The interaction volume,
+            // door root, network identity and all collider dimensions stay unchanged.
+            hingePosition.z = HingeFaceZ;
+            hinge.localPosition = hingePosition;
+            var backing = hinge.Find("DarkWoodBacking");
+            if (backing == null || !backing.TryGetComponent<MeshFilter>(out var backingFilter)
+                || backing.GetComponentsInChildren<Collider>(true).Length != 0)
+                throw new InvalidOperationException("The authored wood backing must be visual-only.");
+            backingFilter.sharedMesh = FittedBackingMesh();
+            backing.localPosition = new Vector3(Width * .5f, 0, Thickness * .5f - .034f);
+
+            var arch = root.transform.Find("StoneFrame/StoneArch");
+            if (arch == null || !arch.TryGetComponent<MeshFilter>(out var filter)
+                || !arch.TryGetComponent<MeshRenderer>(out var renderer)
+                || !arch.TryGetComponent<MeshCollider>(out var collider)
+                || filter.sharedMesh == null || filter.sharedMesh != collider.sharedMesh)
+                throw new InvalidOperationException("Door arch must retain its authored, matching render and collision mesh.");
+
+            // This mesh is the solid infill ABOVE a precisely arched aperture, not an arch
+            // trim. Fitting a downloaded crown to its rectangular bounds stretches the
+            // crown from the spring line to the ceiling and leaves gaps beside the leaf.
+            // Restore the actual opening surface so its jambs/reveal join the wall exactly.
+            var replacement = arch.Find("Meshy_Architecture_Visual");
+            if (replacement != null)
+            {
+                if (replacement.GetComponentsInChildren<Collider>(true).Length != 0)
+                    throw new InvalidOperationException("Unexpected collision in the door's visual-only arch replacement.");
+                Object.DestroyImmediate(replacement.gameObject);
+            }
+            renderer.sharedMaterial = Load<Material>("Assets/Emberdelve/Art/Generated/DungeonSurfaces/World_Stone_Wall.mat");
+            renderer.enabled = true;
+
+            // Saved doors still carry the old column-fragment wall tiles. Their closed
+            // authored cubes remain underneath; restore those without rebuilding physics.
+            foreach (string name in new[] { "Infilled_Wall", "Jamb" })
+            {
+                var wall = root.transform.Find("StoneFrame/" + name);
+                if (wall == null || !wall.TryGetComponent<MeshFilter>(out var wallFilter)
+                    || !wall.TryGetComponent<MeshRenderer>(out var wallRenderer)
+                    || !wall.TryGetComponent<BoxCollider>(out var wallCollider)
+                    || wallFilter.sharedMesh == null
+                    || (wallFilter.sharedMesh.bounds.center - wallCollider.center).sqrMagnitude > .000001f
+                    || (wallFilter.sharedMesh.bounds.size - wallCollider.size).sqrMagnitude > .000001f)
+                    throw new InvalidOperationException("Door masonry must retain its closed authored collider-matched mesh: " + name);
+                var tiles = wall.Find("Meshy_Architecture_Visual");
+                if (tiles != null)
+                {
+                    if (tiles.GetComponentsInChildren<Collider>(true).Length != 0)
+                        throw new InvalidOperationException("Unexpected collision in the door's visual-only wall replacement.");
+                    Object.DestroyImmediate(tiles.gameObject);
+                }
+                wallRenderer.sharedMaterial = renderer.sharedMaterial;
+                wallRenderer.enabled = true;
+            }
         }
 
         public static void BuildWithPreview()
@@ -171,6 +266,58 @@ namespace Emberdelve.EditorTools
             EditorUtility.SetDirty(existing);
             Object.DestroyImmediate(mesh);
             return existing;
+        }
+
+        private static Mesh FittedBackingMesh()
+        {
+            const string folder = "Assets/Emberdelve/Art/Generated/ArchitecturalJoins";
+            const string path = folder + "/DoorBacking_ApertureInset5mm.asset";
+            var saved = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            if (saved != null) return saved;
+            const int segments = 20;
+            const float inset = .005f, halfDepth = .034f;
+            // Copy the actual twenty-segment aperture, then offset every edge inward by
+            // the same distance. Rescaling an ellipse changes the side/crown gaps unevenly.
+            var aperture = new List<Vector2> { new Vector2(-Width * .5f, 0), new Vector2(Width * .5f, 0) };
+            for (int i = 0; i <= segments; i++)
+            {
+                float u = 1f - 2f * i / segments;
+                aperture.Add(new Vector2(u * Width * .5f,
+                    Mathf.Lerp(SpringLine, Height, Mathf.Sqrt(Mathf.Max(0, 1f - u * u)))));
+            }
+            var contour = new List<Vector2>();
+            for (int i = 0; i < aperture.Count; i++)
+            {
+                Vector2 previous = (aperture[i] - aperture[(i + aperture.Count - 1) % aperture.Count]).normalized;
+                Vector2 next = (aperture[(i + 1) % aperture.Count] - aperture[i]).normalized;
+                Vector2 a = new Vector2(-previous.y, previous.x), b = new Vector2(-next.y, next.x);
+                contour.Add(aperture[i] + (a + b) * (inset / (1f + Vector2.Dot(a, b))));
+            }
+            var vertices = new List<Vector3>(); var triangles = new List<int>(); var uv = new List<Vector2>();
+            void Face(Vector3 a, Vector3 b, Vector3 c)
+            {
+                int first = vertices.Count;
+                foreach (var p in new[] { a, b, c })
+                {
+                    vertices.Add(p); uv.Add(new Vector2(p.x + .5f, p.y * .45f));
+                }
+                triangles.Add(first); triangles.Add(first + 1); triangles.Add(first + 2);
+            }
+            for (int i = 0; i < contour.Count; i++)
+            {
+                Vector2 a = contour[i], b = contour[(i + 1) % contour.Count];
+                Vector3 frontA = new Vector3(a.x, a.y, -halfDepth), frontB = new Vector3(b.x, b.y, -halfDepth);
+                Vector3 backA = new Vector3(a.x, a.y, halfDepth), backB = new Vector3(b.x, b.y, halfDepth);
+                Face(new Vector3(0, 1, -halfDepth), frontB, frontA);
+                Face(new Vector3(0, 1, halfDepth), backA, backB);
+                AddQuad(frontA, frontB, backB, backA, vertices, triangles, uv);
+            }
+            var mesh = new Mesh { name = "Door backing - uniform 5mm aperture clearance" };
+            mesh.SetVertices(vertices); mesh.SetTriangles(triangles, 0); mesh.SetUVs(0, uv);
+            mesh.RecalculateNormals(); mesh.RecalculateTangents(); mesh.RecalculateBounds();
+            if (!AssetDatabase.IsValidFolder(folder)) AssetDatabase.CreateFolder("Assets/Emberdelve/Art/Generated", "ArchitecturalJoins");
+            AssetDatabase.CreateAsset(mesh, path);
+            return mesh;
         }
 
         private static void AddQuad(Vector3 a, Vector3 b, Vector3 c, Vector3 d,

@@ -29,6 +29,10 @@ Preserve the approved scope and budget. Reuse tasks for retexture, remesh/LOD, r
 
 Rig humanoids from a suitable neutral pose; verify hands, joint clearance, weights and Unity retargeting. Deliver files and inspect the mesh/preview; task success does not establish game readiness. Follow the shared license and Unity integration rules.
 
+## Architectural fit before acceptance
+
+Request a solid masonry span for a wall, not repeated columns used as wall tiles. Treat generated dimensions and bounds as a starting point: measure actual arch springlines against their supports, stair transitions, door/frame motion clearance and module joins after import. Remove coplanar duplicate opaque faces or establish real geometric separation; do not use material renderQueue or sorting priority to conceal z-fighting. Apply the [shared depth and joins review](../../../Tools/LocalTesting/unity-tester/references/graphical-review.md#architecture-depth-and-joins) in actual Play across affected modules/seeds; screenshots or video with visible defects prevent acceptance despite passing automated checks.
+
 ## Sources
 
 Checked 2026-11-17: [prompting](https://docs.meshy.ai/en/webapp/guides/prompting), [models](https://docs.meshy.ai/en/api/models), [image API](https://docs.meshy.ai/en/api/image-to-3d), [text API](https://docs.meshy.ai/en/api/text-to-3d). Execution guidance also reviewed against the installed Meshy 3D Generation plugin skill and its `references/pipelines.md`; it is not a project dependency.

@@ -10,6 +10,16 @@ Regenerate in the primary checkout with the user's Editor left in its current sc
 2. Blender4.3.2 `--background --factory-startup --python Tools/Art/BevelTraversal.py` from the project root.
 3. Unity CLI `script run --file Tools/Art/TraversalSurfaces.cs --entry TraversalSurfaces.Import --timeout 240` against the same primary project.
 
-The bridge calls the editor APIs directly so validation exceptions reach the CLI. Export/import load isolated prefab contents and save only selected assets. `.bevel.json` and `numeric-qa.json` are reproducible intermediates. Future room builders call WeatheredTraversalSurfaces.Apply and refuse missing dimension variants rather than silently restoring sharp cubes. ValidateSaved is read-only and can inspect the test mirror.
+The bridge calls the editor APIs directly so validation exceptions reach the CLI. Export/import load isolated prefab contents and save only selected assets. `.bevel.json` and `numeric-qa.json` are reproducible intermediates. Future room builders call `WeatheredTraversalSurfaces.Apply(root)` followed by `StairSurfaceSeparation.Apply(root)` before saving. Missing dimension variants fail closed. `WeatheredTraversalSurfaces.ValidateSaved` verifies original bevel quality plus fitted geometry; it is read-only and can inspect the test mirror.
 
 Selection covers terrace/gallery stairs and decks, parapets, and the undercroft floor/retaining sides. Broad adjoining floor slabs, decorative floor wear, furnishing and cover remain outside this surface pass.
+
+## Non-overlapping masonry joints
+
+The original collision boxes intentionally overlap. Rounded edges alone do not remove overlapping visual faces: gallery top treads extend into their decks, and undercroft retaining walls duplicate the top and inner face of adjoining ground slabs.
+
+`StairSurfaceSeparation` derives shared render meshes in `Assets/Emberdelve/Art/Generated/TraversalSeparation` from the original bevel meshes. It fits 2,400 treads into disjoint run intervals with 4 mm joints and at least 2 mm clearance to landings. Retaining render faces stop at room Y = -0.6 m, where the ground slab supplies the upper wall; their original full-height colliders remain intact. Tread top heights, object transforms, materials and gameplay components remain unchanged.
+
+For existing saved prefabs, invoke `Emberdelve.EditorTools.StairSurfaceSeparation.RepairSaved()` in the primary Editor. It uses isolated prefab contents, preflights all 30 rooms, saves only affected derivatives/prefabs and validates the saved result. `ValidateSaved()` checks actual fitted mesh bounds, preserved tread heights and the floor/retaining boundary.
+
+The standard bevel import now refreshes derivative assets while preserving their GUIDs, reapplies separation after assigning base bevels and validates the combined result. Dimension export resolves fitted derivatives back to their original bevels, so the 70-variant manifest remains reproducible. Do not save a room after calling the base `Apply` alone: that API intentionally assigns only the original bevels; the separation hook completes the visual fit.

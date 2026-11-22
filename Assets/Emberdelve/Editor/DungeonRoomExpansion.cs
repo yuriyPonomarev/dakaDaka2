@@ -10,6 +10,8 @@ namespace Emberdelve.EditorTools
     internal static class DungeonRoomExpansion
     {
         private const float GalleryHeight = 3.9f;
+        // Collision overlap remains continuous; StairSurfaceSeparation fits render meshes to dry masonry joints.
+        private const float CollisionTreadDepth = .305f;
         internal static void BuildFloor(Transform root, Material paving, Material stone)
         {
             // Leave a genuine opening in the floor for the east undercroft. No invisible flat floor over stairs.
@@ -20,6 +22,8 @@ namespace Emberdelve.EditorTools
             Box(root, "Undercroft_Floor", new Vector3(14.5f, -1.8f, -10), new Vector3(5, .6f, 4), paving);
             Stairs(root, "Undercroft_SouthStairs", new Vector3(14.5f, -1.5f, -12), 180, 1.5f, 5, stone);
             Stairs(root, "Undercroft_NorthStairs", new Vector3(14.5f, -1.5f, -8), 0, 1.5f, 5, stone);
+            // The ground slab supplies the upper 0.6 m of wall. StairSurfaceSeparation removes that
+            // hidden portion from these render meshes while preserving the full-height collision backing.
             Box(root, "Undercroft_RetainingWest", new Vector3(11.8f, -.75f, -10), new Vector3(.4f, 1.5f, 10), stone);
             Box(root, "Undercroft_RetainingEast", new Vector3(17.2f, -.75f, -10), new Vector3(.4f, 1.5f, 10), stone);
         }
@@ -139,7 +143,7 @@ namespace Emberdelve.EditorTools
             for (int i = 0; i < steps; i++)
             {
                 float rise = (i + 1) * .15f;
-                Box(stairs, "Tread_" + i, new Vector3(0, rise * .5f, (i + .5f) * .3f), new Vector3(width, rise, .305f), material);
+                Box(stairs, "Tread_" + i, new Vector3(0, rise * .5f, (i + .5f) * .3f), new Vector3(width, rise, CollisionTreadDepth), material);
             }
         }
 

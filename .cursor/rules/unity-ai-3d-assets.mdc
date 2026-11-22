@@ -14,3 +14,4 @@ alwaysApply: false
 - Use original project examples in `.agents/skills/unity-3d-prompts/references/prompt-library.md` when useful.
 - Prefer existing accepted assets and task IDs for revisions. Preserve gameplay dimensions and existing prefab adapters.
 - Do not put credentials in project files or prompts. Record source, task, settings and actual license before integration.
+- Architectural integration must pass `Tools/LocalTesting/unity-tester/references/graphical-review.md#architecture-depth-and-joins`: remove coplanar opaque duplicates instead of hiding them with render priority; check stairs/landings, exact arch support contacts, solid wall spans, door motion and module seams in both orientations. Review actual Play sweeps near/far, both sides, multiple modules/seeds. A visible defect in saved images or video blocks acceptance even when tests pass.

@@ -162,6 +162,7 @@ namespace Emberdelve.EditorTools
                     Debug.Log("[Traversal] imported " + variant.key + " vertices=" + saved.vertexCount +
                         " triangles=" + saved.triangles.Length / 3 + " unit bounds=" + saved.bounds);
                 }
+                StairSurfaceSeparation.RefreshDerivedMeshes();
                 int changedPrefabs = 0, changedMeshes = 0;
                 foreach (PrefabRecord record in manifest.prefabs)
                 {
@@ -169,6 +170,7 @@ namespace Emberdelve.EditorTools
                     try
                     {
                         int changed = Apply(root);
+                        changed += StairSurfaceSeparation.Apply(root);
                         if (changed == 0) continue;
                         if (PrefabUtility.SaveAsPrefabAsset(root, record.path) == null)
                             throw new InvalidOperationException("Prefab save failed: " + record.path);
@@ -222,11 +224,13 @@ namespace Emberdelve.EditorTools
                 {
                     transforms += root.GetComponentsInChildren<Transform>(true).Length;
                     colliders += root.GetComponentsInChildren<Collider>(true).Length;
+                    StairSurfaceSeparation.Validate(root);
                     foreach (MeshFilter filter in Selected(root))
                     {
                         Variant variant = Describe(filter, root.transform);
                         Mesh mesh = LoadMesh(variant.key);
-                        if (filter.sharedMesh != mesh) throw new InvalidOperationException("Unapplied traversal surface: " + path + ":" + filter.name);
+                        if (filter.sharedMesh != mesh && ResolveOriginalMesh(filter.sharedMesh) != mesh)
+                            throw new InvalidOperationException("Unapplied traversal surface: " + path + ":" + filter.name);
                         if (checkedKeys.Add(variant.key))
                             ValidateSurface(new Surface { version = Version, key = variant.key, size = variant.size,
                                 bevel = variant.bevel, segments = Segments, vertices = mesh.vertices, normals = mesh.normals,
@@ -282,9 +286,23 @@ namespace Emberdelve.EditorTools
         private static bool Numbered(string name, string prefix) => name.StartsWith(prefix, StringComparison.Ordinal) &&
             int.TryParse(name.Substring(prefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out int index) && index >= 0;
 
+        private static Mesh ResolveOriginalMesh(Mesh source)
+        {
+            if (source == null) return null;
+            string path = AssetDatabase.GetAssetPath(source);
+            if (!path.StartsWith(StairSurfaceSeparation.MeshFolder + "/", StringComparison.Ordinal)) return source;
+            int marker = source.name.IndexOf("__", StringComparison.Ordinal);
+            if (marker < 0) throw new InvalidOperationException("Unrecognized fitted traversal mesh: " + source.name);
+            string key = source.name.Substring(0, marker);
+            string recipe = source.name.Substring(marker);
+            if (!recipe.StartsWith("__joint_v1_", StringComparison.Ordinal) && !recipe.StartsWith("__lower_v1_", StringComparison.Ordinal))
+                throw new InvalidOperationException("Unrecognized fitted traversal recipe: " + source.name);
+            return LoadMesh(key);
+        }
+
         private static Variant Describe(MeshFilter filter, Transform root)
         {
-            Mesh source = filter.sharedMesh;
+            Mesh source = ResolveOriginalMesh(filter.sharedMesh);
             if (source == null) throw new InvalidOperationException("Traversal surface has no mesh: " + filter.name);
             string path = AssetDatabase.GetAssetPath(source);
             bool box = (source.name == "Cube" && !path.StartsWith("Assets/", StringComparison.Ordinal)) ||

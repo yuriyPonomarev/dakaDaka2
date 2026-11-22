@@ -893,8 +893,10 @@ namespace Emberdelve.EditorTools
             Collider portalCollider = portal.GetComponent<Collider>();
             if (portalCollider != null) UnityEngine.Object.DestroyImmediate(portalCollider);
             portal.transform.SetParent(gate.transform, false);
-            portal.transform.localPosition = new Vector3(0f, 1.7f, 0f);
-            portal.transform.localScale = new Vector3(2.4f, 3.1f, 1f);
+            // The veil meets the floor, both jambs and the lintel inside the .7m reveal.
+            // A metre-deep cube protruded beyond the stone and floated .15m above the floor.
+            portal.transform.localPosition = new Vector3(0f, height * .5f, 0f);
+            portal.transform.localScale = new Vector3(width - .9f, height, .06f);
             Renderer portalRenderer = portal.GetComponent<Renderer>();
             if (portalRenderer != null) portalRenderer.sharedMaterial = EmberdelveMaterials.PortalMat;
 
