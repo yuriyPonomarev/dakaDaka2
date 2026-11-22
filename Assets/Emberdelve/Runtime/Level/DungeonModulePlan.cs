@@ -31,8 +31,8 @@ namespace Emberdelve.Level
     {
         public const int Width = 3;
         public const int Height = 3;
-        public const int ModuleWidthCells = 12;
-        public const int ModuleHeightCells = 12;
+        public const int ModuleWidthCells = 18;
+        public const int ModuleHeightCells = 18;
 
         public RoyalePartyMode? RoyaleMode { get; internal set; }
         public int Seed { get; internal set; }

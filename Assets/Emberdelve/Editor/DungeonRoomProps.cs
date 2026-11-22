@@ -95,7 +95,7 @@ namespace Emberdelve.EditorTools
             }
             return count;
         }
-        private static void Model(Transform parent,string id,Vector3 position,float height,float yaw)
+        internal static void Model(Transform parent,string id,Vector3 position,float height,float yaw)
         {
             var source=EmberdelvePolyHavenImport.LoadModel(id);
             if(source==null)throw new InvalidOperationException("Missing licensed prop " + id);

@@ -206,6 +206,65 @@ namespace Emberdelve.EditorTools
             Check(WaitFor(bLog, aiOpenPattern.Replace("role=(?<role>a|b)", "role=b"), TimeoutSeconds, b),
                 "client B received the AI-opened state and same revision");
 
+            WriteAtomic(serverStage, "secret-far");
+            Match secretStage = WaitMatch(serverLog, @"secret-proof staged stage=secret-far id=(?<door>secret_[A-Za-z0-9_-]+)" +
+                @" canInteract=False reason=Too_far_away open=False revision=" + revision, 20, server);
+            Check(secretStage != null, "an authored secret rejects interaction from its remote stone wall");
+            if (secretStage == null) return 1;
+            string secretId = secretStage.Groups["door"].Value;
+            Check(WaitFor(serverLog, @"secret-proof enemy id=" + secretId +
+                @" accepted=False open=False blocker=True revisionUnchanged=True", 10, server),
+                "the actual server enemy-open authority rejects the secret without changing revision");
+            WriteAtomic(aCommand, "observe|" + secretId + "|7");
+            WriteAtomic(bCommand, "observe|" + secretId + "|7");
+            WriteAtomic(lateCommand, "observe|" + secretId + "|7");
+            Match secretClosed = WaitMatch(aLog, @"door-proof state role=a source=observe id=" + secretId +
+                @" open=False revision=\d+ ready=True replicaOpen=False blocker=True secret=True panelLocalY=(?<height>[-\d.]+)", 20, a);
+            Check(secretClosed != null, "client A has the authored secret's closed wall snapshot before activation");
+            if (secretClosed == null) return 1;
+            Check(WaitFor(bLog, @"door-proof state role=b source=observe id=" + secretId +
+                @" open=False revision=\d+ ready=True replicaOpen=False blocker=True secret=True", 20, b),
+                "client B is observing the same closed cache");
+            Check(WaitFor(lateLog, @"door-proof state role=late source=observe id=" + secretId +
+                @" open=False revision=\d+ ready=True replicaOpen=False blocker=True secret=True", 20, late),
+                "the late observer has the same closed cache from its initial snapshot");
+            Thread.Sleep(350);
+            WriteAtomic(aCommand, "toggle|" + secretId + "|8");
+            Check(WaitFor(serverLog, @"door-proof request sender=" + admittedA.Groups["client"].Value + @" id=" + secretId +
+                @" accepted=False reason=Too_far_away open=False revision=" + revision + @" blocker=True", 20, server),
+                "a real client RPC from the remote wall cannot unlock the secret");
+            WriteAtomic(serverStage, "secret-near");
+            Check(WaitFor(serverLog, @"secret-proof staged stage=secret-near id=" + secretId +
+                @" canInteract=True reason=- open=False revision=" + revision, 20, server),
+                "server places the actor beside the actual visible lever");
+            Thread.Sleep(350);
+            WriteAtomic(aCommand, "toggle|" + secretId + "|9");
+            Match secretOpened = WaitMatch(serverLog, @"door-proof request sender=" + admittedA.Groups["client"].Value + @" id=" + secretId +
+                @" accepted=True reason=- open=True revision=(?<revision>\d+) blocker=False", 20, server);
+            Check(secretOpened != null, "the real lever RPC unlocks the secret through production server authority");
+            if (secretOpened == null) return 1;
+            Check(uint.Parse(secretOpened.Groups["revision"].Value) == uint.Parse(revision) + 1u,
+                "secret activation advances the shared door revision exactly once");
+            revision = secretOpened.Groups["revision"].Value;
+            string secretOpenPattern = @"door-proof state role=(?<role>a|b|late) source=replica id=" + secretId +
+                @" open=True revision=" + revision + @" ready=True replicaOpen=True blocker=False secret=True panelLocalY=(?<height>[-\d.]+)";
+            Match secretReplicaA = WaitMatch(aLog, secretOpenPattern.Replace("role=(?<role>a|b|late)", "role=a"), 20, a);
+            Match secretReplicaB = WaitMatch(bLog, secretOpenPattern.Replace("role=(?<role>a|b|late)", "role=b"), 20, b);
+            Match secretReplicaLate = WaitMatch(lateLog, secretOpenPattern.Replace("role=(?<role>a|b|late)", "role=late"), 20, late);
+            Check(secretReplicaA != null && secretReplicaB != null && secretReplicaLate != null,
+                "all three real clients replicate the secret unlock and disabled wall collider");
+            if (secretReplicaA == null || secretReplicaB == null || secretReplicaLate == null) return 1;
+            float closedHeight = float.Parse(secretClosed.Groups["height"].Value, System.Globalization.CultureInfo.InvariantCulture);
+            float openHeight = float.Parse(secretReplicaA.Groups["height"].Value, System.Globalization.CultureInfo.InvariantCulture);
+            Check(openHeight > closedHeight + .5f && secretReplicaA.Groups["height"].Value == secretReplicaB.Groups["height"].Value &&
+                secretReplicaA.Groups["height"].Value == secretReplicaLate.Groups["height"].Value,
+                "the remote stone panel actually slides upward identically on all clients");
+            Thread.Sleep(350);
+            WriteAtomic(aCommand, "toggle|" + secretId + "|10");
+            Check(WaitFor(serverLog, @"door-proof request sender=" + admittedA.Groups["client"].Value + @" id=" + secretId +
+                @" accepted=False reason=Already_activated open=True revision=" + revision + @" blocker=False", 20, server),
+                "a repeated real lever request cannot close the cache or trap a player");
+
             File.WriteAllText(aQuit, "quit"); File.WriteAllText(bQuit, "quit"); File.WriteAllText(lateQuit, "quit");
             Check(WaitExit(a, 35), "client A shut down cleanly");
             Check(WaitExit(b, 35), "client B shut down cleanly");

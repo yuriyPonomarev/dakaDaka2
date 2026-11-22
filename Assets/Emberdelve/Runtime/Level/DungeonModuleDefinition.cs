@@ -36,8 +36,8 @@ namespace Emberdelve.Level
         [SerializeField] private string moduleId = "crypt-room";
         [SerializeField] private DungeonModuleKind kind = DungeonModuleKind.Hall;
         [SerializeField] private DungeonModuleSockets availableSockets = DungeonModuleSockets.All;
-        [SerializeField, Min(1)] private int widthCells = 12;
-        [SerializeField, Min(1)] private int heightCells = 12;
+        [SerializeField, Min(1)] private int widthCells = DungeonModulePlan.ModuleWidthCells;
+        [SerializeField, Min(1)] private int heightCells = DungeonModulePlan.ModuleHeightCells;
         [SerializeField] private Transform northSocket;
         [SerializeField] private Transform eastSocket;
         [SerializeField] private Transform southSocket;

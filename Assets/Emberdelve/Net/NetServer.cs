@@ -1616,7 +1616,7 @@ namespace Emberdelve.Net
             forward.y = 0f;
             forward = forward.sqrMagnitude > 0.01f ? forward.normalized : Vector3.forward;
             Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
-            Collider panel = _doorProofDoor.GetComponentInChildren<Collider>();
+            Collider panel = _doorProofDoor.BlockerCollider;
             float y = panel != null ? panel.bounds.min.y + 0.15f : _doorProofDoor.transform.position.y + 0.15f;
             float[] radii = { 0.8f, 1.1f, 1.4f, 1.7f, 2.0f, 2.3f };
             Vector3[] directions = { forward, -forward };
@@ -1645,8 +1645,14 @@ namespace Emberdelve.Net
                 using (var reader = new StreamReader(stream, Encoding.UTF8)) stage = reader.ReadToEnd().Trim().ToLowerInvariant();
             }
             catch (IOException) { return; }
-            if (stage == _doorProofLastStage || (stage != "far" && stage != "los" && stage != "near" && stage != "ai")) return;
+            if (stage == _doorProofLastStage || (stage != "far" && stage != "los" && stage != "near" && stage != "ai" &&
+                stage != "secret-far" && stage != "secret-near")) return;
             _doorProofLastStage = stage;
+            if (stage == "secret-far" || stage == "secret-near")
+            {
+                ApplySecretDoorProofStage(stage);
+                return;
+            }
             if (stage == "ai")
             {
                 StartDoorAiProof();
@@ -1687,6 +1693,38 @@ namespace Emberdelve.Net
                  " reason=" + (string.IsNullOrEmpty(reason) ? "-" : reason.Replace(' ', '_')) + " open=" +
                  _doorProofDoor.IsOpen + " revision=" + (_inventory != null ? _inventory.DoorRevision : 0) +
                  " rayDistance=" + rayDistance.ToString("F3", CultureInfo.InvariantCulture));
+        }
+
+        private void ApplySecretDoorProofStage(string stage)
+        {
+            if (_inventory == null || _doorProofActorA?.Rig?.Movement == null) return;
+            if (_doorProofOccluder != null) _doorProofOccluder.SetActive(false);
+            if (_doorProofAiEnemy != null) _doorProofAiEnemy.gameObject.SetActive(false);
+            _doorProofAiRunning = false;
+            if (stage == "secret-far")
+            {
+                var candidates = UnityEngine.Object.FindObjectsByType<DungeonDoorInteractable>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+                Array.Sort(candidates, (a, b) => string.CompareOrdinal(a.DoorId, b.DoorId));
+                _doorProofDoor = Array.Find(candidates, door => door.IsSecret && !door.IsOpen);
+                if (_doorProofDoor == null) { _logError("secret-proof has no authored closed secret"); return; }
+                uint before = _inventory.DoorRevision;
+                bool enemyAccepted = _inventory.RequestEnemyDoorOpen(_doorProofDoor.DoorId);
+                _log("secret-proof enemy id=" + _doorProofDoor.DoorId + " accepted=" + enemyAccepted +
+                    " open=" + _doorProofDoor.IsOpen + " blocker=" + _doorProofDoor.BlockerEnabled +
+                    " revisionUnchanged=" + (_inventory.DoorRevision == before));
+                Collider panel = _doorProofDoor.BlockerCollider;
+                Vector3 remoteWall = panel.bounds.center + panel.transform.forward * 2f;
+                remoteWall.y = panel.bounds.min.y + .15f;
+                _doorProofActorA.Rig.Movement.TeleportTo(remoteWall);
+            }
+            else if (_doorProofDoor == null || !_doorProofDoor.IsSecret ||
+                !TryPlaceDoorProofActor(_doorProofActorA, -_doorProofDoor.transform.forward, 0f, out _))
+            { _logError("secret-proof could not place actor beside visible lever"); return; }
+            Physics.SyncTransforms();
+            bool can = _doorProofDoor.CanInteract(_doorProofActorA.Rig, out string reason);
+            _log("secret-proof staged stage=" + stage + " id=" + _doorProofDoor.DoorId + " canInteract=" + can +
+                " reason=" + (string.IsNullOrEmpty(reason) ? "-" : reason.Replace(' ', '_')) +
+                " open=" + _doorProofDoor.IsOpen + " revision=" + _inventory.DoorRevision);
         }
 
         private void StartDoorAiProof()

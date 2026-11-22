@@ -665,7 +665,9 @@ namespace Emberdelve.Net
                 if (door == null || !string.Equals(door.DoorId, doorId, StringComparison.Ordinal)) continue;
                 Debug.Log(NetTuning.LogPrefix + "[client] door-proof state role=" + _doorProofRole + " source=" + source +
                           " id=" + doorId + " open=" + open + " revision=" + revision + " ready=" + client.DoorStateReady +
-                          " replicaOpen=" + door.IsOpen + " blocker=" + door.BlockerEnabled);
+                          " replicaOpen=" + door.IsOpen + " blocker=" + door.BlockerEnabled +
+                          " secret=" + door.IsSecret + " panelLocalY=" +
+                          (door.BlockerCollider != null ? door.BlockerCollider.transform.localPosition.y.ToString("F3", CultureInfo.InvariantCulture) : "missing"));
                 return;
             }
             Debug.Log(NetTuning.LogPrefix + "[client] door-proof state role=" + _doorProofRole + " source=" + source +

@@ -31,6 +31,20 @@ namespace Emberdelve.Level
             int expected = CountSocketPairs(plan);
             if (doors.Count != expected)
             { reason = "created " + doors.Count + " doors for " + expected + " planned socket pairs"; DestroyCreated(doors); return false; }
+            // Authored levers share the existing authoritative door state stream, with cell-scoped identities.
+            for (int i = 0; i < moduleRoots.Length; i++)
+            {
+                if (moduleRoots[i] == null) { reason = "secret module root is missing"; DestroyCreated(doors); return false; }
+                DungeonDoorInteractable[] attached = moduleRoots[i].GetComponentsInChildren<DungeonDoorInteractable>(true);
+                foreach (DungeonDoorInteractable secret in attached)
+                {
+                    if (!secret.IsSecret) continue;
+                    DungeonModulePlacement p = plan.Placements[i];
+                    if (!secret.BindModuleCell(p.X, p.Y) || !ids.Add(secret.DoorId))
+                    { reason = "secret lever is invalid or has a duplicate room-local key"; DestroyCreated(doors); return false; }
+                    doors.Add(secret);
+                }
+            }
             var actualIds = new HashSet<string>(StringComparer.Ordinal);
             for (int i = 0; i < doors.Count; i++)
                 if (doors[i] == null || !DungeonDoorInteractable.IsValidDoorId(doors[i].DoorId) || !actualIds.Add(doors[i].DoorId))
@@ -59,8 +73,17 @@ namespace Emberdelve.Level
                 if (moduleRoots[i] == null) { reason = "doorway module root " + i + " is missing"; return false; }
                 DungeonDoorInteractable[] attached = moduleRoots[i].GetComponentsInChildren<DungeonDoorInteractable>(true);
                 for (int d = 0; d < attached.Length; d++)
+                {
+                    if (attached[d] != null && attached[d].IsSecret)
+                    {
+                        DungeonModulePlacement p = plan.Placements[i];
+                        string id = attached[d].SecretIdForCell(p.X, p.Y);
+                        if (!attached[d].ValidateSecret(out reason) || !expected.Add(id) || attached[d].DoorId != id)
+                        { reason = "secret lever is invalid, duplicated, or bound to a different room"; return false; }
+                    }
                     if (attached[d] == null || !DungeonDoorInteractable.IsValidDoorId(attached[d].DoorId) || !actual.Add(attached[d].DoorId))
                     { reason = "doorway objects contain a missing, invalid, or duplicate id"; return false; }
+                }
             }
             if (actual.Count != expected.Count || !actual.SetEquals(expected))
             { reason = "present " + actual.Count + " doors for " + expected.Count + " planned socket pairs"; return false; }
@@ -128,7 +151,8 @@ namespace Emberdelve.Level
 
         private static void DestroyCreated(List<DungeonDoorInteractable> doors)
         {
-            for (int i = 0; i < doors.Count; i++) if (doors[i] != null) UnityEngine.Object.Destroy(doors[i].gameObject);
+            for (int i = 0; i < doors.Count; i++)
+                if (doors[i] != null && !doors[i].IsSecret) UnityEngine.Object.Destroy(doors[i].gameObject);
         }
     }
 }

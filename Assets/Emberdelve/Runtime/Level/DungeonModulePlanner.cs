@@ -36,7 +36,8 @@ namespace Emberdelve.Level
                 { reason = "module '" + modules[i].ModuleId + "' is invalid: " + validation; return false; }
                 if (!ids.Add(modules[i].ModuleId)) { reason = "duplicate module id '" + modules[i].ModuleId + "'"; return false; }
                 if (modules[i].WidthCells != DungeonModulePlan.ModuleWidthCells || modules[i].HeightCells != DungeonModulePlan.ModuleHeightCells)
-                { reason = "module '" + modules[i].ModuleId + "' must use a 12x12 cell footprint"; return false; }
+                { reason = "module '" + modules[i].ModuleId + "' must use a " + DungeonModulePlan.ModuleWidthCells + "x" +
+                    DungeonModulePlan.ModuleHeightCells + " cell footprint"; return false; }
                 if (modules[i].Kind != DungeonModuleKind.Entry && modules[i].Kind != DungeonModuleKind.Extraction)
                     combatKinds.Add(modules[i].Kind);
                 if (modules[i].Kind == DungeonModuleKind.Bridge) bridgeModules++;

@@ -49,18 +49,20 @@ namespace Emberdelve.EditorTools
             var vertices = new List<Vector3>();
             var indices = new List<int>();
             // Different widths, chipped corners, shallow settling, and missing patches interrupt the perfect plane.
-            for (int row = 0; row < 22; row++)
+            float half = Emberdelve.Level.DungeonModulePlan.ModuleWidthCells;
+            for (int row = 0; row < Mathf.FloorToInt((half * 2f - .4f) / 1.07f); row++)
             {
-                float z = -11.8f + row * 1.07f;
-                float x = -11.8f;
-                while (x < 11.6f)
+                float z = -half + .2f + row * 1.07f;
+                float x = -half + .2f;
+                while (x < half - .4f)
                 {
-                    float width = Mathf.Min(.75f + (float)random.NextDouble() * .95f, 11.8f - x);
+                    float width = Mathf.Min(.75f + (float)random.NextDouble() * .95f, half - .2f - x);
                     float centerX = x + width * .5f;
                     float centerZ = z + .49f;
                     float patch = Mathf.PerlinNoise(centerX * .19f + seed % 97, centerZ * .19f + 31);
-                    bool doorway = (Mathf.Abs(centerX) < 2.3f && Mathf.Abs(centerZ) > 10.4f) || (Mathf.Abs(centerZ) < 2.3f && Mathf.Abs(centerX) > 10.4f);
-                    if (width > .25f && !doorway && patch > .27f && random.NextDouble() > .10)
+                    bool doorway = (Mathf.Abs(centerX) < 2.3f && Mathf.Abs(centerZ) > half - 1.6f) || (Mathf.Abs(centerZ) < 2.3f && Mathf.Abs(centerX) > half - 1.6f);
+                    bool undercroft = x + width > 12f && x < 17f && z + .98f > -15f && z < -5f;
+                    if (width > .25f && !doorway && !undercroft && patch > .27f && random.NextDouble() > .10)
                     {
                         float height = .025f + (float)random.NextDouble() * .055f;
                         AddStone(vertices, indices, random, centerX, centerZ, width - .055f, .94f, height);

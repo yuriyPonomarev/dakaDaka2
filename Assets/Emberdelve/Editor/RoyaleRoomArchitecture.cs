@@ -24,9 +24,9 @@ namespace Emberdelve.EditorTools
                 foreach (int side in new[] { -1, 1 })
                 {
                     // Keep the east/west doorway axis free.
-                    if (z != 0) CryptRoomArchitecture.Column(root, new Vector3(side * 4.5f, 0, z), 5.3f, stone);
+                    if (z != 0) CryptRoomArchitecture.Column(root, new Vector3(side * 4.5f, 0, z), 7.3f, stone);
                 }
-                Box(root, "Nave_Vault_Rib", new Vector3(0, 5.55f, z), new Vector3(23, .6f, .7f), stone);
+                Box(root, "Nave_Vault_Rib", new Vector3(0, 7.55f, z), new Vector3(DungeonModulePlan.ModuleWidthCells * 2f - .4f, .6f, .7f), stone);
             }
             foreach (int x in new[] { -1, 1 }) foreach (int z in new[] { -1, 1 })
             {
@@ -59,7 +59,7 @@ namespace Emberdelve.EditorTools
                 for (int tooth = -1; tooth <= 1; tooth++)
                     Box(root, "Iron_Furnace_Tooth", center + new Vector3(tooth * 1.1f, 3.3f, z * 1.6f), new Vector3(.25f, 1.6f, .35f), metal);
                 CryptRoomArchitecture.Brazier(root, center + new Vector3(0, 2.7f, 0), stone, metal, false);
-                Box(root, "Oblique_Vault_Brace", new Vector3(x * 6.8f, 5.3f, z * 6.8f), new Vector3(9, .9f, 1.2f), stone, -x * z * 45);
+                Box(root, "Oblique_Vault_Brace", new Vector3(x * 6.8f, 7.7f, z * 6.8f), new Vector3(9, .9f, 1.2f), stone, -x * z * 45);
             }
             foreach (int side in new[] { -1, 1 })
             {

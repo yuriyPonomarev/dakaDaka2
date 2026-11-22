@@ -1,5 +1,11 @@
 # Asset plan and sourcing
 
+## Expanded rooms and caches (21 November 2026)
+
+Reuses the existing CC0 Poly Haven `WoodenTable_01`, `wine_barrel_01`, `wooden_crate_02` and `wooden_bucket_01` imports, including their original manifest/licenses below. Existing project `CryptArch.asset`, sarcophagus/column/brazier construction and stone surface materials furnish the expanded modules. New gallery/stair/undercroft/cache architecture and lever mechanism are authored with the existing masonry/wood/metal kit.
+
+Public Meshy archway/coffin listings were researched, but individual asset retrieval was blocked by site access. No public Meshy model was downloaded, no license was inferred for an unverified individual file, and no paid generation occurred. These changes do not claim Meshy replacements for the existing project arches or sarcophagi. Implementation/evidence: `Tasks/ROOM_EXPANSION_20261121.md`.
+
 19October2026: user explicitly authorized searching open-source textures/packs/assets. Codex curates downloads and licenses; local worker integrates only assigned files. No payments or external messages.
 
 First inventory/reuse the existing packs at C:/Users/yrapa/Documents/just test/РЅРѕРІС‹Р№-РёРіСЂРѕРІРѕР№-РїСЂРѕРµРєС‚/assets/vendor and original manifest.json. They include KayKit dungeon/adventurer/skeleton meshes/animations and Kenney audio. Do not redownload the same files. Import into a Unity vendor namespace only when the relevant stage is assigned; preserve licenses/hashes and use prefab adapters so collider/gameplay sizes remain stable. Inspect actual file formats before deciding whether Unity needs an importer or alternate source format; do not claim glTF is natively ready merely because Godot loaded it.

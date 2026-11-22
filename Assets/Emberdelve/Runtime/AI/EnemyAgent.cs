@@ -637,7 +637,7 @@ namespace Emberdelve.AI
 
         private void TryOpenDoorForCurrentTarget(DungeonDoorInteractable door)
         {
-            if (door == null || !NetRole.RunsSimulation || !CombatRegistry.TryGet(_currentTargetId, out ICombatEntity target) ||
+            if (door == null || !door.AllowsEnemyOpening || !NetRole.RunsSimulation || !CombatRegistry.TryGet(_currentTargetId, out ICombatEntity target) ||
                 target == null || target.IsDead || !EntityKinds.IsPlayer(target.Kind)) return;
 
             Vector3 delta = door.transform.position - transform.position;

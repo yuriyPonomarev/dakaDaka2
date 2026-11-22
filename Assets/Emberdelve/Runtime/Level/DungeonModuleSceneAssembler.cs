@@ -195,7 +195,7 @@ namespace Emberdelve.Level
             for (int axis = 0; axis < axes.Length; axis++)
             {
                 // Eighteen metres keeps the ranged gate inside the same authored room and preserves its existing data-derived
-                // target distance (which is capped at 18 m), while leaving three metres to each 24 m room boundary.
+                // target distance (which is capped at 18 m), with clearance from the enlarged room boundaries.
                 Vector3 offset = axes[axis] * 9f;
                 Vector3 candidateA = center - offset + Vector3.up * 0.15f;
                 Vector3 candidateB = center + offset + Vector3.up * 0.15f;
@@ -554,6 +554,7 @@ namespace Emberdelve.Level
         {
             result = default;
             if (layout == null || moduleRoot == null || min.x > max.x || min.y > max.y) return false;
+            var secrets = moduleRoot.GetComponentsInChildren<Emberdelve.Interaction.DungeonDoorInteractable>(true);
             int maxDistance = Mathf.Max(Mathf.Abs(anchor.x - min.x), Mathf.Abs(anchor.x - max.x)) +
                               Mathf.Max(Mathf.Abs(anchor.y - min.y), Mathf.Abs(anchor.y - max.y));
             for (int distance = 0; distance <= maxDistance; distance++)
@@ -563,6 +564,7 @@ namespace Emberdelve.Level
                         if (Mathf.Abs(x - anchor.x) + Mathf.Abs(y - anchor.y) != distance) continue;
                         Vector2Int cell = new Vector2Int(x, y);
                         Vector3 root = layout.CellCenterWorld(cell) + Vector3.up * 0.15f;
+                        if (IsInsideSecretRoom(secrets, root)) continue;
                         const float radius = 0.36f;
                         Vector3 bottom = root + Vector3.up * (radius + 0.02f);
                         Vector3 top = root + Vector3.up * (1.8f - radius);
@@ -588,6 +590,12 @@ namespace Emberdelve.Level
                         result = cell;
                         return true;
                     }
+            return false;
+        }
+
+        private static bool IsInsideSecretRoom(Emberdelve.Interaction.DungeonDoorInteractable[] secrets, Vector3 point)
+        {
+            foreach (var secret in secrets) if (secret.ContainsSecretRoomPoint(point)) return true;
             return false;
         }
 
@@ -695,9 +703,13 @@ namespace Emberdelve.Level
                 int centerX = x0 + DungeonModulePlan.ModuleWidthCells / 2;
                 int centerY = y0 + DungeonModulePlan.ModuleHeightCells / 2;
                 if (p.X + 1 < DungeonModulePlan.Width && DungeonModulePlan.Has(p.OpenSockets, DungeonModuleSockets.East))
-                    _runtimeLayout.corridors.Add(new CorridorSpec { corridorName = "E_" + i, fromCell = new Vector2Int(x0 + 10, centerY), toCell = new Vector2Int(x0 + 13, centerY), width = 2 });
+                    _runtimeLayout.corridors.Add(new CorridorSpec { corridorName = "E_" + i,
+                        fromCell = new Vector2Int(x0 + DungeonModulePlan.ModuleWidthCells - 2, centerY),
+                        toCell = new Vector2Int(x0 + DungeonModulePlan.ModuleWidthCells + 1, centerY), width = 2 });
                 if (p.Y + 1 < DungeonModulePlan.Height && DungeonModulePlan.Has(p.OpenSockets, DungeonModuleSockets.North))
-                    _runtimeLayout.corridors.Add(new CorridorSpec { corridorName = "N_" + i, fromCell = new Vector2Int(centerX, y0 + 10), toCell = new Vector2Int(centerX, y0 + 13), width = 2 });
+                    _runtimeLayout.corridors.Add(new CorridorSpec { corridorName = "N_" + i,
+                        fromCell = new Vector2Int(centerX, y0 + DungeonModulePlan.ModuleHeightCells - 2),
+                        toCell = new Vector2Int(centerX, y0 + DungeonModulePlan.ModuleHeightCells + 1), width = 2 });
             }
         }
 
@@ -854,8 +866,10 @@ namespace Emberdelve.Level
             List<int> rooms = CombatRoomIndices(plan);
             var occupied = new List<Bounds>();
             if (rooms.Count == 0) { reason = "no combat room for content"; return false; }
+            int ordinaryChestCount = layout.chestSpawns != null ? layout.chestSpawns.Count : 0;
+            if (!AddSecretChestSpawns(layout, plan, occupied, out reason)) return false;
             if (layout.chestSpawns != null)
-                for (int i = 0; i < layout.chestSpawns.Count; i++)
+                for (int i = 0; i < ordinaryChestCount; i++)
                 {
                     var spec = layout.chestSpawns[i];
                     if (spec == null) continue;
@@ -879,6 +893,42 @@ namespace Emberdelve.Level
                     Vector3 size = new Vector3(1.1f, 2.1f, 1.1f) * (spec.enemy != null ? spec.enemy.BodyScale : 1f);
                     if (!TryContentCell(layout, plan, rooms, i, 4, size, occupied, out spec.cell))
                     { reason = ContentLocationFailure("enemy", i, plan, rooms); return false; }
+                }
+            return true;
+        }
+
+        private bool AddSecretChestSpawns(DungeonLayoutData layout, DungeonModulePlan plan,
+            List<Bounds> occupied, out string reason)
+        {
+            reason = null;
+            ChestSpawnSpec template = layout.chestSpawns?.Find(spec => spec != null && spec.lootTable != null);
+            for (int i = 0; i < _moduleRoots.Length; i++)
+                foreach (var secret in _moduleRoots[i].GetComponentsInChildren<Emberdelve.Interaction.DungeonDoorInteractable>(true))
+                {
+                    if (!secret.IsSecret) continue;
+                    Transform anchor = null;
+                    foreach (Transform child in secret.GetComponentsInChildren<Transform>(true))
+                    {
+                        if (child.name != "SecretChestAnchor") continue;
+                        if (anchor != null) { reason = "Secret lever has duplicate chest anchors: " + secret.DoorId; return false; }
+                        anchor = child;
+                    }
+                    if (anchor == null || template == null)
+                    { reason = "Secret cache requires a chest anchor and an authored loot table: " + secret.DoorId; return false; }
+                    Vector2Int cell = layout.CellFromWorld(anchor.position);
+                    Vector3 position = layout.CellCenterWorld(cell);
+                    Vector3 size = ChestSpawner.SizeFor(template.variant);
+                    if (Vector3.Distance(position, anchor.position) > .1f ||
+                        !secret.ContainsSecretRoomPoint(position) ||
+                        !TryFindContentCell(layout, _moduleRoots[i], cell, cell, cell, size, out _, occupied, IsReachableGroundCell, true))
+                    { reason = "Secret chest anchor is unsupported, obstructed, disconnected or off-grid: " + secret.DoorId; return false; }
+                    layout.chestSpawns.Add(new ChestSpawnSpec
+                    {
+                        cell = cell, variant = template.variant,
+                        seed = unchecked(plan.Seed ^ (cell.x * 73856093) ^ (cell.y * 19349663)),
+                        lootTable = template.lootTable, bodyMaterial = template.bodyMaterial, lidMaterial = template.lidMaterial
+                    });
+                    occupied.Add(new Bounds(position + Vector3.up * (size.y * .5f + .05f), size));
                 }
             return true;
         }
@@ -915,10 +965,11 @@ namespace Emberdelve.Level
         /// <summary>Finds a deterministic supported content cell clear of module geometry and every player spawn.</summary>
         public static bool TryFindContentCell(DungeonLayoutData layout, Transform moduleRoot, Vector2Int preferred,
             Vector2Int min, Vector2Int max, Vector3 size, out Vector2Int result, IReadOnlyList<Bounds> occupied = null,
-            Func<Vector2Int, bool> allowed = null)
+            Func<Vector2Int, bool> allowed = null, bool allowSecretRoom = false)
         {
             result = default;
             if (layout == null || moduleRoot == null || size.x <= 0f || size.y <= 0f || size.z <= 0f) return false;
+            var secrets = moduleRoot.GetComponentsInChildren<Emberdelve.Interaction.DungeonDoorInteractable>(true);
             int limit = Mathf.Max(max.x - min.x, max.y - min.y);
             for (int ring = 0; ring <= limit; ring++)
                 for (int z = -ring; z <= ring; z++)
@@ -929,6 +980,7 @@ namespace Emberdelve.Level
                         if (cell.x < min.x || cell.x > max.x || cell.y < min.y || cell.y > max.y) continue;
                         if (allowed != null && !allowed(cell)) continue;
                         Vector3 ground = layout.CellCenterWorld(cell);
+                        if (!allowSecretRoom && IsInsideSecretRoom(secrets, ground)) continue;
                         bool nearSpawn = false;
                         foreach (Vector2Int spawn in layout.playerSpawns)
                         {
@@ -965,8 +1017,8 @@ namespace Emberdelve.Level
         {
             int module = rooms[ordinal % rooms.Count];
             DungeonModulePlacement p = plan.Placements[module];
-            int x = p.X * DungeonModulePlan.ModuleWidthCells + 6 + ((ordinal + offset) % 3) - 1;
-            int y = p.Y * DungeonModulePlan.ModuleHeightCells + 6 + ((ordinal + offset * 2) % 3) - 1;
+            int x = p.X * DungeonModulePlan.ModuleWidthCells + DungeonModulePlan.ModuleWidthCells / 2 + ((ordinal + offset) % 3) - 1;
+            int y = p.Y * DungeonModulePlan.ModuleHeightCells + DungeonModulePlan.ModuleHeightCells / 2 + ((ordinal + offset * 2) % 3) - 1;
             return new Vector2Int(x, y);
         }
 

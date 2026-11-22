@@ -129,6 +129,26 @@ namespace Emberdelve.Level.Tests
             Assert.That(reason, Does.Contain("bridge"));
         }
 
+        [TestCase(12, 12)]
+        [TestCase(12, DungeonModulePlan.ModuleHeightCells)]
+        [TestCase(DungeonModulePlan.ModuleWidthCells, 12)]
+        public void PlannerAndCodecRejectLegacyRoomFootprints(int width, int height)
+        {
+            Assert.That(DungeonModulePlanner.TryCreate(11, _modules, out DungeonModulePlan plan, out string reason), Is.True, reason);
+            byte[] payload = DungeonModulePlanCodec.Encode(plan);
+            SerializedObject module = new SerializedObject(_modules[1]);
+            module.FindProperty("widthCells").intValue = width;
+            module.FindProperty("heightCells").intValue = height;
+            module.ApplyModifiedPropertiesWithoutUndo();
+
+            Assert.That(DungeonModulePlanner.TryCreate(11, _modules, out DungeonModulePlan rejected, out reason), Is.False);
+            Assert.That(rejected, Is.Null);
+            Assert.That(reason, Does.Contain("footprint"));
+            Assert.That(DungeonModulePlanCodec.TryDecode(payload, _modules, out rejected, out reason), Is.False);
+            Assert.That(rejected, Is.Null);
+            Assert.That(reason, Does.Contain("footprint"));
+        }
+
         [Test]
         public void DifferentSeedsVaryLayoutAndEveryPlanIsConnectedAndInBounds()
         {
@@ -411,10 +431,12 @@ namespace Emberdelve.Level.Tests
 
         private static void PlaceSocketChildren(DungeonModuleDefinition definition)
         {
-            definition.Socket(DungeonModuleSockets.North).localPosition = new Vector3(0f, 0f, 12f);
-            definition.Socket(DungeonModuleSockets.East).localPosition = new Vector3(12f, 0f, 0f);
-            definition.Socket(DungeonModuleSockets.South).localPosition = new Vector3(0f, 0f, -12f);
-            definition.Socket(DungeonModuleSockets.West).localPosition = new Vector3(-12f, 0f, 0f);
+            const float halfWidth = DungeonModulePlan.ModuleWidthCells * 2f / 2f;
+            const float halfHeight = DungeonModulePlan.ModuleHeightCells * 2f / 2f;
+            definition.Socket(DungeonModuleSockets.North).localPosition = new Vector3(0f, 0f, halfHeight);
+            definition.Socket(DungeonModuleSockets.East).localPosition = new Vector3(halfWidth, 0f, 0f);
+            definition.Socket(DungeonModuleSockets.South).localPosition = new Vector3(0f, 0f, -halfHeight);
+            definition.Socket(DungeonModuleSockets.West).localPosition = new Vector3(-halfWidth, 0f, 0f);
         }
 
         private void SetSocket(SerializedObject serialized, string property, Transform root, string name,

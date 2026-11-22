@@ -12,9 +12,9 @@ namespace Emberdelve.EditorTools
     {
         private const string PrefabFolder = "Assets/Emberdelve/Prefabs/DungeonModules";
         private const string CatalogFolder = "Assets/Emberdelve/Resources/Emberdelve";
-        private const float Half = 12f; // 12 cells * existing 2-unit DungeonLayoutData cell size.
+        private const float Half = DungeonModulePlan.ModuleWidthCells; // Two-metre cells, 36m room.
         private const float DoorHalf = 2f;
-        private const float WallHeight = 6f;
+        private const float WallHeight = 8f;
 
         private sealed class Spec
         {
@@ -173,8 +173,8 @@ namespace Emberdelve.EditorTools
             so.FindProperty("moduleId").stringValue = spec.Id;
             so.FindProperty("kind").enumValueIndex = (int)spec.Kind;
             so.FindProperty("availableSockets").intValue = (int)DungeonModuleSockets.All;
-            so.FindProperty("widthCells").intValue = 12;
-            so.FindProperty("heightCells").intValue = 12;
+            so.FindProperty("widthCells").intValue = DungeonModulePlan.ModuleWidthCells;
+            so.FindProperty("heightCells").intValue = DungeonModulePlan.ModuleHeightCells;
             so.FindProperty("playerSpawnAnchor").objectReferenceValue = spawn;
             Transform[] sockets = new Transform[4];
             string[] names = { "North", "East", "South", "West" };
@@ -187,7 +187,7 @@ namespace Emberdelve.EditorTools
             }
             so.ApplyModifiedPropertiesWithoutUndo();
 
-            Box(root.transform, "Floor", new Vector3(0,-0.3f,0), new Vector3(Half*2,0.6f,Half*2), floor);
+            DungeonRoomExpansion.BuildFloor(root.transform, floor, wall);
             if (destination > 1 || spec.Kind == DungeonModuleKind.Vault)
                 Box(root.transform, "Roof", new Vector3(0,WallHeight+0.3f,0), new Vector3(Half*2,0.6f,Half*2), ceiling);
             if (destination > 1 || spec.Kind == DungeonModuleKind.Vault)
@@ -199,7 +199,7 @@ namespace Emberdelve.EditorTools
             }
             else
                 for (int side = 0; side < 4; side++)
-                    RuinsWallProfile.Build(root.transform, side < 2, side % 2 == 1, wall, ((int)spec.Kind + spec.Variant + side) % 3);
+                    RuinsWallProfile.Build(root.transform, side < 2, side % 2 == 1, wall, ((int)spec.Kind + spec.Variant + side) % 3, Half);
             for (int i = 0; i < 4; i++)
             {
                 bool horizontal = i == 0 || i == 2;
@@ -218,6 +218,7 @@ namespace Emberdelve.EditorTools
                 if (spec.Kind == DungeonModuleKind.Entry) MoonlitRuinsContent.AddEnvironment(root.transform);
             }
             else RoyaleRoomArchitecture.Build(root.transform, destination, spec.Kind, spec.Variant, wall, floor);
+            DungeonRoomExpansion.Dress(root.transform, spec.Kind, spec.Variant, destination, wall, floor);
             return root;
         }
 

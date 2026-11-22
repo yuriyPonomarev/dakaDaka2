@@ -29,7 +29,7 @@ namespace Emberdelve.Net.Rules
     public static class NetTuning
     {
         /// <summary>Wire protocol version checked in connection approval.</summary>
-        public const int ProtocolVersion = 42; // Adds the replicated Cinder Warden visual kind.
+        public const int ProtocolVersion = 43; // Enlarged 18x18-cell room modules require matching authored maps.
 
         public const int DefaultPort = 7777;
         public const string DefaultAddress = "127.0.0.1";

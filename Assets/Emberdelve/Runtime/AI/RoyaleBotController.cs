@@ -316,7 +316,7 @@ namespace Emberdelve.AI
             if (!Physics.Raycast(transform.position + Vector3.up, direction, out var hit, 2f,
                 Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)) return;
             var door = hit.collider.GetComponentInParent<DungeonDoorInteractable>();
-            if (door == null || door.IsOpen || !door.CanInteract(_rig, out _)) return;
+            if (door == null || !door.AllowsEnemyOpening || door.IsOpen || !door.CanInteract(_rig, out _)) return;
             _doorCooldown = 1f;
             if (NetRole.IsOffline) door.OnInteractInstant(_rig);
             else if (GameServices.TryGet<IDoorAiAuthority>(out var authority))

@@ -63,7 +63,8 @@ namespace Emberdelve.Level
                 if (modules[i] == null || !modules[i].HasValidSockets(out _)) { reason = "module catalog contains an invalid entry"; return false; }
                 if (!ids.Add(modules[i].ModuleId)) { reason = "module catalog contains duplicate module ids"; return false; }
                 if (modules[i].WidthCells != DungeonModulePlan.ModuleWidthCells || modules[i].HeightCells != DungeonModulePlan.ModuleHeightCells)
-                { reason = "module footprint differs from the 12x12 contract"; return false; }
+                { reason = "module footprint differs from the " + DungeonModulePlan.ModuleWidthCells + "x" +
+                    DungeonModulePlan.ModuleHeightCells + " contract"; return false; }
             }
             if (payload == null || payload.Length != PayloadBytes) { reason = "payload has the wrong length"; return false; }
             try

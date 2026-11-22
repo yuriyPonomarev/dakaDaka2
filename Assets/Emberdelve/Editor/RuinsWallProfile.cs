@@ -17,7 +17,7 @@ namespace Emberdelve.EditorTools
             new[] { 6.75f,6.6f,6.2f,6.3f,5.9f,5.8f,5.05f,5.2f,5.7f,5.65f,6.4f,6.55f,6.05f,5.6f,5.7f,6.3f,6.5f,6.8f,6.65f,6.2f,6.3f }
         };
 
-        internal static void Build(Transform root, bool horizontal, bool negative, Material stone, int variant = 0)
+        internal static void Build(Transform root, bool horizontal, bool negative, Material stone, int variant = 0, float half = 12f)
         {
             if (root == null) throw new ArgumentNullException(nameof(root));
             int layer = LayerMask.NameToLayer(GameConfig.LevelLayerName);
@@ -26,7 +26,7 @@ namespace Emberdelve.EditorTools
             var side = new GameObject("RuinedWall_" + (horizontal ? "H" : "V") + (negative ? "_N" : "_P"));
             side.layer = layer;
             side.transform.SetParent(root, false);
-            float edge = negative ? -12f : 12f;
+            float edge = negative ? -half : half;
             side.transform.localPosition = horizontal ? new Vector3(0, 0, edge) : new Vector3(edge, 0, 0);
             side.transform.localRotation = Quaternion.Euler(0, horizontal ? 0 : 90, 0);
             for (int run = 0; run < 2; run++)
@@ -34,7 +34,8 @@ namespace Emberdelve.EditorTools
                 var wall = new GameObject("BrokenMasonry_" + run);
                 wall.layer = layer;
                 wall.transform.SetParent(side.transform, false);
-                wall.transform.localPosition = new Vector3(run == 0 ? -7 : 7, 0, 0);
+                wall.transform.localPosition = new Vector3((run == 0 ? -1 : 1) * (half + 2f) * .5f, 0, 0);
+                wall.transform.localScale = new Vector3((half - 2f) / 10f, 1, 1);
                 Mesh mesh = ProfileMesh((profile + run + (negative ? 1 : 0)) % 3);
                 wall.AddComponent<MeshFilter>().sharedMesh = mesh;
                 wall.AddComponent<MeshRenderer>().sharedMaterial = stone;

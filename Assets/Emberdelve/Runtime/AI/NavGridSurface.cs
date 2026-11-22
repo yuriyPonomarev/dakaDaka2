@@ -26,7 +26,7 @@ namespace Emberdelve.AI
                 int index=y*grid.width+x;
                 if(!grid.IsWalkable(x,y)) continue;
                 Vector3 point=grid.origin+new Vector3((x+.5f)*grid.cellSize,0,(y+.5f)*grid.cellSize);
-                if(!TryBakeGround(point,grid.origin.y+4.25f,grid.origin.y-.25f,mask,geometry,out float height))
+                if(!TryBakeGround(point,grid.origin.y+4.25f,grid.origin.y-2f,mask,geometry,out float height))
                 { walkable[index]='#'; continue; }
                 grid.surfaceHeights[index]=height-grid.origin.y;
             }

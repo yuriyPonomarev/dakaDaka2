@@ -67,6 +67,22 @@ namespace Emberdelve.Level.Tests
             var go=new GameObject("Solid",typeof(BoxCollider));go.transform.SetParent(_root.transform,false);
             go.transform.localPosition=center;go.GetComponent<BoxCollider>().size=size;go.layer=0;
         }
+        [Test] public void BakeKeepsSupportedUndercroftBelowTheModuleOrigin()
+        {
+            Box(new Vector3(2, -1.75f, 2), new Vector3(4, .5f, 4));
+            Physics.SyncTransforms();
+            var grid = ScriptableObject.CreateInstance<NavGridData>();
+            try
+            {
+                grid.origin = _origin; grid.width = grid.height = 2; grid.cellSize = 2; grid.mask = "....";
+                NavGridSurface.Bake(grid, _root.transform, 1);
+                Assert.True(grid.IsWalkable(0, 0));
+                Assert.That(grid.CellCenter(0, 0).y, Is.EqualTo(_origin.y - 1.5f).Within(.01f));
+                Assert.True(grid.CanTraverse(0, 0, 0, 1));
+            }
+            finally { Object.DestroyImmediate(grid); }
+        }
+
         [Test] public void StairTreadsConnectBothWays_ButSameHeightCliffDoesNot()
         {
             Box(new Vector3(2,-.25f,0),new Vector3(8,.5f,6));
