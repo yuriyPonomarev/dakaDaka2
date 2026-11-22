@@ -65,7 +65,7 @@ public sealed class LayoutFamilyReviewRunner : MonoBehaviour
     private float low, high;
     private int captures;
     private bool cornersOnly;
-    private bool diagnosticLight, inspectionLightActive, furnishingReview;
+    private bool diagnosticLight, inspectionLightActive, furnishingReview, lightingReview;
     private IEnumerator Start()
     {
         var stack = new System.Collections.Generic.Stack<IEnumerator>(); stack.Push(Review());
@@ -85,6 +85,7 @@ public sealed class LayoutFamilyReviewRunner : MonoBehaviour
         string seed = args[Array.IndexOf(args, "-emberdelveRaidSeed") + 1];
         string tag = args[Array.IndexOf(args, "-emberWallReviewTag") + 1];
         cornersOnly=tag.StartsWith("corners-final",StringComparison.Ordinal);
+        lightingReview=tag.StartsWith("lighting",StringComparison.Ordinal);
         furnishingReview=tag.StartsWith("furnishing",StringComparison.Ordinal);
         diagnosticLight=tag.StartsWith("geometry-final",StringComparison.Ordinal) || furnishingReview;
         output = Path.GetFullPath("Logs/acceptance/layout-families-20261122/live-" + seed + "-" + tag);
@@ -123,7 +124,7 @@ public sealed class LayoutFamilyReviewRunner : MonoBehaviour
         if(!doorsOnly)
         {
         // Native follow-up also walks into both furnished side chambers using normal input.
-        if(tag.StartsWith("furnished-native",StringComparison.Ordinal))
+        if(tag.StartsWith("furnished-native",StringComparison.Ordinal) || lightingReview)
         {
             foreach(float side in new[]{-1f,1f})
             {
@@ -132,6 +133,19 @@ public sealed class LayoutFamilyReviewRunner : MonoBehaviour
                 player.Look.ApplyAimPose(Mathf.Atan2(look.x,look.z)*Mathf.Rad2Deg,16);
                 inspectionLabel="PLAYER / FURNISHED SIDE CHAMBER / "+(side<0?"WEST":"EAST");
                 for(int i=0;i<45;i++)yield return null;
+                if(lightingReview)
+                {
+                    var candle=room.GetComponentsInChildren<Emberdelve.Interaction.WorldLightInteractable>()
+                        .Where(x=>x.transform.parent.name=="Authored_Candlelight")
+                        .OrderBy(x=>(x.transform.position-player.transform.position).sqrMagnitude).First();
+                    if(!candle.TrySetAuthoritatively(player,false,out string reason))throw new Exception("Cannot extinguish bedside candle: "+reason);
+                    inspectionLabel="PLAYER / CANDLE EXTINGUISHED / "+(side<0?"WEST":"EAST");
+                    for(int i=0;i<25;i++)yield return null;
+                    ScreenCapture.CaptureScreenshot(Path.Combine(output,"candle-off-"+(side<0?"west":"east")+".png"));yield return null;
+                    if(!candle.TrySetAuthoritatively(player,true,out reason))throw new Exception("Cannot relight bedside candle: "+reason);
+                    inspectionLabel="PLAYER / CANDLE RELIT / "+(side<0?"WEST":"EAST");
+                    for(int i=0;i<25;i++)yield return null;
+                }
                 ScreenCapture.CaptureScreenshot(Path.Combine(output,"player-furnished-chamber-"+(side<0?"west":"east")+".png"));yield return null;
             }
         }
@@ -223,7 +237,8 @@ public sealed class LayoutFamilyReviewRunner : MonoBehaviour
                 doorway.name="Inspection_Doorway_"+direction;
             }
             yield return InspectView(camera,instance.transform,new Vector3(0,7.4f,-12),new Vector3(0,0,3),"catalog-"+prefab.name+"-overview",18);
-            if(furnishingReview)
+            if(lightingReview) Emberdelve.Interaction.WorldLightInteractable.Install(instance.transform);
+            if(furnishingReview || lightingReview)
             {
                 Physics.SyncTransforms();
                 int furnishingIndex=0;
@@ -232,6 +247,7 @@ public sealed class LayoutFamilyReviewRunner : MonoBehaviour
                 foreach(Transform item in furnishing)
                 {
                     if(!item.name.StartsWith("Floor_"))continue;
+                    if(lightingReview && item.name!="Floor_WoodenTable_01" && item.name!="Floor_wooden_bookshelf_worn" && item.name!="Floor_StandingShrine")continue;
                     var rs=item.GetComponentsInChildren<MeshRenderer>();var b=rs[0].bounds;foreach(var r in rs)b.Encapsulate(r.bounds);
                     Vector3 target=new Vector3(b.center.x,b.min.y+Mathf.Min(1,b.size.y*.6f),b.center.z);
                     Vector3 from=Vector3.zero;bool found=false;
@@ -254,6 +270,26 @@ public sealed class LayoutFamilyReviewRunner : MonoBehaviour
                     if(!found)throw new Exception("No readable furniture view "+instance.name+" "+item.name);
                     inspectionLabel="FURNISHING / "+prefab.name+" / "+item.name;
                     yield return InspectView(camera,instance.transform,instance.transform.InverseTransformPoint(from),instance.transform.InverseTransformPoint(target),"furniture-"+prefab.name+"-"+(furnishingIndex++)+"-"+item.name,8);
+                }
+                if(lightingReview)
+                {
+                    int bay=0;
+                    foreach(var chamber in instance.GetComponentsInChildren<Transform>().Where(t=>t.name=="Side_Chamber"))
+                    {
+                        var walls=chamber.GetComponentsInChildren<MeshRenderer>();var cb=walls[0].bounds;foreach(var wall in walls)cb.Encapsulate(wall.bounds);
+                        Vector3 from=new Vector3(chamber.position.x,1.7f,cb.min.z-1.4f);
+                        Vector3 to=chamber.position+Vector3.up*1.7f;
+                        inspectionLabel="NATIVE LIGHT / CHAMBER ENTRANCE / "+prefab.name;
+                        yield return InspectView(camera,instance.transform,instance.transform.InverseTransformPoint(from),instance.transform.InverseTransformPoint(to),"lighting-chamber-"+prefab.name+"-"+(bay++),18);
+                    }
+                    int lampIndex=0;
+                    foreach(Transform lamp in instance.transform.Find("Layout_Lighting"))
+                    {
+                        Vector3 to=lamp.GetComponentInChildren<Light>().transform.position;
+                        Vector3 from=to+lamp.forward*2.2f;from.y-=.5f;
+                        inspectionLabel="NATIVE LIGHT / WALL MOUNT / "+prefab.name;
+                        yield return InspectView(camera,instance.transform,instance.transform.InverseTransformPoint(from),instance.transform.InverseTransformPoint(to),"lighting-mount-"+prefab.name+"-"+(lampIndex++),12);
+                    }
                 }
                 for(int side=0;side<4;side++)
                 {

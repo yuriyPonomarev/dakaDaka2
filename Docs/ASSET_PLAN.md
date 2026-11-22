@@ -261,3 +261,10 @@ Final join derivatives also include `Art/Generated/PitJointBacking`: widened ver
 ## Layout-aware furnishing (22 November 2026)
 
 Reuses the existing licensed CC0 PolyHaven WoodenTable_01, wooden_stool_01, wooden_bookshelf_worn, wooden_crate_02, wooden_bucket_01, wine_barrel_01 and wooden_candlestick imports, plus existing owner-supplied Meshy StandingShrine and VotiveStand. All original manifests/materials/source meshes remain intact. Authoring fits uniform scale to actual imported bounds and gives furniture physical collision; no new source download or generation. GothicCabinet_01 stays lobby-only. The existing RustboundGate leaf keeps its original Meshy faces; its opaque wooden backing becomes a joined thin core with a deeper perimeter rebate inside the leaf. The pale industrial rack was rejected during this pass. See Tasks/LAYOUT_FURNISHING_20261122.md for source-reference evidence and acceptance status.
+
+
+## Local furniture lighting (22 November 2026)
+
+Existing PolyHaven wooden_candlestick models now illuminate table surfaces and actual top shelf boards; existing Meshy WallTorch/WallSconce imports light chamber backs and selected storage/chapel bays. Source downloads, meshes and materials remain unchanged. Added candle flames reuse the existing authored torch particle material with small candle-specific emission settings. New sconces have bounded warm point illumination and explicit URP custom128px soft shadows per cubemap face; no global exposure or ambient change.
+
+Public Meshy lantern/torch/candle candidates and their individual page/license evidence are recorded in Tasks/LAYOUT_LIGHTING_20261122.md. They remain a researched shortlist, with no unreviewed download or paid generation integrated. Current room lighting uses the already accepted project imports.

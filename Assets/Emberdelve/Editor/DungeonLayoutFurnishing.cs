@@ -188,6 +188,7 @@ namespace Emberdelve.EditorTools
             System.IO.Directory.CreateDirectory("Logs/acceptance/layout-furnishing-20261122");
             System.IO.File.WriteAllText("Logs/acceptance/layout-furnishing-20261122/"+room.name+"-placement.txt", "placed="+f.Count+"\n"+string.Join("\n",f.Rejected));
             Validate(room);
+            DungeonLayoutLighting.Apply(room);
             Debug.Log("[LayoutFurnishing] "+room.name+" placed="+f.Count+" rejected="+f.Rejected.Count+"\n"+string.Join("\n",f.Rejected));
             return f.Count;
         }
