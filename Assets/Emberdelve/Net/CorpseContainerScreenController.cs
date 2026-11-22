@@ -161,7 +161,8 @@ namespace Emberdelve.Net
             bool isTransfer = sequence != 0 && sequence == _session.TransferSequence;
             if (!_session.ApplyResult(corpseId, sequence, accepted, corpseRevision, reason)) return;
             // Authority acquisition already raises ItemCollected; snapshots on a remote client do not.
-            if (accepted && isTransfer && NetRole.IsClientOnly) WorldAudio.PlayLocal(WorldSound.Pickup);
+            if (accepted && isTransfer && NetRole.IsClientOnly && _rig != null)
+                WorldAudio.PlayAttached(WorldSound.Pickup, _rig.transform, Vector3.up * 1.2f);
             _lastFailure = accepted ? null : (string.IsNullOrEmpty(reason) ? "Server refused this container request" : reason);
             if (_session.TransferSequence == 0) _transferStartedAt = 0.0;
             if (_session.StateRequestSequence == 0) _stateStartedAt = 0.0;

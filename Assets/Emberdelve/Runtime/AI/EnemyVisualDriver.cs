@@ -118,7 +118,7 @@ namespace Emberdelve.AI
                 if (!_dead)
                 {
                     _dead = true;
-                    Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldSound.EnemyDeath, _agent.transform.position + Vector3.up, .65f);
+                    Emberdelve.Feedback.WorldAudio.PlayAttached(Emberdelve.Feedback.WorldSound.EnemyDeath, _agent.transform, Vector3.up, .65f);
                     animator.ResetTrigger(_attackHash);
                     animator.ResetTrigger(_hitHash);
                     animator.SetBool(_deadHash, true);
@@ -151,7 +151,7 @@ namespace Emberdelve.AI
 
             EnemyAttackPhase phase = _agent.AttackPresentation;
             if (phase.Phase == 2 && _soundPhase != 2)
-                Emberdelve.Feedback.WorldAudio.Play(_agent.UsesCinderClub ? Emberdelve.Feedback.WorldSound.BluntSwing : Emberdelve.Feedback.WorldSound.Swing, _agent.transform.position + Vector3.up, .8f);
+                Emberdelve.Feedback.WorldAudio.PlayAttached(_agent.UsesCinderClub ? Emberdelve.Feedback.WorldSound.BluntSwing : Emberdelve.Feedback.WorldSound.Swing, _agent.transform, Vector3.up, .8f);
             _soundPhase = phase.Phase;
             if (phase.Phase != 0)
             {
@@ -236,7 +236,7 @@ namespace Emberdelve.AI
         private void HandleDamaged(DamageInfo damage)
         {
             if (_agent != null && !_agent.IsDead && damage.Amount > 0f)
-                Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldSound.EnemyHurt, _agent.transform.position + Vector3.up, .5f);
+                Emberdelve.Feedback.WorldAudio.PlayAttached(Emberdelve.Feedback.WorldSound.EnemyHurt, _agent.transform, Vector3.up, .5f);
             if (bloodEffect != null && _agent != null && damage.Amount > 0f)
             {
                 Vector3 point = damage.Point;

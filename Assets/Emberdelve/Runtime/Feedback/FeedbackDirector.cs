@@ -33,6 +33,8 @@ namespace Emberdelve.Feedback
         private MeleeCombat _melee;
         private WallStopFeedback _wallFeedback;
         private bool _subscribedToPlayer;
+        private AudioListener _audioListener;
+        private float _nextListenerSearch;
 
         private void Awake()
         {
@@ -70,7 +72,7 @@ namespace Emberdelve.Feedback
             LocalGameAudio.UiVolume = uiVolume;
             var worldAudio = GetComponent<WorldAudio>();
             if (worldAudio != null) worldAudio.Volume = masterVolume;
-            WorldAudio.BindListener(_player != null && !_player.IsDead && !_player.IsExtracted && _player.Look != null ? _player.Look.AimTransform : null);
+            BindActiveListener();
             if (_subscribedToPlayer && _player == null) UnhookPlayer();
             if (_subscribedToPlayer) return;
             if (GameServices.TryGet<RunDirector>(out RunDirector director)) HookPlayer(director.Player);
@@ -81,6 +83,26 @@ namespace Emberdelve.Feedback
             if (_player == player && _subscribedToPlayer) return;
             UnhookPlayer();
             HookPlayer(player);
+            _nextListenerSearch = 0f;
+        }
+
+        private void BindActiveListener()
+        {
+            // Spectating moves the real camera independently of the owner's aim transform.
+            // Keep that listener cached; search only on invalidation or a bounded camera refresh.
+            bool valid = _audioListener != null && _audioListener.isActiveAndEnabled;
+            if (Time.unscaledTime >= _nextListenerSearch || (!valid && _audioListener != null))
+            {
+                _nextListenerSearch = Time.unscaledTime + .5f;
+                _audioListener = null;
+                Camera camera = Camera.main;
+                if (camera != null && camera.isActiveAndEnabled && camera.TryGetComponent(out AudioListener candidate) &&
+                    candidate.isActiveAndEnabled) _audioListener = candidate;
+                if (_audioListener == null)
+                    foreach (AudioListener listener in FindObjectsByType<AudioListener>(FindObjectsSortMode.None))
+                        if (listener.isActiveAndEnabled) { _audioListener = listener; break; }
+            }
+            WorldAudio.BindListener(_audioListener != null && _audioListener.isActiveAndEnabled ? _audioListener.transform : null);
         }
 
         private void HookPlayer(PlayerRig player)
@@ -149,8 +171,10 @@ namespace Emberdelve.Feedback
         private void OnPlayerDamaged(int playerId, DamageInfo info)
         {
             if (!float.IsFinite(info.Amount) || info.Amount <= 0f) return;
-            // The flash is a world effect anyone can see (a hit on a teammate or a rival); the grunt is the local player's own.
-            if (PlayerView.Shows(playerId)) WorldAudio.PlayLocal(WorldSound.Hurt, .65f);
+            // Client hit reports supply their own deduplicated voice; authority events cover all nearby actors.
+            PlayerRig actor = ResolveActor(playerId);
+            if (!NetRole.IsClientOnly && actor != null && !actor.IsDead && actor.Health != null && actor.Health.CurrentHealth > 0f)
+                WorldAudio.PlayAttached(WorldSound.Hurt, actor.transform, Vector3.up * 1.4f, .65f);
             ImpactFlash.Spawn(info.Point, new Color(1f, 0.3f, 0.25f), info.Blocked ? blockFlashSize : hitFlashSize);
         }
 
@@ -165,8 +189,20 @@ namespace Emberdelve.Feedback
 
         private void OnItemCollected(int playerId, ItemData item, int totalCollected)
         {
-            if (!PlayerView.Shows(playerId)) return;
-            WorldAudio.PlayLocal(item != null && item.kind == ItemKind.Currency ? WorldSound.Coins : WorldSound.Pickup, .6f);
+            PlayerRig actor = ResolveActor(playerId);
+            if (actor == null) return;
+            WorldAudio.PlayAttached(item != null && item.kind == ItemKind.Currency ? WorldSound.Coins : WorldSound.Pickup,
+                actor.transform, Vector3.up * 1.2f, .6f);
+        }
+
+        private PlayerRig ResolveActor(int playerId)
+        {
+            if (_player != null && _player.PlayerId == playerId) return _player;
+            if (CombatRegistry.TryGet(playerId, out ICombatEntity entity) && entity is PlayerRig actor && actor.PlayerId == playerId)
+                return actor;
+            if (GameServices.TryGet<RunDirector>(out var director) && director.TryGetSession(playerId, out var session))
+                return session.Rig;
+            return null;
         }
 
         private void OnActiveWeaponChanged(int playerId, WeaponData weapon)
@@ -182,7 +218,7 @@ namespace Emberdelve.Feedback
             WeaponData weapon = _player.ActiveWeapon;
             bool changed = _weaponSeeded && _lastWeapon != weapon;
             _weaponSeeded = true; _lastWeapon = weapon;
-            if (changed) WorldAudio.PlayLocal(WorldSound.Equip, .5f);
+            if (changed) WorldAudio.PlayAttached(WorldSound.Equip, _player.transform, Vector3.up * 1.2f, .5f);
         }
 
         private void OnSkillRejected(int playerId, SkillSnapshot skill, string reason)
@@ -192,7 +228,8 @@ namespace Emberdelve.Feedback
         {
             if (!PlayerView.Shows(playerId)) return;
             if (result.Outcome == RunState.Extracted) WorldAudio.PlayLocal(WorldSound.Extract, .8f);
-            else WorldAudio.PlayLocal(result.Outcome == RunState.Dead ? WorldSound.Death : WorldSound.Fail, .8f);
+            // Death is an actor sound from the observed life-state edge, including observers and environmental deaths.
+            else if (result.Outcome != RunState.Dead) WorldAudio.PlayLocal(WorldSound.Fail, .8f);
         }
 
     }

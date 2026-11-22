@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Emberdelve.Feedback
 {
-    /// <summary>Local presentation of observed action edges. Never starts or completes a gameplay action.</summary>
+    /// <summary>Actor foley from observed action edges. Never starts or completes a gameplay action.</summary>
     [DisallowMultipleComponent]
     public sealed class PlayerActionAudio : MonoBehaviour
     {
@@ -25,6 +25,8 @@ namespace Emberdelve.Feedback
         private RoyaleZoneBoundary _zoneBoundary;
         private bool _zoneSeeded;
         private float _nextZoneSample, _nextZoneWarning;
+        private bool _hasReplicatedActions, _replicatedDrawing, _replicatedReloading, _replicatedConsuming;
+        private string _replicatedWeaponId, _replicatedUtilityId, _sampledWeaponId;
 
         public void Bind(PlayerRig rig)
         {
@@ -35,6 +37,7 @@ namespace Emberdelve.Feedback
             _channel = rig != null ? rig.GetComponent<ConsumableChannel>() : null;
             _drink = rig != null ? rig.GetComponent<PotionDrinkPresentation>() : null;
             _seeded = false;
+            _hasReplicatedActions = false;
             if (_rig != null && isActiveAndEnabled)
             {
                 _rig.FloorMovementChanged += OnFloorMovementChanged;
@@ -59,24 +62,38 @@ namespace Emberdelve.Feedback
             _sawTransitEntry |= rig.IsInFloorTransit;
         }
 
+        /// <summary>Client presentation only. Owners and observers share one sampler, so neither also emits from its local simulation.</summary>
+        public void ApplyReplicatedActionState(bool valid, string weaponId, string utilityId,
+            bool drawing, bool reloading, bool consuming)
+        {
+            if (!NetRole.IsClientOnly) return;
+            _hasReplicatedActions = valid;
+            if (!valid) { _seeded = false; return; }
+            _replicatedWeaponId = weaponId;
+            _replicatedUtilityId = utilityId;
+            _replicatedDrawing = drawing;
+            _replicatedReloading = reloading;
+            _replicatedConsuming = consuming;
+        }
+
         private void LateUpdate()
         {
-            if (_rig == null || !_rig.IsLocallyControlled || _rig.IsDead || _rig.IsExtracted || Time.timeScale <= 0f)
+            if (_rig == null || _rig.IsDead || _rig.IsExtracted || Time.timeScale <= 0f ||
+                (NetRole.IsClientOnly && !_hasReplicatedActions))
             { _seeded = false; return; }
             if (_ranged == null) _ranged = _rig.GetComponent<RangedCombat>();
             if (_channel == null) _channel = _rig.GetComponent<ConsumableChannel>();
             if (_drink == null) _drink = _rig.GetComponent<PotionDrinkPresentation>();
             WeaponData weapon = _rig.ActiveWeapon;
             bool ranged = _ranged != null && weapon != null && weapon.IsRanged && !_rig.WeaponInputSuppressed;
-            bool reloading = ranged && _ranged.IsReloading;
-            // A client owner's ranged simulation is disabled. Its view draw clock is fed by the server snapshot.
-            bool drawing = ranged && !reloading && !_rig.IsGuarding && (NetRole.IsClientOnly
-                ? _rig.Loadout != null && _rig.Loadout.Visual != null && _rig.Loadout.Visual.DrawProgress > 0f
-                : _ranged.IsDrawing);
-            bool consuming = (_drink != null && _drink.IsDrinking) || (_channel != null && _channel.IsChanneling);
+            // Remote rigs need no private inventory or first-person weapon model to make foley.
+            bool reloading = NetRole.IsClientOnly ? _replicatedReloading : ranged && _ranged.IsReloading;
+            bool drawing = NetRole.IsClientOnly ? _replicatedDrawing : ranged && !reloading && !_rig.IsGuarding && _ranged.IsDrawing;
+            bool consuming = NetRole.IsClientOnly ? _replicatedConsuming :
+                (_drink != null && _drink.IsDrinking) || (_channel != null && _channel.IsChanneling);
             int magazine = _ranged != null ? _ranged.Magazine : 0;
             bool floorChanged = _floorChanged || _floorGeneration != _rig.FloorMovementGeneration || _inTransit != _rig.IsInFloorTransit;
-            if (_seeded && floorChanged)
+            if (_rig.IsLocallyControlled && _seeded && floorChanged)
             {
                 bool entered = _sawTransitEntry || (!_inTransit && _rig.IsInFloorTransit);
                 bool transferBetweenSamples = !_inTransit && !_rig.IsInFloorTransit && _floorGeneration != _rig.FloorMovementGeneration;
@@ -87,38 +104,46 @@ namespace Emberdelve.Feedback
                     WorldAudio.PlayLocal(WorldSound.Portal, .6f);
                 }
             }
-            if (!_seeded || floorChanged || _weapon != weapon || _rig.IsInFloorTransit)
+            bool weaponChanged = NetRole.IsClientOnly ? _sampledWeaponId != _replicatedWeaponId : _weapon != weapon;
+            if (_seeded && weaponChanged && !floorChanged && !_rig.IsInFloorTransit && !_rig.IsLocallyControlled)
+                PlayActor(WorldSound.Equip, .5f);
+            if (!_seeded || floorChanged || weaponChanged || _rig.IsInFloorTransit)
             {
                 Capture(weapon, drawing, reloading, consuming, magazine);
                 return;
             }
 
-            if (drawing && !_drawing) WorldAudio.PlayLocal(WorldSound.Draw, .55f);
+            if (drawing && !_drawing) PlayActor(WorldSound.Draw, .55f);
             if (reloading && !_reloading)
             {
                 _reloadStartMagazine = magazine;
-                WorldAudio.PlayLocal(WorldSound.Reload, .6f);
+                PlayActor(WorldSound.Reload, .6f);
             }
             // Cancellation also clears IsReloading. Only an observed ammunition commit earns the latch sound.
-            if (_reloading && !reloading && ranged && magazine > _reloadStartMagazine)
-                WorldAudio.PlayLocal(WorldSound.Equip, .4f);
+            if (_reloading && !reloading && ranged && magazine > _reloadStartMagazine &&
+                (!NetRole.IsClientOnly || _rig.IsLocallyControlled))
+                PlayActor(WorldSound.Equip, .4f);
             if (consuming && !_consuming)
             {
-                ItemData item = _channel != null && _channel.IsChanneling ? _channel.ChannelItem : _rig.Inventory?.HeldItem;
+                ItemData item = NetRole.IsClientOnly ? HandheldUtilityVisual.Find(_replicatedUtilityId) :
+                    _channel != null && _channel.IsChanneling ? _channel.ChannelItem : _rig.Inventory?.HeldItem;
                 // A late snapshot without item identity is silent rather than calling a bandage a potion.
                 if (item != null && item.useChannelSeconds > 0f)
-                    WorldAudio.PlayLocal(item.IsBandage ? WorldSound.Bandage : WorldSound.Potion, .55f);
+                    PlayActor(item.IsBandage ? WorldSound.Bandage : WorldSound.Potion, .55f);
             }
-            if (CanRequestDryFire(weapon, ranged, drawing, reloading, consuming) && Time.unscaledTime >= _nextDryFire)
+            if (_rig.IsLocallyControlled && CanRequestDryFire(weapon, ranged, drawing, reloading, consuming) && Time.unscaledTime >= _nextDryFire)
             {
                 _nextDryFire = Time.unscaledTime + .2f;
-                WorldAudio.PlayLocal(WorldSound.DryFire, .5f);
+                PlayActor(WorldSound.DryFire, .5f);
             }
             _drawing = drawing;
             _reloading = reloading;
             _consuming = consuming;
-            SampleZoneWarning();
+            if (_rig.IsLocallyControlled) SampleZoneWarning();
         }
+
+        private void PlayActor(WorldSound sound, float gain) =>
+            WorldAudio.PlayAttached(sound, _rig.transform, Vector3.up * 1.2f, gain);
 
         private void SampleZoneWarning()
         {
@@ -162,6 +187,7 @@ namespace Emberdelve.Feedback
         private void Capture(WeaponData weapon, bool drawing, bool reloading, bool consuming, int magazine)
         {
             _weapon = weapon;
+            _sampledWeaponId = _replicatedWeaponId;
             _drawing = drawing;
             _reloading = reloading;
             _consuming = consuming;

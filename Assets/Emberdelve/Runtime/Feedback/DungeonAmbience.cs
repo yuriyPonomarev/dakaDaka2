@@ -20,6 +20,7 @@ namespace Emberdelve.Feedback
         private float _nextProbe;
         private float _target;
         private bool _covered;
+        private AudioListener _listener;
         private void Awake()
         {
             _feedback = GetComponent<FeedbackDirector>();
@@ -43,29 +44,34 @@ namespace Emberdelve.Feedback
         {
             if (_director == null) GameServices.TryGet<RunDirector>(out _director);
             var player = _boundPlayer != null ? _boundPlayer : _director != null ? _director.Player : null;
-            bool running = player != null && !player.IsDead && (_boundPlayer != null ||
+            bool running = player != null && !player.IsDead && !player.IsExtracted && (_boundPlayer != null ||
                 (_director.State == RunState.Running && _director.LocalPlayerState == RunState.Running));
-            bool hasListener = running && player.Look != null;
-            if (hasListener)
+            // Room acoustics follow the actual listening camera, including spectating after death.
+            if (Time.unscaledTime >= _nextProbe)
             {
-                Vector3 eye = player.Look.AimOrigin;
-                _room.transform.position = eye;
-                if (Time.unscaledTime >= _nextProbe)
+                _nextProbe = Time.unscaledTime + .35f;
+                _listener = null;
+                foreach (var candidate in FindObjectsByType<AudioListener>(FindObjectsSortMode.None))
+                    if (candidate.isActiveAndEnabled) { _listener = candidate; break; }
+                _covered = _listener != null && Physics.Raycast(_listener.transform.position, Vector3.up, 14f,
+                    _mask, QueryTriggerInteraction.Ignore);
+                if (_covered && _room.reverbPreset != AudioReverbPreset.User)
                 {
-                    _nextProbe = Time.unscaledTime + .35f;
-                    _covered = Physics.Raycast(eye, Vector3.up, 14f, _mask, QueryTriggerInteraction.Ignore);
-                    _room.reverbPreset = _covered ? AudioReverbPreset.StoneCorridor : AudioReverbPreset.Off;
+                    _room.reverbPreset = AudioReverbPreset.StoneCorridor;
+                    _room.reverbPreset = AudioReverbPreset.User;
+                    // A short stone-room tail keeps transients readable instead of washing every step in a cavern echo.
+                    _room.decayTime = 1.05f;
+                    _room.decayHFRatio = .55f;
+                    _room.reflectionsDelay = .012f;
+                    _room.reverbDelay = .025f;
                 }
-                _target = (_covered ? .29f : .42f) * (_feedback != null ? _feedback.masterVolume : .7f);
-                if (_ambience.clip != null && !_ambience.isPlaying) _ambience.Play();
+                else if (!_covered) _room.reverbPreset = AudioReverbPreset.Off;
             }
-            else
-            {
-                _target = 0f;
-                _room.reverbPreset = AudioReverbPreset.Off;
-            }
+            if (_listener != null && _listener.isActiveAndEnabled) _room.transform.position = _listener.transform.position;
+            _target = running ? (_covered ? .29f : .42f) * (_feedback != null ? _feedback.masterVolume : .7f) : 0f;
+            if (running && _ambience.clip != null && !_ambience.isPlaying) _ambience.Play();
             _ambience.volume = Mathf.MoveTowards(_ambience.volume, _target, Time.unscaledDeltaTime * .25f);
-            if (!hasListener && _ambience.volume == 0f && _ambience.isPlaying) _ambience.Stop();
+            if (!running && _ambience.volume == 0f && _ambience.isPlaying) _ambience.Stop();
         }
         private void OnDisable()
         {

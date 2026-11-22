@@ -16,15 +16,6 @@ namespace Emberdelve.Net
     {
         private NetPlayerRig _owner;
         private Emberdelve.Feedback.DungeonAmbience _ambience;
-        private bool _ended;
-        private void OnEnable() => Emberdelve.Core.GameEvents.RunEnded += OnRunEnded;
-        private void OnRunEnded(int playerId, Emberdelve.Core.RunResult result)
-        {
-            if (_owner == null || _owner.Rig == null || _owner.Rig.PlayerId != playerId) return;
-            _ended = true;
-            if (_ambience != null) _ambience.enabled = false;
-            Emberdelve.Feedback.WorldAudio.BindListener(null);
-        }
 
         public int ResultsReceived { get; private set; }
         public int AcceptedResults { get; private set; }
@@ -37,7 +28,6 @@ namespace Emberdelve.Net
         public void Configure(NetPlayerRig owner)
         {
             _owner = owner;
-            _ended = false;
             if (owner != null && !owner.IsServer)
             {
                 var feedback = GetComponent<Emberdelve.Feedback.FeedbackDirector>();
@@ -64,9 +54,6 @@ namespace Emberdelve.Net
         {
             if (_owner == null || !_owner.IsSpawned) return;
             NetEnemyViews.TickSummary(Time.unscaledTime);
-            if (!_owner.IsServer)
-                Emberdelve.Feedback.WorldAudio.BindListener(!_ended && _owner.Rig != null && !_owner.Rig.IsDead && _owner.Rig.Look != null
-                    ? _owner.Rig.Look.AimTransform : null);
         }
 
         private void LateUpdate()
@@ -79,7 +66,6 @@ namespace Emberdelve.Net
 
         private void OnDisable()
         {
-            Emberdelve.Core.GameEvents.RunEnded -= OnRunEnded;
             if (_ambience != null) _ambience.enabled = false;
             if (_owner != null && !_owner.IsServer && _owner.Rig != null && _owner.Rig.Loadout != null)
                 _owner.Rig.Loadout.SetGuardHeldVisual(false);

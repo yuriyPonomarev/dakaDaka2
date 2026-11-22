@@ -46,6 +46,12 @@ namespace Emberdelve.Net
         public static int Total => Entries.Count;
         public static int PoseCount => _poses;
 
+        internal static bool TryGetAudioEmitter(int enemyId, out Transform emitter)
+        {
+            emitter = Entries.TryGetValue(enemyId, out Entry entry) && entry.Proxy != null ? entry.Proxy.transform : null;
+            return emitter != null;
+        }
+
         public static bool TryGetNearestAliveProxy(Vector3 from, out int enemyId, out Vector3 position)
         {
             enemyId = 0;
@@ -318,7 +324,7 @@ namespace Emberdelve.Net
             var footsteps = GetComponent<Emberdelve.Feedback.WorldFootsteps>();
             if (footsteps != null) footsteps.Audible = !state.IsDead && !state.IsDormant && !state.IsWaking;
             if (!initial && !state.IsDead && state.AttackPhase == 2 && _attackPhase.Phase != 2)
-                Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldSound.Swing, transform.position + Vector3.up, .8f);
+                Emberdelve.Feedback.WorldAudio.PlayAttached(Emberdelve.Feedback.WorldSound.Swing, transform, Vector3.up, .8f);
             bool starting = state.AttackPhase != 0 && (_attackPhase.Phase == 0 || initial);
             _attackPhase = new EnemyAttackPhase(state.AttackPhase, state.PhaseElapsed, state.PhaseDuration, state.RecoilStart);
             _phaseSampleTime = state.SampleTime;

@@ -9,7 +9,7 @@ namespace Emberdelve.Tests
     public sealed class GameAudioTests
     {
         [Test]
-        public void EveryCueLoadsAllOriginalMonoVariantsWithHeadroom()
+        public void EveryCueLoadsAllMonoVariantsWithHeadroom()
         {
             foreach (WorldSound cue in Enum.GetValues(typeof(WorldSound)))
                 for (int i = 0; i < GameSoundBank.VariantCount(cue); i++)

@@ -146,9 +146,22 @@ namespace Emberdelve.Net
                             hit.Blocked ? Emberdelve.Feedback.WorldSound.Metal : hit.Source != (byte)CombatHitSource.Melee
                             ? Emberdelve.Feedback.WorldSound.ArrowImpact : PlayerImpactSound(hit.Attacker), point);
                         if (hit.Amount > 0f && hit.TargetIsEnemy)
-                            Emberdelve.Feedback.WorldAudio.Play(hit.Killed ? Emberdelve.Feedback.WorldSound.EnemyDeath : Emberdelve.Feedback.WorldSound.EnemyHurt, point, .6f);
-                        else if (hit.Amount > 0f && PlayerView.Shows(hit.Target))
-                            Emberdelve.Feedback.WorldAudio.PlayLocal(Emberdelve.Feedback.WorldSound.Hurt, .65f);
+                        {
+                            var voice = hit.Killed ? Emberdelve.Feedback.WorldSound.EnemyDeath : Emberdelve.Feedback.WorldSound.EnemyHurt;
+                            if (NetEnemyViews.TryGetAudioEmitter(hit.Target, out Transform emitter))
+                                Emberdelve.Feedback.WorldAudio.PlayAttached(voice, emitter, Vector3.up, .6f);
+                            else Emberdelve.Feedback.WorldAudio.Play(voice, point, .6f);
+                        }
+                        else if (hit.Amount > 0f && !hit.Killed && NetRole.IsClientOnly)
+                        {
+                            foreach (NetPlayerRig actor in NetPlayerRig.Spawned)
+                                if (actor != null && actor.ServerPlayerId.Value == hit.Target && actor.Rig != null)
+                                {
+                                    Emberdelve.Feedback.WorldAudio.PlayAttached(Emberdelve.Feedback.WorldSound.Hurt,
+                                        actor.Rig.transform, Vector3.up * 1.4f, .65f);
+                                    break;
+                                }
+                        }
                     }
                     Color color = hit.Blocked ? new Color(.55f, .75f, 1f)
                         : hit.TargetIsEnemy ? new Color(1f, .85f, .45f) : new Color(1f, .4f, .35f);

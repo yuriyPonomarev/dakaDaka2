@@ -197,6 +197,13 @@ namespace Emberdelve.Net
             }
             if (NetRole.IsClientOnly && pose.IsValid)
                 PotionDrinkPresentation.Ensure(Rig).ApplyNetwork(pose.Drinking, pose.DrinkProgress, pose.DrinkDuration);
+            if (NetRole.IsClientOnly)
+            {
+                var actionAudio = Rig.GetComponent<Emberdelve.Feedback.PlayerActionAudio>();
+                if (actionAudio != null)
+                    actionAudio.ApplyReplicatedActionState(pose.IsValid, pose.Main.ToString(), pose.Utility.ToString(),
+                        pose.Drawing, pose.Reloading, pose.Drinking);
+            }
             if (view != null && pose.IsValid) view.PresentUtility(pose.Utility.ToString());
             if (view != null && pose.IsValid && (NetRole.IsClientOnly || !pose.Bot))
                 view.PresentCombat(pose.Main.ToString(),pose.Off.ToString(),pose.Pattern.ToString(),pose.Guard,pose.Swing,
@@ -721,7 +728,8 @@ namespace Emberdelve.Net
             if (accepted && NetRole.IsClientOnly && sequence != 0 && sequence > _lastAudibleFloorPickup)
             {
                 _lastAudibleFloorPickup = sequence;
-                Emberdelve.Feedback.WorldAudio.PlayLocal(Emberdelve.Feedback.WorldSound.Pickup, .6f);
+                if (_rig != null) Emberdelve.Feedback.WorldAudio.PlayAttached(
+                    Emberdelve.Feedback.WorldSound.Pickup, _rig.transform, Vector3.up * 1.2f, .6f);
             }
             if (!accepted) GameEvents.RaiseToast(_rig != null ? _rig.PlayerId : GameEvents.NoPlayer, reason.ToString());
         }

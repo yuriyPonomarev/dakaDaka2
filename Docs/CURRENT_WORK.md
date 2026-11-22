@@ -4,15 +4,16 @@ Updated 22 November 2026. The ONLY development checkout is `C:/Users/yrapa/OneDr
 
 Runner and project rules updated 22 November. The Windows entry points validate the development root and test mirror before writing, preserve Unity locks and serialize runs. Reports and skill text select zero gameplay scenarios. Proof: 28 harness tests in `Logs/harness/editor-guard-20261122-tests.txt`, EditMode 16/16, NetProof 35/35 and NetAdmission 107/107 in `Logs/runs/20261122-050757-383`. Build output copying was checked with temporary player files. The shared visual and asset procedures are linked in AGENTS.md. Its [Unity pipeline rule](../AGENTS.md#unity-pipeline) now gives the named MCP connections priority for interactive Editor work.
 
-## Current slice: cohesive game sound
+## Current slice: recorded Foley and spatial sound
 
-User asked for jumping, walking, impacts and the rest of the game’s sounds. Report: [GAME_AUDIO_20261122](../Tasks/GAME_AUDIO_20261122.md).
+The user rejected the synthetic timbre of bd3975ba0 and requested natural, spacious sounds with distance-dependent volume. Report: [NATURAL_AUDIO_20261122](../Tasks/NATURAL_AUDIO_20261122.md).
 
-- 49 original cue families/151 mono 48 kHz PCM16 variants,14.2 MiB. Movement/surfaces/jump/landing, leather/equipment, melee/ranged/guards, actors, doors/chests/cache mechanisms, inventory/UI, consumables, skills and run transitions. Shared cached clips, anti-repeat selection independent of gameplay RNG, bounded 24 spatial + 8 local voices and existing wall occlusion.
-- Gameplay facts and presentation edges drive audio; no protocol, physics, inventory custody or damage changes. Remote owner uses the same feedback/action presenters. Initial chest/door/skill states are silent. Confirmed inventory transfers and coalesced final weapon state prevent snapshot chatter. No guessed consumable completion on cancellation.
-- Original melodic 48 s ambience from 19519855b retained. Generator/provenance: `Tools/Audio/SynthesizeGameSfx.cjs`, `SFX_README.md`, bank manifest. Preview reel and raw evidence: `Logs/acceptance/game-audio-20261122`.
-- Asset generation reproduced byte-for-byte,151 unique hashes, zero endpoints/no clipped samples. New focused audio fixture 8/8 passed. NetCombat 399, NetSkill 127, NetDoor 49, NetInventory 148:723 checks,4/4 passing, run `Logs/runs/20261122-042155-904`.
-- Final visible seed 12345 passes 19 checks:13steps,1jump,1landing,2attacks,32spatial voices;6.97s MP4 has48kHz stereo audio, mean−24.8/peak−8.4dBFS. Ordinary camera/HUD/AI/lighting preserved; paused menu/lifecycle checks happen after recording. No claim of subjective mix acceptance before the user listens. See the report for small presentation fallbacks and intentionally reserved cues.
+- Replaced the active49-family/151-clip bank with edits of real CC0 recordings; stable filenames/GUIDs.132 selected originals, authors/licenses and exact take provenance are retained. Designed magic/UI cues arrange recorded materials; wood steps and stone mechanisms are explicitly labelled material composites. Existing48s melodic music remains.
+- World audio has category-specific smooth distance falloff, stereo direction, attached moving emitters and smoothed wall attenuation/filtering. Short1.05s stone-room reflections; actual active/spectator AudioListener controls acoustics. UI and personal run notifications remain local.
+- Action audio now covers authority actors and client observers through existing replicated edges. Hurt/death/equipment/skills follow actors. Initial snapshots/floor transitions stay silent; no protocol, damage, inventory custody or level changes.
+- Asset checks pass:151 unique mono48k PCM16 files,8.78MiB,95.855s total; byte-for-byte reproduction and independent source/PCM checks. Preview50.520s: `Logs/acceptance/natural-audio-20261122/RecordedSfx-preview.wav`. Audio fixtures8/8+5/5 pass; final NetCombat399/399 and NetSkill127/127 pass (`Logs/runs/20261122-052407-639`).
+
+- Final visible seed12345:19 ordinary raid checks,38 cumulative source/geometry checks and6 recorded-output comparisons across8cases pass. Normal6.97s gameplay and separate21.27s controlled MP4s have stereo48k audio. Same impact is22.13dB quieter at18m than2m; wall adds13.67dB at8m. Fixed contacts no longer follow a moving pool owner. Final artifacts: `Logs/acceptance/natural-audio-20261122/live-12345-final2`. All172 changed Unity assets/source files match the tested mirror; primary Editor remained open and mirror closed cleanly. Listening acceptance remains with the user.
 
 ## Preserved baseline and limitations
 
@@ -26,6 +27,6 @@ Old stash `Preserve audio completion and inherited Unity drift before Sol integr
 
 ## Next three actions
 
-1. User listening/mix review using the 71 s sound reel and actual gameplay recording; tune timbre/gains based on that feedback.
-2. Extend audible close-up review to consumables, cache mechanisms and distinct weapons when requested; the entry video does not claim every cue was auditioned in context.
-3. Address old schema/attribute/weapon/enemy/HUD test debt only as a separate requested slice. Do not rerun all passing integration gates without relevant changes.
+1. User listening review using the new recorded-effect reel and final ordinary/controlled videos; tune specific timbres or levels from concrete feedback.
+2. Extend close-up context review to individual weapons, consumables and cache mechanisms when requested; the brief raid recording does not claim every cue was heard in context.
+3. Keep old integration test debt separate and preserve inherited material/settings drift. No broad suite rerun or push without a relevant reason.

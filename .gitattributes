@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# The recorded-bank manifest hashes this reproducible generator; keep checkout bytes stable.
+Tools/Audio/BuildRecordedFoley.py text eol=lf

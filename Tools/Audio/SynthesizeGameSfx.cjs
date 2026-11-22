@@ -1,4 +1,8 @@
 'use strict';
+// Retained historical implementation. The user rejected this synthesized bank.
+// Never overwrite the replacement recordings through an old generation command.
+console.error('Deprecated: use python -X utf8 Tools/Audio/BuildRecordedFoley.py (or --verify). The recorded bank was not changed.');
+process.exit(1);
 // Original deterministic Foley / modal / string / nonverbal vocal synthesis. No external samples.
 const fs = require('node:fs');
 const path = require('node:path');

@@ -460,12 +460,12 @@ namespace Emberdelve.Skills
             _readyCache[slot] = false;
 
             GameEvents.RaiseSkillState(OwnerId, Snapshot(slot));
-            PlayCastAudio(skill, rig.transform.position);
+            PlayCastAudio(skill, rig.transform);
             return true;
         }
 
         /// <summary>Presentation shared by authority casts and accepted network cast messages; never called for state snapshots.</summary>
-        public static void PlayCastAudio(SkillData skill, Vector3 position)
+        public static void PlayCastAudio(SkillData skill, Transform emitter)
         {
             if (skill == null || !skill.IsActive) return;
             WorldSound sound;
@@ -480,7 +480,7 @@ namespace Emberdelve.Skills
                 case SkillEffectKind.PiercingShot: sound = WorldSound.SkillShot; break;
                 default: return;
             }
-            WorldAudio.Play(sound, position);
+            WorldAudio.PlayAttached(sound, emitter, Vector3.up * 1.2f);
         }
 
         public bool TryCast(string skillId)

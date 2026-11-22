@@ -47,7 +47,7 @@ namespace Emberdelve.Net
             foreach (SkillData skill in SkillLoadoutStore.Pool(caster.Rig.Class, SkillSlot.Active))
             {
                 if (skill.skillId != skillId) continue;
-                SkillCaster.PlayCastAudio(skill, caster.transform.position);
+                SkillCaster.PlayCastAudio(skill, caster.Rig.transform);
                 return;
             }
         }

@@ -1,0 +1,625 @@
+{
+  "schema": "dakadaka.recorded-foley-sources/v1",
+  "packs": {
+    "fantozzi": {
+      "page": "https://opengameart.org/content/fantozzis-footsteps-grasssand-stone",
+      "download": "https://opengameart.org/sites/default/files/Fantozzi-footsteps.7z",
+      "author": "Fantozzi / qubodup",
+      "license": "CC0-1.0",
+      "archive_sha256": "415d360e0911c1c1c5355ee94023b772e6f4044f59b9b580610e7dbffd1840fd",
+      "source_page_sha256": "c8283a0e615b73a2116f97e9b714a0e4528468da3f13352a4aee1b626a56b4c7",
+      "license_evidence": "License(s): CC0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"
+    },
+    "hael-voices": {
+      "page": "https://opengameart.org/content/male-gruntyelling-sounds",
+      "download": "https://opengameart.org/sites/default/files/yelling%20sounds.zip",
+      "author": "HaelDB",
+      "license": "CC0-1.0",
+      "archive_sha256": "e9100a4e3b9dcd146993089970dc6097dcf9935fa4683b196040012bad65d67a",
+      "source_page_sha256": "1062a36d0b6413daa3b6d2a791ca80ceb4d41164ffc41213a1f8e09af8383ac8",
+      "license_evidence": "License(s): OGA-BY 3.0 CC0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"
+    },
+    "independent-hits": {
+      "page": "https://opengameart.org/content/37-hitspunches",
+      "download": "https://opengameart.org/sites/default/files/independent_nu_ljudbank-hits_and_punches.7z",
+      "author": "Independent.nu / qubodup",
+      "license": "CC0-1.0",
+      "archive_sha256": "641c65d2e1a00002171c23e2c6fa14e925ae4c12db09d3f79d130a4538916032",
+      "source_page_sha256": "2b240cfb7953b769e9eefc7507f2660a63af337667d8b7b3807f11d918ded747",
+      "license_evidence": "License(s): CC0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"
+    },
+    "medieval-1": {
+      "page": "https://opengameart.org/content/medieval-sound-effects-weapon-textures",
+      "download": "https://opengameart.org/sites/default/files/medieval_sfx_textures_1_of_2.7z",
+      "author": "Ben Jaszczak and Brian Nelson",
+      "license": "CC0-1.0",
+      "archive_sha256": "b5e2b2c86d811d983d15dbf8453df6a25275a2a0dc4e88e0dc5e1cb3046fd4ae",
+      "source_page_sha256": "50a5b87730343843f2b43143fc67bc317ff79fe61fef8d6b503293b168c248ce",
+      "license_evidence": "License(s): CC0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"
+    },
+    "medieval-2": {
+      "page": "https://opengameart.org/content/medieval-sound-effects-weapon-textures",
+      "download": "https://opengameart.org/sites/default/files/medieval_sfx_textures_2_of_2.7z",
+      "author": "Ben Jaszczak and Brian Nelson",
+      "license": "CC0-1.0",
+      "archive_sha256": "5181e1ea63714cd954bd5972b39ac095c8bdfea88a7abe1dea41fb272de0480f",
+      "source_page_sha256": "3ba83d6bc9a96c544beef82d8caf5f5abe34f94d99e7f6722baade8677766e69",
+      "license_evidence": "License(s): CC0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"
+    },
+    "qubodup-doors": {
+      "page": "https://opengameart.org/content/door-open-door-close-set",
+      "download": "https://opengameart.org/sites/default/files/qubodup-DoorSet.7z",
+      "author": "qubodup",
+      "license": "CC0-1.0",
+      "archive_sha256": "88502c82451a646fa4bc1b9021a26bbd3441b2850a613784a05336067b11a25d",
+      "source_page_sha256": "fff6133209fbbc65b661d23b3bbb7e831a291c52d49c026a67f12fb9447c5d3f",
+      "license_evidence": "License(s): CC0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"
+    },
+    "vehicle-accessory": {
+      "page": "https://opengameart.org/content/fantasy-accessory-sfx-library",
+      "download": "https://opengameart.org/sites/default/files/accessory.zip",
+      "author": "Vehicle",
+      "license": "CC0-1.0",
+      "archive_sha256": "1d1166b2469be771d8894cd77ffcd6d500bcb676e2b6cb1c9cecacf97e957217",
+      "source_page_sha256": "5c75c95650030b1b978a7271805336e53e303d57e6c5059e8408d9a2bc4f746a",
+      "license_evidence": "License(s): CC0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"
+    },
+    "vehicle-weapons": {
+      "page": "https://opengameart.org/content/fantasy-weapons-and-apparel-sfx-library",
+      "download": "https://opengameart.org/sites/default/files/weapons-apparel.zip",
+      "author": "Vehicle",
+      "license": "CC0-1.0",
+      "archive_sha256": "81cc6317f21b68f8e7f2b23a5a0f5f33c301c39ee41347307eec02201be989e5",
+      "source_page_sha256": "d74f0e6fcc3fb1b5b6447f2fa6b4967df45aec86b7407f55b1ee9760c8e4a25c",
+      "license_evidence": "License(s): CC0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"
+    },
+    "wareya-foley": {
+      "page": "https://warsong.pages.dev/tags/sounds/",
+      "download": "https://warsong.pages.dev/sounds/rpg%20foley.zip",
+      "author": "Wareya",
+      "license": "CC0-1.0",
+      "archive_sha256": "a420de6ffff453faa55d8ad6503ca3077e620fd805b45a7421460be6ebee47f3",
+      "source_page_sha256": "d044afc4752fec66dfcb8a197d402dcd6af952425fca56b3cbc758a91e6d44d7",
+      "license_evidence": "Usage: Creative Commons Zero",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"
+    }
+  },
+  "files": {
+    "fantozzi/Fantozzi-footsteps/flac/Fantozzi-SandL1.flac": {
+      "sha256": "93a2630579a82507e3c6ceab9b012f71a50cf8922f4beadb14057dcc0636b099",
+      "bytes": 40317
+    },
+    "fantozzi/Fantozzi-footsteps/flac/Fantozzi-SandL2.flac": {
+      "sha256": "9bb57478cc96e1410cae27d926aa8d77d5f2d368d9776822f63cf0b37c6d2faf",
+      "bytes": 30870
+    },
+    "fantozzi/Fantozzi-footsteps/flac/Fantozzi-SandL3.flac": {
+      "sha256": "042820e65cc947d8bb8adf18524ffff7cdf5fc310f9412cbf8bdf7a139984c21",
+      "bytes": 29250
+    },
+    "fantozzi/Fantozzi-footsteps/flac/Fantozzi-SandR1.flac": {
+      "sha256": "3514d12f3369297233e915814364ed02902003d4103b010371c2ac15c2aa48fe",
+      "bytes": 36934
+    },
+    "fantozzi/Fantozzi-footsteps/flac/Fantozzi-SandR2.flac": {
+      "sha256": "0356f659313887f01a9f21fd5bedf57a77073d0d74d57b5621279ee453a80f3c",
+      "bytes": 30328
+    },
+    "fantozzi/Fantozzi-footsteps/flac/Fantozzi-SandR3.flac": {
+      "sha256": "7535306b6ff3b9e071256f12789eb53fb90769a913ff7e00b271298727e0f521",
+      "bytes": 32496
+    },
+    "fantozzi/Fantozzi-footsteps/flac/Fantozzi-StoneL1.flac": {
+      "sha256": "7cfa4a2f500ae2bd19a961022296611d837c34ca2e556fe68deb692388f49971",
+      "bytes": 37045
+    },
+    "fantozzi/Fantozzi-footsteps/flac/Fantozzi-StoneL2.flac": {
+      "sha256": "dcbd6be44af4b3206daa36c5398035ca527bb057c51ce00482b9ca6356be2468",
+      "bytes": 33441
+    },
+    "fantozzi/Fantozzi-footsteps/flac/Fantozzi-StoneL3.flac": {
+      "sha256": "37a25f4254cf8f2e56d271912b0569f3bb15c57bf3fde9de492466eb23853b0d",
+      "bytes": 34318
+    },
+    "fantozzi/Fantozzi-footsteps/flac/Fantozzi-StoneR1.flac": {
+      "sha256": "7073bddd2e3ba432e15a83844180c0ebc52835c2c6bab0fa902ee5952499c729",
+      "bytes": 36412
+    },
+    "fantozzi/Fantozzi-footsteps/flac/Fantozzi-StoneR2.flac": {
+      "sha256": "d66330b4a32e93b0dfdcb8c53667654de8702a0fa48b2d06c48d94dc66b3e1cc",
+      "bytes": 34323
+    },
+    "fantozzi/Fantozzi-footsteps/flac/Fantozzi-StoneR3.flac": {
+      "sha256": "b98f2c4b932242739ce8687206f7eb3313ce30afd4af7b7e148507c5cbd26787",
+      "bytes": 35929
+    },
+    "hael-voices/yelling sounds/1yell1.wav": {
+      "sha256": "d9fd329f37c07327bf6a3249ff9b30dad9ecec8762981c6d8eda225f892d028e",
+      "bytes": 177556
+    },
+    "hael-voices/yelling sounds/1yell2.wav": {
+      "sha256": "5bd2d3b068ba08b2d1237676bd441c4edd608624df4c2ed1d7a6a471d5765138",
+      "bytes": 177556
+    },
+    "hael-voices/yelling sounds/1yell4.wav": {
+      "sha256": "6ee9d367fcec4ca722d1fa97a336a8c264ac443156fe51d1e2b7825636a1b0b7",
+      "bytes": 265756
+    },
+    "hael-voices/yelling sounds/1yell5.wav": {
+      "sha256": "9c8f8591b96ecc44d58682a438e47cbee446a2c1a64dee24a07309ebfe04715c",
+      "bytes": 265756
+    },
+    "hael-voices/yelling sounds/1yell6.wav": {
+      "sha256": "e4d4ff092abf76af8e2e452a478fc0c1f7a8bfba0a6d1120efb22e56d5b5b098",
+      "bytes": 177556
+    },
+    "hael-voices/yelling sounds/1yell7.wav": {
+      "sha256": "75c348abf2a0c698258b7509334bb0e2330b735133093fcc5450e127fd57b1dc",
+      "bytes": 265756
+    },
+    "hael-voices/yelling sounds/2yell3.wav": {
+      "sha256": "5fbacf0e1d7fca6f8c3022203793af19f6903a6281f6822e022206ec29bf625d",
+      "bytes": 177556
+    },
+    "hael-voices/yelling sounds/2yell5.wav": {
+      "sha256": "ac7d9933dad827ad105bb6e2b229161631b5b760d90bf4ee1dbf869e8f6f6ec5",
+      "bytes": 353956
+    },
+    "hael-voices/yelling sounds/2yell6.wav": {
+      "sha256": "05d4bd5c0863f4dceae54f3434a8dc55ddbcad73921561eb1d9073edb756e570",
+      "bytes": 442156
+    },
+    "hael-voices/yelling sounds/3grunt1.wav": {
+      "sha256": "57b3a59c39ffe74a1706bcb85c451443c3b388d1f6423827b2af4af508c8416b",
+      "bytes": 177556
+    },
+    "hael-voices/yelling sounds/3grunt2.wav": {
+      "sha256": "a377c43f2151000713a45c18223c94e1de2e2393ad10569a391c1b9f96898544",
+      "bytes": 177556
+    },
+    "hael-voices/yelling sounds/3grunt4.wav": {
+      "sha256": "4ba97adf030acefa10195f88c3fb329ebbea2c9638bd412896e1b4fc0ca35404",
+      "bytes": 89356
+    },
+    "hael-voices/yelling sounds/3yell1.wav": {
+      "sha256": "df151155a9c1a743de9d7c079a700896f37926d832305e07d2c7f2f0846c86b9",
+      "bytes": 442156
+    },
+    "hael-voices/yelling sounds/3yell6.wav": {
+      "sha256": "154c45227173e8419cc408b9ec92b01c4bb1a7a6bfbdb1f469ab787ec49ecec2",
+      "bytes": 442156
+    },
+    "hael-voices/yelling sounds/3yell9.wav": {
+      "sha256": "f9c63c26c2dafb9c0dd0859c56c79c9012faf32bf2defdc8b53b19ed23ad0704",
+      "bytes": 353956
+    },
+    "independent-hits/hits/hit01.mp3.flac": {
+      "sha256": "bdab6cd6c1d261efc363da24e205372daa88718b98bb149677d74459b24245d8",
+      "bytes": 73876
+    },
+    "independent-hits/hits/hit02.mp3.flac": {
+      "sha256": "31fe92be9bf7dccf2428ade7b680ee09e2f70c2aa2a3cbec502f4a9ff932249f",
+      "bytes": 77634
+    },
+    "independent-hits/hits/hit04.mp3.flac": {
+      "sha256": "729d8301e133c3038ec5818b73965c7f2364dd49ba1347c7a057d74e3ffe8e10",
+      "bytes": 71727
+    },
+    "independent-hits/hits/hit05.mp3.flac": {
+      "sha256": "f4185c56500bfdd48a09c1606d87a2262a90907e95f7d2a37000746bbb0f2cbf",
+      "bytes": 59025
+    },
+    "independent-hits/hits/hit06.mp3.flac": {
+      "sha256": "e51601e681630928329da90b299e813b53be23b76a9db44716235ee3496f8174",
+      "bytes": 57924
+    },
+    "independent-hits/hits/hit07.mp3.flac": {
+      "sha256": "fd0bddacf2daf2041be7196d1569b91cec2188ebdc66dc8bbf508f58c4d9baa4",
+      "bytes": 71574
+    },
+    "independent-hits/hits/hit09.mp3.flac": {
+      "sha256": "97666669bdb698ee5a9061a8dbe78fa6cb873f3158899f3689d5e9efdde8cf0a",
+      "bytes": 52079
+    },
+    "independent-hits/hits/hit10.mp3.flac": {
+      "sha256": "1a1f4bec8fed5a1b785b9d43b335fa1cf99efcb85cf37507482f32e75a052265",
+      "bytes": 55828
+    },
+    "independent-hits/hits/hit11.mp3.flac": {
+      "sha256": "106a25515b9c9183103a693d4b66070280324c1887557b0c273130abc0d31825",
+      "bytes": 72060
+    },
+    "medieval-1/Crossbow Lever Trigger.wav": {
+      "sha256": "607b6398e35d14d9c9633d047fa0dbf7e8e5a3ffee13bdeddc8dba41320c960a",
+      "bytes": 2884228
+    },
+    "medieval-1/English Longbow Shoot.wav": {
+      "sha256": "c25684ccdab3eb13f17a0ffa637fbd175659d092665f16c0bce8510d46c4fbee",
+      "bytes": 2305156
+    },
+    "medieval-1/Scythian Recurve Draw.wav": {
+      "sha256": "b41781c926d358e6a259ea5e522b9730f857c8a0e65e28ff9ed632fdf598ce08",
+      "bytes": 27191416
+    },
+    "medieval-1/Scythian Recurve Shoot.wav": {
+      "sha256": "8d95d06f0c7539f14b5a69fb2818ab42dc985b6966db9856a30a7767f11c259b",
+      "bytes": 2369668
+    },
+    "medieval-2/Axe Swing.wav": {
+      "sha256": "a27039c0778934e71e01b943cba04aa4cb788fd94e5e771b68374326494f38a4",
+      "bytes": 3916420
+    },
+    "medieval-2/Seax Swing.wav": {
+      "sha256": "2fdf7688ce88a105393fe2b1f3b3f14dbe80e42708d2e2e46246d9d40bb2a151",
+      "bytes": 5205118
+    },
+    "qubodup-doors/qubodup-DoorSet/flac/qubodup-DoorClose01.flac": {
+      "sha256": "2959db3fddc39a3b6141e9d987e589393989a107473559e03733b3e0b4aaed94",
+      "bytes": 66399
+    },
+    "qubodup-doors/qubodup-DoorSet/flac/qubodup-DoorClose02.flac": {
+      "sha256": "29dd1e636ad932211dde35741f975e588d35f3995b255f872df1caf3caa5b92b",
+      "bytes": 46416
+    },
+    "qubodup-doors/qubodup-DoorSet/flac/qubodup-DoorClose03.flac": {
+      "sha256": "44a8b36d7b22b963e9332be25dc08f8d826338ace999bc7bf212c498c7e5731e",
+      "bytes": 129347
+    },
+    "qubodup-doors/qubodup-DoorSet/flac/qubodup-DoorClose04.flac": {
+      "sha256": "2a62d99dce4638426665e022cdb9a44c6fa99cb9a7ddb05979b694d9c2417dad",
+      "bytes": 105619
+    },
+    "qubodup-doors/qubodup-DoorSet/flac/qubodup-DoorClose06.flac": {
+      "sha256": "86c760cd67d23d3570e069766055382a70d311213bb6318e9224607fcb306ad3",
+      "bytes": 300252
+    },
+    "qubodup-doors/qubodup-DoorSet/flac/qubodup-DoorClose09.flac": {
+      "sha256": "59e878b16390213cd6cf0909a70599960abf73d3c5e65f6e886efcfda0725311",
+      "bytes": 252626
+    },
+    "qubodup-doors/qubodup-DoorSet/flac/qubodup-DoorOpen01.flac": {
+      "sha256": "eb97248b3338996da76f3597f2de14e0d9dcd499f1799c33b9b7e2559d7bf796",
+      "bytes": 143740
+    },
+    "qubodup-doors/qubodup-DoorSet/flac/qubodup-DoorOpen02.flac": {
+      "sha256": "c75c679b70cdc72b7c61c6b7078a042d33904abfbf47e25fb50d39003e56f2b5",
+      "bytes": 141307
+    },
+    "qubodup-doors/qubodup-DoorSet/flac/qubodup-DoorOpen03.flac": {
+      "sha256": "ef7215b83b14567f9cb7180a1fb631ac73c4d0591a6d07dfb1952d46827e592c",
+      "bytes": 175508
+    },
+    "qubodup-doors/qubodup-DoorSet/flac/qubodup-DoorOpen04.flac": {
+      "sha256": "71fc3cb4b4ffadb285b5a2d847da44a3d8595fe053c04a1088a76dad213b4a8b",
+      "bytes": 150878
+    },
+    "qubodup-doors/qubodup-DoorSet/flac/qubodup-DoorOpen07.flac": {
+      "sha256": "b105d475260a8e7b3d266d470f6bf8b8edc9b72481a59e9cf642b7d53ecac10c",
+      "bytes": 314566
+    },
+    "vehicle-accessory/sfx/bottle-clay-uncork-01.wav": {
+      "sha256": "97ee737089a5dc3e918b98ca3a0c1b8f43e83f71cb8911530cf378dca7efda2d",
+      "bytes": 64644
+    },
+    "vehicle-accessory/sfx/bottle-clay-uncork-02.wav": {
+      "sha256": "c7dade8b31f620368a512e4884f84c86511aacc775f918b07fa281f0119d0a7f",
+      "bytes": 107224
+    },
+    "vehicle-accessory/sfx/bottle-clay-uncork-03.wav": {
+      "sha256": "714197c40c88025a569f92942a2cbf965d8a52b60c2b5ae2ee78586f8ead7f42",
+      "bytes": 86980
+    },
+    "vehicle-accessory/sfx/coin-spin-fall-01.wav": {
+      "sha256": "c22f51e651107b62b203ed093d709a914a22715e81a0189b102e747a2f4a0722",
+      "bytes": 253292
+    },
+    "vehicle-accessory/sfx/coin-spin-fall-02.wav": {
+      "sha256": "f12e7df55ed861bfa992481c09231388f5150d67a8bdeec7468aa123717f7d37",
+      "bytes": 618816
+    },
+    "vehicle-accessory/sfx/coin-spin-fall-03.wav": {
+      "sha256": "a75cd0f711a7470bd8b40f7ee769559e3ac9f7c7ead51429109df708d01f0e72",
+      "bytes": 739776
+    },
+    "vehicle-accessory/sfx/coins-shake-01.wav": {
+      "sha256": "11c1eb2f1052e83e50d7cd73454104cd684041a4c78f2500001b3bb75b46c290",
+      "bytes": 209788
+    },
+    "vehicle-accessory/sfx/coins-shake-02.wav": {
+      "sha256": "a37bac4d4a9eba05c030b3214e3d7b7fab817c0f6d06cad213d39933e2b9baed",
+      "bytes": 183544
+    },
+    "vehicle-accessory/sfx/coins-shake-03.wav": {
+      "sha256": "fc7dd309378bab5658dde5f222d2e4843eae79a9e2a89452fd10478f7cc1311b",
+      "bytes": 205280
+    },
+    "vehicle-accessory/sfx/keyhole-lockbox-turn-01.wav": {
+      "sha256": "8a534c1cecba50a61ad031bb4fd2a2d085adb547b4652b960ec4e4fccc9bfb69",
+      "bytes": 163040
+    },
+    "vehicle-accessory/sfx/keyhole-lockbox-turn-02.wav": {
+      "sha256": "78f47f24880be06583e73c8ce6f48e5a590c8bb4945843cd9d391bd50a2cf282",
+      "bytes": 153076
+    },
+    "vehicle-accessory/sfx/keyhole-lockbox-unlock-01.wav": {
+      "sha256": "4a8307c941dc56d984fc460b4730b70bf4833252c29922f08457b96d1ce10df0",
+      "bytes": 131252
+    },
+    "vehicle-accessory/sfx/keyhole-lockbox-unlock-02.wav": {
+      "sha256": "c670b8bf372db54acb8275b0ced51df4cc203a8553dd3cf77b9fad54e581b25f",
+      "bytes": 301844
+    },
+    "vehicle-accessory/sfx/keyhole-lockbox-unlock-03.wav": {
+      "sha256": "8c41758e0084597defc62bb39933fa860418c520cbe19efbea7e9dff42a33518",
+      "bytes": 310592
+    },
+    "vehicle-accessory/sfx/vial-glass-small-drop-01.wav": {
+      "sha256": "3a6807cb1d5a7f0a0622ae5760415ad0ac0c73b66d4a40c094cc65472a19d1d5",
+      "bytes": 134188
+    },
+    "vehicle-accessory/sfx/vial-glass-small-drop-02.wav": {
+      "sha256": "accfbe7dda7d081a7b8b84fb9f2bde754ab7fccddbd89487dcaf6cb00d226026",
+      "bytes": 229444
+    },
+    "vehicle-accessory/sfx/vial-glass-small-drop-03.wav": {
+      "sha256": "4469f5972df1f25b06a812ac213c1139504d4976e0f61ceac36d76982ccfd169",
+      "bytes": 246996
+    },
+    "vehicle-accessory/sfx/vials-glass-rattle-01.wav": {
+      "sha256": "3ba1ecb9db1a823b68e11faab14f6a39375da1309f47504ad5796be356c396aa",
+      "bytes": 210032
+    },
+    "vehicle-accessory/sfx/vials-glass-rattle-02.wav": {
+      "sha256": "9a61d013aa5567bfd328967f23dd605e498805c6567b979a9e27090c924dd0d7",
+      "bytes": 123528
+    },
+    "vehicle-accessory/sfx/vials-glass-rattle-03.wav": {
+      "sha256": "99fcfcce72676e35d8b283575bb1b76c6db80c5d355d19ceae19372772a4e830",
+      "bytes": 141824
+    },
+    "vehicle-accessory/sfx/vials-glass-rattle-04.wav": {
+      "sha256": "4563d079da442160daf9d9f9fbfab1d6a7cfba066c620a36a27bf03dd6f47bae",
+      "bytes": 70012
+    },
+    "vehicle-accessory/sfx/vials-glass-rattle-05.wav": {
+      "sha256": "e8e23dfad36a93df1d7ade4d18a0fe7b783a3b9d555ba882225759d49f03feb2",
+      "bytes": 70420
+    },
+    "vehicle-accessory/sfx/wood-bowl-put-wood-03.wav": {
+      "sha256": "d9cb75836688928526d5667b81a38c5ac38f822ce92626c973301f01555b7544",
+      "bytes": 82484
+    },
+    "vehicle-accessory/sfx/wood-bowl-put-wood-04.wav": {
+      "sha256": "1026da527faae5d7a117793555890d7fd2ece2da563db9d28261244ae00de7f4",
+      "bytes": 92852
+    },
+    "vehicle-accessory/sfx/wood-bowl-put-wood-05.wav": {
+      "sha256": "30ec1f729acb3f3378b49b8e8b15f7c586627da532bfd5429dfcb4eec9e2a671",
+      "bytes": 123788
+    },
+    "vehicle-accessory/sfx/wood-bowl-put-wood-06.wav": {
+      "sha256": "cb3a74b68a0a69d42af6a4331ee03b0245546df1574a4adf27b5684343645f3b",
+      "bytes": 160428
+    },
+    "vehicle-accessory/sfx/wood-bowl-put-wood-07.wav": {
+      "sha256": "a28770b1c47196bd7f8aa04b68e5ca0d86ace854ea1283caa19238952c7c105a",
+      "bytes": 141188
+    },
+    "vehicle-accessory/sfx/wood-bowl-put-wood-08.wav": {
+      "sha256": "ed8e720a60e1e3d377e766a9a42b250568f36d9e20170e844420f5a1e8545225",
+      "bytes": 70740
+    },
+    "vehicle-weapons/sfx/arrow-grab-from-quiver-01.wav": {
+      "sha256": "1364a2223fa59834325f56c25eb5ad3a96cec19a3b2f8d97f0449d3fc25ad5cc",
+      "bytes": 110224
+    },
+    "vehicle-weapons/sfx/arrow-grab-from-quiver-02.wav": {
+      "sha256": "bc5ad937c67f5e2968d462025c52c204e6168ede2e1b056bd27ea95730b481b9",
+      "bytes": 217268
+    },
+    "vehicle-weapons/sfx/arrow-grab-from-quiver-03.wav": {
+      "sha256": "f8a1383b5b39e293cff785622031baf275cae2840bf9acaef53f596047e2db05",
+      "bytes": 126000
+    },
+    "vehicle-weapons/sfx/belt-buckle-01.wav": {
+      "sha256": "e2696a53d0cccf3fa573737ad27847f42e3d06cf36e4fca1e03362c6961235ea",
+      "bytes": 35456
+    },
+    "vehicle-weapons/sfx/belt-buckle-02.wav": {
+      "sha256": "3010680ff66c07718cea1f62898356d3978ddbf74faed7316dacd3d2d7073e9f",
+      "bytes": 118508
+    },
+    "vehicle-weapons/sfx/belt-buckle-03.wav": {
+      "sha256": "3214f31e7a1f71a41f07145ef444b1a2f1400b89122b27c858a84eb2e41b1df9",
+      "bytes": 147572
+    },
+    "vehicle-weapons/sfx/belt-buckle-04.wav": {
+      "sha256": "6bd265c996eab899b4946ed8df59055cf621745b8acf5f269d827d0d2b3a77af",
+      "bytes": 52904
+    },
+    "vehicle-weapons/sfx/belt-buckle-05.wav": {
+      "sha256": "25636c00828a053b37e4a673f5684548854917d47b93b343672504424206330a",
+      "bytes": 70572
+    },
+    "vehicle-weapons/sfx/boots-leather-jump-01.wav": {
+      "sha256": "9b8b6e3ac1f0263df49c60c1e571974b421bfe12c576f26328397ee644bb3ac4",
+      "bytes": 87644
+    },
+    "vehicle-weapons/sfx/boots-leather-jump-02.wav": {
+      "sha256": "abac208239b386f30daf87c52f8feef5b7d71c80f1cdffe4de86ebf1ca40fd5c",
+      "bytes": 151420
+    },
+    "vehicle-weapons/sfx/boots-leather-jump-03.wav": {
+      "sha256": "10e6a8b20c225f463da1b1875c40458b8ab5bb5b383f7e1de347a3d0cc087181",
+      "bytes": 81484
+    },
+    "vehicle-weapons/sfx/boots-leather-step-01.wav": {
+      "sha256": "5b0de415a95f7ad5ef4541d8142415587b2898c43ac26a45862cf14756894a06",
+      "bytes": 119756
+    },
+    "vehicle-weapons/sfx/boots-leather-step-02.wav": {
+      "sha256": "923d9b9e09947dc8354b39e113f3cdb04e61dc09ecf87543e8813f408c2e60df",
+      "bytes": 106552
+    },
+    "vehicle-weapons/sfx/boots-leather-step-03.wav": {
+      "sha256": "f63cc8613d927915c691257d8c12e3b62e1badd5079f503aa155f33c2d91c7e5",
+      "bytes": 102652
+    },
+    "vehicle-weapons/sfx/boots-leather-step-04.wav": {
+      "sha256": "1924af86e3f5ca2a8515ac9c731c2eb7a7430392c645a7141a52b0dd079b977c",
+      "bytes": 116320
+    },
+    "vehicle-weapons/sfx/knife-sheathe-01.wav": {
+      "sha256": "860b98f0f974bfddb2cbee9ab9f2676770c3a747d7c17398bd5b5c679822b428",
+      "bytes": 109560
+    },
+    "vehicle-weapons/sfx/knife-sheathe-02.wav": {
+      "sha256": "f26edc00747d0bb0982bb5ee7b79040c01773265a480f3a37d97520872a74d75",
+      "bytes": 95608
+    },
+    "vehicle-weapons/sfx/knife-sheathe-03.wav": {
+      "sha256": "d09f8f5ac28b2150f458e657d580fae82673f77600b8a44a20fd2b07d9eff399",
+      "bytes": 99520
+    },
+    "vehicle-weapons/sfx/quiver-leather-squeeze-01.wav": {
+      "sha256": "c53929968eb63bf07080be8d4f0ed9a02ce40e688c094c50dff92243ca3e334f",
+      "bytes": 127248
+    },
+    "vehicle-weapons/sfx/quiver-leather-squeeze-02.wav": {
+      "sha256": "208b1694418d86614e3f586a751058ebc2ab04e07025921aa4dead39bdcf0006",
+      "bytes": 129808
+    },
+    "vehicle-weapons/sfx/quiver-leather-squeeze-04.wav": {
+      "sha256": "6bbe6d44f10f565e3264575503a579bd7e58a151178354536cb46bd4217ccea8",
+      "bytes": 192516
+    },
+    "vehicle-weapons/sfx/quiver-leather-squeeze-05.wav": {
+      "sha256": "e6c1f778db402d02aa20cbbb904fe4f7192fddda91d89ff70d818444a91bdc58",
+      "bytes": 80384
+    },
+    "vehicle-weapons/sfx/quiver-leather-squeeze-06.wav": {
+      "sha256": "f33ecdc45a63fff9ae019319674a737d1bd40b2247ee73b384704d3acc451446",
+      "bytes": 241096
+    },
+    "vehicle-weapons/sfx/sheath-squeeze-01.wav": {
+      "sha256": "f8736ab0f790f7e23014b32cfec3993244425b0af8937495baffb9f40514de85",
+      "bytes": 154336
+    },
+    "vehicle-weapons/sfx/sheath-squeeze-02.wav": {
+      "sha256": "0bc3977eb6d57e7e9c11e3909a50f3ef853ee106b544dc9a080acae3751ffc90",
+      "bytes": 139380
+    },
+    "vehicle-weapons/sfx/sheath-squeeze-03.wav": {
+      "sha256": "8d761f7afd9d14b41f96245718844b660ea5e216b178ff64584295b3ff58dfcd",
+      "bytes": 185720
+    },
+    "vehicle-weapons/sfx/sheath-squeeze-04.wav": {
+      "sha256": "48ab361ca701e8a583f1aca5f3f708c02ae446f81b7cb589835a31c4375dfdf1",
+      "bytes": 244640
+    },
+    "vehicle-weapons/sfx/sheath-squeeze-05.wav": {
+      "sha256": "949d3a4cc78b3971de1a435f1cab5cf895c2743e6a4edfa534d21fa3c9e69bca",
+      "bytes": 163152
+    },
+    "vehicle-weapons/sfx/sheath-squeeze-06.wav": {
+      "sha256": "fdafd8ff8acad77322cc1becacf0ddcbc82fb8bc17088228d7106954134dc20f",
+      "bytes": 888940
+    },
+    "vehicle-weapons/sfx/sheath-squeeze-07.wav": {
+      "sha256": "1f9c35edaf488f7f5ac9e204b27f18ed07090b5ebc15b0aa2a67ee639c8f037e",
+      "bytes": 308008
+    },
+    "vehicle-weapons/sfx/sheath-squeeze-08.wav": {
+      "sha256": "1006add2f907ccb49b2d65522e070ec317afb49593b25da6cc0c65dd9dd9f67e",
+      "bytes": 390240
+    },
+    "vehicle-weapons/sfx/sheath-unbuckle-01.wav": {
+      "sha256": "cd45a3115bc080d949e15dd4067df3416549a974bab9490e4bae362ea443f096",
+      "bytes": 364216
+    },
+    "vehicle-weapons/sfx/sheath-unbuckle-02.wav": {
+      "sha256": "b920936edb29169a877a4ab5eb753938cdcde94ec40077d6987795838c14c180",
+      "bytes": 141904
+    },
+    "vehicle-weapons/sfx/sword-knife-clash-01.wav": {
+      "sha256": "58072bf9c80d84a37c4cfaeb694659dad3b5c4ecd24e2f7fc1e7c2fcdc7fc325",
+      "bytes": 235684
+    },
+    "vehicle-weapons/sfx/sword-knife-clash-02.wav": {
+      "sha256": "cf26b74e29ef42b425fb969b1b30e14db989fa8355d705ffb6917067bcdbae5d",
+      "bytes": 271860
+    },
+    "vehicle-weapons/sfx/sword-knife-clash-03.wav": {
+      "sha256": "6c8d3a0ca3daa0d8544848f847d879e17f60b49ab360507d7466f4fc42fbd0d5",
+      "bytes": 228264
+    },
+    "vehicle-weapons/sfx/sword-knife-clash-04.wav": {
+      "sha256": "9912ee60c12417c024b29bce0f4a32053253426490b4746f04a08037e4576fe1",
+      "bytes": 636180
+    },
+    "vehicle-weapons/sfx/sword-knife-clash-05.wav": {
+      "sha256": "b39052994ad7d45c1381cf4c418ef3fc75e7849b997e1a55fc0c9cebec25a2c6",
+      "bytes": 550508
+    },
+    "vehicle-weapons/sfx/sword-knife-clash-06.wav": {
+      "sha256": "1ea6a36585ec155f2364a1dbaedbfe932d64ba9db6f41c8a54e4f6cfcc988293",
+      "bytes": 560868
+    },
+    "vehicle-weapons/sfx/sword-knife-clash-07.wav": {
+      "sha256": "17a430a74ee96afc777182e5f15fb6059f369de39b7185d414e7fa739593b6a7",
+      "bytes": 580444
+    },
+    "vehicle-weapons/sfx/sword-table-leg-scrape-01.wav": {
+      "sha256": "81292025e19534abb435bf31eba872eeb09a220ecd40fa3e9278c11a51360d59",
+      "bytes": 1304756
+    },
+    "vehicle-weapons/sfx/sword-table-leg-scrape-02.wav": {
+      "sha256": "b57c73119d4a455c7525a828240c541eb16685755794ec6ccea47470de47f32e",
+      "bytes": 475328
+    },
+    "vehicle-weapons/sfx/sword-table-leg-scrape-03.wav": {
+      "sha256": "abb6e76ddedb441644c626af2e36dabfd4cbfd8ed051bf3ccd804e56e2d21de4",
+      "bytes": 559136
+    },
+    "wareya-foley/foley - chain a.wav": {
+      "sha256": "4c565d2c27cd49b5ec31489be6d84d84a99e99ad9a6504a6bda6b541ed3f97f8",
+      "bytes": 1130892
+    },
+    "wareya-foley/foley - chain b.wav": {
+      "sha256": "37a6fcfd09378312b19dda4a377d76d6433f2d48b407c131eb5d1d43feb9ff6d",
+      "bytes": 531608
+    },
+    "wareya-foley/foley - clothes.wav": {
+      "sha256": "15769059a992d22f895ef69e71f38d536e9249d22b55e40b434d8a20899afca6",
+      "bytes": 856844
+    },
+    "wareya-foley/foley - crunchy impacts.wav": {
+      "sha256": "f25f40115805fd0362a91cc1e4e357db92bb1d2c2427956af4c8a0f279487db8",
+      "bytes": 826132
+    },
+    "wareya-foley/foley - door and latch.wav": {
+      "sha256": "3dde9c0dcbdf87255b51ea24325814f0aa9a9f972b13feb9c1bbf49b67465d26",
+      "bytes": 1145856
+    },
+    "wareya-foley/foley - metal clank.wav": {
+      "sha256": "1bdf918477228579a54961c091179d932de88fed473589315b6b5e28d451234a",
+      "bytes": 1140344
+    },
+    "wareya-foley/foley - metal shlunk.wav": {
+      "sha256": "a396991048ac9cb0eaffc05b00cf6e44e0c817f9588dc33b872efebaf6bce9c2",
+      "bytes": 2329468
+    },
+    "wareya-foley/foley - quaff.wav": {
+      "sha256": "ab7b487b592c0d64edc079af6db80d181bba21625503f962c21d1f726e3aa9d2",
+      "bytes": 94544
+    }
+  }
+}

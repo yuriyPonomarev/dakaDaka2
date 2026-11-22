@@ -111,7 +111,7 @@ namespace Emberdelve.Player
                 _rig != null && !_rig.IsLocallyControlled)
             {
                 _soundPlayed = true;
-                Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldAudio.SwingFor(_mainId), _rig.AimOrigin, .7f);
+                Emberdelve.Feedback.WorldAudio.PlayAttached(Emberdelve.Feedback.WorldAudio.SwingFor(_mainId), _rig.transform, Vector3.up * 1.4f, .7f);
             }
             _guard=guard; _swing=swing && _pattern!=null; _elapsed=elapsed; _timing=timing; _frame=frame;
         }

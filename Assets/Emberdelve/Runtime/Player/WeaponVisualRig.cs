@@ -465,7 +465,7 @@ namespace Emberdelve.Player
                 {
                     _swingSoundPlayed = true;
                     if (t <= _timing.ActiveEnd)
-                        Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldAudio.SwingFor(_soundWeaponId), transform.position, .7f);
+                        Emberdelve.Feedback.WorldAudio.PlayAttached(Emberdelve.Feedback.WorldAudio.SwingFor(_soundWeaponId), transform, Vector3.zero, .7f);
                 }
                 float activeEnd = _timing.ActiveEnd;
                 InActivePhase = t >= _timing.Windup && t <= activeEnd;

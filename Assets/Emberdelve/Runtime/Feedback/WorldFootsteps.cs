@@ -89,6 +89,7 @@ namespace Emberdelve.Feedback
         private int _step;
         private Vector3 _previousPosition;
         private bool _motionSeeded;
+        private bool _lifeSeeded, _wasAlive;
         private bool _wasGrounded;
         private bool _suppressUntilGrounded;
         private uint _floorGeneration;
@@ -99,12 +100,28 @@ namespace Emberdelve.Feedback
         private void Awake()
         {
             _player = GetComponent<PlayerRig>();
+            if (_player != null)
+            {
+                var actions = GetComponent<PlayerActionAudio>();
+                if (actions == null) actions = gameObject.AddComponent<PlayerActionAudio>();
+                actions.Bind(_player);
+            }
             _enemy = GetComponent<EnemyAgent>();
             _mask = LayerMask.GetMask(GameConfig.LevelLayerName);
             _variation = unchecked((uint)GetInstanceID()) | 1u;
         }
         private void LateUpdate()
         {
+            if (_player != null)
+            {
+                bool playerAlive = !_player.IsDead;
+                // One physical death voice per actor, from either authority health or replicated vitals.
+                // A body already dead on the first observation never replays its death.
+                if (_lifeSeeded && _wasAlive && !playerAlive && Audible)
+                    WorldAudio.PlayAttached(WorldSound.Death, _player.transform, Vector3.up * 1.4f, .8f);
+                _wasAlive = playerAlive;
+                _lifeSeeded = true;
+            }
             Vector3 position = transform.position;
             float dt = Time.deltaTime;
             bool alive = Audible && (_player == null || (!_player.IsDead && _player.IsInPlay)) &&
@@ -144,8 +161,8 @@ namespace Emberdelve.Feedback
                     if (!_suppressUntilGrounded && upwardTakeoff)
                     {
                         JumpRequests++;
-                        WorldAudio.Play(WorldSound.Jump, position + Vector3.up * .35f, .42f, VaryPitch());
-                        WorldAudio.Play(WorldSound.Cloth, position + Vector3.up, .18f, VaryPitch());
+                        WorldAudio.PlayAttached(WorldSound.Jump, transform, Vector3.up * .35f, .42f, VaryPitch());
+                        WorldAudio.PlayAttached(WorldSound.Cloth, transform, Vector3.up, .18f, VaryPitch());
                     }
                 }
                 _airTime += dt;
@@ -203,6 +220,7 @@ namespace Emberdelve.Feedback
         {
             _cadence = default;
             _motionSeeded = false;
+            _lifeSeeded = false;
             ReplicatedCrouched = null;
         }
     }
