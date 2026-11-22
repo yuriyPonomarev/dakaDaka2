@@ -99,6 +99,8 @@ namespace Emberdelve.Flow
         private float _nextExtractionSettlementAttemptAt;
         public bool ExtractionSettlementPending => _pendingExtraction != null;
         public RoyalePartyMode? RoyaleMode { get; private set; }
+        public bool HasTeamDescent => RoyaleMode is RoyalePartyMode.Duo or RoyalePartyMode.Trio;
+        public uint DescentRevision { get; private set; }
         private RoyaleFloorCoordinator _floorCoordinator;
         public RoyaleFloorCoordinator FloorCoordinator => _floorCoordinator ?? (_floorCoordinator = new RoyaleFloorCoordinator(this));
         private readonly float[] _floorStartedAt = new float[4];
@@ -136,9 +138,15 @@ namespace Emberdelve.Flow
             for (int floor = 1; floor <= 3; floor++)
             {
                 if (_floorExpired[floor] || !TryGetRoyaleFloorClock(floor, out _, out float remaining) || remaining > 0f) continue;
-                _floorExpired[floor] = true;
-                ExpirePlayersOnFloor(floor);
+                CloseRoyaleFloor(floor);
             }
+        }
+
+        internal void CloseRoyaleFloor(int floor)
+        {
+            if (_floorExpired[floor]) return;
+            _floorExpired[floor] = true;
+            ExpirePlayersOnFloor(floor);
         }
 
         public bool ConfigureRoyale(RoyalePartyMode mode)
@@ -152,13 +160,28 @@ namespace Emberdelve.Flow
         /// <summary>Called only after the authority validates the specific portal, its wave and remaining slots.</summary>
         public bool TryQueueDescent(IInteractionActor actor, int sourceFloor, out string reason)
         {
+            if (!CanQueueDescent(actor, sourceFloor, out reason)) return false;
+            PlayerSession session = SessionOf(actor);
+            if (!session.Rig.TryBeginFloorTransit(out reason, HasTeamDescent)) return false;
+            DescentRevision++;
+            GameEvents.RaiseStatusLine(session.PlayerId, HasTeamDescent ? "Entered the portal" : "Descending to floor " + (sourceFloor + 1));
+            return true;
+        }
+
+        internal bool CanQueueDescent(IInteractionActor actor, int sourceFloor, out string reason)
+        {
             reason = "Descent is not available";
             if (NetRole.IsClientOnly || !RoyaleMode.HasValue || sourceFloor < 1 || sourceFloor >= 3) return false;
             if (!IsInteractionActorAdmitted(actor, out reason)) return false;
             PlayerSession session = SessionOf(actor);
             if (session.Floor != sourceFloor) { reason = "Portal belongs to a different floor"; return false; }
-            if (!session.Rig.TryBeginFloorTransit(out reason)) return false;
-            GameEvents.RaiseStatusLine(session.PlayerId, "Descending to floor " + (sourceFloor + 1));
+            int destination = sourceFloor + 1;
+            if (HasTeamDescent && TryGetRoyaleFloorClock(destination, out _, out _))
+            {
+                if (!IsRoyaleFloorOpen(destination)) { reason = "Destination floor has closed"; return false; }
+                if (!FloorCoordinator.HasReservedArrival(destination, session.PlayerId))
+                { reason = "No destination seat is reserved"; return false; }
+            }
             return true;
         }
 
@@ -173,7 +196,7 @@ namespace Emberdelve.Flow
             if (session == null || session.State != RunState.Running || !session.Rig.IsInFloorTransit
                 || (destinationFloor != session.Floor + 1 && !(session.AwaitingInitialFloor && destinationFloor == session.Floor)) || destinationFloor > 3) return false;
             if (!IsRoyaleFloorOpen(destinationFloor)) { reason = "Destination floor is not open"; return false; }
-            if (!session.Rig.TryEndFloorTransit(position, rotation, out reason)) return false;
+            if (!session.Rig.TryEndFloorTransit(position, rotation, out reason, destinationFloor)) return false;
             session.Floor = destinationFloor;
             session.AwaitingInitialFloor = false;
             GameEvents.RaiseStatusLine(session.PlayerId, "Floor " + destinationFloor);
@@ -678,6 +701,7 @@ namespace Emberdelve.Flow
             if (!CombatSenders.Bind(CombatSenderId.ForPlayer(rig.PlayerId), rig.CombatId, out reason)) return false;
 
             rig.AssignParty(party, locallyControlled);
+            if (RoyaleMode.HasValue) rig.SetRoyaleFloor(floor);
 
             // R4: the bag mints its starting kit from the raid's one issuer, not from a private one.
             if (rig.Inventory != null) rig.Inventory.SetIssuer(Session.Issuer);
@@ -911,12 +935,13 @@ namespace Emberdelve.Flow
         }
 
         internal bool TryCreateRoyaleBot(GameObject prefab, CharacterClassData selectedClass, int party,
-            int floor, Vector3 position, out PlayerRig rig, out string reason)
+            int floor, Vector3 position, out PlayerRig rig, out string reason, bool fillStartedTeamFloor = false)
         {
             rig = null; reason = "Bot creation is unavailable";
             if (NetRole.IsClientOnly || !RoyaleMode.HasValue || party < 0 || floor < 1 || floor > 3
                 || prefab == null || prefab.scene.IsValid() || selectedClass == null || config == null
-                || TryGetRoyaleFloorClock(floor, out _, out _)
+                || (TryGetRoyaleFloorClock(floor, out _, out _)
+                    && !(fillStartedTeamFloor && HasTeamDescent && floor > 1 && IsRoyaleFloorOpen(floor)))
                 || (NetRole.IsOffline && LocalSession == null)) return false;
             var instance = Instantiate(prefab, position, Quaternion.identity);
             bool committed = false;

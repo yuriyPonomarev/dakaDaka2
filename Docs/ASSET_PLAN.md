@@ -1,5 +1,13 @@
 # Asset plan and sourcing
 
+## Downloaded Meshy architecture (22 November 2026)
+
+The follow-up architecture pass uses the owner's downloaded Meshy StonePillar and RusticBarrel archives, plus the project's existing SealedChest source as a closed funerary reliquary. The exact source/archive hashes are in `Art/Models/AI/Meshy/DownloadedArchitecture/manifest.json`. These archives are owner-supplied and are not represented as CC0. Existing OvergrownArch geometry supplies cropped arch crowns and stone-facing pieces with original UVs. Shared display meshes limit repeated geometry; original sources remain intact. Pillars use the dungeon's world-space stone material to avoid the downloaded albedo's baked blue/black patches; their source geometry and original albedo are retained. Physical rooms, stair routes and secret controls are preserved. See `Tasks/DOWNLOADED_ARCHITECTURE_20261122.md` for the exact scope and review evidence.
+
+## Original dark fantasy ambience (22 November 2026)
+
+`Resources/Emberdelve/Audio/DarkFantasyAmbience.wav` is original deterministic synthesis, recovered from Sol and revised to the user-requested melodic dark-fantasy arrangement. No external samples or paid service are involved. Source: `Tools/Audio/SynthesizeDarkFantasyAmbience.cjs`; 48 seconds, stereo, 48 kHz PCM16. Cello/viola, low horn, woodwind melody, harp and sparse frame drum; 12 bars at60 BPM, D minor/B-flat/G minor/A dominant. Circular note/reverb tails make a seamless loop. SHA256: `c8eced308b3634687fdd8f7fecf3143a7b076b1847ab66c10c36fb6d1d84cf8d`. Peak −3.50 dBFS, RMS −14.74 dBFS, no clipping, seam steps6/6 PCM units. Replaces per-flame synthetic ticks and the old short wind loop; combat, doors and footsteps stay separate. See `Tools/Audio/README.md`.
+
 ## Expanded rooms and caches (21 November 2026)
 
 Reuses the existing CC0 Poly Haven `WoodenTable_01`, `wine_barrel_01`, `wooden_crate_02` and `wooden_bucket_01` imports, including their original manifest/licenses below. Existing project `CryptArch.asset`, sarcophagus/column/brazier construction and stone surface materials furnish the expanded modules. New gallery/stair/undercroft/cache architecture and lever mechanism are authored with the existing masonry/wood/metal kit.
@@ -131,6 +139,26 @@ Royale crypt dependency: Art/Generated/CryptFlame_BlueParticle.mat is a factory-
 
 Room props/sky (13 November): reuses existing CC0 PolyHaven wooden_crate_02, wine_barrel_01 and wooden_bucket_01 meshes/materials. Original lathed ceramic vessel mesh and WeatheredClay material derive from project stone maps; procedural moon/craters/stars/clouds authored in MoonlitSky shader. No external downloads or original-game assets.
 
+### Moonlit Ruins room shapes (21 November 2026)
+
+Six original folded masonry meshes in `Art/Generated/RuinsWalls` share the existing `World_Stone_Wall` material. They provide recessed wall runs, collapsed crowns, weathered buttresses and two diagonal corners in each outdoor room. A shared mesh supplies both the visible wall and its physics surface. No additional source assets are required.
+
+### Rustbound dungeon doors (21 November 2026)
+
+The user-supplied `Meshy_AI_Rustbound_Gate_20261104_texture_fbx.zip` contains the grille FBX and albedo. Both are stored in `Art/Models/AI/Meshy/MapDressing/RustboundGate`. The original wood backing and arched masonry reuse the project's existing plank and dungeon stone materials. The saved `Resources/Emberdelve/DungeonDoor.prefab` is shared by the room catalogs.
+
+### Moonlit Ruins courtyard trial (21 November 2026)
+
+- `WallPanel` uses the user-supplied `Meshy_AI_Rustic_Timber_Panel_20261018_texture_fbx.zip` and keeps 20,621 imported triangles. [Medieval Modular Wall by thedude767](https://www.meshy.ai/pt-PT/posts/medieval-modular-wall-01a14fdc-ba6c-7127-b103-4ab391e6cb1e)
+- `RuinedArches` uses `Meshy_AI_Ruined_Arches_20260818_texture_fbx.zip` and reduces 1,978,106 imported triangles to 36,982. [Ruined Wall by eromaxi](https://www.meshy.ai/fr/posts/ruined-wall-01a013e9-8c12-70a1-94a5-cb02fd7c85a8)
+- `OvergrownArch` uses `Meshy_AI_Overgrown_Stone_Arch_20260627_texture_fbx.zip` and reduces 360,634 imported triangles to 26,998. [Overgrown Stone Arch by Yarpii](https://www.meshy.ai/posts/019f0b22-ecb5-7953-b714-e4125d20c9be)
+
+Meshy publishes community models under CC0 1.0. The original archive names and download files are retained by the project owner. Each Unity prefab in `Art/Models/AI/Meshy/CommunityRuins` uses its own 2K albedo and normal maps plus a 1K metallic/smoothness map packed from the source maps. The trial appears once in `Crypt_Entry`. Its material finish is tuned for the courtyard lighting. [Meshy community license](https://www.meshy.ai/terms-of-use)
+
+The courtyard brazier uses the 48,508-triangle FBX and 2K albedo from the user-supplied Meshy archive `Meshy_AI_A_stone_brazier_standing_on_a_small_20250502_texture_fbx.zip`. The carved bowl prefab in `Art/Models/AI/Meshy/CommunityRuins/StoneBrazier` uses an original fit of the existing stone column and reuses the authored flame and point light. Its in-game CarvedBowl mesh removes the fused round slab and caps all four feet while retaining the original UVs and material. The derived mesh uses 34,706 triangles.
+
+The replacement 90 cm brazier pedestal uses an original 1,736-triangle ashlar mesh with staggered joints and modeled chips. The user-supplied reference guided the square cap and recessed masonry joints. Its material uses the original 2K edition of the same CC0 Rock030 set and the project-authored shrine fissure masks. The color, normals, AO and packed smoothness are 2048 x 2048. [Rock030 on ambientCG](https://ambientcg.com/view?id=Rock030)
+
 ## Equipment-driven armor models (13 November 2026)
 - Original cuirass, boots and two cloaks, leather/cloth/metal textures and URP materials authored by EmberdelveItemArmorModels; saved in Art/Models/Equipment and Prefabs/Visual/Equipment. Inventory sprites are rendered from those same models. No external downloads or Dark and Darker assets.
 - Graspwrap glove garment derives hand/wrist topology and skin weights from the existing Innerscene Human CC0 source listed above. Source mesh remains unchanged; garment clips the wrist and offsets the surface. One skinned renderer/two materials preserves finger bending, 25,883 triangles for both gloves. Other pieces use bone-attached meshes.
@@ -165,3 +193,23 @@ Both active rigs use Unity Humanoid. Existing generated idle, sword slash, shiel
 Art/Models/Meshy/CryptDelver/manifest.json records task IDs, source checksums, all source revisions, derivation and measured charges. Charges were 38 credits initially, 29 for the muscular prototype, 44 for the approved detailed generation and 5 for the approved rig-only retry: 116 total, verified balance 979. The user's connected Meshy account terms govern use of these commissioned generations. Blender is used as a local authoring tool; no external character models or textures were imported.
 
 Visual review and focused verification are recorded in Tasks/MESHY_CHARACTER_20261117.md. Unity maps all 30 repaired finger joints. The detailed revision's visual acceptance remains with the user.
+
+## Cinder Warden boss visual (17 November 2026)
+
+Meshy generated the original cyclops and separate ironbound club from the two project-created reference images. The [source manifest](../SourceArt/AI/Meshy/CinderWarden/manifest.json) records the references, Meshy terms, settings, source files, SHA-256 hashes and four task IDs. Meshy billed 44 credits.
+
+The Unity prefab is `Assets/Emberdelve/Art/Models/AI/Meshy/CinderWarden/CinderWarden.prefab`. The 3.3 m body uses 27,520 triangles and a Humanoid avatar. The 6,731-triangle club follows the right wrist, with a fixed grip authored on the skin. The pipe smoke emitter follows the head and reuses the existing SmokeWisp material. The controller has Idle, Walk, Run, Attack and Hit states. URP material variants use Meshy's albedo, normal, and metallic/smoothness maps.
+
+Unity 6000.2.5f1 imported the avatar and sampled all five clips in the Editor. Idle and attack renders, including the grip and smoke, are in `Logs/acceptance/cinder-warden`. This is a standalone visual prefab. Scene placement, AI and hitboxes are separate work.
+
+## Meshy map dressing (20 November 2026)
+
+The four chest meshes and the wall torch came from five FBX archives supplied by the project owner. The two praying statues and votive candles came from original Meshy tasks for this project. The [source manifest](../SourceArt/AI/Meshy/MapDressing/manifest.json) records the archives, original file hashes, task IDs, Unity files and Meshy terms. Archive exports did not carry an asset-specific license.
+
+The prefab sources live under `Art/Models/AI/Meshy/MapDressing`. Each chest uses the existing loot variant, interactable and colliders, with the Hidden chest added as a deterministic Ember visual variant. The four chests have separate animated lids and fitted interior pieces. The archived wall torch uses the existing scene flame and light, with the shared sconce prefab also placed on modular room jambs. Shrine altars carry both statues and a votive tray. Runtime art uses 1K URP textures and compact meshes; the recorded geometry counts exclude the simple chest interiors.
+
+The two shrine statues share an original procedural 1K aged limestone material with albedo, normal and packed occlusion/smoothness maps. The existing dungeon stone shader projects the texture at a consistent scale across the carved figures. The votive stand now has three animated fire volumes attached to the original wicks and one warm flickering light. The [source manifest](../SourceArt/AI/Meshy/MapDressing/manifest.json) records the authored texture and prefab hashes.
+
+Shrine weathering uses per-vertex raycast occlusion and localized moss seeds on the two Meshy statues. Two original 1K maps give the moss fine mottling and the stone branching fissures. Each plinth has three small geometry chips, and the standing figure retains a diagonal head cut with a closed faceted interior. The sculpture masks are enabled on the shrine stone material. Evidence is in `Logs/acceptance/shrine-surface-detail`.
+
+Modular raid layouts place the 2.10 m kneeling figures and 2.22 m standing figures on the shrine altars and along the walls of entrances and ossuaries. Extraction rooms use another lit votive stand on existing masonry. The same floor plan and chest spawner place the four archive chest appearances, alternating the two Ember visuals by their authored spawn order. Placement evidence is in `Logs/acceptance/map-dressing-placement`.

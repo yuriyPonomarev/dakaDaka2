@@ -198,11 +198,11 @@ namespace Emberdelve.Net
             if (NetRole.IsClientOnly && pose.IsValid)
                 PotionDrinkPresentation.Ensure(Rig).ApplyNetwork(pose.Drinking, pose.DrinkProgress, pose.DrinkDuration);
             if (view != null && pose.IsValid) view.PresentUtility(pose.Utility.ToString());
-            if (view != null && pose.IsValid)
+            if (view != null && pose.IsValid && (NetRole.IsClientOnly || !pose.Bot))
                 view.PresentCombat(pose.Main.ToString(),pose.Off.ToString(),pose.Pattern.ToString(),pose.Guard,pose.Swing,
                     pose.PresentationElapsed(NetworkManager.ServerTime.Time),new Emberdelve.Data.SwingTiming(pose.Windup,pose.Active,pose.Recovery,0),
                     new Emberdelve.Combat.SwingFrame(Rig.transform.position+pose.EyeOffset,pose.Aim),
-                    pose.Recoil,pose.StopFraction,pose.RecoilProgress(NetworkManager.ServerTime.Time));
+                    pose.Recoil,pose.StopFraction,pose.RecoilProgress(NetworkManager.ServerTime.Time),pose.Bot);
             // Draw is server presentation state, never a client charge or ammunition claim.
             var remoteWeapons = Rig.GetComponent<RemoteWeaponPresentation>();
             if (remoteWeapons != null)
@@ -401,6 +401,7 @@ namespace Emberdelve.Net
         private static FloorMovementWire CaptureFloorMovement(PlayerRig rig) => new FloorMovementWire
         {
             Generation = rig.FloorMovementGeneration, InTransit = rig.IsInFloorTransit,
+            SpectatingParty = rig.IsPortalSpectating, RoyaleFloor = (byte)rig.RoyaleFloor,
             Position = rig.transform.position, Rotation = rig.transform.rotation
         };
 
@@ -422,7 +423,8 @@ namespace Emberdelve.Net
             if (!NetRole.IsClientOnly || _rig == null || !current.IsValid
                 || (_floorMovementApplied && current.Generation <= _appliedFloorGeneration)) return;
             if (current.Generation == 0) return; // Ordinary initial spawn has no transition history to discard.
-            if (!_rig.ApplyReplicatedFloorMovement(current.Generation, current.InTransit, current.Position, current.Rotation)) return;
+            if (!_rig.ApplyReplicatedFloorMovement(current.Generation, current.InTransit, current.Position, current.Rotation,
+                current.RoyaleFloor, current.SpectatingParty)) return;
             _appliedFloorGeneration = current.Generation; _floorMovementApplied = true;
             GetComponent<NetOwnerPrediction>()?.ResetForFloorMovement();
             GetComponent<NetInputSender>()?.ResetForFloorMovement(current.Rotation);
@@ -600,21 +602,23 @@ namespace Emberdelve.Net
         public bool DescentReady(int floor) => IsSpawned && Rig != null && Rig.IsInPlay && !Rig.IsDead
             && (Role == NetPlayerRole.HostPlayer || (Role == NetPlayerRole.Owner && DescentPortals.Value.IsValid
                 && DescentPortals.Value.Floor == floor && DescentPortals.Value.Generation == Rig.FloorMovementGeneration));
-        public bool RequestDescent(int floor, int group, int slot)
+        public bool RequestDescent(int floor, int group, int slot, DescentPortalIntent intent = DescentPortalIntent.Complete)
         {
-            if (!DescentReady(floor) || floor < 1 || floor > 2 || group < 0 || group > 2 || slot < 0 || slot > 2) return false;
+            if (!IsSpawned || floor < 1 || floor > 2 || group < 0 || group > 2 || slot < 0 || slot > 2) return false;
+            if (intent != DescentPortalIntent.Cancel && !DescentReady(floor)) return false;
             if (Role == NetPlayerRole.HostPlayer) return NetInventoryServer.Current != null
-                && NetInventoryServer.Current.RequestDescent(NetworkManager.ServerClientId, NetworkObject, floor, group, slot);
+                && NetInventoryServer.Current.RequestDescent(NetworkManager.ServerClientId, NetworkObject, floor, group, slot, intent);
+            if (Role != NetPlayerRole.Owner) return false;
             int size = DescentPortals.Value.Count / 3;
-            if (slot >= size || !DescentPortals.Value.IsAvailable(group * size + slot)) return false;
-            DescentIntentRpc((byte)floor, (byte)group, (byte)slot); return true;
+            if (intent != DescentPortalIntent.Cancel && (slot >= size || !DescentPortals.Value.IsAvailable(group * size + slot))) return false;
+            DescentIntentRpc((byte)floor, (byte)group, (byte)slot, intent); return true;
         }
         [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]
-        public void DescentIntentRpc(byte floor, byte group, byte slot, RpcParams rpcParams = default)
+        public void DescentIntentRpc(byte floor, byte group, byte slot, DescentPortalIntent intent = DescentPortalIntent.Complete, RpcParams rpcParams = default)
         {
             bool accepted = NetInventoryServer.Current != null && NetInventoryServer.Current.RequestDescent(
-                rpcParams.Receive.SenderClientId, NetworkObject, floor, group, slot);
-            if (rpcParams.Receive.SenderClientId == OwnerClientId) DescentResultRpc(accepted);
+                rpcParams.Receive.SenderClientId, NetworkObject, floor, group, slot, intent);
+            if (intent == DescentPortalIntent.Complete && rpcParams.Receive.SenderClientId == OwnerClientId) DescentResultRpc(accepted);
         }
         [Rpc(SendTo.Owner, InvokePermission = RpcInvokePermission.Server)]
         public void DescentResultRpc(bool accepted)
@@ -945,6 +949,7 @@ namespace Emberdelve.Net
         {
             if (_rig == null || _rig.Health == null) return;
             bool applied = _rig.Health.ApplyReplicatedState(current.Health, current.MaxHealth, current.Dead);
+            if (applied && current.Extracted && !_rig.IsExtracted) _rig.MarkExtracted();
             Debug.Log(Emberdelve.Net.Rules.NetTuning.LogPrefix + "[client] vitals id=" + ServerPlayerId.Value +
                       " health=" + current.Health.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) +
                       " max=" + current.MaxHealth.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) +

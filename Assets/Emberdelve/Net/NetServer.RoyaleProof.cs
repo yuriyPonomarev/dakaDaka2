@@ -3,6 +3,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using Emberdelve.AI;
+using Emberdelve.Combat;
+using Emberdelve.Core;
 using Emberdelve.Flow;
 using Emberdelve.Interaction;
 using Emberdelve.Items;
@@ -153,7 +156,12 @@ namespace Emberdelve.Net
         private int _descentProofPending, _descentProofApproaching, _descentProofCompleted = 1;
         private float _descentProofSourceDuration;
         private bool _descentProofFailed, _finalExitProofPlaced;
+        private DescentPortalSlot _lateDescentProofSlot;
+        private NetIdentity _descentProofLeader, _descentProofTeammate;
+        private float _spectatorProofObservedAt;
+        private readonly List<RoyaleBotController> _pausedDescentProofBots = new List<RoyaleBotController>();
         private readonly string _descentProofPath = DescentProofPath();
+        private string _deathSpectatorCommand;
         private static string DescentProofPath()
         {
             var args = Environment.GetCommandLineArgs();
@@ -167,13 +175,48 @@ namespace Emberdelve.Net
         {
             if (_descentProofFailed || string.IsNullOrEmpty(_descentProofPath) || !_royaleMapProofReported
                 || _director == null || _table.Count != 2) return;
+            if (_director.RoyaleMode == RoyalePartyMode.Duo && File.Exists(_descentProofPath))
+            {
+                string command = ReadSharedText(_descentProofPath).Trim();
+                if (command.StartsWith("death-spectator-", StringComparison.Ordinal))
+                { TickDeathSpectatorProof(command); return; }
+            }
             TickBotLootProof();
             if (_descentProofApproaching != 0)
             {
-                foreach (var row in _table.All) if (!row.Rig.IsInFloorTransit) return;
-                if (_botLootProofActor == null || !_botLootProofActor.IsInFloorTransit) return;
-                if (!_director.AdvanceRoyaleFloorForProof(_descentProofApproaching - 1, _descentProofSourceDuration))
+                bool team = _director.HasTeamDescent;
+                int sourceFloor = _descentProofApproaching - 1;
+                if (team && _lateDescentProofSlot != null)
+                {
+                    var leader = _descentProofLeader.Rig;
+                    var teammate = _descentProofTeammate.Rig;
+                    if (!leader.IsPortalSpectating) return;
+                    var slot = _lateDescentProofSlot;
+                    if (teammate == null || teammate.PartyId != leader.PartyId || teammate.IsInFloorTransit
+                        || teammate.IsDead || _director.SessionOf(teammate)?.Floor != sourceFloor || leader.RoyaleFloor != sourceFloor
+                        || !_director.IsRoyaleFloorOpen(sourceFloor) || slot.Group.SlotUsed(slot.Slot))
+                    { _descentProofFailed = true; _logError("Royale teammate was not alive on the source floor during spectator hold"); return; }
+                    if (leader.IsLocallyControlled && leader.GetComponent<PortalSpectatorCamera>()?.Target != teammate) return;
+                    if (_spectatorProofObservedAt == 0) _spectatorProofObservedAt = Time.unscaledTime;
+                    if (Time.unscaledTime - _spectatorProofObservedAt < 1f) return;
+                    _log("Royale team lead spectating source=" + sourceFloor + " teammateStillOnSource=True");
+                    PositionPortalProofActor(teammate, slot);
+                    if (_descentProofTeammate.ClientId == Unity.Netcode.NetworkManager.ServerClientId)
+                    {
+                        if (!slot.Group.TryEnter(teammate, slot.Slot, out string reason))
+                        { _descentProofFailed = true; _logError("Royale late teammate could not use portal: " + reason); return; }
+                    }
+                    else _log("Royale portal proof remote approaching floor=" + sourceFloor + " group=" + slot.Group.Group + " slot=" + slot.Slot);
+                    _lateDescentProofSlot = null;
+                }
+                foreach (var row in _table.All) if (!ReachedDescentProofStage(row.Rig, team)) return;
+                bool botInHumanParty = team && _botLootProofActor.PartyId == _descentProofLeader.Rig.PartyId;
+                if (!ReachedDescentProofStage(_botLootProofActor, botInHumanParty)
+                    && !ReachedDescentProofStage(_botLootProofActor, team)) return;
+                if (!_director.AdvanceRoyaleFloorForProof(sourceFloor, _descentProofSourceDuration))
                 { _descentProofFailed = true; return; }
+                foreach (var brain in _pausedDescentProofBots) if (brain != null) brain.enabled = true;
+                _pausedDescentProofBots.Clear();
                 _descentProofPending = _descentProofApproaching; _descentProofApproaching = 0;
                 _log("Royale descent proof queued floor=" + _descentProofPending + " humans=" + _descentProofItems.Count);
                 return;
@@ -188,7 +231,9 @@ namespace Emberdelve.Net
                 foreach (var session in _director.Players)
                     if (session.Floor == _descentProofPending && session.IsRunning && !session.Rig.IsDead)
                     { count++; parties[session.PartyId] = parties.TryGetValue(session.PartyId, out int n) ? n + 1 : 1; }
-                bool valid = count == new RoyaleRoster(_director.RoyaleMode.Value).Capacity;
+                int capacity = new RoyaleRoster(_director.RoyaleMode.Value).Capacity;
+                if (_director.HasTeamDescent && count < capacity) return;
+                bool valid = count == capacity;
                 foreach (int size in parties.Values) valid &= size == (int)_director.RoyaleMode.Value;
                 int botLootCopies = 0;
                 foreach (var slot in _botLootProofActor.Inventory.Slots)
@@ -289,9 +334,26 @@ namespace Emberdelve.Net
             if (!_botLootProofReported || _botLootProofActor == null || _botLootProofActor.IsDead
                 || _director.SessionOf(_botLootProofActor)?.Floor != source)
             { _logError("Royale descent proof requires the living bot that collected the source UID"); return; }
+            if (_director.HasTeamDescent)
+            {
+                // Isolate the actors whose arrival order is under test. A competing party can
+                // legally claim the bot's group before its next AI scan. The tracked bot still
+                // approaches and uses a real slot through its own FixedUpdate.
+                foreach (var actor in _director.Players)
+                    if (actor.IsBot && actor.Floor == source && actor.Rig != null && actor.Rig != _botLootProofActor
+                        && actor.Rig.TryGetComponent<RoyaleBotController>(out var brain) && brain.enabled)
+                    { brain.enabled = false; _pausedDescentProofBots.Add(brain); }
+            }
             if (!_director.AdvanceRoyaleFloorForProof(source, elapsed + remaining - 59)) return;
             encounter.Tick(); _descentProofItems.Clear();
-            foreach (var row in _table.All)
+            var proofRows = new List<NetIdentity>(_table.All);
+            proofRows.Sort((a, b) => a.ClientId.CompareTo(b.ClientId));
+            if (_director.HasTeamDescent && source == 2) proofRows.Reverse();
+            _descentProofLeader = proofRows[0]; _descentProofTeammate = proofRows[1];
+            _spectatorProofObservedAt = 0;
+            DescentPortalGroup leadGroup = null;
+            DescentPortalSlot leadSlot = null;
+            foreach (var row in proofRows)
             {
                 var rig = row.Rig;
                 if (source == 1 && row.ClientId != Unity.Netcode.NetworkManager.ServerClientId && !CollectRoyaleProofLoot(row))
@@ -301,16 +363,23 @@ namespace Emberdelve.Net
                 bool entered = false;
                 foreach (var group in encounter.Groups)
                 {
+                    if (_director.HasTeamDescent && leadGroup != null && group != leadGroup) continue;
                     foreach (var slot in group.GetComponentsInChildren<DescentPortalSlot>(true))
                     {
-                        if (group.SlotUsed(slot.Slot)) continue;
-                        rig.Movement.TeleportTo(slot.transform.position - Vector3.up * 1.1f); Physics.SyncTransforms();
-                        if (row.ClientId == Unity.Netcode.NetworkManager.ServerClientId)
+                        if (group.SlotUsed(slot.Slot) || !slot.isActiveAndEnabled || slot == leadSlot) continue;
+                        if (_director.HasTeamDescent && row != _descentProofLeader) _lateDescentProofSlot = slot;
+                        else if (row.ClientId == Unity.Netcode.NetworkManager.ServerClientId)
                         {
+                            PositionPortalProofActor(rig, slot);
                             if (!group.TryEnter(rig, slot.Slot, out string reason))
                             { _logError("Royale descent proof portal refused: " + reason); return; }
                         }
-                        else _log("Royale portal proof remote approaching floor=" + source + " group=" + group.Group + " slot=" + slot.Slot);
+                        else
+                        {
+                            PositionPortalProofActor(rig, slot);
+                            _log("Royale portal proof remote approaching floor=" + source + " group=" + group.Group + " slot=" + slot.Slot);
+                        }
+                        if (row == _descentProofLeader) { leadGroup = group; leadSlot = slot; }
                         entered = true; break;
                     }
                     if (entered) break;
@@ -318,28 +387,81 @@ namespace Emberdelve.Net
                 if (!entered) { _logError("Royale descent proof missing portal slot"); return; }
             }
             bool botApproaching = false;
-            // Use the last free slot so it does not overlap the remote human awaiting its RPC
-            // in the first free slot. Only position the bot; its normal FixedUpdate enters it.
-            for (int groupIndex = encounter.Groups.Count - 1; groupIndex >= 0 && !botApproaching; groupIndex--)
+            var botGroups = new List<DescentPortalGroup>(encounter.Groups);
+            botGroups.Reverse();
+            if (_director.HasTeamDescent && leadGroup != null && _botLootProofActor.PartyId == _descentProofLeader.Rig.PartyId)
+            { botGroups.Remove(leadGroup); botGroups.Insert(0, leadGroup); }
+            foreach (var group in botGroups)
             {
-                var group = encounter.Groups[groupIndex];
                 var slots = group.GetComponentsInChildren<DescentPortalSlot>(true);
                 for (int slotIndex = slots.Length - 1; slotIndex >= 0; slotIndex--)
                 {
                     var slot = slots[slotIndex];
-                    if (group.SlotUsed(slot.Slot) || !slot.isActiveAndEnabled) continue;
-                    _botLootProofActor.Movement.TeleportTo(slot.transform.position - Vector3.up * 1.1f);
-                    Physics.SyncTransforms();
+                    if (group.SlotUsed(slot.Slot) || !slot.isActiveAndEnabled || !group.IsAvailableToParty(_botLootProofActor.PartyId)
+                        || slot == _lateDescentProofSlot || slot == leadSlot) continue;
+                    PositionPortalProofActor(_botLootProofActor, slot);
+                    if (!slot.CanInteract(_botLootProofActor, out _)) continue;
                     _botDescentProofItems = (LoadoutSnapshot.Capture(_botLootProofActor.Inventory,
                         _botLootProofActor.Equipment).checksum, ProofAmmo(_botLootProofActor));
                     _log("Royale bot portal approaching floor=" + source + " id=" + _botLootProofActor.PlayerId
                         + " group=" + group.Group + " slot=" + slot.Slot);
                     botApproaching = true; break;
                 }
+                if (botApproaching) break;
             }
             if (!botApproaching) { _logError("Royale descent proof missing bot portal slot"); return; }
             _descentProofSourceDuration = (float)encounter.Portals.Duration;
             _descentProofApproaching = destination; _descentProofFailed = false;
+        }
+
+        private bool ReachedDescentProofStage(PlayerRig rig, bool team) => rig != null && (team
+            ? _director.SessionOf(rig)?.Floor == _descentProofApproaching && !rig.IsInFloorTransit
+            : rig.IsInFloorTransit);
+
+        private static void PositionPortalProofActor(PlayerRig rig, DescentPortalSlot slot)
+        {
+            rig.Movement.TeleportTo(slot.transform.position - Vector3.up * 1.1f);
+            Physics.SyncTransforms();
+        }
+
+        private void TickDeathSpectatorProof(string command)
+        {
+            if (command == _deathSpectatorCommand || !_table.TryGetByClient(Unity.Netcode.NetworkManager.ServerClientId, out var host)) return;
+            NetIdentity remote = null;
+            foreach (var row in _table.All) if (row != host) { remote = row; break; }
+            if (remote == null || remote.Rig.PartyId != host.Rig.PartyId) return;
+            if (command == "death-spectator-start")
+            {
+                if (!CollectRoyaleProofLoot(host)) { _logError("Could not stage surviving teammate's loot"); _descentProofFailed = true; return; }
+                foreach (var session in _director.Players)
+                    if (session.IsBot && session.Rig != null && session.Rig.TryGetComponent<RoyaleBotController>(out var brain)) brain.enabled = false;
+                var target = remote.Rig;
+                var position = target.transform.position;
+                target.Health.ApplyDamage(new DamageInfo(target.CurrentHealth + 1, position, Vector3.zero, position,
+                    0, EntityKind.Neutral, DamageType.Physical, false, false, 0));
+            }
+            else if (!remote.Rig.IsDead) return;
+            else if (command == "death-spectator-exit")
+            {
+                var exit = _director.FloorCoordinator.EncounterFor(3)?.FinalExit;
+                if (exit == null || !exit.isActiveAndEnabled) return;
+                host.Rig.Movement.TeleportTo(exit.transform.position - Vector3.up * 1.1f);
+                Physics.SyncTransforms();
+                if (!_director.BeginExtraction(host.Rig, out string reason))
+                { _logError("Spectated teammate could not extract: " + reason); _descentProofFailed = true; return; }
+            }
+            else if (int.TryParse(command.Substring("death-spectator-".Length), out int source) && source is 1 or 2)
+            {
+                if (host.Rig.RoyaleFloor != source || !_director.TryGetRoyaleFloorClock(source, out float elapsed, out float left)) return;
+                if (!_director.AdvanceRoyaleFloorForProof(source, elapsed + left - 59)) return;
+                var encounter = _director.FloorCoordinator.EncounterFor(source);
+                encounter.Tick();
+                var slot = encounter.Groups[0].GetComponentInChildren<DescentPortalSlot>();
+                PositionPortalProofActor(host.Rig, slot);
+                if (!slot.Group.TryEnter(host.Rig, slot.Slot, out string reason))
+                { _logError("Spectated teammate could not descend: " + reason); _descentProofFailed = true; return; }
+            }
+            _deathSpectatorCommand = command;
         }
     }
 }

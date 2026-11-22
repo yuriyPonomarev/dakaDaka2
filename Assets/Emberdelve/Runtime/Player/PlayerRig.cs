@@ -111,17 +111,22 @@ namespace Emberdelve.Player
         /// <summary>True after this player extracted: they left the dungeon and are nobody's target.</summary>
         public bool IsExtracted => _extracted;
         public bool IsInFloorTransit { get; private set; }
+        public bool IsPortalSpectating { get; private set; }
+        public int RoyaleFloor { get; private set; }
         public uint FloorMovementGeneration { get; private set; }
         public event System.Action<PlayerRig> FloorMovementChanged;
         public bool IsInPlay => !_extracted && !IsInFloorTransit;
 
         /// <summary>Freezes the existing authority-owned actor without changing its carried state.</summary>
-        public bool TryBeginFloorTransit(out string reason)
+        internal void SetRoyaleFloor(int floor) => RoyaleFloor = floor;
+
+        public bool TryBeginFloorTransit(out string reason, bool spectateParty = false)
         {
             reason = null;
             if (NetRole.IsClientOnly || IsDead || _extracted || IsInFloorTransit)
             { reason = "Actor cannot begin floor transit"; return false; }
             IsInFloorTransit = true;
+            IsPortalSpectating = spectateParty;
             FloorMovementGeneration++;
             GetComponent<MeleeCombat>()?.SetRemoteAttack(false);
             SetGuardHeld(false);
@@ -135,7 +140,7 @@ namespace Emberdelve.Player
         }
 
         /// <summary>The caller validates map readiness and a safe destination before releasing this actor.</summary>
-        public bool TryEndFloorTransit(Vector3 position, Quaternion rotation, out string reason)
+        public bool TryEndFloorTransit(Vector3 position, Quaternion rotation, out string reason, int destinationFloor = 0)
         {
             reason = null;
             if (NetRole.IsClientOnly || !IsInFloorTransit || IsDead || _extracted || movement == null)
@@ -148,6 +153,8 @@ namespace Emberdelve.Player
             movement.TeleportTo(position);
             transform.rotation = rotation.normalized;
             IsInFloorTransit = false;
+            IsPortalSpectating = false;
+            if (destinationFloor != 0) SetRoyaleFloor(destinationFloor);
             FloorMovementGeneration++;
             RefreshFloorTransitPresentation();
             SetInputEnabled(locallyControlled);
@@ -156,22 +163,25 @@ namespace Emberdelve.Player
         }
 
         /// <summary>Presentation of the server-owned flag only. Clients cannot use it to admit or settle a transfer.</summary>
-        public void ApplyReplicatedFloorTransit(bool inTransit)
+        public void ApplyReplicatedFloorTransit(bool inTransit, bool spectateParty = false)
         {
-            if (!NetRole.IsClientOnly || IsInFloorTransit == inTransit) return;
+            if (!NetRole.IsClientOnly || (IsInFloorTransit == inTransit && IsPortalSpectating == spectateParty)) return;
             IsInFloorTransit = inTransit;
+            IsPortalSpectating = inTransit && spectateParty;
             SetInputEnabled(!inTransit && locallyControlled);
             RefreshFloorTransitPresentation();
         }
 
-        public bool ApplyReplicatedFloorMovement(uint generation, bool inTransit, Vector3 position, Quaternion rotation)
+        public bool ApplyReplicatedFloorMovement(uint generation, bool inTransit, Vector3 position, Quaternion rotation,
+            int royaleFloor = 0, bool spectateParty = false)
         {
             if (!NetRole.IsClientOnly || generation < FloorMovementGeneration || movement == null
                 || !FiniteTransitValue(position.x) || !FiniteTransitValue(position.y) || !FiniteTransitValue(position.z)
                 || !FiniteTransitValue(rotation.x) || !FiniteTransitValue(rotation.y) || !FiniteTransitValue(rotation.z)
                 || !FiniteTransitValue(rotation.w) || Quaternion.Dot(rotation, rotation) < .000001f) return false;
             FloorMovementGeneration = generation;
-            ApplyReplicatedFloorTransit(inTransit);
+            SetRoyaleFloor(royaleFloor);
+            ApplyReplicatedFloorTransit(inTransit, spectateParty);
             movement.TeleportTo(position);
             transform.rotation = rotation;
             return true;

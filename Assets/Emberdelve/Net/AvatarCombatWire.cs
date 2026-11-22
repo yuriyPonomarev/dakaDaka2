@@ -8,7 +8,7 @@ namespace Emberdelve.Net
     public struct AvatarCombatWire : INetworkSerializable, IEquatable<AvatarCombatWire>
     {
         public FixedString64Bytes Main, Off, Pattern, Utility;
-        public bool Swing, Guard, Drinking;
+        public bool Swing, Guard, Drinking, Bot;
         public bool Crouched;
         public bool InFloorTransit;
         public bool Recoil;
@@ -54,7 +54,7 @@ namespace Emberdelve.Net
             s.SerializeValue(ref Drinking); s.SerializeValue(ref DrinkProgress); s.SerializeValue(ref DrinkDuration);
             s.SerializeValue(ref Reloading); s.SerializeValue(ref ReloadProgress); s.SerializeValue(ref ReloadDuration);
             s.SerializeValue(ref CrossbowLoaded); s.SerializeValue(ref Drawing); s.SerializeValue(ref DrawProgress);
-            s.SerializeValue(ref Crouched);
+            s.SerializeValue(ref Crouched); s.SerializeValue(ref Bot);
             s.SerializeValue(ref InFloorTransit);
             s.SerializeValue(ref Swing); s.SerializeValue(ref Guard); s.SerializeValue(ref SwingId);
             s.SerializeValue(ref Recoil); s.SerializeValue(ref StopFraction); s.SerializeValue(ref RecoilDuration);
@@ -66,7 +66,7 @@ namespace Emberdelve.Net
             && Reloading==o.Reloading&&ReloadProgress==o.ReloadProgress&&ReloadDuration==o.ReloadDuration
             && CrossbowLoaded==o.CrossbowLoaded && Drawing==o.Drawing&&DrawProgress==o.DrawProgress
             && Recoil==o.Recoil&&StopFraction==o.StopFraction&&RecoilDuration==o.RecoilDuration
-            && InFloorTransit==o.InFloorTransit && Crouched==o.Crouched && Swing==o.Swing&&Guard==o.Guard&&SwingId==o.SwingId&&Elapsed==o.Elapsed&&Windup==o.Windup&&Active==o.Active&&Recovery==o.Recovery
+            && InFloorTransit==o.InFloorTransit && Crouched==o.Crouched && Bot==o.Bot && Swing==o.Swing&&Guard==o.Guard&&SwingId==o.SwingId&&Elapsed==o.Elapsed&&Windup==o.Windup&&Active==o.Active&&Recovery==o.Recovery
             && EyeOffset.Equals(o.EyeOffset)&&Aim.Equals(o.Aim)&&SampleTime==o.SampleTime;
     }
 }

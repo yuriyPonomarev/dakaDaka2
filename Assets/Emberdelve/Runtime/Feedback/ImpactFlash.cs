@@ -9,16 +9,37 @@ namespace Emberdelve.Feedback
     public sealed class ImpactFlash : MonoBehaviour
     {
         private static readonly Dictionary<Color, Material> _materials = new Dictionary<Color, Material>();
+        private static readonly Color ParryColor = new Color(1f, .74f, .26f);
 
         private float _age;
         private float _duration;
         private float _startSize;
+        private float _widthScale = 1f;
+        private Vector3 _velocity;
         private Renderer _renderer;
 
         public static void Spawn(Vector3 point, Color color, float size, float duration = 0.18f)
+            => SpawnFlash(point, color, size, duration, Vector3.zero, 1f);
+
+        public static void SpawnParry(Vector3 point, float size)
+        {
+            var camera = Camera.main;
+            if (camera == null) return;
+            Spawn(point, ParryColor, size * 1.15f, .22f);
+            var plane = camera.transform;
+            const int sparks = 5;
+            for (int i = 0; i < sparks; i++)
+            {
+                float angle = (i + .25f) * (2f * Mathf.PI / sparks);
+                Vector3 direction = plane.right * Mathf.Cos(angle) + plane.up * Mathf.Sin(angle);
+                SpawnFlash(point, ParryColor, size * .48f, .23f, direction * (i % 2 == 0 ? 2.3f : 1.7f), .3f);
+            }
+        }
+
+        private static void SpawnFlash(Vector3 point, Color color, float size, float duration, Vector3 velocity, float widthScale)
         {
             GameObject root = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            root.name = "ImpactFlash";
+            root.name = widthScale < 1f ? "ParrySpark" : "ImpactFlash";
 
             Collider collider = root.GetComponent<Collider>();
             if (collider != null) UnityEngine.Object.Destroy(collider);
@@ -27,7 +48,6 @@ namespace Emberdelve.Feedback
             if (ignoreLayer >= 0) root.layer = ignoreLayer;
 
             root.transform.position = point;
-            root.transform.localScale = Vector3.one * Mathf.Max(0.02f, size);
 
             Renderer renderer = root.GetComponent<Renderer>();
             if (renderer != null)
@@ -36,17 +56,19 @@ namespace Emberdelve.Feedback
                 renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 renderer.receiveShadows = false;
             }
-            if (Camera.main != null) root.transform.rotation = Camera.main.transform.rotation;
-
             ImpactFlash flash = root.AddComponent<ImpactFlash>();
-            flash.Configure(duration, size);
+            flash.Configure(duration, size, velocity, widthScale);
         }
 
-        private void Configure(float duration, float size)
+        private void Configure(float duration, float size, Vector3 velocity, float widthScale)
         {
             _duration = Mathf.Max(0.03f, duration);
-            _startSize = size;
+            _startSize = Mathf.Max(.02f, size);
+            _velocity = velocity;
+            _widthScale = widthScale;
+            transform.localScale = new Vector3(_widthScale, 1f, 1f) * _startSize;
             _renderer = GetComponent<Renderer>();
+            FaceCamera();
         }
 
         private void Update()
@@ -55,7 +77,8 @@ namespace Emberdelve.Feedback
             float t = Mathf.Clamp01(_age / _duration);
 
             float scale = Mathf.Lerp(_startSize, _startSize * 2.4f, t);
-            transform.localScale = Vector3.one * scale;
+            transform.localScale = new Vector3(_widthScale, 1f, 1f) * scale;
+            transform.position += _velocity * Time.unscaledDeltaTime;
 
             if (_renderer != null)
             {
@@ -69,9 +92,16 @@ namespace Emberdelve.Feedback
             if (t >= 1f) Destroy(gameObject);
         }
 
-        private void LateUpdate()
+        private void LateUpdate() => FaceCamera();
+
+        private void FaceCamera()
         {
-            if (Camera.main != null) transform.rotation = Camera.main.transform.rotation;
+            var camera = Camera.main;
+            if (camera == null) return;
+            var forward = camera.transform.forward;
+            var screenVelocity = Vector3.ProjectOnPlane(_velocity, forward);
+            transform.rotation = screenVelocity.sqrMagnitude > .001f
+                ? Quaternion.LookRotation(forward, screenVelocity) : camera.transform.rotation;
         }
 
         private void OnDestroy()

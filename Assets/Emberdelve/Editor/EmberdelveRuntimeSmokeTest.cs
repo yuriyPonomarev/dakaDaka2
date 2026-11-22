@@ -236,6 +236,22 @@ namespace Emberdelve.EditorTools
 
                 _rig = FindLocalSmokeRig();
                 _director = FindFirstObjectByType<RunDirector>();
+                if (Mode == "combat" && _rig != null && _director != null)
+                {
+                    // The modular scene now starts an offline Royale population by default. Let its
+                    // real admission barrier finish before parking unrelated PvP actors. This fixture
+                    // measures one player against EnemyAgent; bots would contaminate authority counts
+                    // and damage samples. Royale population itself is covered by NetRoyale.
+                    yield return WaitUntil(() => _director.IsInteractionActorAdmitted(_rig, out _), 10f);
+                    Check(_director.IsInteractionActorAdmitted(_rig, out _),
+                        "combat fixture completes the real initial floor admission");
+                    foreach (var population in FindObjectsByType<Emberdelve.Net.OfflineRoyalePopulation>(FindObjectsSortMode.None))
+                        population.enabled = false;
+                    foreach (var bot in FindObjectsByType<RoyaleBotController>(FindObjectsSortMode.None))
+                        bot.gameObject.SetActive(false);
+                    Check(FindObjectsByType<RoyaleBotController>(FindObjectsSortMode.None).Length == 0,
+                        "unrelated Royale bots are parked before combat measurements");
+                }
                 // The active modular level owns its runtime layout and navigation grid. The authored
                 // Ashen Halls assets describe a different map and are not a valid geometry oracle here.
                 DungeonModuleSceneAssembler assembler = FindFirstObjectByType<DungeonModuleSceneAssembler>();

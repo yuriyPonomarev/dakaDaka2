@@ -71,7 +71,7 @@ namespace Emberdelve.Net
             _presenter = presenter;
             _client = client;
             _hostOwner = hostOwner;
-            _owner = rig != null ? rig.GetComponent<NetPlayerRig>() : null;
+            _owner = rig != null && !NetRole.IsOffline ? rig.GetComponent<NetPlayerRig>() : null;
             _rig = rig;
             _bag = rig != null ? rig.Inventory : null;
             if (_client != null)

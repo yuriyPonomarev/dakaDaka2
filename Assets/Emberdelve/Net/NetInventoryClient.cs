@@ -258,7 +258,7 @@ namespace Emberdelve.Net
                 _doorRevision = revision;
             }
             if (snapshotEnd) _doorStateReady = true;
-            if (_doorStateReady) ApplyDoorSnapshotToScene();
+            if (_doorStateReady) ApplyDoorSnapshotToScene(immediate: snapshotEnd);
             if (!string.IsNullOrEmpty(doorId)) DoorStateReceived?.Invoke(doorId, isOpen, revision, false, false);
             if (snapshotEnd) DoorStateReceived?.Invoke(string.Empty, false, revision, false, true);
         }
@@ -272,12 +272,12 @@ namespace Emberdelve.Net
             return false;
         }
 
-        private void ApplyDoorSnapshotToScene()
+        private void ApplyDoorSnapshotToScene(bool immediate = false)
         {
             DungeonDoorInteractable[] doors = FindObjectsByType<DungeonDoorInteractable>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             for (int i = 0; i < doors.Length; i++)
                 if (doors[i] != null && _doorStates.TryGetValue(doors[i].DoorId, out DoorReplicaState state))
-                    doors[i].ApplyReplicatedState(doors[i].DoorId, state.Open);
+                    doors[i].ApplyReplicatedState(doors[i].DoorId, state.Open, immediate);
         }
 
         public bool RequestChestOpen(string chestId)

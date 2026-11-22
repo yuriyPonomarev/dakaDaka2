@@ -63,15 +63,19 @@ namespace Emberdelve.Tests
             Assert.IsFalse(state.IsValid);
         }
 
-        [Test] public void AcceptedTrajectoryAndLoadoutSurviveRoundTrip()
+        [TestCase(false)] [TestCase(true)]
+        public void AcceptedTrajectoryAndLoadoutSurviveRoundTrip(bool bot)
         {
             var original=Sample();
+            original.Bot=bot;
             using(var writer=new FastBufferWriter(512,Allocator.Temp))
             {
                 writer.WriteValueSafe(original);
                 using(var reader=new FastBufferReader(writer,Allocator.Temp))
                 { reader.ReadValueSafe(out AvatarCombatWire decoded); Assert.That(decoded.IsValid,Is.True); Assert.That(decoded.Equals(original),Is.True); }
             }
+            var changed = original; changed.Bot = !bot;
+            Assert.That(changed.Equals(original), Is.False);
         }
         [Test] public void ClockDoesNotRewindOrPredictBeyondBoundedSampleAge()
         {

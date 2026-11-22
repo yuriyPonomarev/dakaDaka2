@@ -722,10 +722,13 @@ namespace Emberdelve.Combat
         /// player id (<see cref="IPlayerCombatFeedback"/>); the authority raises no HUD event itself and never asks who the
         /// "local" player is, so any number of players, and a server with none, resolve identically.
         /// </summary>
-        private static void PublishCombatFeedback(ICombatEntity instigator, ICombatEntity target, in HitFeedback feedback, in DamageInfo damage)
+        private static void PublishCombatFeedback(ICombatEntity instigator, ICombatEntity target, in HitFeedback feedback,
+            in DamageInfo damage, bool parried = false)
         {
             if (instigator is IPlayerCombatFeedback dealer) dealer.OnHitDealt(feedback);
             if (target is IPlayerCombatFeedback taker) taker.OnDamageTaken(damage);
+            if (damage.Blocked && !damage.GuardBroken && damage.Amount == 0f)
+                GameEvents.RaiseGuardContact(target is IPlayerOwned player ? player.PlayerId : GameEvents.NoPlayer, damage.Point, parried);
         }
 
         private bool Reject(AttackIntent intent, string reason, out string reasonOut)

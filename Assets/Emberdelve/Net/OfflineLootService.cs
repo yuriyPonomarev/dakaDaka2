@@ -1,8 +1,11 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using Emberdelve.Core;
 using Emberdelve.Flow;
 using Emberdelve.Interaction;
 using Emberdelve.Items;
+using Emberdelve.Level;
 using Emberdelve.Player;
 using UnityEngine;
 
@@ -15,16 +18,18 @@ namespace Emberdelve.Net
     /// Every request is validated like the server does (alive, admitted, in reach, line of sight) and the item
     /// itself moves through <see cref="CorpseContainerModel.TryTransferToBag"/>, so UID and affix custody are the
     /// same code path as the network.
-    /// The service only runs for an interactive offline player. Batch-mode gates keep the direct-grant behavior.
+    /// Ordinary headless gates keep direct grants; the offline Royale adapter explicitly installs this authority.
     /// </summary>
     [DisallowMultipleComponent]
-    public sealed class OfflineLootService : MonoBehaviour, IWorldLootContainerHost, ICorpseDeathCustodian
+    public sealed class OfflineLootService : MonoBehaviour, IWorldLootContainerHost, ICorpseDeathCustodian, IRetiredFloorLootSink
     {
         private readonly HashSet<int> _committedDeaths = new HashSet<int>();
+        private readonly HashSet<int> _committingDeaths = new HashSet<int>();
         private const float PollSeconds = 0.25f;
         private static OfflineLootService _instance;
 
         private readonly Dictionary<ulong, CorpseContainerModel> _containers = new Dictionary<ulong, CorpseContainerModel>();
+        private readonly List<Rect> _retiredFloorBounds = new List<Rect>();
         private ulong _nextId = 1;
         private uint _sequence = 1;
         private CorpseLootWorldPresenter _presenter;
@@ -37,9 +42,22 @@ namespace Emberdelve.Net
         private static void Boot()
         {
             if (_instance != null || Application.isBatchMode) return;
+            CreateInstance();
+        }
+
+        private static void CreateInstance()
+        {
             var go = new GameObject("OfflineLootService");
             DontDestroyOnLoad(go);
             _instance = go.AddComponent<OfflineLootService>();
+        }
+
+        /// <summary>Royale and ordinary offline play share one container table and one presenter.</summary>
+        public static OfflineLootService Ensure(RunDirector director)
+        {
+            if (!NetRole.IsOffline || director == null || director.Player == null) return null;
+            if (_instance == null) CreateInstance();
+            return _instance.Attach(director, director.Player) ? _instance : null;
         }
 
         private void Update()
@@ -57,9 +75,21 @@ namespace Emberdelve.Net
             if (_rig == null) { Detach(); return; }
             if (_director == null) _director = FindFirstObjectByType<RunDirector>();
 
-            if (_presenter == null || _presenter.gameObject != _rig.gameObject)
+            if (_director != null) Attach(_director, _rig);
+        }
+
+        private bool Attach(RunDirector director, PlayerRig rig)
+        {
+            // Check authority before configuring the presenter, otherwise even a rejected registration can steal its routing.
+            if (GameServices.TryGet<IWorldLootContainerHost>(out var other) && !ReferenceEquals(other, this)) return false;
+            if (_presenter == null || _presenter.gameObject != rig.gameObject || _director != director)
             {
-                _containers.Clear();
+                ClearContainers();
+                _committedDeaths.Clear();
+                _committingDeaths.Clear();
+                _retiredFloorBounds.Clear();
+                _director = director;
+                _rig = rig;
                 _presenter = _rig.GetComponent<CorpseLootWorldPresenter>();
                 if (_presenter == null) _presenter = _rig.gameObject.AddComponent<CorpseLootWorldPresenter>();
                 _presenter.ConfigureOffline(this, _rig, _director != null ? _director.InteractionReach : InteractionRules.DefaultReach);
@@ -67,11 +97,12 @@ namespace Emberdelve.Net
 
             if (!_registered)
             {
-                if (GameServices.TryGet<IWorldLootContainerHost>(out var other) && !ReferenceEquals(other, this)) return;
                 GameServices.Register<IWorldLootContainerHost>(this);
                 GameServices.Register<ICorpseDeathCustodian>(this);
+                GameServices.Register<IRetiredFloorLootSink>(this);
                 _registered = true;
             }
+            return true;
         }
 
         private void Detach()
@@ -80,12 +111,16 @@ namespace Emberdelve.Net
             {
                 GameServices.Unregister<IWorldLootContainerHost>(this);
                 GameServices.Unregister<ICorpseDeathCustodian>(this);
+                GameServices.Unregister<IRetiredFloorLootSink>(this);
             }
             _registered = false;
+            ClearContainers();
             _presenter = null;
             _rig = null;
-            _containers.Clear();
+            _director = null;
             _committedDeaths.Clear();
+            _committingDeaths.Clear();
+            _retiredFloorBounds.Clear();
         }
 
         /// <summary>
@@ -95,42 +130,41 @@ namespace Emberdelve.Net
         /// </summary>
         public bool TryCommitDeath(int playerId, Vector3 position, Inventory bag, Equipment equipment, out string reason)
         {
-            if (_presenter == null || playerId < 0 || bag == null || equipment == null || !equipment.IsPairedWith(bag))
+            reason = "Only an admitted dead offline actor can leave a lootable corpse";
+            if (!NetRole.IsOffline || _presenter == null || _director == null ||
+                !_director.TryGetSession(playerId, out var actor) || actor.IsLocal || actor.Rig == null ||
+                !actor.Rig.IsDead || actor.Inventory != bag || actor.Rig.Equipment != equipment) return false;
+            if (_committedDeaths.Contains(playerId)) { reason = null; return true; }
+            reason = "Death loot is already being committed";
+            if (!_committingDeaths.Add(playerId)) return false;
+            try
             {
-                reason = "offline corpse custody needs a ready loot window and a paired loadout";
-                return false;
+                if (!CorpseLootManifest.TryCapture(playerId, position, bag, equipment, out var manifest, out reason) ||
+                    !CorpseContainerModel.TryCreate(manifest, out var model, out reason)) return false;
+                if (model.EntryCount == 0) { _committedDeaths.Add(playerId); reason = null; return true; }
+                if (!TryReserve(model, out ulong id, out reason)) return false;
+                bool committed = false;
+                try
+                {
+                    var empty = manifest.CopyLoadout();
+                    empty.bag.entries = Array.Empty<ContainerEntry>();
+                    empty.equipment.entries = Array.Empty<ContainerEntry>();
+                    empty.weaponSet = 0;
+                    empty.belt = new string[LoadoutSnapshot.BeltSlotCount];
+                    Array.Fill(empty.belt, string.Empty);
+                    empty.Seal();
+                    if (!manifest.StillMatches(bag, equipment))
+                    { reason = "Source loadout changed before death custody commit"; return false; }
+                    if (!LoadoutSnapshot.TryRestore(empty, bag, equipment, null, out reason)) return false;
+                    committed = true;
+                }
+                finally { if (!committed) _containers.Remove(id); }
+                _committedDeaths.Add(playerId);
+                Show(id, model);
+                reason = null;
+                return true;
             }
-            if (!_committedDeaths.Add(playerId)) { reason = null; return true; }
-            if (!CorpseLootManifest.TryCapture(playerId, position, bag, equipment, out CorpseLootManifest manifest, out reason) ||
-                !CorpseContainerModel.TryCreate(manifest, out CorpseContainerModel model, out reason))
-            {
-                _committedDeaths.Remove(playerId);
-                return false;
-            }
-            LoadoutSnapshot captured = manifest.CopyLoadout();
-            bool hasItems = captured.bag.entries.Length > 0 || captured.equipment.entries.Length > 0;
-            if (hasItems && !CorpseContainerWire.TryCreate(_nextId, model, out _, out reason))
-            {
-                _committedDeaths.Remove(playerId);
-                return false;
-            }
-            LoadoutSnapshot empty = captured.Clone();
-            empty.bag.entries = System.Array.Empty<ContainerEntry>();
-            empty.equipment.entries = System.Array.Empty<ContainerEntry>();
-            empty.weaponSet = 0;
-            empty.belt = new string[HotbarBindings.SlotCount];
-            for (int i = 0; i < empty.belt.Length; i++) empty.belt[i] = "";
-            empty.Seal();
-            if (!manifest.StillMatches(bag, equipment) || !LoadoutSnapshot.TryRestore(empty, bag, equipment, null, out reason))
-            {
-                _committedDeaths.Remove(playerId);
-                if (string.IsNullOrEmpty(reason)) reason = "source loadout changed before death custody commit";
-                return false;
-            }
-            if (hasItems && !TryPublishLoot(model, out _, out reason))
-                Debug.LogError("[Emberdelve][OfflineLoot] corpse for player " + playerId + " could not be published after the loadout was emptied: " + reason);
-            reason = null;
-            return true;
+            finally { _committingDeaths.Remove(playerId); }
         }
 
         private void OnDestroy()
@@ -141,28 +175,50 @@ namespace Emberdelve.Net
 
         public bool TryPublishLoot(CorpseContainerModel model, out ulong id, out string reason)
         {
+            if (!TryReserve(model, out id, out reason)) return false;
+            Show(id, model);
+            return true;
+        }
+
+        private bool TryReserve(CorpseContainerModel model, out ulong id, out string reason)
+        {
             id = 0;
-            if (_presenter == null || model == null)
+            if (!NetRole.IsOffline || _presenter == null || model == null || model.EntryCount == 0 ||
+                _nextId == 0 || _nextId == ulong.MaxValue || IsRetired(model.WorldPosition))
             {
                 reason = "Loot window is unavailable";
                 return false;
             }
+            var incoming = model.CopyEntries().Where(row => row.IsGear).Select(row => row.Uid).ToHashSet(StringComparer.Ordinal);
+            if (incoming.Count > 0 && _containers.Values.Any(container => container.CopyEntries().Any(row => incoming.Contains(row.Uid))))
+            { reason = "An item is already held in another loot container"; return false; }
             if (!CorpseContainerWire.TryCreate(_nextId, model, out _, out reason)) return false;
             id = _nextId++;
             _containers.Add(id, model);
+            reason = null;
+            return true;
+        }
+
+        private void Show(ulong id, CorpseContainerModel model)
+        {
             // A chest is its own world object; a dead enemy or bot is searched on its own body.
             if (model.Kind != "chest")
             {
                 _presenter.OnBodyPresence(id, model.WorldPosition, model.Revision, false);
             }
-            reason = null;
-            return true;
         }
 
         public void OpenLoot(IInteractionActor actor, ulong id)
         {
-            if (_presenter == null || _rig == null || !ReferenceEquals(actor, _rig) || !_containers.ContainsKey(id)) return;
+            if (!CanLoot(actor, id, out _)) return;
             _presenter.OpenContainer(id);
+        }
+
+        internal bool CanLoot(IInteractionActor actor, ulong id, out string reason)
+        {
+            reason = "Loot container is unavailable";
+            return NetRole.IsOffline && _presenter != null && ReferenceEquals(actor, _rig) &&
+                _containers.TryGetValue(id, out var model) && Validate(_rig, model, out reason);
         }
 
         internal bool RequestState(CorpseLootWorldPresenter presenter, PlayerRig rig, ulong id,
@@ -170,8 +226,7 @@ namespace Emberdelve.Net
         {
             sequence = 0;
             if (!_containers.TryGetValue(id, out CorpseContainerModel model)) return false;
-            sequence = _sequence++;
-            if (beforeSend != null && !beforeSend(sequence)) { sequence = 0; return false; }
+            if (!BeginRequest(beforeSend, out sequence)) return false;
             if (!Validate(rig, model, out string reason))
             {
                 presenter.OnCorpseResult(id, sequence, false, model.Revision, reason);
@@ -192,8 +247,7 @@ namespace Emberdelve.Net
         {
             sequence = 0;
             if (!_containers.TryGetValue(request.CorpseId, out CorpseContainerModel model)) return false;
-            sequence = _sequence++;
-            if (beforeSend != null && !beforeSend(sequence)) { sequence = 0; return false; }
+            if (!BeginRequest(beforeSend, out sequence)) return false;
 
             ItemUidRegistry uids = null;
             string reason;
@@ -265,43 +319,43 @@ namespace Emberdelve.Net
             return true;
         }
 
+        private bool BeginRequest(Func<uint, bool> beforeSend, out uint sequence)
+        {
+            sequence = _sequence;
+            if (sequence == 0 || sequence > Rules.CorpseRequestSequenceGate.MaximumSequence ||
+                (beforeSend != null && !beforeSend(sequence))) { sequence = 0; return false; }
+            _sequence++;
+            return true;
+        }
+
+        public void RetireFloorLoot(Rect bounds)
+        {
+            if (!NetRole.IsOffline) return;
+            if (!_retiredFloorBounds.Contains(bounds)) _retiredFloorBounds.Add(bounds);
+            foreach (var entry in _containers.Where(entry => bounds.Contains(new Vector2(entry.Value.WorldPosition.x, entry.Value.WorldPosition.z))).ToArray())
+            {
+                _containers.Remove(entry.Key);
+                if (_presenter != null) _presenter.OnPresence(entry.Key, entry.Value.WorldPosition, ulong.MaxValue, true);
+            }
+        }
+
+        private void ClearContainers()
+        {
+            foreach (var entry in _containers)
+                if (_presenter != null) _presenter.OnPresence(entry.Key, entry.Value.WorldPosition, ulong.MaxValue, true);
+            _containers.Clear();
+        }
+
+        private bool IsRetired(Vector3 position) =>
+            _retiredFloorBounds.Any(bounds => bounds.Contains(new Vector2(position.x, position.z))) ||
+            DungeonModuleSceneAssembler.IsPositionOnRetiredFloor(position);
+
         private bool Validate(PlayerRig rig, CorpseContainerModel model, out string reason)
         {
-            if (rig == null || model == null) { reason = "Player or loot is unavailable"; return false; }
-            if (!rig.IsAlive) { reason = "The dead cannot loot"; return false; }
-            if (_director == null) _director = FindFirstObjectByType<RunDirector>();
-            if (_director == null) { reason = "The run is unavailable"; return false; }
-            if (!_director.IsInteractionActorAdmitted(rig, out reason)) return false;
-
-            if (model.Kind == "chest")
-            {
-                ChestInteractable source = null;
-                foreach (ChestInteractable chest in FindObjectsByType<ChestInteractable>(FindObjectsSortMode.None))
-                    if (ReferenceEquals(chest.LootContainer, model)) { source = chest; break; }
-                if (source == null) { reason = "Chest is unavailable"; return false; }
-                if (!source.CanInteract(rig, out reason)) return false;
-            }
-
-            Vector3 origin = rig.InteractionOrigin;
-            Vector3 offset = model.WorldPosition - origin;
-            float distance = offset.magnitude;
-            if (float.IsNaN(distance) || float.IsInfinity(distance) || distance > Mathf.Max(0.5f, _director.InteractionReach))
-            {
-                reason = "Too far away";
-                return false;
-            }
-            if (distance > 0.24f)
-            {
-                int levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
-                if (levelMask != 0 && Physics.Raycast(origin, offset / distance, out _, distance - 0.12f,
-                        levelMask, QueryTriggerInteraction.Ignore))
-                {
-                    reason = "No line of sight";
-                    return false;
-                }
-            }
-            reason = null;
-            return true;
+            reason = "Loot container is unavailable";
+            return NetRole.IsOffline && ReferenceEquals(rig, _rig) && model != null &&
+                !IsRetired(model.WorldPosition) &&
+                NetInventoryServer.ValidateLootAccess(_director, rig, model, out reason);
         }
     }
 }

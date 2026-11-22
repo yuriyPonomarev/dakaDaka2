@@ -45,6 +45,14 @@ namespace Emberdelve.Net
                 if (client != NetworkManager.ServerClientId && (!_sent.TryGetValue((client, floor), out var state) || !state.PublicReady)) return false;
             return true;
         }
+
+        public bool PublicStateReadyForClient(int floor, ulong client)
+        {
+            if (client == NetworkManager.ServerClientId) return true;
+            return _initialReady(client) && _sent.TryGetValue((client, floor), out var state) && state.PublicReady
+                && _director.FloorCoordinator.TryCopyMapSnapshot(floor, out var snapshot)
+                && snapshot.Hash == state.Snapshot.Hash;
+        }
         public void Tick(float now)
         {
             var clients = new List<ulong>(_network.ConnectedClientsIds);

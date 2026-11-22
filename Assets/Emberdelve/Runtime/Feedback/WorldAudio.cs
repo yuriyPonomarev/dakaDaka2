@@ -3,7 +3,7 @@ using Emberdelve.Core;
 
 namespace Emberdelve.Feedback
 {
-    public enum WorldSound { Swing, Impact, Metal, Step, Fire, Bow }
+    public enum WorldSound { Swing, Impact, Metal, Step, Bow, Parry, DoorCreak, DoorThud }
 
     /// <summary>Presentation-only, bounded voice pool. Geometry filters sound, never damage or enemy perception.</summary>
     [DisallowMultipleComponent]
@@ -37,7 +37,8 @@ namespace Emberdelve.Feedback
             _instance = this;
             _levelMask = LayerMask.GetMask(GameConfig.LevelLayerName);
             _clips = new[] { ProceduralAudio.SwordSwing(), ProceduralAudio.Impact(), ProceduralAudio.Block(),
-                ProceduralAudio.StoneStep(), ProceduralAudio.FireCrackle(), ProceduralAudio.BowRelease() };
+                ProceduralAudio.StoneStep(), ProceduralAudio.BowRelease(), ProceduralAudio.Parry(),
+                ProceduralAudio.DoorCreak(), ProceduralAudio.DoorThud() };
             for (int i = 0; i < VoiceCount; i++)
             {
                 var voice = new GameObject("WorldVoice" + i);
@@ -75,7 +76,7 @@ namespace Emberdelve.Feedback
             source.transform.position = position;
             source.clip = _clips[(int)sound];
             source.pitch = Mathf.Clamp(pitch, .75f, 1.25f);
-            source.maxDistance = sound == WorldSound.Fire ? 9f : sound == WorldSound.Step ? 18f : 24f;
+            source.maxDistance = sound == WorldSound.Step ? 18f : 24f;
             _gains[index] = Mathf.Clamp01(gain);
             ApplyOcclusion(index);
             source.Play();
@@ -104,8 +105,11 @@ namespace Emberdelve.Feedback
             _filters[index].cutoffFrequency = blocked ? 1100f : 22000f;
         }
 
-        private void OnHit(Emberdelve.Combat.CombatHitReport hit) =>
+        private void OnHit(Emberdelve.Combat.CombatHitReport hit)
+        {
+            if (hit.Blocked && !hit.GuardBroken && hit.Amount == 0f) return; // FeedbackDirector plays the confirmed guard contact.
             Play(hit.Blocked ? WorldSound.Metal : WorldSound.Impact, hit.Point);
+        }
 
         private void OnDisable()
         {

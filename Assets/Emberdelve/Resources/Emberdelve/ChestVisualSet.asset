@@ -14,20 +14,23 @@ MonoBehaviour:
   m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Level.ChestVisualSet
   entries:
   - variant: 0
-    model: {fileID: 919132149155446097, guid: 7862a8fcaeb26014c9e2312d0c39ff4f, type: 3}
+    model: {fileID: 3682668057521752056, guid: 3a08cc43e244fe0449cc5b5cfd69eb13, type: 3}
+    alternateModel: {fileID: 0}
     tint: {r: 1, g: 1, b: 1, a: 1}
     lidNameContains: lid
     frontSign: 1
     openAngle: 105
   - variant: 1
-    model: {fileID: 919132149155446097, guid: 7862a8fcaeb26014c9e2312d0c39ff4f, type: 3}
-    tint: {r: 1, g: 0.78, b: 0.5, a: 1}
+    model: {fileID: 4938561443651280130, guid: 39841c97b47e8874c88c157ea9c0e03f, type: 3}
+    alternateModel: {fileID: 2238051028052414848, guid: d88627c7372810c4db0ba5de82567488, type: 3}
+    tint: {r: 1, g: 1, b: 1, a: 1}
     lidNameContains: lid
     frontSign: 1
     openAngle: 105
   - variant: 2
-    model: {fileID: 919132149155446097, guid: 7862a8fcaeb26014c9e2312d0c39ff4f, type: 3}
-    tint: {r: 0.55, g: 0.6, b: 0.9, a: 1}
+    model: {fileID: 4796864602086273553, guid: 297b7b42501e962449a8bbde58df66ea, type: 3}
+    alternateModel: {fileID: 0}
+    tint: {r: 1, g: 1, b: 1, a: 1}
     lidNameContains: lid
     frontSign: 1
     openAngle: 105

@@ -1,0 +1,349 @@
+{
+  "provider": "Meshy",
+  "sources": "Five FBX archives supplied by the project owner, plus three original Meshy models generated for this project.",
+  "rights": {
+    "terms": "https://www.meshy.ai/terms-of-use",
+    "note": "Game integration was requested by the project owner. Supplied archives do not identify an account plan or an asset-specific license. Do not represent these assets as CC0."
+  },
+  "assets": [
+    {
+      "asset": "HiddenChest",
+      "source_archive": "Meshy_AI_hidden_treasure_chest_locked_with_20250208_texture_fbx.zip",
+      "archive_sha256": "79df1dfeae3277abba76dffdf0746b7f46e9eaca7e21f319c3aab1dc36cf333a",
+      "original_files": [
+        {
+          "source": "Meshy_AI_hidden_treasure_chest_locked_with_20250208_texture_fbx/Meshy_AI_hidden_treasure_chest_locked_with_20250208_texture.fbx",
+          "source_sha256": "c8604faf264939849b6107852746f06575569e41b12a3649c576c3f9e2d566fa"
+        },
+        {
+          "source": "Meshy_AI_hidden_treasure_chest_locked_with_20250208_texture_fbx/Meshy_AI_hidden_treasure_chest_locked_with_20250208_texture.png",
+          "source_sha256": "acac0302abf4260bb53802f5b816fe38266d13e204e24228439a7d8441592b7c"
+        }
+      ],
+      "unity_use": "Every second Ember chest in the authored floor layout.",
+      "triangles_source": 245874,
+      "triangles_art_meshes": 7399,
+      "unity_files": {
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/HiddenChest/BaseColor.png": "4efc3e5c103305e0fdb2ee909cc58fa74fde1bb60cc84210774170c77af5c129",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/HiddenChest/Body.asset": "b453bd2d5c20b35b335079e09da708d106d6ae855cf2421583acf17b77f8fd23",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/HiddenChest/HiddenChest.prefab": "5688d0e7261626ae0b62698c72e6e0d5838f14e4ce2ea9d8ae3fb7c5b5871ebb",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/HiddenChest/Lid.asset": "f947d5b4dd64c9da99ff20e14a0e865388f95de34685e1acbdc60a4276ac45a2",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/HiddenChest/Surface.mat": "c09d43e2575748a1dc1773ea137fc8c15f63628b55fb25c71518b0897a7a8fcb"
+      }
+    },
+    {
+      "asset": "IronboundChest",
+      "source_archive": "Meshy_AI_Ironbound_Chest_20260723_texture_fbx.zip",
+      "archive_sha256": "db8476752b9c3fbd6a7e87689903a3f93ab3608ec64f8d0a469a67098ac66174",
+      "original_files": [
+        {
+          "source": "Meshy_AI_Ironbound_Chest_20260723_texture_fbx/Meshy_AI_Ironbound_Chest_20260723_texture.fbx",
+          "source_sha256": "418ec632ccdf1cfe161a7092e28836928adbc6a75ad360c78d2175e28b9254fa"
+        },
+        {
+          "source": "Meshy_AI_Ironbound_Chest_20260723_texture_fbx/Meshy_AI_Ironbound_Chest_20260723_texture.png",
+          "source_sha256": "631559f89b04232c84b637c29788ee430ee603c6658716011d11570bbe4fe8e3"
+        },
+        {
+          "source": "Meshy_AI_Ironbound_Chest_20260723_texture_fbx/Meshy_AI_Ironbound_Chest_20260723_texture_emission.png",
+          "source_sha256": "db77c29b63f19fdb2cd451237cd7b2a2c73e23532e41bb8ed7430903ecb4a543"
+        },
+        {
+          "source": "Meshy_AI_Ironbound_Chest_20260723_texture_fbx/Meshy_AI_Ironbound_Chest_20260723_texture_metallic.png",
+          "source_sha256": "6857cf3a6ba839a9bf928d8a2171199d03e5d949dd5e204c8ec25af37e27e414"
+        },
+        {
+          "source": "Meshy_AI_Ironbound_Chest_20260723_texture_fbx/Meshy_AI_Ironbound_Chest_20260723_texture_normal.png",
+          "source_sha256": "4af8ae11b499569ba6ffcf11d47a42a519e9dd729701299f204cecfd9e238557"
+        },
+        {
+          "source": "Meshy_AI_Ironbound_Chest_20260723_texture_fbx/Meshy_AI_Ironbound_Chest_20260723_texture_roughness.png",
+          "source_sha256": "8b719e166517e8f534207e036c28240615e1cb98215cc914028ea38f28d1f28b"
+        }
+      ],
+      "unity_use": "Supply chest",
+      "triangles_source": 364504,
+      "triangles_art_meshes": 11190,
+      "unity_files": {
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/IronboundChest/BaseColor.png": "1e90c4dc1062f7f7b04610318c2321722be7ff958d8d0dbe626cbef986cfbf99",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/IronboundChest/Body.asset": "0b59cea462d889cd56d46b18e63d48c0c662d819f88416f03ad8f082662326c5",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/IronboundChest/Emission.png": "d9fb3391537bcc2e2beff2e92fcd3431be1255ec09160ad30105c1fbbcc7677f",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/IronboundChest/IronboundChest.prefab": "953996a1de02fb58865aa2d46d0e258a71d366fc0eea18a64d48435d0ee58786",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/IronboundChest/Lid.asset": "3778ed61278b90a4db7e36b0e82ae741acf113a7da29f21b8231ce2081170fdc",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/IronboundChest/Normal.png": "90c217bb27e8cdb1b38b41d651c9c4663bb1b5561c97ddf0957ff4c6ff65a1e2",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/IronboundChest/PackedMask.png": "cf4d10512c589561270acaca1a388dfd28abb07b2cf20115b69d82567c6d031d",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/IronboundChest/Surface.mat": "6590be63691f2251ef47f5ad242522590057608fbf1331f47f6b7c819e786bfc"
+      }
+    },
+    {
+      "asset": "TreasureChest",
+      "source_archive": "Meshy_AI_Treasure_Chest_20261115_texture_fbx.zip",
+      "archive_sha256": "5820f4a194e7e44e1fe85fee1f1257def4641ffb06a936f929bd4bd49751017e",
+      "original_files": [
+        {
+          "source": "Meshy_AI_Treasure_Chest_20261115_texture_fbx/Meshy_AI_Treasure_Chest_20261115_texture.fbx",
+          "source_sha256": "0428d07d68f1f60217b7789be4583e56842edb9051cbc6691ac076d30d7b88fb"
+        },
+        {
+          "source": "Meshy_AI_Treasure_Chest_20261115_texture_fbx/Meshy_AI_Treasure_Chest_20261115_texture.png",
+          "source_sha256": "77e6ca8285052ecf5d38061937178d7a51210d2d3a902d2f6d2b5a4add4de6f7"
+        },
+        {
+          "source": "Meshy_AI_Treasure_Chest_20261115_texture_fbx/Meshy_AI_Treasure_Chest_20261115_texture_metallic.png",
+          "source_sha256": "f02b27224edc1fb38871f7431afc71256093f0c1bfba20db3dd38d1de819d017"
+        },
+        {
+          "source": "Meshy_AI_Treasure_Chest_20261115_texture_fbx/Meshy_AI_Treasure_Chest_20261115_texture_normal.png",
+          "source_sha256": "c1cb8bd889c70ef54383054c5e9d35535b8408b300841b35b633f123b89f7770"
+        },
+        {
+          "source": "Meshy_AI_Treasure_Chest_20261115_texture_fbx/Meshy_AI_Treasure_Chest_20261115_texture_roughness.png",
+          "source_sha256": "8db5e1eb7bf457cc2c04a6602b6cb9895fc7cd8cd03f9fbfaff629b15c0d8b12"
+        }
+      ],
+      "unity_use": "The first and subsequent odd-numbered Ember chests in the authored floor layout.",
+      "triangles_source": 449306,
+      "triangles_art_meshes": 13329,
+      "unity_files": {
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/TreasureChest/BaseColor.png": "ffc8e2588bc5ba39cd9e4c1610f96fe265bc9ac579bff0bf0890944d94a9b73f",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/TreasureChest/Body.asset": "1a70bba31692c9b33d5c89fd4e1a50a6df763f4d0d169dd4b2215e33731a285e",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/TreasureChest/Lid.asset": "49fb4dc750238df9b6301880dfb4a956d9183240e6ef2b4edd29d306db29bdcc",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/TreasureChest/Normal.png": "ac64464fca999ebede3c51089306a8b2f0f9ef96acbada376d70cb0656df2564",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/TreasureChest/PackedMask.png": "05afe968c6a37e6e27b6874ae204ddad8d4be5f5b5da629299305b95c04dd0aa",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/TreasureChest/Surface.mat": "9b15d76df3f88c2472aa66086bf8e3175e04a9115fb42307405c4c8ac9c133a8",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/TreasureChest/TreasureChest.prefab": "b90b58239c232f2511b32d2f252810a139b6c7ce603ff855b225cbf423436eaf"
+      }
+    },
+    {
+      "asset": "AncientChest",
+      "source_archive": "Meshy_AI_Ancient_Treasure_Chest_20251016_texture_fbx.zip",
+      "archive_sha256": "83956560fa8e92f6646c49e3fb313607c654374a386154a8c37e9fe94fbfd338",
+      "original_files": [
+        {
+          "source": "Meshy_AI_Ancient_Treasure_Chest_20251016_texture_fbx/Meshy_AI_Ancient_Treasure_Chest_20251016_texture.fbx",
+          "source_sha256": "0c05d23e4066e4ca57fa1e5137576cc5f355965286fffba7d77efead9dc16e78"
+        },
+        {
+          "source": "Meshy_AI_Ancient_Treasure_Chest_20251016_texture_fbx/Meshy_AI_Ancient_Treasure_Chest_20251016_texture.png",
+          "source_sha256": "6b97a92fcabf2124cf2cdfcb0046834e3b242a5960676561c971071d26b36a3b"
+        },
+        {
+          "source": "Meshy_AI_Ancient_Treasure_Chest_20251016_texture_fbx/Meshy_AI_Ancient_Treasure_Chest_20251016_texture_metallic.png",
+          "source_sha256": "300d4065e261a7428d93819111e5b53eca41a75eb3b47e7041eec002978c58ca"
+        },
+        {
+          "source": "Meshy_AI_Ancient_Treasure_Chest_20251016_texture_fbx/Meshy_AI_Ancient_Treasure_Chest_20251016_texture_normal.png",
+          "source_sha256": "6c3ded08a1684b868b7931fc6131c2a4c39de2413b4837c9bc6479c67ddd2400"
+        },
+        {
+          "source": "Meshy_AI_Ancient_Treasure_Chest_20251016_texture_fbx/Meshy_AI_Ancient_Treasure_Chest_20251016_texture_roughness.png",
+          "source_sha256": "0623c421639eab7dc91f9778621f78d49de3a1302fe161a241e3e9e049c9b807"
+        }
+      ],
+      "unity_use": "Sealed chest",
+      "triangles_source": 745844,
+      "triangles_art_meshes": 14015,
+      "unity_files": {
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/AncientChest/AncientChest.prefab": "da8e4e1872ec71f4e05b51985643c0651b340a1d6a18832a23ea23f80746745f",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/AncientChest/BaseColor.png": "1c9f2dd5cc0cb477fbb8850b18a2d641c89994b1e5b7edefaf5fa4317e00ee80",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/AncientChest/Body.asset": "7d0f1da9035b0f8c2e338b8ffc71c339eacd5e79a59d33c49713cbb9c401dc87",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/AncientChest/Lid.asset": "d605090d1128c4bc347e561d32f345039857e62c0fc9b7451019cb0911ef181c",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/AncientChest/Normal.png": "6a3593608193ce59a60c6a91d436a0db16825af13e51aa7d856efe8776b04e88",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/AncientChest/PackedMask.png": "cfd54a1a61b4ad5ff435528639ad6cbebd46802e7206f04ceb4720ff2d34146a",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/AncientChest/Surface.mat": "f8cd6cc853ea0193d251769ee2cc5b036f7febbd667e0e03349cded5050b8b7c"
+      }
+    },
+    {
+      "asset": "WallTorch",
+      "source_archive": "Meshy_AI_Clockwork_Torch_20260427_texture_fbx.zip",
+      "archive_sha256": "917ee9045fc6eea5d547f00a0e6bff6e20112f3bbea9572ce82c07d175e872fe",
+      "original_files": [
+        {
+          "source": "Meshy_AI_Clockwork_Torch_20260427_texture_fbx/Meshy_AI_Clockwork_Torch_20260427_texture.fbx",
+          "source_sha256": "d5351d139268fa4fc93b4899d457ddf6605aff0d2588dc11c8dab47790b2e755"
+        },
+        {
+          "source": "Meshy_AI_Clockwork_Torch_20260427_texture_fbx/Meshy_AI_Clockwork_Torch_20260427_texture.png",
+          "source_sha256": "3c97fd7a65db6596692acde9c8be42f53533493ec7a1ef537ad096d2d9ff1105"
+        },
+        {
+          "source": "Meshy_AI_Clockwork_Torch_20260427_texture_fbx/Meshy_AI_Clockwork_Torch_20260427_texture_emission.png",
+          "source_sha256": "d2d422d8a78b134bd8eaca53ce66dcd25334a50b8e8d91fa4c894a5e74c770fc"
+        },
+        {
+          "source": "Meshy_AI_Clockwork_Torch_20260427_texture_fbx/Meshy_AI_Clockwork_Torch_20260427_texture_metallic.png",
+          "source_sha256": "aa3a231dbd6eb5ff274a66cbe29f00639794dc10862fd58c64736867c390e184"
+        },
+        {
+          "source": "Meshy_AI_Clockwork_Torch_20260427_texture_fbx/Meshy_AI_Clockwork_Torch_20260427_texture_normal.png",
+          "source_sha256": "6a3eb32eee6db0fdcb53c74fe1d434f224a315cac684c40cd21b56e0563cc3c5"
+        },
+        {
+          "source": "Meshy_AI_Clockwork_Torch_20260427_texture_fbx/Meshy_AI_Clockwork_Torch_20260427_texture_roughness.png",
+          "source_sha256": "f14ada2c5bc5f0334ec7af27e0c0dc8d865c9de7a75651778bef9b963829c1b8"
+        }
+      ],
+      "unity_use": "Raid scene wall sconces and modular room wall sconces",
+      "triangles_source": 392102,
+      "triangles_art_meshes": 11480,
+      "unity_files": {
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/WallTorch/BaseColor.png": "b5c7a148ca0e550ef0466b76e117350b3b2e6c51f28179f186f5ec82b485dee2",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/WallTorch/Emission.png": "13653f95a20f78bf316a4220965b0ab91ebcd50197ab5d0ab1a8ffd3fd7c59e7",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/WallTorch/Normal.png": "185df1f543a0baf3dcdfb057996cdc81da086397a1a6b3084ba069d87355c553",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/WallTorch/PackedMask.png": "379142cfdba052277529626c4f54d85c7f126297c5aec9525b06d71e7d32ad3a",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/WallTorch/Surface.mat": "52c183d4cd27744efb9a8ad63b52107455fcce7496071cd35cb29fb0a08a26b9",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/WallTorch/Visual.asset": "d20d76ae3552f0cd932840c3381f3a19e3011decf370d0deb1b4f47d76398601",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/WallTorch/WallSconce.prefab": "5f701cf74b8e0001e65603801a30c9df6afb4321ef73432d0fea8b091f45877f",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/WallTorch/WallTorch.prefab": "1341209e9324f49c15ff0fd6dc1c3bcd51dbe318b52e64c87eaa8139c85ff859"
+      }
+    },
+    {
+      "asset": "KneelingShrine",
+      "meshy_task": "01a1fa18-c23b-7169-bb4f-8067d9cf1b73",
+      "original_files": [
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/KneelingShrine/01a1fa18-c23b-7169-bb4f-8067d9cf1b73/KneelingShrine.fbx",
+          "source_sha256": "882e97527d88a6dc89a3a796ddff697933e313e844d6ab94d637b449530aa2b5"
+        },
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/KneelingShrine/01a1fa18-c23b-7169-bb4f-8067d9cf1b73/Meshy_AI_A_single_weathered_medieval_limestone_20261120_texture.png",
+          "source_sha256": "0f61009c9222328bed10ac71502b5d4ed11285666fe54834bcbf3cff6a2a827a"
+        },
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/KneelingShrine/01a1fa18-c23b-7169-bb4f-8067d9cf1b73/Meshy_AI_A_single_weathered_medieval_limestone_20261120_texture_metallic.png",
+          "source_sha256": "6feaeff4656dd1f667e9702ebfa8884928a1f73ed695278c8dc032489844bdce"
+        },
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/KneelingShrine/01a1fa18-c23b-7169-bb4f-8067d9cf1b73/Meshy_AI_A_single_weathered_medieval_limestone_20261120_texture_normal.png",
+          "source_sha256": "592523141e9f3541a69ce9c9bd6ae19ced8e070aa01e62962aabb60ecb7cc493"
+        },
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/KneelingShrine/01a1fa18-c23b-7169-bb4f-8067d9cf1b73/Meshy_AI_A_single_weathered_medieval_limestone_20261120_texture_roughness.png",
+          "source_sha256": "bcc717c79ce7009d982b321d063fa5048f025a6149e11a97e09d4c1dd56fe318"
+        }
+      ],
+      "unity_use": "Full-scale statue at modular altars, entrances or burial rooms.",
+      "triangles_source": 8590,
+      "triangles_art_meshes": 8672,
+      "unity_files": {
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/KneelingShrine/BaseColor.png": "8ecb39ba6634413b350b8d732b48edbb8b3e75e2b496063ae0ac9c1781cc2e08",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/KneelingShrine/KneelingShrine.prefab": "4424741de89b38d69dffdcb754d52e8697b5a3d44817ddf84a20b20002b13929",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/KneelingShrine/Normal.png": "34a237ea58d254aef362568409b00eeff7e2ab388e9ecc7867d4b8943b16288a",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/KneelingShrine/PackedMask.png": "f32be5c16498086a8c5bf62751ff6ae0b0a79ff4f508766f13b74bd20976d891",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/KneelingShrine/Surface.mat": "63f20aae855dd2c43913a2cf69b48f08b0058e19999fff034b7db3f7d9a377a9",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/KneelingShrine/Visual.asset": "a2d2a07926e45d4750f94d61c19b96905626c2f234404f3b04ba82ce86bdedae"
+      },
+      "assigned_material": "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/ShrineStone/AgedShrineStone.mat",
+      "weathering": "Baked vertex cavity visibility and localized moss seeds. Three modeled plinth chips and projected branching fissures."
+    },
+    {
+      "asset": "StandingShrine",
+      "meshy_task": "01a1fa18-d51c-76e6-aad0-592b41744173",
+      "original_files": [
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/StandingShrine/01a1fa18-d51c-76e6-aad0-592b41744173/StandingShrine.fbx",
+          "source_sha256": "3e6e703f78721d4860e3953319912ec580218c0facacd76ad73e2e82d86bd42f"
+        },
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/StandingShrine/01a1fa18-d51c-76e6-aad0-592b41744173/Meshy_AI_A_single_ancient_standing_medieval_20261120_texture.png",
+          "source_sha256": "9338aefd2ac7ece94e2d027e698b00b235849be81cbc8dc537bd5a0c0cc041d4"
+        },
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/StandingShrine/01a1fa18-d51c-76e6-aad0-592b41744173/Meshy_AI_A_single_ancient_standing_medieval_20261120_texture_metallic.png",
+          "source_sha256": "bb310cfcefc71fdf9f99e9d912bae55ce9b12819bad9596c4f69922b47dcaae2"
+        },
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/StandingShrine/01a1fa18-d51c-76e6-aad0-592b41744173/Meshy_AI_A_single_ancient_standing_medieval_20261120_texture_normal.png",
+          "source_sha256": "63555bcb2ea796feffc6d3cdfe7f81eca5604ded2b30cc6da7ca969d5eb3ad49"
+        },
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/StandingShrine/01a1fa18-d51c-76e6-aad0-592b41744173/Meshy_AI_A_single_ancient_standing_medieval_20261120_texture_roughness.png",
+          "source_sha256": "a8a63ec0240689ef5652d054804e314b84d248fcb24fff89c2d5a73e08c97399"
+        }
+      ],
+      "unity_use": "Full-scale statue at modular altars, entrances or burial rooms.",
+      "triangles_source": 9195,
+      "triangles_art_meshes": 8965,
+      "unity_files": {
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/StandingShrine/BaseColor.png": "87128fb4cda1e36e3aeee334b183c4cceaed405cee9639dbc9c436549869c6af",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/StandingShrine/Normal.png": "06bf332dedc63b02098319546e4fdb01e7b80d6afe8044e9c34075c0ce594268",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/StandingShrine/PackedMask.png": "272091941c6ed3b9743617d5c2e0013e91084ef7027e187237a1fb560c18f82b",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/StandingShrine/StandingShrine.prefab": "b80e9dd33bfe215ccbbd9a764aed1bd885530d066b208badc4377fbf4eed1465",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/StandingShrine/Surface.mat": "6649911e1ae9e3a10fdfc5bc59210541a58d10cceb5530d1b52c7c9b33349701",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/StandingShrine/Visual.asset": "a55265d2e7570df1f2695298b23645ebe3fcde3b5fbfbdda0ae369443ef86b87"
+      },
+      "assigned_material": "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/ShrineStone/AgedShrineStone.mat",
+      "weathering": "Baked vertex cavity visibility and localized moss seeds. Three modeled plinth chips and projected branching fissures. Diagonal head fracture with a closed faceted cap."
+    },
+    {
+      "asset": "VotiveStand",
+      "meshy_task": "01a1fa18-c554-7313-8284-0c087274441d",
+      "original_files": [
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/VotiveStand/01a1fa18-c554-7313-8284-0c087274441d/VotiveStand.fbx",
+          "source_sha256": "a74747df10457fc0075211dbbacde53baa59798ab34b4b67ceb5d12d33c30825"
+        },
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/VotiveStand/01a1fa18-c554-7313-8284-0c087274441d/Meshy_AI_A_freestanding_medieval_crypt_votive_20261120_texture.png",
+          "source_sha256": "3ba2259a818b7760266fd92f990f8dc7b84e960f5a1b790ef4da85a7280efdad"
+        },
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/VotiveStand/01a1fa18-c554-7313-8284-0c087274441d/Meshy_AI_A_freestanding_medieval_crypt_votive_20261120_texture_metallic.png",
+          "source_sha256": "c8afd0304d0cd18080226a69d5f1f20f63339b2e21a457d2bedf5e3d789633fe"
+        },
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/VotiveStand/01a1fa18-c554-7313-8284-0c087274441d/Meshy_AI_A_freestanding_medieval_crypt_votive_20261120_texture_normal.png",
+          "source_sha256": "1155c3c8c7e5011e68132f845daaa4969b856e350a14bbb7db8c0f6d3d065da1"
+        },
+        {
+          "source": "SourceArt/AI/Meshy/CryptProps/VotiveStand/01a1fa18-c554-7313-8284-0c087274441d/Meshy_AI_A_freestanding_medieval_crypt_votive_20261120_texture_roughness.png",
+          "source_sha256": "9c19f4f195fda92ce94af61ca74652fc5dde32ce4189ed1d63ac65f9d26362e3"
+        }
+      ],
+      "unity_use": "Lit candle stand at modular altars and extraction rooms.",
+      "triangles_source": 3396,
+      "triangles_art_meshes": 3216,
+      "unity_files": {
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/VotiveStand/BaseColor.png": "070a0e9d24e02a09b95bd46aa8d906f42704f67df15a6205f7d80cc358a5b0a4",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/VotiveStand/CandleFlame.mat": "3ed84a6d37b741e9bf635b246a05c7848bcfc3631f605f63f851dc68107ef048",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/VotiveStand/Normal.png": "a093c0846c4cfb54332a0d5f7d8e23c10a910ce63400e09cbdb870be7c082b3c",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/VotiveStand/PackedMask.png": "e1a01e04ac0687fa01bdae1a1a7b7226be020add808c310612c8e683faf92a3b",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/VotiveStand/Surface.mat": "361e426b0f79fffa69d6a63426b7ed1670781eaef40f47335f2ca93f8aaaca5c",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/VotiveStand/Visual.asset": "9520a8877ff33e3266bc93e0c8a50ba368f01fc2a4c4af5f8ed77f612ce00ba5",
+        "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/VotiveStand/VotiveStand.prefab": "a029199d6cc36b87f50ccdf9ac30c36acdd0f48d68e134633369dfbc0b951c3d"
+      }
+    }
+  ],
+  "optimization": {
+    "geometry": "meshoptimizer 1.1.0, MIT; vertex UVs and normals retained",
+    "chests": "Separated at each sculpted seam. Added original fitted interior wood inserts and reused the existing lid hinge.",
+    "textures": "URP Lit with up to 1024px color, normal and emission maps. Metallic is packed into red and 1 - roughness is smoothness in alpha.",
+    "props": "The existing chest hitboxes and loot authority were retained. The wall torch and shrine meshes have no colliders."
+  },
+  "shrine_finish": {
+    "creator": "Original procedural material authored for DakaDaka",
+    "seed": 20870,
+    "description": "Tileable 1024px aged limestone color, normal, and data maps. Packed mask stores completely nonmetallic red, occlusion in green, and smoothness in alpha. The existing triplanar dungeon stone shader applies them to both praying figures.",
+    "files": {
+      "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/ShrineStone/AgedShrineStone.mat": "b7c5cc7278e505e106a4f8a6cc3357e8aeb11f5710d67c5beb4e495c8f27dd09",
+      "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/ShrineStone/AgedStone_BaseColor.png": "4d4ad850c6040b3de5c971b41f4805e82672e8b446434940ef25e30200ea55d8",
+      "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/ShrineStone/AgedStone_Mask.png": "866e997d096cd463b80c4aa2ddafb5fe4ab2a3cdec66ec5497f6322709e13a5b",
+      "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/ShrineStone/AgedStone_Normal.png": "644f136700002658d5d2e4184fc2cd887ab5780d7a95a22903a250d366e16db2",
+      "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/ShrineStone/PatchMoss.png": "4948ef2a400a8f922297128cc6fdae671229bbe974d011cfd0037e27b81efa11",
+      "Assets/Emberdelve/Art/Models/AI/Meshy/MapDressing/ShrineStone/StoneFissures.png": "8751895a4f71318a67ab33ca1f8fcc6e99f59c20d32ca319b853a764b1863497"
+    },
+    "candle_effect": "Removed 180 triangles in the three solid flame islands and preserved the mesh wicks. Three scaled instances use the existing animated fire-volume shader with a dedicated material. One warm flickering point light serves the tray.",
+    "sculpture_masks": "Red stores raycast ambient occlusion; green stores discrete moss seed coverage; blue distinguishes the exposed stone of the head cut and small chipped corners.",
+    "surface_detail_seed": 620314,
+    "surface_detail": "Original 1K patch moss color and coverage, plus branching fissure and raised edge maps. Texture projection layers the fine detail over the original aged limestone."
+  },
+  "placement": {
+    "mode": "default modular raid",
+    "height_meters": {
+      "standing": 2.22,
+      "kneeling": 2.1,
+      "player_reference": 1.8
+    },
+    "artist_checks": "Six assembled plans, two per floor. Artwork fits alongside the existing architecture. All four chest models use the same authoritative chest and loot system."
+  }
+}

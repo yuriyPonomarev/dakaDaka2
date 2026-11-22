@@ -126,11 +126,11 @@ namespace Emberdelve.Net
             if (float.IsFinite(hit.PointX) && float.IsFinite(hit.PointY) && float.IsFinite(hit.PointZ))
             {
                 Vector3 point = new Vector3(hit.PointX, hit.PointY, hit.PointZ);
-                Emberdelve.Feedback.WorldAudio.Play(hit.Blocked ? Emberdelve.Feedback.WorldSound.Metal : Emberdelve.Feedback.WorldSound.Impact, point);
-                // Reliable server hit RPCs reach client-only presentation; the host already uses FeedbackDirector.
-                // A miss or non-damaging status report must not look like a successful strike.
-                if (hit.Blocked || (float.IsFinite(hit.Amount) && hit.Amount > 0f))
+                if (hit.Blocked && !hit.GuardBroken && hit.Amount == 0f)
+                    Emberdelve.Feedback.FeedbackDirector.PlayGuardContact(point, hit.Parried);
+                else if (hit.Blocked || (float.IsFinite(hit.Amount) && hit.Amount > 0f))
                 {
+                    Emberdelve.Feedback.WorldAudio.Play(hit.Blocked ? Emberdelve.Feedback.WorldSound.Metal : Emberdelve.Feedback.WorldSound.Impact, point);
                     Color color = hit.Blocked ? new Color(.55f, .75f, 1f)
                         : hit.TargetIsEnemy ? new Color(1f, .85f, .45f) : new Color(1f, .4f, .35f);
                     Emberdelve.Feedback.ImpactFlash.Spawn(point, color, hit.Blocked ? .22f : .16f);
@@ -145,6 +145,9 @@ namespace Emberdelve.Net
                 {
                     NetPlayerRig targetRig = rigs[i];
                     if (targetRig == null || targetRig.Role != NetPlayerRole.Owner || targetRig.ServerPlayerId.Value != hit.Target) continue;
+                    // Client-only owners do not receive the authority's local GuardContact event.
+                    if (hit.Parried && !hit.GuardBroken && hit.Amount == 0f)
+                        GameEvents.RaiseToast(hit.Target, "Parry");
                     if (targetRig.Rig != null && targetRig.Rig.Loadout != null)
                     {
                         bool shieldBlock = targetRig.Rig.Defense.HasShield;
@@ -170,7 +173,7 @@ namespace Emberdelve.Net
 
             Debug.Log(NetTuning.LogPrefix + "[client] server-hit src=" + SourceName(hit.Source) + " attacker=" + hit.Attacker + " target=" + hit.Target +
                       " enemy=" + hit.TargetIsEnemy + " amount=" + F(hit.Amount) + " loc=" + LocationName(hit.Location) + " blocked=" + hit.Blocked +
-                      " guardBroken=" + hit.GuardBroken + " killed=" + hit.Killed);
+                      " guardBroken=" + hit.GuardBroken + " killed=" + hit.Killed + " parried=" + hit.Parried);
         }
 
         // The wire carries bytes; the report names the enums exactly as the server's combat-hit line does (src=Melee, loc=Arms).

@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using Emberdelve.Core;
+using Emberdelve.Feedback;
 
 namespace Emberdelve.Interaction
 {
@@ -33,8 +34,10 @@ namespace Emberdelve.Interaction
         [SerializeField] private Vector3 openPanelOffset;
         [SerializeField] private Transform leverHandle;
         [SerializeField] private BoxCollider secretRoomVolume;
+        [SerializeField, Min(.05f)] private float swingDuration = .43f;
         private bool _open;
         private int _boundFloor;
+        private float _swing;
 
         public string DoorId => doorId;
         public bool IsOpen => _open;
@@ -48,12 +51,18 @@ namespace Emberdelve.Interaction
 
         public void Configure(string id, Transform newHinge, Collider doorBlocker, float swingYaw)
         {
-            secret = false;
-            doorId = id;
             hinge = newHinge;
             blocker = doorBlocker;
             openYaw = swingYaw;
-            SetOpen(false);
+            Configure(id);
+        }
+
+        public void Configure(string id)
+        {
+            secret = false;
+            doorId = id;
+            _boundFloor = 0;
+            SetOpen(false, immediate: true);
         }
 
         /// <summary>The interaction root stays at the lever; the descendant panel may be offset to a remote entrance.</summary>
@@ -70,7 +79,7 @@ namespace Emberdelve.Interaction
             closedPanelPosition = slidingPanel != null ? slidingPanel.localPosition : Vector3.zero;
             openPanelOffset = openLocalOffset;
             leverHandle = transform.Find("Lever_Handle");
-            SetOpen(false);
+            SetOpen(false, immediate: true);
         }
 
         public string SecretIdForCell(int x, int y) => "secret_" + x + "_" + y + "_" + secretLocalKey;
@@ -159,10 +168,10 @@ namespace Emberdelve.Interaction
         public void OnHoldComplete(IInteractionActor actor) => OnInteractInstant(actor);
 
         /// <summary>Applies an authoritative state update; validates IDs before changing collision.</summary>
-        public bool ApplyReplicatedState(string id, bool open)
+        public bool ApplyReplicatedState(string id, bool open, bool immediate = false)
         {
             if (!string.Equals(doorId, id, StringComparison.Ordinal) || !IsValidDoorId(id)) return false;
-            SetOpen(open);
+            SetOpen(open, immediate);
             return true;
         }
 
@@ -188,16 +197,41 @@ namespace Emberdelve.Interaction
             return true;
         }
 
-        private void SetOpen(bool open)
+        private void SetOpen(bool open, bool immediate = false)
         {
+            bool startsOpening = open && !_open;
             _open = open;
-            if (hinge != null)
+            if (blocker != null && blocker.enabled == open) blocker.enabled = !open;
+            if (secret)
             {
-                if (secret) hinge.localPosition = closedPanelPosition + (open ? openPanelOffset : Vector3.zero);
-                else hinge.localRotation = Quaternion.Euler(0f, open ? openYaw : 0f, 0f);
+                // Cache panels retain their authoritative lift; only regular hinged doors swing.
+                if (hinge != null) hinge.localPosition = closedPanelPosition + (open ? openPanelOffset : Vector3.zero);
+                if (leverHandle != null) leverHandle.localRotation = Quaternion.Euler(open ? 35f : -35f, 0f, 0f);
+                return;
             }
-            if (blocker != null) blocker.enabled = !open;
-            if (secret && leverHandle != null) leverHandle.localRotation = Quaternion.Euler(open ? 35f : -35f, 0f, 0f);
+            if (immediate || !Application.isPlaying || !isActiveAndEnabled)
+            {
+                _swing = open ? 1f : 0f;
+                PoseHinge();
+            }
+            else if (startsOpening && _swing < 1f && hinge != null)
+                WorldAudio.Play(WorldSound.DoorCreak, transform.position + Vector3.up * 1.05f, .77f);
+        }
+
+        private void Update()
+        {
+            if (secret) return;
+            float target = _open ? 1f : 0f;
+            if (_swing == target) return;
+            _swing = Mathf.MoveTowards(_swing, target, Time.deltaTime / swingDuration);
+            PoseHinge();
+            if (_swing == 0f && hinge != null)
+                WorldAudio.Play(WorldSound.DoorThud, transform.position + Vector3.up * 1.05f, .88f);
+        }
+
+        private void PoseHinge()
+        {
+            if (hinge != null) hinge.localRotation = Quaternion.Euler(0f, Mathf.SmoothStep(0f, openYaw, _swing), 0f);
         }
 
         private static bool TryGetAuthority(IInteractionActor actor, out IDoorInteractionAuthority authority)

@@ -8,6 +8,16 @@ namespace Emberdelve.Tests.Visual
     public sealed class RaidReadabilityTests
     {
         [Test]
+        public void DungeonAmbience_ImportsAContinuousStereoAsset()
+        {
+            var clip = Resources.Load<AudioClip>(DungeonAmbience.ClipResource);
+            Assert.NotNull(clip);
+            Assert.That(clip.channels, Is.EqualTo(2));
+            Assert.That(clip.frequency, Is.EqualTo(48000));
+            Assert.That(clip.length, Is.EqualTo(48f).Within(.01f));
+        }
+
+        [Test]
         public void Footsteps_RequireTravelAndRejectTeleportsAirborneAndDeadMovement()
         {
             var cadence = new FootstepCadence();
@@ -54,7 +64,7 @@ namespace Emberdelve.Tests.Visual
             Random.InitState(278);
             float expected = Random.value;
             Random.InitState(278);
-            var clips = new[] { ProceduralAudio.SwordSwing(), ProceduralAudio.Impact(), ProceduralAudio.StoneStep(), ProceduralAudio.FireCrackle() };
+            var clips = new[] { ProceduralAudio.SwordSwing(), ProceduralAudio.Impact(), ProceduralAudio.StoneStep() };
             try
             {
                 Assert.AreEqual(expected, Random.value);

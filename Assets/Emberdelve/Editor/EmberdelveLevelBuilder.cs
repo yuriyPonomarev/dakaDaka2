@@ -717,6 +717,7 @@ namespace Emberdelve.EditorTools
             cameraGo.tag = "MainCamera";
 
             Camera camera = cameraGo.AddComponent<Camera>();
+            cameraGo.AddComponent<AudioListener>();
             camera.clearFlags = CameraClearFlags.SolidColor;
             camera.backgroundColor = new Color(0.015f, 0.015f, 0.02f, 1f);
             camera.nearClipPlane = 0.05f;

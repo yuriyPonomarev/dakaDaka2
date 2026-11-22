@@ -66,6 +66,9 @@ namespace Emberdelve.EditorTools
                 DungeonSurfaceMaterials.Apply(root);
                 DungeonFloorWear.Apply(root);
                 DungeonRoomProps.Apply(root);
+                if (spec.Kind == DungeonModuleKind.Entry) CommunityRuinsTrial.Apply(root);
+                MeshyMapDressing.ApplyWayside(root);
+                DownloadedCryptArchitecture.Apply(root);
                 string path = PrefabFolder + "/" + spec.Name + ".prefab";
                 GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, path);
                 UnityEngine.Object.DestroyImmediate(root);
@@ -121,8 +124,10 @@ namespace Emberdelve.EditorTools
                         theme + "_" + original.Name, original.Kind, original.Variant);
                     var root = CreateModule(spec, stone, floor, ceiling, destination);
                     DungeonSurfaceMaterials.Apply(root);
-                DungeonFloorWear.Apply(root);
-                DungeonRoomProps.Apply(root);
+                    DungeonFloorWear.Apply(root);
+                    DungeonRoomProps.Apply(root);
+                    MeshyMapDressing.ApplyWayside(root);
+                    DownloadedCryptArchitecture.Apply(root);
                     try
                     {
                         var prefab = PrefabUtility.SaveAsPrefabAsset(root, PrefabFolder + "/" + theme + "/" + spec.Name + ".prefab");
@@ -197,9 +202,7 @@ namespace Emberdelve.EditorTools
                 BuildSide(root.transform, false, false, wall);
                 BuildSide(root.transform, false, true, wall);
             }
-            else
-                for (int side = 0; side < 4; side++)
-                    RuinsWallProfile.Build(root.transform, side < 2, side % 2 == 1, wall, ((int)spec.Kind + spec.Variant + side) % 3, Half);
+            else BuildRuinsWalls(root.transform, spec, wall);
             for (int i = 0; i < 4; i++)
             {
                 bool horizontal = i == 0 || i == 2;
@@ -219,6 +222,7 @@ namespace Emberdelve.EditorTools
             }
             else RoyaleRoomArchitecture.Build(root.transform, destination, spec.Kind, spec.Variant, wall, floor);
             DungeonRoomExpansion.Dress(root.transform, spec.Kind, spec.Variant, destination, wall, floor);
+            MeshyMapDressing.ApplyRoom(root);
             return root;
         }
 
@@ -232,6 +236,36 @@ namespace Emberdelve.EditorTools
             Vector3 size = horizontal ? new Vector3(span,WallHeight,.7f) : new Vector3(.7f,WallHeight,span);
             Box(root,"WallRun_"+(horizontal ? "H" : "V")+"_"+(negative ? "N" : "P")+"_A",firstPos,size,material);
             Box(root,"WallRun_"+(horizontal ? "H" : "V")+"_"+(negative ? "N" : "P")+"_B",secondPos,size,material);
+        }
+
+        [MenuItem("Emberdelve/Visual/Rebuild Ruined Room Walls")]
+        public static void RebuildRuinedRoomWalls()
+        {
+            const string path = "Assets/Emberdelve/Art/Generated/DungeonSurfaces/World_Stone_Wall.mat";
+            var stone = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (stone == null) throw new InvalidOperationException("Missing " + path);
+            RuinsWallProfile.RebuildMeshes();
+            foreach (var spec in Specs)
+            {
+                if (spec.Kind == DungeonModuleKind.Vault) continue;
+                string prefabPath = $"{PrefabFolder}/{spec.Name}.prefab";
+                var root = PrefabUtility.LoadPrefabContents(prefabPath);
+                try
+                {
+                    BuildRuinsWalls(root.transform, spec, stone);
+                    if (PrefabUtility.SaveAsPrefabAsset(root, prefabPath) == null)
+                        throw new InvalidOperationException("Could not save " + prefabPath);
+                }
+                finally { PrefabUtility.UnloadPrefabContents(root); }
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("[RuinedRoomWalls] Rebuilt nine outdoor rooms with colliding chamfered corners and folded walls.");
+        }
+
+        private static void BuildRuinsWalls(Transform root, Spec spec, Material stone)
+        {
+            bool highDeck = spec.Kind == DungeonModuleKind.Shrine || spec.Kind == DungeonModuleKind.Bridge;
+            RuinsWallProfile.BuildRoom(root, stone, (int)spec.Kind + spec.Variant, highDeck);
         }
 
         private static void AddRoomFeature(Transform root, Spec spec, Material stone, Material floor)

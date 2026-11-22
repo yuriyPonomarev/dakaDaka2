@@ -30,6 +30,7 @@ namespace Emberdelve.Core
         public static event Action<int, RunState> PlayerRunStateChanged;
         public static event Action<int, float, float> PlayerHealthChanged;
         public static event Action<int, DamageInfo> PlayerDamaged;
+        public static event Action<int, Vector3, bool> GuardContact;
         public static event Action<int, HitFeedback> DamageDealt;
         public static event Action<int, ItemData, int> ItemCollected;
         public static event Action<int> InventoryChanged;
@@ -57,6 +58,7 @@ namespace Emberdelve.Core
         public static void RaisePlayerRunState(int playerId, RunState state) => GameEventTransaction.Publish(PlayerRunStateChanged, playerId, state);
         public static void RaisePlayerHealth(int playerId, float current, float max) => GameEventTransaction.Publish(PlayerHealthChanged, playerId, current, max);
         public static void RaisePlayerDamaged(int playerId, DamageInfo info) => GameEventTransaction.Publish(PlayerDamaged, playerId, info);
+        public static void RaiseGuardContact(int playerId, Vector3 point, bool parried) => GameEventTransaction.Publish(GuardContact, playerId, point, parried);
         public static void RaiseDamageDealt(int playerId, HitFeedback feedback) => GameEventTransaction.Publish(DamageDealt, playerId, feedback);
         public static void RaiseItemCollected(int playerId, ItemData item, int totalCollected) => GameEventTransaction.Publish(ItemCollected, playerId, item, totalCollected);
         public static void RaiseInventoryChanged(int playerId) => GameEventTransaction.Publish(InventoryChanged, playerId);

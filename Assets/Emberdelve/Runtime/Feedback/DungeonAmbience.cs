@@ -8,10 +8,11 @@ namespace Emberdelve.Feedback
     [DisallowMultipleComponent]
     public sealed class DungeonAmbience : MonoBehaviour
     {
+        public const string ClipResource = "Emberdelve/Audio/DarkFantasyAmbience";
+
         private Emberdelve.Player.PlayerRig _boundPlayer;
         public void BindPlayer(Emberdelve.Player.PlayerRig player) => _boundPlayer = player;
-        private AudioSource _wind;
-        private AudioClip _clip;
+        private AudioSource _ambience;
         private AudioReverbZone _room;
         private RunDirector _director;
         private FeedbackDirector _feedback;
@@ -23,14 +24,14 @@ namespace Emberdelve.Feedback
         {
             _feedback = GetComponent<FeedbackDirector>();
             _mask = LayerMask.GetMask(GameConfig.LevelLayerName);
-            _clip = ProceduralAudio.RuinWind();
-            _wind = gameObject.AddComponent<AudioSource>();
-            _wind.playOnAwake = false;
-            _wind.loop = true;
-            _wind.clip = _clip;
-            _wind.volume = 0f;
-            _wind.spatialBlend = 0f;
-            _wind.reverbZoneMix = 0f;
+            _ambience = gameObject.AddComponent<AudioSource>();
+            _ambience.playOnAwake = false;
+            _ambience.loop = true;
+            _ambience.clip = Resources.Load<AudioClip>(ClipResource);
+            if (_ambience.clip == null) Debug.LogError("[DungeonAmbience] Missing ambient clip: " + ClipResource, this);
+            _ambience.volume = 0f;
+            _ambience.spatialBlend = 0f;
+            _ambience.reverbZoneMix = 0f;
             var zone = new GameObject("ListenerRoomReverb");
             zone.transform.SetParent(transform, false);
             _room = zone.AddComponent<AudioReverbZone>();
@@ -44,7 +45,8 @@ namespace Emberdelve.Feedback
             var player = _boundPlayer != null ? _boundPlayer : _director != null ? _director.Player : null;
             bool running = player != null && !player.IsDead && (_boundPlayer != null ||
                 (_director.State == RunState.Running && _director.LocalPlayerState == RunState.Running));
-            if (running && player.Look != null)
+            bool hasListener = running && player.Look != null;
+            if (hasListener)
             {
                 Vector3 eye = player.Look.AimOrigin;
                 _room.transform.position = eye;
@@ -54,21 +56,31 @@ namespace Emberdelve.Feedback
                     _covered = Physics.Raycast(eye, Vector3.up, 14f, _mask, QueryTriggerInteraction.Ignore);
                     _room.reverbPreset = _covered ? AudioReverbPreset.StoneCorridor : AudioReverbPreset.Off;
                 }
-                _target = (_covered ? .012f : .055f) * (_feedback != null ? _feedback.masterVolume : .7f);
-                if (!_wind.isPlaying) _wind.Play();
+                _target = (_covered ? .29f : .42f) * (_feedback != null ? _feedback.masterVolume : .7f);
+                if (_ambience.clip != null && !_ambience.isPlaying) _ambience.Play();
             }
             else
             {
                 _target = 0f;
                 _room.reverbPreset = AudioReverbPreset.Off;
             }
-            _wind.volume = Mathf.MoveTowards(_wind.volume, _target, Time.unscaledDeltaTime * .04f);
+            _ambience.volume = Mathf.MoveTowards(_ambience.volume, _target, Time.unscaledDeltaTime * .25f);
+            if (!hasListener && _ambience.volume == 0f && _ambience.isPlaying) _ambience.Stop();
         }
         private void OnDisable()
         {
-            if (_wind != null) _wind.Stop();
+            if (_ambience != null)
+            {
+                _ambience.Stop();
+                _ambience.volume = 0f;
+            }
             if (_room != null) _room.reverbPreset = AudioReverbPreset.Off;
         }
-        private void OnDestroy() { if (_clip != null) Destroy(_clip); }
+        private void OnDestroy()
+        {
+            // The resource clip is shared. Only the components created by this instance are owned here.
+            if (_ambience != null) Destroy(_ambience);
+            if (_room != null) Destroy(_room.gameObject);
+        }
     }
 }

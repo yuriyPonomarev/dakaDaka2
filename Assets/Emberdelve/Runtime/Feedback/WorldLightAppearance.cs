@@ -11,7 +11,6 @@ namespace Emberdelve.Feedback
         public static void Configure(Light light)
         {
             if (light == null || light.type == LightType.Directional) return;
-            if (Application.isPlaying && light.GetComponent<FlameAudio>() == null) light.gameObject.AddComponent<FlameAudio>();
             // Appearance/interaction must preserve the authored light budget and reach.
             // Decorative braziers intentionally have no shadows; torches opt into them.
             var flicker = light.GetComponent<TorchFlicker>();

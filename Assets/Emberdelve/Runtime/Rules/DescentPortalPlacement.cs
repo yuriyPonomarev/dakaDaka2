@@ -30,18 +30,31 @@ namespace Emberdelve.Rules
                 int j = (int)(random % (uint)(i + 1));
                 var swap = available[i]; available[i] = available[j]; available[j] = swap;
             }
-            var result = new List<PortalLocation>();
-            foreach (var candidate in available)
+            var result = new PortalLocation[groups];
+            if (!TryFill(available, separation * separation, result, 0, 0)) return false;
+            selected = result;
+            return true;
+        }
+
+        private static bool TryFill(IReadOnlyList<PortalLocation> available, double minDistanceSquared,
+            PortalLocation[] result, int start, int count)
+        {
+            if (count == result.Length) return true;
+            int last = available.Count - (result.Length - count);
+            for (int index = start; index <= last; index++)
             {
+                PortalLocation candidate = available[index];
                 bool clear = true;
-                foreach (var prior in result)
+                for (int i = 0; i < count; i++)
                 {
-                    double dx = candidate.X - prior.X, dz = candidate.Z - prior.Z;
-                    if (dx * dx + dz * dz < separation * separation) { clear = false; break; }
+                    double dx = candidate.X - result[i].X, dz = candidate.Z - result[i].Z;
+                    if (dx * dx + dz * dz >= minDistanceSquared) continue;
+                    clear = false;
+                    break;
                 }
                 if (!clear) continue;
-                result.Add(candidate);
-                if (result.Count == groups) { selected = result.ToArray(); return true; }
+                result[count] = candidate;
+                if (TryFill(available, minDistanceSquared, result, index + 1, count + 1)) return true;
             }
             return false;
         }

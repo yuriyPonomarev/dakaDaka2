@@ -40,7 +40,7 @@ namespace Emberdelve.Net
             {
                 var slot = _slots[i]; slot.gameObject.SetActive(_state.IsAvailable(i));
                 if (i >= _state.Count) continue;
-                slot.transform.position = _state.Position(i); slot.Configure(_owner, _owner.Rig, _state.Floor, i / size, i % size);
+                slot.transform.position = _state.Position(i); slot.Configure(_owner, _owner.Rig, _state.Floor, i / size, i % size, size > 1);
             }
         }
         private void OnDestroy() { if (_root != null) { if (Application.isPlaying) Destroy(_root); else DestroyImmediate(_root); } }

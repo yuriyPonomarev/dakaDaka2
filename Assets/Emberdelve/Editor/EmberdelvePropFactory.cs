@@ -57,19 +57,32 @@ namespace Emberdelve.EditorTools
             bool created = set == null;
             if (created) set = ScriptableObject.CreateInstance<ChestVisualSet>();
 
+            var supply = MeshyMapDressing.Load("IronboundChest");
+            var ember = MeshyMapDressing.Load("TreasureChest");
+            var sealedChest = MeshyMapDressing.Load("AncientChest");
+            var emberEntry = NewEntry(ChestVariant.Ember, ember ?? chest, ember != null ? Color.white : new Color(1f, 0.78f, 0.5f, 1f));
+            if (ember != null) emberEntry.alternateModel = MeshyMapDressing.Load("HiddenChest");
             set.entries = new[]
             {
-                NewEntry(ChestVariant.Supply, chest, Color.white),
-                NewEntry(ChestVariant.Ember, chest, new Color(1f, 0.78f, 0.5f, 1f)),
-                NewEntry(ChestVariant.Sealed, chest, new Color(0.55f, 0.6f, 0.9f, 1f))
+                NewEntry(ChestVariant.Supply, supply ?? chest, Color.white),
+                emberEntry,
+                NewEntry(ChestVariant.Sealed, sealedChest ?? chest, sealedChest != null ? Color.white : new Color(0.55f, 0.6f, 0.9f, 1f))
             };
 
             if (created) AssetDatabase.CreateAsset(set, ChestSetPath);
             else EditorUtility.SetDirty(set);
             AssetDatabase.SaveAssets();
 
-            if (chest == null) Debug.LogWarning("[Emberdelve][Props] the Poly Haven treasure_chest is not imported; the chests keep their blockout cubes.");
+            if (ArrayHasMissingModel(set.entries))
+                Debug.LogWarning("[Emberdelve][Props] Some chest variants have no visual asset and will use their fallback cubes.");
             return set;
+        }
+
+        private static bool ArrayHasMissingModel(ChestVisualSet.Entry[] entries)
+        {
+            foreach (var entry in entries)
+                if (entry.model == null) return true;
+            return false;
         }
 
         private static ChestVisualSet.Entry NewEntry(ChestVariant variant, GameObject model, Color tint)

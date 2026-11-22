@@ -55,5 +55,18 @@ namespace Emberdelve.Rules
 
         public bool IsGroupOpen(int groupIndex, double elapsed) => groupIndex >= 0
             && TryGetAvailableGroups(elapsed, out int available) && groupIndex < available;
+
+        public bool TryGetSecondsToNextWave(double elapsed, out double seconds)
+        {
+            seconds = 0;
+            if (!SwarmSchedule.Finite(elapsed) || elapsed < 0) return false;
+            foreach (var wave in _waves)
+            {
+                if (wave.AppearsAt <= elapsed) continue;
+                seconds = wave.AppearsAt - elapsed;
+                return true;
+            }
+            return false;
+        }
     }
 }

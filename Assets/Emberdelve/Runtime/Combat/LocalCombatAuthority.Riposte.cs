@@ -43,10 +43,10 @@ namespace Emberdelve.Combat
             if (target != null && damage.Amount > 0f) _riposte.NoteDamage(target.CombatId);
         }
 
-        /// <summary>The result of a melee hit on <paramref name="target"/>: a physical player sword block opens a riposte only at its confirmed parry region.</summary>
-        private void NoteMeleeResult(int attackerId, ICombatEntity target, in DamageInfo damage)
+        /// <summary>Records the sword response and returns whether this hit earned a physical parry.</summary>
+        private bool NoteMeleeResult(int attackerId, ICombatEntity target, in DamageInfo damage)
         {
-            if (target == null) return;
+            if (target == null) return false;
             bool kitCan = target is IRiposteKit kit && RiposteKitOf(target, kit, out _);
             // Player guards have authoritative geometry. Abstract rule-only combat entities
             // retain their own guard contract; they do not expose a physical player blade.
@@ -64,13 +64,14 @@ namespace Emberdelve.Combat
                 if (target is Emberdelve.Player.PlayerRig && !parryBonus)
                 {
                     _riposte.Forget(target.CombatId);
-                    return;
+                    return false;
                 }
                 _riposte.NoteBlock(target.CombatId, attackerId, Now, WeaponEpochOf(target), parryBonus);
-                return;
+                return parryBonus;
             }
 
             NoteDamageTaken(target, in damage);
+            return false;
         }
 
         private static bool RiposteKitOf(ICombatEntity entity, IRiposteKit kit, out WeaponData weapon)

@@ -1,27 +1,27 @@
 # DakaDaka — current work
 
-Updated 21 November 2026. Primary development checkout: `C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff`, tracking `origin/main`. `../DakaDaka` is the preserved old checkout; tests/builds use `../DakaDaka_ci`. Do not close or enter Play mode in the user's Editor.
+Updated22 November2026. The ONLY development checkout is `C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff`. Legacy `../DakaDaka` is read-only; `../DakaDaka_ci` is a disposable test/build mirror synchronized only from handoff. Never close or automate Play mode in the user's main Editor. Visual reviews use a separate visible mirror Editor and record an MP4 with game audio.
 
-## Active slice: expanded rooms and lever caches
+## Current baseline: consolidated Meshy environment and melodic ambience
 
-User requested larger, more varied modules, rises/descents, and secret rooms opened by levers, using existing assets or free public Meshy assets. Report: [ROOM_EXPANSION_20261121](../Tasks/ROOM_EXPANSION_20261121.md).
+User authorized combining Sol's models/doors/raid work with enlarged rooms and lever caches, improving the result and committing it. Latest request adds downloaded Meshy architecture and melodic instrumental dark-fantasy ambience. Full record: [HANDOFF_INTEGRATION_20261122](../Tasks/HANDOFF_INTEGRATION_20261122.md).
 
-- All 30 saved room prefabs expanded from 24×24m to 36×36m. Two supported upper balconies at +3.9m, a true sunken passage at −1.5m, stairs, perimeter bays and varied furnishing. Free central doorway axis preserves large-enemy clearance. Three catalogs retain stable order; protocol 43 and dimension-aware socket/corridor placement.
-- Existing CC0 Poly Haven tables/barrels/crates/buckets, project arches/sarcophagi and existing materials reused. Public Meshy downloads were blocked by site access; no new Meshy model or spending.
-- Twelve cache variants: lever-only server reach/LOS, stable room/floor IDs, replicated sliding wall/handle, one-way unlock, AI cannot operate secrets. Cache volume excludes random spawns; authored anchors add deterministic server-owned chests.
-- Final v6 main compile clean; mirror rebuilt all 30 modules. Thirty prefabs and three catalogs hash-match the mirror. Fifteen final views inspected/stored in `Logs/review/room-expansion` (staged renders, not ordinary live-player acceptance).
-- Final v6 level tests: 146/146 passed, including all 18 new controller/clearance/AI path cases and multiple-seed staged-floor placement. Earlier full EditMode: 1461 tests, 4 failures, 12 skipped; failures concern skeleton meshes, Cinder Warden mapping, crossbow palm and cinder_club mapping. Affected planner, door, snapshot and movement-geometry fixtures passed.
-- Full integration `Logs/runs/20261121-192920-176`: 71/71 gates completed, 65 passed, 6 failed; all network entries passed. Remaining failures concern inventory schema, claw trajectory, weapon/preset mapping and HUD (report lists details).
-- Final affected network run `Logs/runs/20261121-201826-956`: 5/5 passed, 924 checks and no failures: NetMovement 198, NetFinal 172, NetDoor 49, NetInventory 148, NetRoyale 357. NetDoor includes actual remote-wall rejection, accepted lever RPC, three-client wall replication and repeated-activation rejection.
+- Checkout rule committed as `0875d13d`; parent/legacy redirects installed. Room/cache work committed as `cbe51fad4`. Consolidated integration is recorded by the commit containing this page.
+- Preserved primary hands/combat,36m modules,+3.9m galleries,−1.5m passages and server-owned lever caches. Protocol47 combines geometry/wire changes. Unified offline loot custody, preserved put-back/body search and added reservation/duplicate/retired-floor protection; restored authoritative owner Parry feedback.
+- Rebuilt all30 modules and dynamic door with downloaded pillars/barrels, Meshy reliquaries and cropped arch/stone-facing meshes. Shared crypt stone replaces patchy pillar albedo. Floors, stairs and irregular broken walls retain authored forms. [Architecture sources and budget](../Tasks/DOWNLOADED_ARCHITECTURE_20261122.md). Geometry/render counts increased; no FPS claim.
+- New original48s stereo chamber loop: cello/viola, horn, woodwind melody, harp and frame drum. Reproducible, no clipping, circular seam. Missing player AudioListeners repaired; repetitive fire/wind loops removed. Generator/review helper: `Tools/Audio`.
+- Final visible seeds12345/67890 each pass14 playback/lifecycle checks; both5.97s MP4s decode with stereo audio. Ordinary camera/HUD/AI/lighting preserved during recording. Post-recording component lifecycle assertions pause simulation. Videos: `Logs/acceptance/ambience-20261122/melodic-review-{seed}`.
+- Final module suite146/146 and movement geometry11/11 pass. All11 real-process network gates pass1763 checks. Combined71-entry integration coverage:65 pass,6 retain baseline failures, no new failing assertions; one old retro-readability failure resolved. Broad EditMode:1479 total,1463 pass,4 existing failures,12 skipped. Full suite is not green.
+- The final smoke fixture initially failed because new offline player-bots interfered with EnemyAgent measurements. Fixture now waits for real floor admission and parks unrelated bots; runtime combat and existing assertions are unchanged. Failed-seed and12345 reruns each complete264 checks with only2 old HUD failures. Other passing suites were not repeated for this fixture-only correction.
 
-Changes remain uncommitted pending user visual acceptance. Preserve inherited material, Oasis texture and ProjectSettings drift; no package/engine upgrades.
+## Preservation and limitations
 
-## Preserved work and limitations
+First three visible checks used the ordinary local Squire profile and may have parked prepared gear in stash. Current Warrior save and backup were preserved under `Logs/acceptance/ambience-20261122/profile-preservation`; no pre-run snapshot establishes the earlier loadout. User informed; no guessed restoration. Subsequent reviews require an isolated mirror `--ember-profile-dir`.
 
-Previous CURRENT_WORK, including detailed 17–20 November combat/character evidence and historical references, is preserved verbatim in [CURRENT_WORK_BEFORE_ROOMS_20261121](../Tasks/CURRENT_WORK_BEFORE_ROOMS_20261121.md). Historical results do not validate this slice. Meshy warrior/hands and two-handed guard visual acceptance remain separate. Ordinary Royale final evacuation/profile-restart acceptance and previously observed native allocator error investigation remain open. Several older task links point to files retained only in the old checkout.
+Original audio/incidental Unity drift remains backed up in stash `Preserve audio completion and inherited Unity drift before Sol integration`. Completed audio has been revised; never blindly pop the stash. Excluded material/Oasis/settings drift is preserved outside the integration commit. No engine/package upgrades or legacy gameplay writes. Final content comparison covers392 staged game/source files; diagnostic legacy-scene regeneration was discarded only in the mirror.
 
 ## Next three actions
 
-1. Review final room previews with the user; choose any requested visual adjustments.
-2. Review expanded modules and lever caches in ordinary play with the user; visual acceptance remains separate from automated proof.
-3. Resume existing Royale acceptance and deferred character/combat feedback according to the user's next priority.
+1. User art/mix review of the new environment and full48s arrangement; entry sweeps do not claim every interior/cache close-up or GPU profiling.
+2. Address the existing schema/attribute/weapon/enemy/HUD test debt as a separate requested slice; see the report's exact baseline comparison.
+3. Continue development only in handoff, using isolated saves and bounded checks; do not rerun the entire integration suite without relevant new changes.

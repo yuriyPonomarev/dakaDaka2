@@ -28,6 +28,9 @@ namespace Emberdelve.AI
         private LootPickup _lootTarget;
         private float _lootScan;
         private DescentPortalSlot _descentTarget;
+        private DescentPortalSlot _heldDescent;
+        private double _descentStartedAt;
+        private float _descentStartHealth;
         private float _portalScan, _exitScan;
         private ExtractionPoint _exitTarget;
         private ExtractionHoldWindow _exitHold;
@@ -125,9 +128,14 @@ namespace Emberdelve.AI
                 // Encounter portals are inside the final safe circle. A known exit is a safe
                 // retreat goal too; last-minute survival takes precedence over chasing a fight.
                 _target = null;
-                if (_descentTarget.CanInteract(_rig, out _) && _descentTarget.Group.TryEnter(_rig, _descentTarget.Slot, out _))
-                { StopIntent(); return; }
+                if (_descentTarget.CanInteract(_rig, out _))
+                {
+                    if (!_descentTarget.RequiresHold || StepDescentHold())
+                        if (_descentTarget.Group.TryEnter(_rig, _descentTarget.Slot, out _)) StopIntent();
+                    return;
+                }
             }
+            _heldDescent = null;
             if (_exitTarget != null && (!_exitTarget.isActiveAndEnabled || _exitTarget.Floor != Floor)) _exitTarget = null;
             var finalExit = encounter?.FinalExit;
             if (_exitTarget == null && _exitScan <= 0f && Floor == 3 && finalExit != null && finalExit.isActiveAndEnabled
@@ -242,6 +250,21 @@ namespace Emberdelve.AI
             _rig.Movement.Step(in frame, dt);
         }
 
+        private bool StepDescentHold()
+        {
+            if (_melee != null) { _melee.SetRemoteAttack(false); _melee.SetRemoteGuard(false); }
+            if (_ranged != null) _ranged.CancelDraw();
+            float health = _rig.CurrentHealth;
+            if (_heldDescent != _descentTarget || health < _descentStartHealth)
+            {
+                _heldDescent = _descentTarget;
+                _descentStartedAt = _intentClock;
+                _descentStartHealth = health;
+                CancelExtractionHold();
+            }
+            return _intentClock - _descentStartedAt >= _descentTarget.HoldDuration;
+        }
+
         private void StepExtractionHold()
         {
             if (_melee != null) { _melee.SetRemoteAttack(false); _melee.SetRemoteGuard(false); }
@@ -279,7 +302,8 @@ namespace Emberdelve.AI
         }
 
         private bool IsAvailablePortal(DescentPortalSlot slot) => slot != null && slot.isActiveAndEnabled
-            && slot.Group != null && slot.Group.Floor == Floor && !slot.Group.SlotUsed(slot.Slot);
+            && slot.Group != null && slot.Group.Floor == Floor && !slot.Group.SlotUsed(slot.Slot)
+            && slot.Group.IsAvailableToParty(_rig.PartyId) && _director.CanQueueDescent(_rig, Floor, out _);
 
         private bool CanSee(PlayerRig target)
             => CanSeePoint(target.transform, target.AimOrigin);
@@ -331,6 +355,7 @@ namespace Emberdelve.AI
 
         private void StopIntent()
         {
+            _heldDescent = null;
             CancelExtractionHold();
             SeekingExtraction = false; _exitTarget = null; _exitScan = 0f;
             SeekingSafeZone = false;

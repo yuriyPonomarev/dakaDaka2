@@ -68,7 +68,6 @@ namespace Emberdelve.Net
             public int Accepted;
             public int Refused;
             public bool Published;
-            public CombatVitalsData LastVitals;
             public bool EnemiesSynced;
             public bool Bot;
         }
@@ -526,7 +525,7 @@ namespace Emberdelve.Net
                  " outMult=" + F(r.OutgoingMultiplier) + " flat=" + F(r.FlatBonus) + " armor=" + F(r.ArmorRating) +
                  " step=" + F(r.StepMultiplier) + " zone=" + F(r.ZoneMultiplier) + " contactT=" + F(r.ContactT) +
                  " charge=" + F(r.Charge) + " air=" + F(r.AirTime) + " airScale=" + F(r.AirTimeScale) + " dist=" + F(dist) +
-                 " px=" + F(r.Point.x) + " py=" + F(r.Point.y) + " pz=" + F(r.Point.z));
+                 " px=" + F(r.Point.x) + " py=" + F(r.Point.y) + " pz=" + F(r.Point.z) + " parried=" + r.Parried);
 
             NetPlayerRig carrier = attackerConn != null ? attackerConn.NetRig : (targetConn != null ? targetConn.NetRig : null);
             if (carrier == null || !carrier.IsSpawned) return;
@@ -543,6 +542,7 @@ namespace Emberdelve.Net
                     Amount = r.Amount,
                     Location = (byte)r.Location,
                     Blocked = r.Blocked,
+                    Parried = r.Parried,
                     GuardBroken = r.GuardBroken,
                     Killed = r.Killed
                 });
@@ -584,6 +584,7 @@ namespace Emberdelve.Net
             if (conn.NetRig == null || !conn.NetRig.IsSpawned) return;
             var rig=conn.Rig;
             var pose=new AvatarCombatWire {
+                Bot=conn.Bot,
                 Utility=rig.Inventory != null && rig.Inventory.HeldItem != null && rig.HeldMeleeWeapon == null ? rig.Inventory.HeldItem.itemId : "",
                 Main=rig.ActiveWeapon!=null ? rig.ActiveWeapon.weaponId : "",
                 Off=!rig.IsHoldingUtility && rig.OffhandWeapon!=null && (rig.ActiveWeapon==null || !rig.ActiveWeapon.twoHanded) ? rig.OffhandWeapon.weaponId : "",
@@ -613,10 +614,7 @@ namespace Emberdelve.Net
                 pose.ReloadProgress = ranged.ReloadProgress;
                 pose.ReloadDuration = ranged.ReloadDuration;
             }
-            if (melee!=null && melee.IsSwinging && melee.ActivePattern!=null && !rig.IsDead
-                && GameServices.TryGet<ICombatAuthority>(out var authority)
-                && authority.TryGetMeleeSwingStatus(melee.LastSwingId,out var status)
-                && !status.Finished && (status.EndReason==SwingEndReason.None || status.Recoiled))
+            if (melee != null && melee.TryGetSwingPresentation(out var status))
             {
                 pose.Swing=!status.Recoiled; pose.Recoil=status.Recoiled;
                 pose.StopFraction=Mathf.Clamp01((float)status.WallContactSample/Mathf.Max(1,status.SampleCount));
@@ -657,10 +655,10 @@ namespace Emberdelve.Net
                     + " magazine=" + ammo.Magazine + " reserve=" + ammo.Reserve);
             }
             CombatVitalsData vitals = new CombatVitalsData(conn.Rig.CurrentHealth, conn.Rig.MaxHealth, conn.Rig.IsDead).Quantized();
-            if (conn.Published && vitals.Equals(conn.LastVitals)) return;
+            var wire = CombatVitalsWire.From(in vitals, conn.Rig.IsExtracted);
+            if (conn.Published && wire.Equals(netRig.Vitals.Value)) return;
             conn.Published = true;
-            conn.LastVitals = vitals;
-            netRig.Vitals.Value = CombatVitalsWire.From(in vitals);
+            netRig.Vitals.Value = wire;
             _log("combat-vitals id=" + conn.PlayerId + " health=" + F(vitals.Health) + " max=" + F(vitals.MaxHealth) + " dead=" + vitals.Dead);
         }
 

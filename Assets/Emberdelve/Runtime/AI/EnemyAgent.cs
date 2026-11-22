@@ -319,13 +319,12 @@ namespace Emberdelve.AI
             if (_nav != null) _nav = new NavGridPathfinder(navGrid);
         }
 
-        /// <summary>Creates a fresh monster under an inactive prepared floor using an authored visual prefab.
-        /// All wiring is assigned before Awake/Start; no live monster health, drops or animation state is cloned.</summary>
+        /// <summary>Creates a fresh monster under its floor with all wiring assigned before Awake/Start.</summary>
         public static EnemyAgent CreateForFloor(EnemyData definition, NavGridData grid, GameConfig gameConfig,
             MonoBehaviour host, Transform parent, Vector3 position, GameObject visualPrefab, string objectName)
         {
             if (NetRole.IsClientOnly || definition == null || grid == null || !(host is IEnemyDropHost)
-                || parent == null || parent.gameObject.activeInHierarchy || visualPrefab == null) return null;
+                || parent == null || visualPrefab == null) return null;
             var root = new GameObject(objectName);
             root.SetActive(false);
             root.transform.SetParent(parent, false);
@@ -351,7 +350,7 @@ namespace Emberdelve.AI
             visual.transform.localPosition = Vector3.zero;
             visual.transform.localRotation = Quaternion.identity;
             visual.transform.localScale = Vector3.one * (definition.IsCinderWarden ? 1f : scale);
-            root.SetActive(true); // Parent stays inactive until the destination is activated.
+            root.SetActive(true);
             return agent;
         }
 

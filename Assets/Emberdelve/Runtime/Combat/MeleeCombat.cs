@@ -119,6 +119,15 @@ namespace Emberdelve.Combat
         /// <summary>Authority id of the swing in progress (or the last one); 0 before the first accepted swing.</summary>
         public int LastSwingId => _swingId;
 
+        public bool TryGetSwingPresentation(out MeleeSwingStatus status)
+        {
+            status = default;
+            return IsSwinging && _pattern != null && rig != null && !rig.IsDead
+                && GameServices.TryGet<ICombatAuthority>(out var authority)
+                && authority.TryGetMeleeSwingStatus(_swingId, out status)
+                && !status.Finished && (status.EndReason == SwingEndReason.None || status.Recoiled);
+        }
+
         /// <summary>Seconds until the swing state machine would start another swing (0 when ready).</summary>
         public float CooldownRemaining => Mathf.Max(0f, _readyTime - Time.time);
 

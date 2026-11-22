@@ -39,7 +39,7 @@ namespace Emberdelve.Net
                 blockedReason = "Corpse search is unavailable";
                 return false;
             }
-            return _presenter.CanInteract(actor, out blockedReason);
+            return _presenter.CanInteract(actor, CorpseId, out blockedReason);
         }
 
         public void OnInteractInstant(IInteractionActor actor)

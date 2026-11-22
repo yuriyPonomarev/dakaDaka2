@@ -1,0 +1,16 @@
+---
+description: Write or review Tripo and Meshy prompts, reference images and Unity game-asset briefs for DakaDaka. Apply when doing AI 3D art work.
+alwaysApply: false
+---
+
+# Unity AI 3D assets
+
+- Read `AGENTS.md` and `Docs/Art/AI_3D_PROMPTING.md`.
+- Use `.agents/skills/unity-3d-prompts/SKILL.md` for the brief, then the selected provider skill beside it.
+- Preserve the grim crypt style: believable proportions, worn stone, aged iron, walnut/leather and restrained moss; no chibi redesign by default.
+- Deliver three separate parts: visual prompt, supported generation settings, Unity acceptance criteria.
+- Keep polycount, rig, parts and export settings in actual supported parameters. Verify the result; words in a prompt do not enforce them.
+- Prompt writing is local work. It does not authorize a paid task, model regeneration, a package install or a license exception.
+- Use original project examples in `.agents/skills/unity-3d-prompts/references/prompt-library.md` when useful.
+- Prefer existing accepted assets and task IDs for revisions. Preserve gameplay dimensions and existing prefab adapters.
+- Do not put credentials in project files or prompts. Record source, task, settings and actual license before integration.

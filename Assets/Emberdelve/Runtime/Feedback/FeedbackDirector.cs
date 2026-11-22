@@ -15,6 +15,8 @@ namespace Emberdelve.Feedback
     [DisallowMultipleComponent]
     public sealed class FeedbackDirector : MonoBehaviour
     {
+        private static readonly Color BlockFlashColor = new Color(0.55f, 0.75f, 1f);
+
         [Header("Levels")]
         [Range(0f, 1f)] public float masterVolume = 0.7f;
         [Range(0f, 1f)] public float uiVolume = 0.55f;
@@ -60,6 +62,7 @@ namespace Emberdelve.Feedback
         {
             GameEvents.DamageDealt += OnDamageDealt;
             GameEvents.PlayerDamaged += OnPlayerDamaged;
+            GameEvents.GuardContact += OnGuardContact;
             GameEvents.ItemCollected += OnItemCollected;
             GameEvents.AmmoChanged += OnAmmoChanged;
             GameEvents.RunEnded += OnRunEnded;
@@ -69,6 +72,7 @@ namespace Emberdelve.Feedback
         {
             GameEvents.DamageDealt -= OnDamageDealt;
             GameEvents.PlayerDamaged -= OnPlayerDamaged;
+            GameEvents.GuardContact -= OnGuardContact;
             GameEvents.ItemCollected -= OnItemCollected;
             GameEvents.AmmoChanged -= OnAmmoChanged;
             GameEvents.RunEnded -= OnRunEnded;
@@ -154,11 +158,11 @@ namespace Emberdelve.Feedback
 
         private void OnDamageDealt(int playerId, HitFeedback feedback)
         {
-            if (!PlayerView.Shows(playerId)) return;
+            if (!PlayerView.Shows(playerId) || (feedback.Blocked && feedback.Damage == 0f)) return;
             if (feedback.Blocked)
             {
 
-                ImpactFlash.Spawn(feedback.Point, new Color(0.55f, 0.75f, 1f), blockFlashSize);
+                ImpactFlash.Spawn(feedback.Point, BlockFlashColor, blockFlashSize);
             }
             else
             {
@@ -172,9 +176,19 @@ namespace Emberdelve.Feedback
 
         private void OnPlayerDamaged(int playerId, DamageInfo info)
         {
+            if (!float.IsFinite(info.Amount) || info.Amount <= 0f) return;
             // The flash is a world effect anyone can see (a hit on a teammate or a rival); the grunt is the local player's own.
             if (PlayerView.Shows(playerId)) Play(_hurt);
             ImpactFlash.Spawn(info.Point, new Color(1f, 0.3f, 0.25f), info.Blocked ? blockFlashSize : hitFlashSize);
+        }
+
+        private void OnGuardContact(int playerId, Vector3 point, bool parried) => PlayGuardContact(point, parried, blockFlashSize);
+
+        public static void PlayGuardContact(Vector3 point, bool parried, float size = .22f)
+        {
+            WorldAudio.Play(parried ? WorldSound.Parry : WorldSound.Metal, point);
+            if (parried) ImpactFlash.SpawnParry(point, size);
+            else ImpactFlash.Spawn(point, BlockFlashColor, size);
         }
 
         private void OnItemCollected(int playerId, ItemData item, int totalCollected)

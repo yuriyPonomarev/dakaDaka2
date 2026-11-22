@@ -184,6 +184,7 @@ namespace Emberdelve.Net
         public float Amount;
         public byte Location;
         public bool Blocked;
+        public bool Parried;
         public bool GuardBroken;
         public bool Killed;
 
@@ -200,6 +201,7 @@ namespace Emberdelve.Net
             serializer.SerializeValue(ref Amount);
             serializer.SerializeValue(ref Location);
             serializer.SerializeValue(ref Blocked);
+            serializer.SerializeValue(ref Parried);
             serializer.SerializeValue(ref GuardBroken);
             serializer.SerializeValue(ref Killed);
         }
@@ -230,27 +232,29 @@ namespace Emberdelve.Net
         public float Health;
         public float MaxHealth;
         public bool Dead;
+        public bool Extracted;
 
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
             serializer.SerializeValue(ref Health);
             serializer.SerializeValue(ref MaxHealth);
             serializer.SerializeValue(ref Dead);
+            serializer.SerializeValue(ref Extracted);
         }
 
-        public static CombatVitalsWire From(in CombatVitalsData data)
+        public static CombatVitalsWire From(in CombatVitalsData data, bool extracted = false)
         {
-            return new CombatVitalsWire { Health = data.Health, MaxHealth = data.MaxHealth, Dead = data.Dead };
+            return new CombatVitalsWire { Health = data.Health, MaxHealth = data.MaxHealth, Dead = data.Dead, Extracted = extracted };
         }
 
         /// <summary>The value as pure data (re-sanitized: a NaN or negative number on the wire becomes 0).</summary>
         public CombatVitalsData ToData() { return new CombatVitalsData(Health, MaxHealth, Dead); }
 
-        public bool Equals(CombatVitalsWire other) { return ToData().Equals(other.ToData()); }
+        public bool Equals(CombatVitalsWire other) { return Extracted == other.Extracted && ToData().Equals(other.ToData()); }
 
         public override bool Equals(object obj) { return obj is CombatVitalsWire other && Equals(other); }
 
-        public override int GetHashCode() { return ToData().GetHashCode(); }
+        public override int GetHashCode() { return HashCode.Combine(ToData(), Extracted); }
     }
 
     /// <summary>U3B3, server to a client, unreliable: where one enemy is (a lost message is replaced by the next).</summary>

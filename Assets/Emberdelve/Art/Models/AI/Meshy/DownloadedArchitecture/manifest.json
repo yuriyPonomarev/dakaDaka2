@@ -1,0 +1,68 @@
+{
+  "provider": "Meshy",
+  "source": "Existing archives supplied/downloaded by project owner; imported 2026-11-22. No generation.",
+  "rights": "Archive contains no asset-specific license. User explicitly requested integration; do not label as CC0.",
+  "assets": [
+    {
+      "asset": "StonePillar",
+      "archive": "C:\\Users\\yrapa\\Downloads\\Meshy_AI_A_ancient_stone_pilla_1121223009_texture_fbx.zip",
+      "archive_sha256": "2571a2c5d87b291539380d7dfe73cd4a3ba4630ef52c37a1e55cf98da72a7a79",
+      "files": [
+        {
+          "source_entry": "Meshy_AI_A_ancient_stone_pilla_1121223009_texture_fbx/Meshy_AI_A_ancient_stone_pilla_1121223009_texture.fbx",
+          "unity_path": "Assets/Emberdelve/Art/Models/AI/Meshy/DownloadedArchitecture/StonePillar/Source.fbx",
+          "sha256": "bf5c4c205d8d35f700de3416a48d2f9727eb844c0093202077d209d5db1fd889"
+        },
+        {
+          "source_entry": "Meshy_AI_A_ancient_stone_pilla_1121223009_texture_fbx/Meshy_AI_A_ancient_stone_pilla_1121223009_texture.png",
+          "unity_path": "Assets/Emberdelve/Art/Models/AI/Meshy/DownloadedArchitecture/StonePillar/Albedo.png",
+          "sha256": "973ef7950e0e555c224318aca19f425e2f1df1faa360a9615fa222d808b1ad43"
+        }
+      ]
+    },
+    {
+      "asset": "RusticBarrel",
+      "archive": "C:\\Users\\yrapa\\Downloads\\Meshy_AI_Rustic_Barrel_1120195018_texture_fbx.zip",
+      "archive_sha256": "b363b2f999fd6402068968cb66d09bf5cd73f7c85c2383efd61369eafa01796d",
+      "files": [
+        {
+          "source_entry": "Meshy_AI_Rustic_Barrel_1120195018_texture_fbx/Meshy_AI_Rustic_Barrel_1120195018_texture.fbx",
+          "unity_path": "Assets/Emberdelve/Art/Models/AI/Meshy/DownloadedArchitecture/RusticBarrel/Source.fbx",
+          "sha256": "faa9c1b49d68c68c4b6bc5d575773ef4afc3b7ed38aaadc5e5722280e89c1a65"
+        },
+        {
+          "source_entry": "Meshy_AI_Rustic_Barrel_1120195018_texture_fbx/Meshy_AI_Rustic_Barrel_1120195018_texture.png",
+          "unity_path": "Assets/Emberdelve/Art/Models/AI/Meshy/DownloadedArchitecture/RusticBarrel/Albedo.png",
+          "sha256": "bb9c6ba3656a37131d65a98fbdd4c6de5f5d3d3610f59ed72e49aa6867d68f11"
+        },
+        {
+          "source_entry": "Meshy_AI_Rustic_Barrel_1120195018_texture_fbx/Meshy_AI_Rustic_Barrel_1120195018_texture_normal.png",
+          "unity_path": "Assets/Emberdelve/Art/Models/AI/Meshy/DownloadedArchitecture/RusticBarrel/Normal.png",
+          "sha256": "fd1615933ff6c4013e9c57b6b2623aec85c6dc17c817999d697027776561e9da"
+        }
+      ]
+    },
+    {
+      "asset": "SealedReliquary",
+      "source_manifest": "SourceArt/AI/Meshy/CryptProps/manifest.json",
+      "files": [
+        {
+          "source_path": "SourceArt/AI/Meshy/CryptProps/SealedChest/01a1fa18-987e-7091-8cde-658d8ca15dcb/Meshy_AI_An_ornate_sealed_reliquary_treasure_20261120_texture.png",
+          "unity_path": "Assets/Emberdelve/Art/Models/AI/Meshy/DownloadedArchitecture/SealedReliquary/Albedo.png",
+          "sha256": "80ea003f086a6ea2a7bffd479e5963ab96c81dd77a12c3effc0fe67ba32eb189"
+        },
+        {
+          "source_path": "SourceArt/AI/Meshy/CryptProps/SealedChest/01a1fa18-987e-7091-8cde-658d8ca15dcb/Meshy_AI_An_ornate_sealed_reliquary_treasure_20261120_texture_normal.png",
+          "unity_path": "Assets/Emberdelve/Art/Models/AI/Meshy/DownloadedArchitecture/SealedReliquary/Normal.png",
+          "sha256": "47b859551bfe8440f357c04885ab520d5aaf7a49e01e498befb704602d9fd9c2"
+        },
+        {
+          "source_path": "SourceArt/AI/Meshy/CryptProps/SealedChest/01a1fa18-987e-7091-8cde-658d8ca15dcb/SealedChest.fbx",
+          "unity_path": "Assets/Emberdelve/Art/Models/AI/Meshy/DownloadedArchitecture/SealedReliquary/Source.fbx",
+          "sha256": "603809c0a39955ea5754a6eed3d3d03f9c1fee04b9f65c94594fbaab02e0a0af"
+        }
+      ],
+      "use": "Static funerary coffer over existing sarcophagus collision; no loot interaction or opening behavior."
+    }
+  ]
+}

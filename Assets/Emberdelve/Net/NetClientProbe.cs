@@ -9,6 +9,8 @@ using Emberdelve.Items;
 using Emberdelve.Level;
 using Emberdelve.Interaction;
 using Emberdelve.Net.Rules;
+using Emberdelve.Player;
+using Emberdelve.UI;
 using UnityEngine;
 
 namespace Emberdelve.Net
@@ -209,9 +211,34 @@ namespace Emberdelve.Net
         private readonly bool _observeRoyale = Array.IndexOf(Environment.GetCommandLineArgs(), "-ember-royale-observe") >= 0;
         private bool _descentNegativeSent;
         private float _nextDescentAttempt;
+        private ReplicatedDescentPortalSlot _heldDescentSlot;
+        private float _descentHoldEnds;
+        private int _spectatorProofFloor;
+        private int _deathSpectatorProofFloor;
+        private bool _deathSpectatorResultReported;
         private void ObservePortalInteractions(NetPlayerRig owner)
         {
-            if (!_observeRoyale || owner?.Rig == null || owner.Rig.IsInFloorTransit) return;
+            if (!_observeRoyale || owner?.Rig == null || owner.Rig.IsDead) return;
+            if (owner.Rig.IsInFloorTransit)
+            {
+                var camera = owner.GetComponent<PortalSpectatorCamera>();
+                if (owner.Rig.IsPortalSpectating && camera?.Target != null && _spectatorProofFloor != owner.Rig.RoyaleFloor
+                    && camera.Target.RoyaleFloor == owner.Rig.RoyaleFloor && camera.Target.PartyId == owner.Rig.PartyId)
+                {
+                    _spectatorProofFloor = owner.Rig.RoyaleFloor;
+                    Debug.Log("[RoyalePortal] local spectator follows ally floor=" + _spectatorProofFloor);
+                }
+                return;
+            }
+            if (_heldDescentSlot != null)
+            {
+                if (!_heldDescentSlot.CanInteract(owner.Rig, out _)) _heldDescentSlot.OnHoldCanceled(owner.Rig);
+                else if (Time.unscaledTime < _descentHoldEnds) return;
+                else _heldDescentSlot.OnHoldComplete(owner.Rig);
+                _heldDescentSlot = null;
+                _nextDescentAttempt = Time.unscaledTime + .25f;
+                return;
+            }
             var state = owner.DescentPortals.Value;
             if (!_descentNegativeSent && state.Floor == 1 && state.Count > 0 && owner.RaidClock.Value.Enabled)
             {
@@ -228,10 +255,37 @@ namespace Emberdelve.Net
                 if (slot != null && slot.CanInteract(owner.Rig, out _))
                 {
                     _nextDescentAttempt = Time.unscaledTime + .25f;
-                    slot.OnInteractInstant(owner.Rig);
+                    if (slot.RequiresHold)
+                    {
+                        if (!slot.OnHoldStarted(owner.Rig)) return;
+                        _heldDescentSlot = slot;
+                        _descentHoldEnds = Time.unscaledTime + slot.HoldDuration + .12f;
+                    }
+                    else slot.OnInteractInstant(owner.Rig);
                     Debug.Log("[RoyalePortal] interaction floor=" + slot.Floor + " group=" + slot.Group + " slot=" + slot.Slot);
                     break;
                 }
+        }
+
+        private void ObserveDeathSpectator(NetPlayerRig owner)
+        {
+            if (!_observeRoyale || owner?.Rig == null || !owner.Rig.IsDead || !RunContext.HasResult
+                || RunContext.LastResult.Outcome != RunState.Dead || RunContext.LastResult.PlayerId != owner.Rig.PlayerId) return;
+            var camera = owner.GetComponent<PortalSpectatorCamera>();
+            var target = camera?.VisibleTarget;
+            if (camera != null && camera.IsDeathSpectating && target != null && target.RoyaleFloor != _deathSpectatorProofFloor)
+            {
+                _deathSpectatorProofFloor = target.RoyaleFloor;
+                Debug.Log("[RoyalePortal] death spectator floor=" + target.RoyaleFloor + " target=" + target.PlayerId
+                    + " ownerStillOnFloor=" + owner.Rig.RoyaleFloor + " sameParty=" + (owner.Rig.PartyId == target.PartyId));
+            }
+            if (_deathSpectatorProofFloor > 0 && !_deathSpectatorResultReported && camera != null && !camera.IsDeathSpectating
+                && owner.GetComponent<ResultScreenController>() is { IsWatchingTeam: false }
+                && GameObject.Find("ResultRoot") != null)
+            {
+                _deathSpectatorResultReported = true;
+                Debug.Log("[RoyalePortal] death spectator returned to own result");
+            }
         }
         private void ObserveRoyaleArrival(NetPlayerRig owner)
         {
@@ -293,6 +347,7 @@ namespace Emberdelve.Net
 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
             ObserveRoyaleArrival(ownedRig);
+            ObserveDeathSpectator(ownedRig);
             ObservePortalInteractions(ownedRig);
             ObserveFinalExtraction(ownedRig);
             ObserveRoyaleBotLoot(ownedRig);

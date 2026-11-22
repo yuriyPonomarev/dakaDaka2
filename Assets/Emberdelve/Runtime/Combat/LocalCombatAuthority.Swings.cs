@@ -1073,7 +1073,7 @@ namespace Emberdelve.Combat
 
             rec.Hit.Add(target.CombatId);
             target.ApplyDamage(damage);
-            NoteMeleeResult(rec.InstigatorId, target, damage);
+            bool parried = NoteMeleeResult(rec.InstigatorId, target, damage);
             AcceptedCount++;
             rec.Hits.Add(new MeleeSwingHit(target.CombatId, contact.Location, damage.Amount, damage.Blocked, sample, contact.FirstSample,
                 contact.Point, contact.T, zone, damage.GuardBroken));
@@ -1082,9 +1082,9 @@ namespace Emberdelve.Combat
             HitFeedback feedback = new HitFeedback(contact.Point, damage.Amount, damage.Blocked, damage.Headshot,
                 target.IsDead, target.Kind, damage.Location);
 
-            PublishCombatFeedback(instigator, target, feedback, damage);
+            PublishCombatFeedback(instigator, target, feedback, damage, parried);
             ReportHit(CombatHitSource.Melee, instigator, target, rec.Weapon, damage, contact.Location, multiplier, rec.StepMultiplier, zone,
-                contact.T, 1f, 0f, -1f, outgoing, flatBonus, armorRating);
+                contact.T, 1f, 0f, -1f, outgoing, flatBonus, armorRating, parried);
             return true;
         }
 

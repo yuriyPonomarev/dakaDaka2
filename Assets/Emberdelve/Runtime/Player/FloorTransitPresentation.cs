@@ -10,12 +10,16 @@ namespace Emberdelve.Player
     public sealed class FloorTransitPresentation : MonoBehaviour
     {
         private PlayerRig _rig;
+        private PortalSpectatorCamera _spectator;
         private readonly Dictionary<Collider, bool> _colliders = new Dictionary<Collider, bool>();
         private readonly Dictionary<Renderer, bool> _renderers = new Dictionary<Renderer, bool>();
 
         public void Refresh(PlayerRig rig)
         {
             _rig = rig;
+            if (rig != null && rig.IsLocallyControlled && rig.IsPortalSpectating && _spectator == null)
+                _spectator = gameObject.AddComponent<PortalSpectatorCamera>();
+            if (_spectator != null) _spectator.Refresh(rig);
             if (rig == null || !rig.IsInFloorTransit) { Restore(); return; }
             foreach (var collider in GetComponentsInChildren<Collider>(true))
             {

@@ -1,125 +1,208 @@
 using System;
 using System.Collections.Generic;
 using Emberdelve.Core;
+using Emberdelve.Level;
 using UnityEditor;
 using UnityEngine;
 
 namespace Emberdelve.EditorTools
 {
-    // Three shared, closed masonry meshes. Crown geometry and collision are the same surface.
+    // The masonry footprint and collision use the same closed mesh.
     internal static class RuinsWallProfile
     {
         private const string Folder = "Assets/Emberdelve/Art/Generated/RuinsWalls";
+        private const float Edge = DungeonModulePlan.ModuleWidthCells;
+        // The expanded perimeter borders gallery stairs, the undercroft and the cache.
+        // Keep folded masonry within their existing clear strip along the room edge.
+        private const float PerimeterDepth = .25f;
+        private const float DoorHalf = 2f;
         private static readonly float[][] Crowns =
         {
-            new[] { 6.5f,6.6f,6.2f,6.25f,5.5f,5.35f,5.8f,5.7f,6.65f,6.8f,6.55f,6.1f,5.3f,5.1f,5.6f,5.7f,6.4f,6.5f,6.05f,6.1f,6.45f },
-            new[] { 6.1f,6.2f,5.7f,5.6f,5.15f,5.05f,5.8f,5.95f,6.4f,6.3f,6.75f,6.9f,6.5f,5.7f,5.8f,5.2f,5.3f,6.1f,6.2f,6.55f,6.4f },
-            new[] { 6.75f,6.6f,6.2f,6.3f,5.9f,5.8f,5.05f,5.2f,5.7f,5.65f,6.4f,6.55f,6.05f,5.6f,5.7f,6.3f,6.5f,6.8f,6.65f,6.2f,6.3f }
+            new[] { 5.20f, 5.33f, 5.62f, 5.44f, 5.22f, 4.50f, 3.53f, 3.23f, 2.96f, 2.85f, 3.08f, 3.02f, 3.31f, 3.81f, 4.36f, 5.34f, 5.46f, 5.84f, 6.05f, 5.84f, 5.56f },
+            new[] { 5.75f, 6.12f, 5.92f, 6.52f, 6.35f, 5.76f, 5.08f, 4.64f, 3.81f, 3.14f, 3.35f, 3.14f, 3.05f, 3.88f, 4.20f, 5.30f, 5.38f, 5.30f, 5.48f, 5.25f, 5.18f },
+            new[] { 5.45f, 5.56f, 5.35f, 5.47f, 5.62f, 5.17f, 4.69f, 4.54f, 3.92f, 3.58f, 3.32f, 3.66f, 4.41f, 4.62f, 5.34f, 5.61f, 6.16f, 6.29f, 5.83f, 5.91f, 5.50f }
         };
-
-        internal static void Build(Transform root, bool horizontal, bool negative, Material stone, int variant = 0, float half = 12f)
+        // Setbacks are strongest away from both ends so joints and door jambs keep their support.
+        private static readonly float[][] Folds =
         {
-            if (root == null) throw new ArgumentNullException(nameof(root));
-            int layer = LayerMask.NameToLayer(GameConfig.LevelLayerName);
-            if (layer < 0) throw new InvalidOperationException("Missing level collision layer: " + GameConfig.LevelLayerName);
-            int profile = (int)((uint)variant % 3);
-            var side = new GameObject("RuinedWall_" + (horizontal ? "H" : "V") + (negative ? "_N" : "_P"));
-            side.layer = layer;
-            side.transform.SetParent(root, false);
-            float edge = negative ? -half : half;
-            side.transform.localPosition = horizontal ? new Vector3(0, 0, edge) : new Vector3(edge, 0, 0);
-            side.transform.localRotation = Quaternion.Euler(0, horizontal ? 0 : 90, 0);
-            for (int run = 0; run < 2; run++)
+            new[] { 0f, .03f, .36f, 1.30f, 1.52f, 1.43f, .65f, .17f, 0f },
+            new[] { 0f, .08f, .12f, .27f, .86f, 1.43f, 1.24f, .20f, 0f },
+            new[] { 0f, .19f, .68f, .96f, .39f, .35f, .89f, .45f, 0f }
+        };
+        private static readonly Mesh[,] Profiles = new Mesh[Crowns.Length, 2];
+
+        internal static void BuildRoom(Transform root, Material stone, int seed, bool highDeck)
+        {
+            float cornerCut = .90f + .05f * (seed % 4);
+            for (int side = 0; side < 4; side++)
+                BuildSide(root, side < 2, side % 2 == 1, seed + side, cornerCut, highDeck, stone);
+            BuildCorner(root, -1, 1, seed + 1, cornerCut, stone);
+            BuildCorner(root, 1, -1, seed + 2, cornerCut, stone);
+        }
+
+        internal static void RebuildMeshes()
+        {
+            for (int i = 0; i < Crowns.Length; i++)
             {
-                var wall = new GameObject("BrokenMasonry_" + run);
-                wall.layer = layer;
-                wall.transform.SetParent(side.transform, false);
-                wall.transform.localPosition = new Vector3((run == 0 ? -1 : 1) * (half + 2f) * .5f, 0, 0);
-                wall.transform.localScale = new Vector3((half - 2f) / 10f, 1, 1);
-                Mesh mesh = ProfileMesh((profile + run + (negative ? 1 : 0)) % 3);
-                wall.AddComponent<MeshFilter>().sharedMesh = mesh;
-                wall.AddComponent<MeshRenderer>().sharedMaterial = stone;
-                wall.AddComponent<MeshCollider>().sharedMesh = mesh;
+                Profile(i, false, rebuild: true);
+                Profile(i, true, rebuild: true);
             }
         }
 
-        private static Mesh ProfileMesh(int profile)
+        private static void BuildSide(Transform root, bool horizontal, bool negative, int seed, float cut, bool highDeck, Material stone)
         {
-            string path = Folder + "/BrokenWall_" + profile + ".asset";
-            Mesh saved = AssetDatabase.LoadAssetAtPath<Mesh>(path);
-            if (saved != null) return saved;
-            EnsureFolder(Folder);
+            var side = Child(root, "RuinedWall_" + (horizontal ? "H" : "V") + (negative ? "_N" : "_P"));
+            float edge = negative ? -Edge : Edge;
+            side.localPosition = horizontal ? new Vector3(0, 0, edge) : new Vector3(edge, 0, 0);
+            side.localRotation = Quaternion.Euler(0, horizontal ? 0 : 90, 0);
+            int cutRun = horizontal == negative ? 1 : 0;
+            for (int run = 0; run < 2; run++)
+            {
+                float extent = run == cutRun ? Edge - cut : Edge;
+                float sign = run == 0 ? -1f : 1f;
+                var wall = Child(side, "BrokenMasonry_" + run);
+                wall.localPosition = new Vector3(sign * (DoorHalf + extent) * .5f, 0, 0);
+                float height = highDeck && !negative && run != cutRun ? 1.18f : 1f;
+                wall.localScale = new Vector3((extent - DoorHalf) / 10f, height, PerimeterDepth);
+                SetMasonry(wall.gameObject, Profile((seed + run) % Crowns.Length, negative), stone);
+            }
+        }
+
+        private static void BuildCorner(Transform root, int xSign, int zSign, int seed, float cut, Material stone)
+        {
+            Vector3 a = new Vector3(xSign * (Edge - cut), 0, zSign * Edge);
+            Vector3 b = new Vector3(xSign * Edge, 0, zSign * (Edge - cut));
+            Vector3 delta = b - a;
+            var corner = Child(root, "ChamferedCorner_" + (xSign < 0 ? "NW" : "SE"));
+            corner.localPosition = (a + b) * .5f;
+            corner.localRotation = Quaternion.FromToRotation(Vector3.right, delta.normalized);
+            corner.localScale = new Vector3((delta.magnitude + .14f) / 10f, .81f, PerimeterDepth);
+            SetMasonry(corner.gameObject, Profile(seed % Crowns.Length, true), stone);
+        }
+
+        private static Transform Child(Transform parent, string name)
+        {
+            Transform child = parent.Find(name);
+            if (child != null) return child;
+            var wall = new GameObject(name) { layer = LayerMask.NameToLayer(GameConfig.LevelLayerName) };
+            wall.transform.SetParent(parent, false);
+            return wall.transform;
+        }
+
+        private static void SetMasonry(GameObject wall, Mesh mesh, Material stone)
+        {
+            if (!wall.TryGetComponent<MeshFilter>(out var filter)) filter = wall.AddComponent<MeshFilter>();
+            if (!wall.TryGetComponent<MeshRenderer>(out var renderer)) renderer = wall.AddComponent<MeshRenderer>();
+            if (!wall.TryGetComponent<MeshCollider>(out var collider)) collider = wall.AddComponent<MeshCollider>();
+            filter.sharedMesh = mesh;
+            renderer.sharedMaterial = stone;
+            collider.sharedMesh = mesh;
+        }
+
+        private static Mesh Profile(int index, bool inwardPositive, bool rebuild = false)
+        {
+            int sign = inwardPositive ? 1 : 0;
+            if (!rebuild && Profiles[index, sign] != null) return Profiles[index, sign];
+
+            string name = $"FoldedMasonry_{index}_{(inwardPositive ? "Positive" : "Negative")}";
+            string path = $"{Folder}/{name}.asset";
+            var saved = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            if (!rebuild && saved != null) return Profiles[index, sign] = saved;
+
             var vertices = new List<Vector3>();
             var triangles = new List<int>();
             var uv = new List<Vector2>();
-            float[] crown = Crowns[profile];
+            float[] crown = Crowns[index];
             for (int i = 0; i < crown.Length - 1; i++)
             {
                 float x = -5f + i * .5f;
-                // Full-height solid base; broad coping projects only inside the original 0.7m envelope.
-                Prism(x, x + .5f, 0, 0, crown[i] - .18f, crown[i + 1] - .18f, .28f, vertices, triangles, uv);
-                // Narrow mortar joints expose the chipped base, never form a hole through the wall.
-                float left = Mathf.Lerp(crown[i], crown[i + 1], .035f);
-                float right = Mathf.Lerp(crown[i], crown[i + 1], .965f);
-                Prism(x + .0175f, x + .4825f, left - .20f, right - .20f, left, right, .35f, vertices, triangles, uv);
+                float z0 = Bend(index, x, inwardPositive);
+                float z1 = Bend(index, x + .5f, inwardPositive);
+                Prism(x, x + .5f, z0, z1, -.12f, -.12f, crown[i] - .16f, crown[i + 1] - .16f, .35f, .25f,
+                    vertices, triangles, uv);
+                float left = Mathf.Lerp(crown[i], crown[i + 1], .06f);
+                float right = Mathf.Lerp(crown[i], crown[i + 1], .94f);
+                float lip = (i + index) % 4 == 1 ? .31f : .39f;
+                Prism(x + .03f, x + .47f, Mathf.Lerp(z0, z1, .06f), Mathf.Lerp(z0, z1, .94f),
+                    left - .21f, right - .21f, left, right, lip, lip - .026f, vertices, triangles, uv);
             }
-            for (int pier = 0; pier < 3; pier++)
+
+            // Weathered buttresses taper upwards and break the long horizontal faces.
+            for (int pier = 0; pier < 2; pier++)
             {
-                float x = -3.5f + pier * 3.5f;
-                int courses = 6 + (pier + profile) % 3;
+                float x = pier == 0 ? -3.67f + index * .37f : 2.88f - index * .25f;
+                float baseZ = Bend(index, x, inwardPositive);
+                int courses = 5 + (pier + index) % 3;
                 for (int row = 0; row < courses; row++)
                 {
-                    float halfWidth = row == 0 ? .43f : .31f;
-                    float y = row * .53f;
-                    float chipped = row == courses - 1 ? .20f : .02f;
-                    Prism(x - halfWidth, x + halfWidth, y, y, y + .50f, y + .50f - chipped, .35f, vertices, triangles, uv);
+                    float width = Mathf.Lerp(.64f, .31f, row / (float)courses);
+                    float depth = Mathf.Lerp(.65f, .35f, row / (float)courses);
+                    float y = row * .48f;
+                    float erosion = row == courses - 1 ? .22f : .03f;
+                    Prism(x - width, x + width, baseZ, baseZ, y, y, y + .48f, y + .48f - erosion, depth, depth - .06f,
+                        vertices, triangles, uv);
                 }
             }
-            var mesh = new Mesh { name = "BrokenWall_" + profile };
+
+            var mesh = new Mesh { name = name };
             mesh.SetVertices(vertices);
             mesh.SetTriangles(triangles, 0);
             mesh.SetUVs(0, uv);
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
+            if (saved != null)
+            {
+                EditorUtility.CopySerialized(mesh, saved);
+                EditorUtility.SetDirty(saved);
+                UnityEngine.Object.DestroyImmediate(mesh);
+                return Profiles[index, sign] = saved;
+            }
+            if (!AssetDatabase.IsValidFolder(Folder)) AssetDatabase.CreateFolder("Assets/Emberdelve/Art/Generated", "RuinsWalls");
             AssetDatabase.CreateAsset(mesh, path);
-            return mesh;
+            return Profiles[index, sign] = mesh;
         }
 
-        // Extruded trapezoid with independently sloping lower and upper edges, closed on all six sides.
-        private static void Prism(float x0, float x1, float low0, float low1, float high0, float high1, float depth,
-            List<Vector3> v, List<int> t, List<Vector2> uv)
+        private static float Bend(int index, float x, bool positive)
         {
-            Vector3 a = new Vector3(x0, low0, -depth), b = new Vector3(x1, low1, -depth);
-            Vector3 c = new Vector3(x1, high1, -depth), d = new Vector3(x0, high0, -depth);
-            Vector3 offset = new Vector3(0, 0, depth * 2);
-            Quad(a, d, c, b, v, t, uv);
-            Quad(a + offset, b + offset, c + offset, d + offset, v, t, uv);
-            Quad(a, a + offset, d + offset, d, v, t, uv);
-            Quad(b, c, c + offset, b + offset, v, t, uv);
-            Quad(d, d + offset, c + offset, c, v, t, uv);
-            Quad(a, b, b + offset, a + offset, v, t, uv);
+            float[] offsets = Folds[index];
+            float sample = Mathf.Clamp01((x + 5f) / 10f) * (offsets.Length - 1);
+            int segment = Mathf.Min((int)sample, offsets.Length - 2);
+            return Mathf.Lerp(offsets[segment], offsets[segment + 1], sample - segment) * (positive ? 1f : -1f);
         }
 
-        private static void Quad(Vector3 a, Vector3 b, Vector3 c, Vector3 d, List<Vector3> v, List<int> t, List<Vector2> uv)
+        private static void Prism(float x0, float x1, float z0, float z1, float lower0, float lower1,
+            float upper0, float upper1, float baseDepth, float topDepth, List<Vector3> vertices, List<int> triangles, List<Vector2> uv)
         {
-            int start = v.Count;
-            v.Add(a); v.Add(b); v.Add(c); v.Add(d);
+            Vector3 a = new Vector3(x0, lower0, z0 - baseDepth), b = new Vector3(x1, lower1, z1 - baseDepth);
+            Vector3 c = new Vector3(x1, upper1, z1 - topDepth), d = new Vector3(x0, upper0, z0 - topDepth);
+            Vector3 e = new Vector3(x0, lower0, z0 + baseDepth), f = new Vector3(x1, lower1, z1 + baseDepth);
+            Vector3 g = new Vector3(x1, upper1, z1 + topDepth), h = new Vector3(x0, upper0, z0 + topDepth);
+            Quad(a, d, c, b, vertices, triangles, uv);
+            Quad(e, f, g, h, vertices, triangles, uv);
+            Quad(a, e, h, d, vertices, triangles, uv);
+            Quad(b, c, g, f, vertices, triangles, uv);
+            Quad(d, h, g, c, vertices, triangles, uv);
+            Quad(a, b, f, e, vertices, triangles, uv);
+        }
+
+        private static void Quad(Vector3 a, Vector3 b, Vector3 c, Vector3 d, List<Vector3> vertices, List<int> triangles, List<Vector2> uv)
+        {
+            int start = vertices.Count;
+            vertices.Add(a);
+            vertices.Add(b);
+            vertices.Add(c);
+            vertices.Add(d);
             Vector3 normal = Vector3.Cross(b - a, c - a);
             bool horizontal = Mathf.Abs(normal.y) > Mathf.Abs(normal.x) + Mathf.Abs(normal.z);
             bool end = Mathf.Abs(normal.x) > Mathf.Abs(normal.z);
             foreach (Vector3 point in new[] { a, b, c, d })
                 uv.Add(horizontal ? new Vector2(point.x, point.z) : new Vector2(end ? point.z : point.x, point.y));
-            t.Add(start); t.Add(start + 1); t.Add(start + 2);
-            t.Add(start); t.Add(start + 2); t.Add(start + 3);
-        }
-
-        private static void EnsureFolder(string path)
-        {
-            if (AssetDatabase.IsValidFolder(path)) return;
-            int slash = path.LastIndexOf('/');
-            string parent = path.Substring(0, slash);
-            EnsureFolder(parent);
-            AssetDatabase.CreateFolder(parent, path.Substring(slash + 1));
+            triangles.Add(start);
+            triangles.Add(start + 1);
+            triangles.Add(start + 2);
+            triangles.Add(start);
+            triangles.Add(start + 2);
+            triangles.Add(start + 3);
         }
     }
 }

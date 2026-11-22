@@ -28,6 +28,23 @@ namespace Emberdelve.Rules.Tests.DescentPortals
         }
 
         [Test]
+        public void ABlockedFirstRandomPickDoesNotHideAValidPair()
+        {
+            var candidates = new[] { new PortalLocation(21, 0), new PortalLocation(29, 0), new PortalLocation(25, 0) };
+            Assert.True(DescentPortalPlacement.TryChoose(Schedule(), candidates, 2, 1, 7, 1, out var chosen));
+            Assert.That(System.Math.Abs(chosen[0].X - chosen[1].X), Is.EqualTo(8));
+        }
+
+        [Test]
+        public void DistinctSeedsCanChooseDifferentPortalLocations()
+        {
+            var candidates = new[] { new PortalLocation(25, 0), new PortalLocation(25, 8), new PortalLocation(25, -8) };
+            Assert.True(DescentPortalPlacement.TryChoose(Schedule(), candidates, 1, 2, 5, 1, out var first));
+            Assert.True(DescentPortalPlacement.TryChoose(Schedule(), candidates, 1, 2, 5, 2, out var second));
+            Assert.That(first[0].Z, Is.Not.EqualTo(second[0].Z));
+        }
+
+        [Test]
         public void InsufficientSafeSpaceDoesNotPublishPartialOrUnsafePlacement()
         {
             var candidates = new[] { new PortalLocation(25, 0), new PortalLocation(25, 0), new PortalLocation(-80, 0) };

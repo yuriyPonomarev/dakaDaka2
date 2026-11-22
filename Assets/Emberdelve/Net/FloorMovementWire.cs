@@ -9,18 +9,23 @@ namespace Emberdelve.Net
     {
         public uint Generation;
         public bool InTransit;
+        public bool SpectatingParty;
+        public byte RoyaleFloor;
         public Vector3 Position;
         public Quaternion Rotation;
-        public bool IsValid => Finite(Position.x) && Finite(Position.y) && Finite(Position.z)
+        public bool IsValid => RoyaleFloor <= 3 && (!SpectatingParty || (InTransit && RoyaleFloor is 1 or 2))
+            && Finite(Position.x) && Finite(Position.y) && Finite(Position.z)
             && Finite(Rotation.x) && Finite(Rotation.y) && Finite(Rotation.z) && Finite(Rotation.w)
             && Quaternion.Dot(Rotation, Rotation) > .000001f;
         private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
             serializer.SerializeValue(ref Generation); serializer.SerializeValue(ref InTransit);
+            serializer.SerializeValue(ref SpectatingParty); serializer.SerializeValue(ref RoyaleFloor);
             serializer.SerializeValue(ref Position); serializer.SerializeValue(ref Rotation);
         }
         public bool Equals(FloorMovementWire other) => Generation == other.Generation && InTransit == other.InTransit
+            && SpectatingParty == other.SpectatingParty && RoyaleFloor == other.RoyaleFloor
             && Position.Equals(other.Position) && Rotation.Equals(other.Rotation);
     }
 }

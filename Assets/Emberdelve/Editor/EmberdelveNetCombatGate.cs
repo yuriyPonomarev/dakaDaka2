@@ -423,6 +423,10 @@ namespace Emberdelve.EditorTools
             Check(CountMatches(s.ServerLog, @"combat-intent client=" + clientB + @" id=" + idB + @" kind=GuardUp seq=\d+ outcome=Accepted reason=None") >= 1, "parry: B's release was accepted");
             Check(CountMatches(s.ServerLog, @"combat reject=") == 0, "parry: honest traffic produced no combat reject");
             Check(WaitForCount(logA, @"\[client\] server-swing id=" + idB + @" .*riposte=1", 1, 20, a), "parry: A (the target) was told riposte strike 1");
+            string contact = @"\[client\] server-hit src=Melee attacker=" + idA + " target=" + idB
+                + @" .*amount=0\.000 .*blocked=True .*parried=True";
+            Check(CountMatches(logA, contact) == 1 && CountMatches(logB, contact) == 1,
+                "parry: both clients receive exactly one confirmed parry contact");
 
             QuitClient(a, quitA, logA, "A");
             QuitClient(b, quitB, logB, "B");

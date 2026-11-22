@@ -447,6 +447,7 @@ namespace Emberdelve.EditorTools
             Check(torches != null, "Torches root exists");
             if (torches == null) return;
 
+            var meshyTorch = MeshyMapDressing.Load("WallTorch");
             bool vendorTorch = EmberdelvePolyHavenImport.LoadModel("Lantern_01") != null;
             int bad = 0;
             for (int i = 0; i < torches.childCount; i++)
@@ -460,7 +461,10 @@ namespace Emberdelve.EditorTools
                     MeshRenderer[] meshes = sconce.GetComponentsInChildren<MeshRenderer>(true);
                     ParticleSystem[] systems = sconce.GetComponentsInChildren<ParticleSystem>(true);
                     ok = meshes.Length > 0 && systems.Length > 0 && sconce.GetComponentsInChildren<Collider>(true).Length == 0;
-                    if (vendorTorch) ok &= sconce.Find(EmberdelveTorchFactory.ModelName) != null;
+                    var model = sconce.Find(EmberdelveTorchFactory.ModelName);
+                    if (meshyTorch != null)
+                        ok &= model != null && PrefabUtility.GetCorrespondingObjectFromSource(model.gameObject) == meshyTorch;
+                    else if (vendorTorch) ok &= model != null;
 
                     if (ok)
                     {
@@ -477,7 +481,7 @@ namespace Emberdelve.EditorTools
             }
 
             Check(torches.childCount > 0 && bad == 0, "every torch has a mesh, a light and particles, no colliders, and the retuned flame (" + bad + " bad of " + torches.childCount + ")");
-            Check(vendorTorch, "Poly Haven Lantern_01 is imported and used for the sconces");
+            Check(meshyTorch != null || vendorTorch, "a wall sconce model is imported");
 
             Material flameMaterial = EmberdelveMaterials.FlameMat;
             Check(flameMaterial != null && flameMaterial.GetColor("_BaseColor").maxColorComponent <= 2.2f && flameMaterial.GetColor("_BaseColor").maxColorComponent > 1f,
@@ -685,7 +689,7 @@ namespace Emberdelve.EditorTools
                     if (!ok) { bad++; Debug.LogError(Tag + " chest '" + body.name + "' lost its interactable/colliders or has no model with a lid hinge"); }
                 }
 
-                Check(bad == 0, "every chest keeps its ChestInteractable, collider, lid and layer, and has a Poly Haven model with a lid hinge (" + bad + " bad)");
+                Check(bad == 0, "every chest keeps its ChestInteractable, collider, lid and layer, and has a model with a lid hinge (" + bad + " bad)");
             }
             finally
             {

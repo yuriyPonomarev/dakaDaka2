@@ -18,6 +18,7 @@ namespace Emberdelve.Flow
             public DungeonModuleSceneAssembler Map;
             public bool OwnsMap = true;
             public bool AdmissionClosed;
+            public bool IndependentArrivals;
             public bool Retired;
             public RoyaleFloorEncounter Encounter;
             public ChestSpawner Chests;
@@ -69,6 +70,23 @@ namespace Emberdelve.Flow
 
         public DungeonModulePlan CopyPreparedPlan(int floor) => _floors.TryGetValue(floor, out var target)
             && target.Map != null ? target.Map.CopyAppliedPlan() : null;
+
+        public DungeonLayoutData ActiveLayoutFor(int floor) => _floors.TryGetValue(floor, out var target)
+            && !target.Retired && target.Map != null && target.Map.gameObject.activeInHierarchy
+            ? target.Map.RuntimeLayout : null;
+
+        public bool TryPrepareDestination(int floor, out string reason)
+        {
+            reason = "Royale destination prerequisites missing";
+            var initial = CopyPreparedPlan(1);
+            var source = _director?.Layout;
+            if (floor < 2 || floor > 3 || initial == null || source == null) return false;
+            if (!RoyaleFloorCatalogs.TryLoad(floor, out var catalog, out reason)) return false;
+            int seed = unchecked(initial.Seed + floor * 7919);
+            if (!DungeonModulePlanner.TryCreate(seed, catalog.Modules, out var plan, out reason)) return false;
+            float spacing = Mathf.Max(source.gridWidth, source.gridHeight) * source.CellSize + 100f;
+            return TryPrepare(floor, source, catalog, plan, source.origin + Vector3.right * (spacing * (floor - 1)), out reason);
+        }
 
         public bool TryPrepare(int floor, DungeonLayoutData source, DungeonModuleCatalog catalog,
             DungeonModulePlan plan, Vector3 origin, out string reason)
@@ -131,7 +149,7 @@ namespace Emberdelve.Flow
         public bool TryReserveIncoming(PlayerRig rig, int floor, out string reason) => TryReserveActor(rig, floor, false, out reason);
         public bool TryHoldInitialPlayer(PlayerRig rig, out string reason) => TryReserveActor(rig, 1, true, out reason);
 
-        private bool TryReserveActor(PlayerRig rig, int floor, bool initial, out string reason)
+        private bool TryReserveActor(PlayerRig rig, int floor, bool initial, out string reason, bool reserveBeforePortal = false)
         {
             reason = "Destination reservation is unavailable";
             if (NetRole.IsClientOnly || _director == null || rig == null
@@ -144,7 +162,8 @@ namespace Emberdelve.Flow
             {
                 if (session.Floor != 1 || session.IsBot || (rig.IsInFloorTransit && !session.AwaitingInitialFloor)) return false;
             }
-            else if (!rig.IsInFloorTransit || session.Floor + 1 != floor) return false;
+            else if (reserveBeforePortal ? session.Floor >= floor : !rig.IsInFloorTransit || session.Floor + 1 != floor)
+                return false;
             if (target.ActorSlots.ContainsKey(rig.PlayerId)) { reason = null; return true; }
             var roster = new RoyaleRoster(target.Mode);
             bool newParty = !target.PartySlots.TryGetValue(session.PartyId, out int partySlot);
@@ -179,8 +198,11 @@ namespace Emberdelve.Flow
             rig = null; reason = "Destination bot admission is unavailable";
             if (NetRole.IsClientOnly || _director == null || party < 0
                 || !_floors.TryGetValue(floor, out var target) || target.Map == null
-                || !target.Map.gameObject.activeInHierarchy
-                || _director.TryGetRoyaleFloorClock(floor, out _, out _)) return false;
+                || !target.Map.gameObject.activeInHierarchy) return false;
+            bool started = _director.TryGetRoyaleFloorClock(floor, out _, out _);
+            bool refill = started && target.IndependentArrivals && _director.IsRoyaleFloorOpen(floor)
+                && (!_director.IsRoyaleFloorOpen(floor - 1) || IsRetired(floor - 1));
+            if (started && !refill) return false;
             var roster = new RoyaleRoster(target.Mode);
             bool newParty = !target.PartySlots.TryGetValue(party, out int partySlot);
             if (newParty)
@@ -193,14 +215,8 @@ namespace Emberdelve.Flow
             {
                 int index = partySlot * roster.PartySize + member;
                 if (target.ActorSlots.ContainsValue(index)) continue;
-                var layout = target.Map.RuntimeLayout;
-                if (index >= layout.playerSpawns.Count) return false;
-                var cell = layout.playerSpawns[index];
-                if (!DungeonModuleSceneAssembler.TryFindClearSpawnCell(layout, target.Map.transform, cell, cell, cell, out _)) return false;
-                Vector3 landing = layout.CellCenterWorld(cell) + Vector3.up * .15f;
-                if (Physics.CheckCapsule(landing + Vector3.up * .38f, landing + Vector3.up * 1.44f,
-                    .36f, Physics.AllLayers, QueryTriggerInteraction.Ignore)) return false;
-                if (!_director.TryCreateRoyaleBot(prefab, character, party, floor, landing, out rig, out reason)) return false;
+                if (!TryResolveLanding(target, index, refill, out Vector3 landing, out reason)) return false;
+                if (!_director.TryCreateRoyaleBot(prefab, character, party, floor, landing, out rig, out reason, refill)) return false;
                 if (newParty) target.PartySlots.Add(party, partySlot);
                 target.ActorSlots.Add(rig.PlayerId, index);
                 return true;
@@ -220,6 +236,8 @@ namespace Emberdelve.Flow
         public RoyaleFloorEncounter EncounterFor(int floor) => _floors.TryGetValue(floor, out var target) ? target.Encounter : null;
 
         public int ReservedCount(int floor) => _floors.TryGetValue(floor, out var target) ? target.ActorSlots.Count : 0;
+        internal bool HasReservedArrival(int floor, int playerId) => _floors.TryGetValue(floor, out var target)
+            && target.ActorSlots.ContainsKey(playerId) && !target.Arrived.Contains(playerId);
         public bool IsAdmissionClosed(int floor) => _floors.TryGetValue(floor, out var target) && target.AdmissionClosed;
 
         public bool IsRetired(int floor) => _floors.TryGetValue(floor, out var target) && target.Retired;
@@ -231,9 +249,13 @@ namespace Emberdelve.Flow
                 || floor < 1 || floor > 2 || !_floors.TryGetValue(floor, out var target)
                 || target.Map == null || target.Map.RuntimeLayout == null
                 || !_director.TryGetRoyaleFloorClock(floor + 1, out _, out _)) return false;
+            if (target.IndependentArrivals && _director.IsRoyaleFloorOpen(floor - 1) && !IsRetired(floor - 1))
+            { reason = "Earlier floor is still admitting arrivals"; return false; }
             foreach (var session in _director.Players)
-                if (session.Floor == floor && (session.DeathCustodyPending || session.ExtractionSettlementPending
-                    || !session.HasResult))
+                if ((session.Floor == floor && (session.DeathCustodyPending || session.ExtractionSettlementPending
+                    || !session.HasResult)) || (target.IndependentArrivals && session.Floor == floor - 1
+                    && !session.HasResult && session.Rig != null && session.Rig.IsInFloorTransit
+                    && target.ActorSlots.ContainsKey(session.PlayerId)))
                 { reason = "Source actor still awaits arrival or terminal custody"; return false; }
             reason = null; return true;
         }
@@ -312,6 +334,44 @@ namespace Emberdelve.Flow
             return true;
         }
 
+        internal bool TryOpenTeamDestination(int floor, int durationSeconds, out string reason)
+        {
+            reason = "Team destination is unavailable";
+            if (NetRole.IsClientOnly || !_director.HasTeamDescent || floor < 2 || floor > 3
+                || !_floors.TryGetValue(floor - 1, out var source) || !_floors.TryGetValue(floor, out var target)
+                || target.AdmissionClosed) return false;
+            // Keep a seat for every live member of the source roster, including teammates who
+            // are still arriving there from the previous floor. Portal use commits the move.
+            foreach (int id in source.ActorSlots.Keys)
+            {
+                if (!_director.TryGetSession(id, out var session) || session.HasResult || session.State != RunState.Running
+                    || session.Rig == null || session.Rig.IsDead || session.Rig.IsExtracted || session.Floor >= floor) continue;
+                if (!TryReserveActor(session.Rig, floor, false, out reason, reserveBeforePortal: true)) return false;
+            }
+            if (!TryActivate(floor, out reason)) return false;
+            if (target.Encounter == null && !RoyaleFloorEncounter.TryCreate(_director, target.Map, floor, durationSeconds,
+                out target.Encounter, out reason)) return false;
+            if (!_director.TryStartRoyaleFloor(floor, durationSeconds, out reason)) return false;
+            target.AdmissionClosed = true;
+            target.IndependentArrivals = true;
+            return true;
+        }
+
+        internal void ReleaseUnusedTeamSeats(int floor)
+        {
+            if (!_floors.TryGetValue(floor, out var target) || !target.IndependentArrivals
+                || (_director.IsRoyaleFloorOpen(floor - 1) && !IsRetired(floor - 1))) return;
+            var unused = new List<int>();
+            foreach (int id in target.ActorSlots.Keys)
+            {
+                if (target.Arrived.Contains(id)) continue;
+                if (_director.TryGetSession(id, out var session) && session.Rig != null && session.Rig.IsInFloorTransit
+                    && (session.Floor == floor - 1 || (session.Floor == floor && session.AwaitingInitialFloor))) continue;
+                unused.Add(id);
+            }
+            foreach (int id in unused) ReleaseSeat(target, id);
+        }
+
         public bool TryArrive(PlayerRig rig, int floor, out string reason)
         {
             reason = "Destination is not ready for arrival";
@@ -325,7 +385,29 @@ namespace Emberdelve.Flow
             return true;
         }
 
-        private bool PrepareArrival(PlayerRig rig, int floor, Floor target, out Vector3 landing, out string reason)
+        internal bool TryArriveParty(IReadOnlyList<PlayerSession> members, int floor, out string reason)
+        {
+            reason = "Team destination is unavailable";
+            if (!_director.IsRoyaleFloorOpen(floor) || !_floors.TryGetValue(floor, out var target) || !target.IndependentArrivals)
+                return false;
+            var landings = new List<Vector3>(members.Count);
+            foreach (var member in members)
+            {
+                if (!PrepareArrival(member.Rig, floor, target, out Vector3 landing, out reason, landings)) return false;
+                landings.Add(landing);
+            }
+            // No yield between validating the whole party's landings and committing them.
+            for (int i = 0; i < members.Count; i++)
+            {
+                var rig = members[i].Rig;
+                if (!_director.TryArriveAtNextFloor(rig, floor, landings[i], Quaternion.identity, out reason)) return false;
+                target.Arrived.Add(rig.PlayerId);
+            }
+            return true;
+        }
+
+        private bool PrepareArrival(PlayerRig rig, int floor, Floor target, out Vector3 landing, out string reason,
+            List<Vector3> reservedLandings = null)
         {
             landing = default; reason = "Arrival actor is not ready";
             if (rig == null || rig.Movement == null || target.Arrived.Contains(rig.PlayerId)) return false;
@@ -333,17 +415,8 @@ namespace Emberdelve.Flow
             if (session == null || session.HasResult || session.State != RunState.Running || rig.IsDead || rig.IsExtracted || !rig.IsInFloorTransit || (session.Floor + 1 != floor && !(session.AwaitingInitialFloor && session.Floor == floor))) return false;
             if (!target.ActorSlots.TryGetValue(rig.PlayerId, out int index))
             { reason = "Arrival requires a reserved destination seat"; return false; }
+            if (!TryResolveLanding(target, index, target.IndependentArrivals, out landing, out reason, reservedLandings)) return false;
             var layout = target.Map.RuntimeLayout;
-            if (layout == null || index >= layout.playerSpawns.Count) return false;
-            Vector2Int cell = layout.playerSpawns[index];
-            // Recheck geometry after activation; a failed transfer retains its reserved seat.
-            if (!DungeonModuleSceneAssembler.TryFindClearSpawnCell(layout, target.Map.transform, cell, cell, cell, out _))
-            { reason = "Destination landing position is obstructed"; return false; }
-            landing = layout.CellCenterWorld(cell) + Vector3.up * .15f;
-            // Existing players/bots are not children of the map; they must also block landing.
-            if (Physics.CheckCapsule(landing + Vector3.up * .38f, landing + Vector3.up * 1.44f,
-                    .36f, Physics.AllLayers, QueryTriggerInteraction.Ignore))
-            { reason = "Destination landing position is occupied"; return false; }
             if (session.IsBot)
             {
                 var controller = rig.GetComponent<RoyaleBotController>();
@@ -355,6 +428,45 @@ namespace Emberdelve.Flow
             }
             reason = null;
             return true;
+        }
+
+        private static bool TryResolveLanding(Floor target, int index, bool allowNearby, out Vector3 landing, out string reason,
+            List<Vector3> reservedLandings = null)
+        {
+            landing = default;
+            reason = "Destination landing position is unavailable";
+            var layout = target.Map.RuntimeLayout;
+            if (layout == null || index >= layout.playerSpawns.Count) return false;
+            var anchor = layout.playerSpawns[index];
+            bool TryCell(Vector2Int cell, out Vector3 point)
+            {
+                point = layout.CellCenterWorld(cell) + Vector3.up * .15f;
+                if (reservedLandings != null)
+                    foreach (var reserved in reservedLandings)
+                        if ((point - reserved).sqrMagnitude < .8f * .8f) return false;
+                return DungeonModuleSceneAssembler.TryFindClearSpawnCell(layout, target.Map.transform, cell, cell, cell, out _)
+                    && !Physics.CheckCapsule(point + Vector3.up * .38f, point + Vector3.up * 1.44f,
+                        .36f, Physics.AllLayers, QueryTriggerInteraction.Ignore);
+            }
+            if (TryCell(anchor, out landing)) { reason = null; return true; }
+            if (!allowNearby || target.Map.RuntimeNavGrid == null) return false;
+            // A teammate can already be standing on the reserved spawn when a later actor enters.
+            var nav = target.Map.RuntimeNavGrid;
+            var route = new List<Vector3>();
+            var pathfinder = new NavGridPathfinder(nav);
+            for (int radius = 1; radius <= 3; radius++)
+                for (int z = -radius; z <= radius; z++)
+                    for (int x = -radius; x <= radius; x++)
+                    {
+                        var cell = anchor + new Vector2Int(x, z);
+                        if (Mathf.Max(Mathf.Abs(x), Mathf.Abs(z)) != radius || !nav.IsWalkable(cell.x, cell.y)
+                            || layout.playerSpawns.Contains(cell) || !TryCell(cell, out landing)
+                            || !pathfinder.TryFindPath(layout.CellCenterWorld(anchor), landing, route)
+                            || route.Count > 5) continue;
+                        reason = null;
+                        return true;
+                    }
+            return false;
         }
 
         /// <summary>Only discard a destination without reservations or a started clock.</summary>
@@ -376,14 +488,22 @@ namespace Emberdelve.Flow
             {
                 var target = entry.Value;
                 if (_director.TryGetRoyaleFloorClock(entry.Key, out _, out _)
-                    || !target.ActorSlots.Remove(session.PlayerId)) continue;
-                if (!target.PartySlots.TryGetValue(session.PartyId, out int partySlot)) continue;
-                int partySize = new RoyaleRoster(target.Mode).PartySize;
-                bool occupied = false;
-                foreach (int slot in target.ActorSlots.Values)
-                    if (slot / partySize == partySlot) { occupied = true; break; }
-                if (!occupied) target.PartySlots.Remove(session.PartyId);
+                    && (!target.IndependentArrivals || target.Arrived.Contains(session.PlayerId))) continue;
+                ReleaseSeat(target, session.PlayerId);
             }
+        }
+
+        private static void ReleaseSeat(Floor target, int actorId)
+        {
+            if (!target.ActorSlots.Remove(actorId, out int seat)) return;
+            int partySize = new RoyaleRoster(target.Mode).PartySize;
+            int partySlot = seat / partySize;
+            foreach (int slot in target.ActorSlots.Values)
+                if (slot / partySize == partySlot) return;
+            int party = -1;
+            foreach (var entry in target.PartySlots)
+                if (entry.Value == partySlot) { party = entry.Key; break; }
+            if (party >= 0) target.PartySlots.Remove(party);
         }
 
         internal void ReleaseOwnedMaps()

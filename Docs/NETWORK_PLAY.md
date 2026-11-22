@@ -2,9 +2,15 @@
 
 ## Current Royale mode (13 November 2026)
 
-The playable mode uses three separate maps: moonlit ruins, enclosed crypts and infernal halls. Choose SOLO, DUO or TRIO in the lobby; these use16,16 and15 participants respectively. Empty seats and destination refill currently use server-owned bots. This version does not merge live players from separate server sessions. Clients and authority must use the same build (current protocol39).
+The playable mode uses three separate maps across moonlit ruins, enclosed crypts and infernal halls. Choose SOLO, DUO or TRIO in the lobby. These modes use 16, 16 and 15 participants respectively. Empty seats and destination refill use server-owned bots. Clients and authority must use the same build (current protocol 45).
 
-For offline play, select a class, prepare the raid and launch. Find the red descent portals on floors1 and2; approach a free slot and press F. Each slot admits one participant. Three groups appear during the floor, with the last group appearing in the final minute. Entering a portal waits for the next-floor cohort; it does not bank the carried loot. The final extraction gate exists only on floor3. Hold F for the displayed duration; damage or movement interrupts the hold. Successful offline final extraction saves the returned equipment and carried items; death loses the raid kit. Stash items remain safe. Online profile persistence is a separate scope.
+For offline play, select a class and mode in the lobby, prepare the raid and launch. Each raid rolls safe positions for the red descent portals on floors 1 and 2. Three portal groups open during the floor, with the last group appearing in the final minute. Approach an available slot and press F. In offline SOLO, entering the portal immediately starts the transition. Any bots already in transit join the destination as it loads.
+
+In DUO and TRIO, hold F at a red portal to enter your slot. Releasing F, moving or taking damage interrupts activation. After entering, you watch living allies on that floor from third person. Press Tab to switch between allies. The remaining slots in the portal group are reserved for their party. Once every teammate has entered or died, the players who entered descend together with their equipment and loot. Online, their destination maps are checked before the party arrives.
+
+After dying in DUO or TRIO, you can watch living allies from third person as they continue to later floors. Tab switches allies. Results opens your own raid result, and Spectate team resumes the view while any ally is still playing. Your result opens automatically once all allies have died, extracted or disconnected.
+
+Chests and fallen adventurers use the paired loot and inventory screen. On floor 3, hold F continuously at the final gate to bank the loot. Movement, damage or releasing F interrupts the hold. Offline extraction saves the returned equipment and carried items. Death loses the raid kit and stash items remain safe.
 
 Command-line host/server selection adds `-ember-royale-mode solo`, `duo` or `trio` to the commands below. The Royale roster owns its16/16/15 capacity; the legacy `-ember-net-max-players` option below is used by development non-Royale proofs. Networking remains opt-in through the lobby Online panel or `-ember-net ...`; one executable supports offline, host, client and dedicated server.
 

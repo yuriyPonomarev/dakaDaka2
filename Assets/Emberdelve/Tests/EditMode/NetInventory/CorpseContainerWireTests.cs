@@ -1,4 +1,7 @@
 using System.Linq;
+using System.Collections.Generic;
+using System.Reflection;
+using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.Items;
 using Emberdelve.Net;
@@ -57,6 +60,66 @@ namespace Emberdelve.Net.Tests
             Assert.That(read.entries.Length, Is.EqualTo(1));
             Assert.That(read.entries[0].item.uid, Is.EqualTo(_gear.UidText));
             Assert.That(read.entries[0].item.ToJson(), Is.EqualTo(_gear.ToSnapshot().ToJson()));
+        }
+
+        [Test]
+        public void SharedOfflineCustodyRejectsDuplicateGearAndRetiredFloorPublication()
+        {
+            NetRoleKind priorRole = NetRole.Current;
+            NetRole.ResetToOffline();
+            var service = _owner.AddComponent<OfflineLootService>();
+            var presenter = _owner.AddComponent<CorpseLootWorldPresenter>();
+            const BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
+            typeof(OfflineLootService).GetField("_presenter", fields).SetValue(service, presenter);
+            try
+            {
+                Assert.True(CorpseContainerModel.TryCreateLoot("chest", "source", new Vector3(5, 0, 5),
+                    new[] { new LootDrop(_gear.Definition, 1, _gear) }, _catalog, out var source, out string reason), reason);
+                Assert.True(service.TryPublishLoot(source, out ulong sourceId, out reason), reason);
+                Assert.False(service.TryPublishLoot(source, out _, out _), "Two offline adapters must not admit the same gear twice.");
+                Assert.True(_bag.TryMintKitInstance(_gear.Definition, out var otherGear, out reason), reason);
+                Assert.True(CorpseContainerModel.TryCreateLoot("chest", "destination", new Vector3(105, 0, 5),
+                    new[] { new LootDrop(otherGear.Definition, 1, otherGear) }, _catalog, out var destination, out reason), reason);
+                Assert.True(service.TryPublishLoot(destination, out ulong destinationId, out reason), reason);
+                var containers = (Dictionary<ulong, CorpseContainerModel>)typeof(OfflineLootService).GetField("_containers", fields).GetValue(service);
+                NetRole.Set(NetRoleKind.Client);
+                service.RetireFloorLoot(new Rect(0, 0, 20, 20));
+                Assert.True(containers.ContainsKey(sourceId), "A client role cannot mutate offline custody.");
+                NetRole.ResetToOffline();
+                service.RetireFloorLoot(new Rect(0, 0, 20, 20));
+                Assert.False(containers.ContainsKey(sourceId));
+                Assert.That(containers[destinationId], Is.SameAs(destination));
+                Assert.False(service.TryPublishLoot(source, out _, out _), "Retired floor contents cannot be republished after removal.");
+                Assert.That(containers.Count, Is.EqualTo(1));
+            }
+            finally
+            {
+                Object.DestroyImmediate(service);
+                Object.DestroyImmediate(presenter);
+                NetRole.Set(priorRole);
+            }
+        }
+
+        [Test]
+        public void OfflineDeathCustodyRejectsAnUnadmittedActorWithoutClearingTheirLoadout()
+        {
+            NetRoleKind priorRole = NetRole.Current;
+            NetRole.ResetToOffline();
+            var service = _owner.AddComponent<OfflineLootService>();
+            var presenter = _owner.AddComponent<CorpseLootWorldPresenter>();
+            typeof(OfflineLootService).GetField("_presenter", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(service, presenter);
+            try
+            {
+                string before = JsonUtility.ToJson(LoadoutSnapshot.Capture(_bag, _equipment));
+                Assert.False(service.TryCommitDeath(25, Vector3.zero, _bag, _equipment, out _));
+                Assert.That(JsonUtility.ToJson(LoadoutSnapshot.Capture(_bag, _equipment)), Is.EqualTo(before));
+            }
+            finally
+            {
+                Object.DestroyImmediate(service);
+                Object.DestroyImmediate(presenter);
+                NetRole.Set(priorRole);
+            }
         }
 
         [Test]

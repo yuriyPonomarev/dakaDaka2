@@ -2,6 +2,7 @@ using UnityEngine;
 using Emberdelve.Combat;
 using Emberdelve.Core;
 using Emberdelve.InputLayer;
+using Emberdelve.Net.Rules;
 using Emberdelve.Player;
 
 namespace Emberdelve.Interaction
@@ -27,6 +28,7 @@ namespace Emberdelve.Interaction
         private float _holdProgress;
         private float _holdDuration;
         private bool _holdLifecycleActive;
+        private Vector3 _holdOrigin;
         private string _lastPrompt = string.Empty;
         private HealthComponent _health;
         private bool _runEnded;
@@ -47,7 +49,7 @@ namespace Emberdelve.Interaction
             EmberdelveInput input = rig.Input;
             if (input == null) return;
 
-            if (rig.IsDead || _runEnded)
+            if (rig.IsDead || !rig.IsInPlay || _runEnded)
             {
                 ClearTarget();
                 return;
@@ -79,8 +81,17 @@ namespace Emberdelve.Interaction
 
             if (_current.RequiresHold)
             {
+                bool offlineFinalExit = NetRole.IsOffline && _current is ExtractionPoint { Floor: 3 };
+                bool uninterrupted = offlineFinalExit || _current is DescentPortalSlot or ReplicatedDescentPortalSlot;
                 if (input.InteractHeld)
                 {
+                    float moveTolerance = ExtractionHoldWindow.MovementToleranceMeters;
+                    if (uninterrupted && _holdLifecycleActive
+                        && (rig.transform.position - _holdOrigin).sqrMagnitude > moveTolerance * moveTolerance)
+                    {
+                        CancelActiveHold();
+                        return;
+                    }
                     if (!_holdLifecycleActive && _current is IInteractableHoldLifecycle lifecycle)
                     {
                         if (!lifecycle.OnHoldStarted(rig))
@@ -89,6 +100,7 @@ namespace Emberdelve.Interaction
                             return;
                         }
                         _holdLifecycleActive = true;
+                        if (uninterrupted) _holdOrigin = rig.transform.position;
                     }
 
                     if (_holdLifecycleActive && _current is IInteractableHoldLifecycle progressing)
@@ -126,10 +138,9 @@ namespace Emberdelve.Interaction
                         }
                     }
                 }
-                else if (_holdLifecycleActive && NetRole.IsClientOnly)
+                else if (_holdLifecycleActive && (NetRole.IsClientOnly || uninterrupted))
                 {
-                    // A network hold is a continuous server lease. Releasing the key ends the attempt now;
-                    // a later press must obtain a fresh server lease and start its timer again.
+                    // Final Royale extraction and client holds must be uninterrupted.
                     CancelActiveHold();
                 }
                 else

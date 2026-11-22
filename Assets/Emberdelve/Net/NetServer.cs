@@ -203,6 +203,7 @@ namespace Emberdelve.Net
         private readonly bool _royaleMapProof = Array.IndexOf(Environment.GetCommandLineArgs(), "-ember-royale-map-proof") >= 0;
 #endif
         private float _nextPopulationTick;
+        private uint _lastDescentRevision;
         private string _populationWaitReason;
 
         /// <summary>Authority-only destination population. Bots never acquire a transport connection
@@ -245,14 +246,19 @@ namespace Emberdelve.Net
 
         private void TickRoyalePopulation(float now)
         {
-            if (_director == null || !_director.IsStarted || !_director.RoyaleMode.HasValue
-                || now < _nextPopulationTick) return;
+            if (_director == null || !_director.IsStarted || !_director.RoyaleMode.HasValue) return;
+            bool newTeamEntry = _director.HasTeamDescent && _director.DescentRevision != _lastDescentRevision;
+            if (!newTeamEntry && now < _nextPopulationTick) return;
             _nextPopulationTick = now + .25f;
+            _lastDescentRevision = _director.DescentRevision;
             if (_initialPopulation != null && _initialPopulation.Started)
             {
                 if (_descentPopulation == null) _descentPopulation = new RoyaleDescentDriver(_director,
                     _director.Config != null ? _director.Config.raidDurationSeconds : 600,
-                    PrepareRoyaleDestination, SpawnInitialBot, floor => _royaleMaps != null && _royaleMaps.PublicStateReady(floor));
+                    _director.FloorCoordinator.TryPrepareDestination, SpawnInitialBot,
+                    floor => _royaleMaps != null && _royaleMaps.PublicStateReady(floor),
+                    (floor, session) => session.IsBot || (session.Rig.TryGetComponent<NetPlayerRig>(out var view)
+                        && _royaleMaps != null && _royaleMaps.PublicStateReadyForClient(floor, view.OwnerClientId)));
                 if (_descentPopulation.Tick(now, out string wait)) _log("Royale destination population arrived");
                 else if (wait != _populationWaitReason) { _populationWaitReason = wait; _log("Royale descent: " + wait); }
                 return;
@@ -266,19 +272,6 @@ namespace Emberdelve.Net
                 _log("Royale floor 1 started population=" + _director.FloorCoordinator.ReservedCount(1));
             else if (reason != _populationWaitReason)
             { _populationWaitReason = reason; _log("Royale population: " + reason); }
-        }
-
-        private bool PrepareRoyaleDestination(int floor, out string reason)
-        {
-            reason = "Royale destination prerequisites missing";
-            if (_modulePlan == null || _moduleCatalog == null || _director?.Layout == null) return false;
-            if (!RoyaleFloorCatalogs.TryLoad(floor, out var destinationCatalog, out reason)) return false;
-            if (!DungeonModulePlanner.TryCreate(unchecked(_modulePlan.Seed + floor * 7919), destinationCatalog.Modules,
-                out var plan, out reason)) return false;
-            var layout = _director.Layout;
-            float spacing = Mathf.Max(layout.gridWidth, layout.gridHeight) * layout.CellSize + 100f;
-            return _director.FloorCoordinator.TryPrepare(floor, layout, destinationCatalog, plan,
-                layout.origin + Vector3.right * (spacing * (floor - 1)), out reason);
         }
 
         private bool SpawnInitialBot(int floor, int party, out PlayerRig rig, out string reason)
@@ -428,7 +421,8 @@ namespace Emberdelve.Net
                     _royaleMapProofPrepared = true;
                     for (int floor = 2; floor <= 3; floor++)
                     {
-                        if (!PrepareRoyaleDestination(floor, out string reason))
+                        if (_director.FloorCoordinator.CopyPreparedPlan(floor) == null
+                            && !_director.FloorCoordinator.TryPrepareDestination(floor, out string reason))
                             _logError("Royale geometry proof preparation failed floor=" + floor + " reason=" + reason);
                     }
                 }

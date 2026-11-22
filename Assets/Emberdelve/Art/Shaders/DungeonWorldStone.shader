@@ -12,6 +12,9 @@ Shader "Emberdelve/Dungeon World Stone"
         _OcclusionStrength("Occlusion Strength", Range(0,1)) = 1
         _WorldTiling("Texture Cycles Per Metre", Float) = 0.333333
         _MacroVariation("Broad Albedo Variation", Range(0,0.25)) = 0.08
+        _SculptureDetail("Sculpture Vertex Masks", Range(0,1)) = 0
+        [NoScaleOffset] _SculptureMossMap("Sculpture Moss and Coverage", 2D) = "black" {}
+        [NoScaleOffset] _SculptureFissureMap("Sculpture Fissures (R) and Edges (G)", 2D) = "black" {}
     }
     SubShader
     {
@@ -32,9 +35,12 @@ Shader "Emberdelve/Dungeon World Stone"
             float _OcclusionStrength;
             float _WorldTiling;
             float _MacroVariation;
+            float _SculptureDetail;
         CBUFFER_END
         TEXTURE2D(_MetallicGlossMap); SAMPLER(sampler_MetallicGlossMap);
         TEXTURE2D(_OcclusionMap); SAMPLER(sampler_OcclusionMap);
+        TEXTURE2D(_SculptureMossMap); SAMPLER(sampler_SculptureMossMap);
+        TEXTURE2D(_SculptureFissureMap); SAMPLER(sampler_SculptureFissureMap);
 
         struct StoneAttributes
         {
@@ -42,6 +48,7 @@ Shader "Emberdelve/Dungeon World Stone"
             float3 normalOS : NORMAL;
             float2 lightmapUV : TEXCOORD1;
             float2 dynamicLightmapUV : TEXCOORD2;
+            half4 sculpture : COLOR;
             UNITY_VERTEX_INPUT_INSTANCE_ID
         };
         struct StoneVaryings
@@ -55,6 +62,7 @@ Shader "Emberdelve/Dungeon World Stone"
             #ifdef DYNAMICLIGHTMAP_ON
                 float2 dynamicLightmapUV : TEXCOORD5;
             #endif
+            half3 sculpture : TEXCOORD6;
             UNITY_VERTEX_INPUT_INSTANCE_ID
             UNITY_VERTEX_OUTPUT_STEREO
         };
@@ -92,7 +100,7 @@ Shader "Emberdelve/Dungeon World Stone"
             slope -= geometricNormal * dot(geometricNormal, slope);
             return normalize(geometricNormal + slope);
         }
-        void StoneSurface(float3 positionWS, float3 geometricNormal, out SurfaceData surface, out half3 normalWS)
+        void StoneSurface(float3 positionWS, float3 geometricNormal, half3 sculpture, out SurfaceData surface, out half3 normalWS)
         {
             StoneProjection p = StoneProject(positionWS, geometricNormal);
             half3 albedo = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, p.uvX).rgb * p.weight.x
@@ -112,6 +120,28 @@ Shader "Emberdelve/Dungeon World Stone"
             surface.metallic = saturate(metal.r);
             surface.smoothness = saturate(metal.a * _Smoothness);
             surface.occlusion = lerp(1.0h, occlusion, saturate(_OcclusionStrength));
+            if (_SculptureDetail > 0.5)
+            {
+                // Red: baked cavity visibility. Green: localized moss seeds. Blue: exposed fractures.
+                half4 vegetation =
+                      SAMPLE_TEXTURE2D(_SculptureMossMap, sampler_SculptureMossMap, p.uvX * 3.6).rgba * p.weight.x
+                    + SAMPLE_TEXTURE2D(_SculptureMossMap, sampler_SculptureMossMap, p.uvY * 3.6).rgba * p.weight.y
+                    + SAMPLE_TEXTURE2D(_SculptureMossMap, sampler_SculptureMossMap, p.uvZ * 3.6).rgba * p.weight.z;
+                half2 fissure =
+                      SAMPLE_TEXTURE2D(_SculptureFissureMap, sampler_SculptureFissureMap, p.uvX * 1.72).rg * p.weight.x
+                    + SAMPLE_TEXTURE2D(_SculptureFissureMap, sampler_SculptureFissureMap, p.uvY * 1.72).rg * p.weight.y
+                    + SAMPLE_TEXTURE2D(_SculptureFissureMap, sampler_SculptureFissureMap, p.uvZ * 1.72).rg * p.weight.z;
+                half moss = smoothstep(0.61h, 0.72h, sculpture.g * 0.49h + vegetation.a * 0.78h)
+                          * smoothstep(0.16h, 0.43h, sculpture.g);
+                surface.albedo = lerp(surface.albedo, vegetation.rgb, moss * 0.96h);
+                surface.albedo = lerp(surface.albedo, albedo * half3(1.12, 1.09, 1.01), sculpture.b * 0.93h);
+                surface.albedo *= lerp(1.0h, 0.13h, fissure.r * (1.0h - moss * 0.47h));
+                surface.albedo += fissure.g * (1.0h - fissure.r) * (1.0h - moss) * 0.021h;
+                surface.occlusion *= lerp(1.0h, 0.49h, fissure.r);
+                surface.albedo *= lerp(0.34h, 1.0h, sculpture.r);
+                surface.occlusion *= lerp(0.42h, 1.0h, sculpture.r);
+                surface.smoothness *= lerp(1.0h, 0.55h, max(moss, sculpture.b));
+            }
             surface.alpha = 1;
             surface.normalTS = half3(0,0,1);
             normalWS = StoneNormal(p, geometricNormal);
@@ -126,6 +156,7 @@ Shader "Emberdelve/Dungeon World Stone"
             output.positionCS = pos.positionCS;
             output.positionWS = pos.positionWS;
             output.normalWS = TransformObjectToWorldNormal(input.normalOS);
+            output.sculpture = input.sculpture.rgb;
             output.shadowCoord = GetShadowCoord(pos);
             output.fogAndVertexLight = half4(ComputeFogFactor(pos.positionCS.z), VertexLighting(pos.positionWS, output.normalWS));
             OUTPUT_LIGHTMAP_UV(input.lightmapUV, unity_LightmapST, output.lightmapUV);
@@ -171,7 +202,7 @@ Shader "Emberdelve/Dungeon World Stone"
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
                 SurfaceData surface;
                 half3 normalWS;
-                StoneSurface(input.positionWS, normalize(input.normalWS), surface, normalWS);
+                StoneSurface(input.positionWS, normalize(input.normalWS), input.sculpture, surface, normalWS);
                 InputData data = (InputData)0;
                 data.positionWS = input.positionWS;
                 data.positionCS = input.positionCS;
@@ -270,7 +301,7 @@ Shader "Emberdelve/Dungeon World Stone"
             half4 StoneMetaFragment(StoneVaryings input) : SV_Target
             {
                 SurfaceData surface; half3 unusedNormal;
-                StoneSurface(input.positionWS, normalize(input.normalWS), surface, unusedNormal);
+                StoneSurface(input.positionWS, normalize(input.normalWS), input.sculpture, surface, unusedNormal);
                 BRDFData brdf;
                 InitializeBRDFData(surface.albedo, surface.metallic, surface.specular, surface.smoothness, surface.alpha, brdf);
                 MetaInput meta = (MetaInput)0;

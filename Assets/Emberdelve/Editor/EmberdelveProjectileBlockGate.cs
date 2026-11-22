@@ -820,10 +820,22 @@ namespace Emberdelve.EditorTools
                     if (!began) return;
                     _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus attack);
                     _clock += attack.Timing.Windup + attack.Timing.Active * 0.1f;
-                    _authority.StepSwings();
+                    int contactCues = 0;
+                    bool parryCue = false;
+                    void OnGuardContact(int playerId, Vector3 point, bool parried)
+                    {
+                        if (playerId != _defender.PlayerId) return;
+                        contactCues++;
+                        parryCue = parried;
+                    }
+                    GameEvents.GuardContact += OnGuardContact;
+                    try { _authority.StepSwings(); }
+                    finally { GameEvents.GuardContact -= OnGuardContact; }
                     _authority.TryGetMeleeSwingStatus(id, out attack);
                     Check(attack.GuardStopped && attack.Hits.Count == 1 && attack.Hits[0].Blocked,
                         "real-player region " + bladeFraction + " physical blade stops the attack");
+                    Check(contactCues == 1 && parryCue == expectedBonus,
+                        "real-player region " + bladeFraction + " publishes the matching defense cue once");
                     Check(_authority.Riposte.HasLiveParry(_defender.CombatId) == expectedBonus
                         && _authority.Riposte.HasParryBonus(_defender.CombatId) == expectedBonus,
                         "real-player region " + bladeFraction + " grants riposte only for a confirmed parry region");

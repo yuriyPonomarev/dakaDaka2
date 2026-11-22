@@ -1,0 +1,580 @@
+{
+  "collection": "Crypt Props",
+  "provider": "Meshy",
+  "created_on": "2026-11-20",
+  "input": "Original text prompts for DakaDaka.",
+  "rights": {
+    "terms": "https://www.meshy.ai/terms-of-use",
+    "service_task_license": "Unavailable in task metadata",
+    "use": "Generated art source for review. Confirm the account's output terms before Unity integration."
+  },
+  "credits": {
+    "balance_before": 935,
+    "balance_after": 860,
+    "observed_debit": 75,
+    "geometry_per_model": 5,
+    "texturing_per_model": 10
+  },
+  "validation": {
+    "mesh": "FBX and GLB triangle totals match for every model. Each is one mesh. GLB UVs and exported 2048 x 2048 PNG maps checked.",
+    "preview": "Reviewed the five Meshy thumbnails.",
+    "integration": "Standalone source files under SourceArt. Unity import, material binding, scale and scene review are pending."
+  },
+  "assets": [
+    {
+      "id": "SupplyChest",
+      "design_observed": "Broad wooden coffer with an arched lid and iron bands. Single mesh, so the lid has no separate transform.",
+      "source_folder": "SupplyChest/01a1fa18-aa2d-77a7-804f-1951cca66399",
+      "mesh_preview": {
+        "task_id": "01a1fa17-fcaa-7273-8ec4-c817d39ab8eb",
+        "request_id": "c6c09961-596b-4555-8b82-014d614dd463",
+        "task_type": "text-to-3d-preview",
+        "prompt": "A plain medieval supply chest for a realistic grim crypt dungeon, a low horizontal rectangular trunk with a shallow arched CLOSED hinged lid. Two thick oak planks across the front, two dark wrought iron straps wrapping over the lid, riveted corners and a centered practical iron hasp, two small back hinges. A clean continuous horizontal lid seam above the box, lid straps stop at the seam. Strong broad silhouette, worn but sound, flat underside. One standalone game prop, no contents, lettering, ground, attachments or surrounding scene.",
+        "settings": {
+          "ai_model": "meshy-t2",
+          "model_type": "smart-topology",
+          "target_polycount": 4200,
+          "topology": "triangle"
+        }
+      },
+      "textured_model": {
+        "task_id": "01a1fa18-aa2d-77a7-804f-1951cca66399",
+        "request_id": "211ea533-0b5f-4b97-a753-94c223657300",
+        "task_type": "text-to-3d-refine",
+        "texture_prompt": "Smoked medium brown oak with visible grain and worn ochre edges, dark forged iron with muted gray edge wear and slight brown rust, subtle damp dirt at the bottom. Natural matte finishes, material color only, no baked lighting or glow.",
+        "settings": {
+          "ai_model": "meshy-7",
+          "enable_pbr": true,
+          "texture_resolution": "2k"
+        }
+      },
+      "files": {
+        "fbx": "SupplyChest.fbx",
+        "glb": "SupplyChest.glb",
+        "preview": "Preview.png",
+        "pbr_png_size_by_filename": {
+          "Meshy_AI_A_plain_medieval_supply_chest_for_a_20261120_texture.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_A_plain_medieval_supply_chest_for_a_20261120_texture_metallic.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_A_plain_medieval_supply_chest_for_a_20261120_texture_normal.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_A_plain_medieval_supply_chest_for_a_20261120_texture_roughness.png": [
+            2048,
+            2048
+          ]
+        }
+      },
+      "geometry": {
+        "glb": {
+          "triangles": 3978,
+          "mesh_count": 1,
+          "material_count": 1,
+          "primitive_count": 1,
+          "has_uv": true,
+          "embedded_images": 3,
+          "mesh_nodes": [
+            ""
+          ]
+        },
+        "fbx": {
+          "version": 7400,
+          "meshes": [
+            {
+              "name": "Mesh_0",
+              "triangles": 3978
+            }
+          ],
+          "model_nodes": [
+            [
+              "Mesh_0",
+              "Mesh"
+            ]
+          ],
+          "textures": [
+            {
+              "name": "Image_0",
+              "embedded_bytes": 2652599
+            },
+            {
+              "name": "Image_2",
+              "embedded_bytes": 1954923
+            },
+            {
+              "name": "texture_0_roughness.png",
+              "embedded_bytes": 1358722
+            },
+            {
+              "name": "texture_0_metallic.png",
+              "embedded_bytes": 1244585
+            }
+          ]
+        },
+        "meshy_size_xyz": [
+          1,
+          0.6734130084514618,
+          0.7352290153503418
+        ]
+      },
+      "sha256_by_collection_path": {
+        "SupplyChest/01a1fa18-aa2d-77a7-804f-1951cca66399/Meshy_AI_A_plain_medieval_supply_chest_for_a_20261120_texture.png": "9a016819c5456d0de770e218d027eeabf24a5a19b7d918734bffa80defb31339",
+        "SupplyChest/01a1fa18-aa2d-77a7-804f-1951cca66399/Meshy_AI_A_plain_medieval_supply_chest_for_a_20261120_texture_metallic.png": "74aadfcc8d5d48c9d1c8b56be9c3ce0a5e2c95ad2e2cd9d3ed4f041c0a57f625",
+        "SupplyChest/01a1fa18-aa2d-77a7-804f-1951cca66399/Meshy_AI_A_plain_medieval_supply_chest_for_a_20261120_texture_normal.png": "d811c913c2e7726b34faed5d1fc45bb0c3fd17d316d0e51cf04a9e20d174073d",
+        "SupplyChest/01a1fa18-aa2d-77a7-804f-1951cca66399/Meshy_AI_A_plain_medieval_supply_chest_for_a_20261120_texture_roughness.png": "b870ba89ced396bb7b2edb19c27ffebbd0f941ca1f9d6f046d5f6f7bcfa56a54",
+        "SupplyChest/01a1fa18-aa2d-77a7-804f-1951cca66399/Preview.png": "2f96ad97fdb9e9ab3e2872830af9f2447284261cf98450cab515effda76ec8f4",
+        "SupplyChest/01a1fa18-aa2d-77a7-804f-1951cca66399/SupplyChest.fbx": "f1aede44ba1e2dca2cfb640a1093820e09c486be6a35b3d67a2e6d6ae0ea8219",
+        "SupplyChest/01a1fa18-aa2d-77a7-804f-1951cca66399/SupplyChest.glb": "51f62fd442a0c9e9eb3f7b03a20b800d8307a8251cbd7ffd80fd768ff34425c9"
+      }
+    },
+    {
+      "id": "SealedChest",
+      "design_observed": "Dark rectangular coffer with heavy iron trim and raised diamond ornaments. Single mesh, so the lid has no separate transform.",
+      "source_folder": "SealedChest/01a1fa18-987e-7091-8cde-658d8ca15dcb",
+      "mesh_preview": {
+        "task_id": "01a1fa17-ba4c-76c8-bbcd-3faded939207",
+        "request_id": "2a856c23-1326-495d-b941-dc7acad4456d",
+        "task_type": "text-to-3d-preview",
+        "prompt": "An ornate sealed reliquary treasure chest for a realistic grim medieval crypt, a broad rectangular coffer with a CLOSED shallow peaked lid, dark oak panels in a heavy decorated iron frame, solid feet, two large rear hinges. A central diamond-shaped tarnished bronze lock plate recessed into the front and restrained pointed Gothic reliefs on the two front panels. Continuous clear lid seam, front lock hardware does not obscure the ends of the seam. Strong geometric silhouette, flat underside. Standalone game prop, no contents, lettering, chains, scene or ground.",
+        "settings": {
+          "ai_model": "meshy-t2",
+          "model_type": "smart-topology",
+          "target_polycount": 5200,
+          "topology": "triangle"
+        }
+      },
+      "textured_model": {
+        "task_id": "01a1fa18-987e-7091-8cde-658d8ca15dcb",
+        "request_id": "43fa4621-ea69-4bf0-9890-be02e752ab82",
+        "task_type": "text-to-3d-refine",
+        "texture_prompt": "Charcoal stained oak, blackened forged iron, muted tarnished bronze with selective pale edge wear and traces of blue green patina in recessed ornament. Dark medieval patina, readable midtones, matte wood, no glow or baked lighting.",
+        "settings": {
+          "ai_model": "meshy-7",
+          "enable_pbr": true,
+          "texture_resolution": "2k"
+        }
+      },
+      "files": {
+        "fbx": "SealedChest.fbx",
+        "glb": "SealedChest.glb",
+        "preview": "Preview.png",
+        "pbr_png_size_by_filename": {
+          "Meshy_AI_An_ornate_sealed_reliquary_treasure_20261120_texture.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_An_ornate_sealed_reliquary_treasure_20261120_texture_metallic.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_An_ornate_sealed_reliquary_treasure_20261120_texture_normal.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_An_ornate_sealed_reliquary_treasure_20261120_texture_roughness.png": [
+            2048,
+            2048
+          ]
+        }
+      },
+      "geometry": {
+        "glb": {
+          "triangles": 4576,
+          "mesh_count": 1,
+          "material_count": 1,
+          "primitive_count": 1,
+          "has_uv": true,
+          "embedded_images": 3,
+          "mesh_nodes": [
+            ""
+          ]
+        },
+        "fbx": {
+          "version": 7400,
+          "meshes": [
+            {
+              "name": "Mesh_0",
+              "triangles": 4576
+            }
+          ],
+          "model_nodes": [
+            [
+              "Mesh_0",
+              "Mesh"
+            ]
+          ],
+          "textures": [
+            {
+              "name": "Image_0",
+              "embedded_bytes": 2213687
+            },
+            {
+              "name": "Image_2",
+              "embedded_bytes": 1668950
+            },
+            {
+              "name": "texture_0_roughness.png",
+              "embedded_bytes": 1325486
+            },
+            {
+              "name": "texture_0_metallic.png",
+              "embedded_bytes": 881080
+            }
+          ]
+        },
+        "meshy_size_xyz": [
+          1,
+          0.6413050293922424,
+          0.5546000003814697
+        ]
+      },
+      "sha256_by_collection_path": {
+        "SealedChest/01a1fa18-987e-7091-8cde-658d8ca15dcb/Meshy_AI_An_ornate_sealed_reliquary_treasure_20261120_texture.png": "80ea003f086a6ea2a7bffd479e5963ab96c81dd77a12c3effc0fe67ba32eb189",
+        "SealedChest/01a1fa18-987e-7091-8cde-658d8ca15dcb/Meshy_AI_An_ornate_sealed_reliquary_treasure_20261120_texture_metallic.png": "6af12e327b1037ecfd86e37c5793bb5b2ba355dba1663e215b62d721b2c75aac",
+        "SealedChest/01a1fa18-987e-7091-8cde-658d8ca15dcb/Meshy_AI_An_ornate_sealed_reliquary_treasure_20261120_texture_normal.png": "47b859551bfe8440f357c04885ab520d5aaf7a49e01e498befb704602d9fd9c2",
+        "SealedChest/01a1fa18-987e-7091-8cde-658d8ca15dcb/Meshy_AI_An_ornate_sealed_reliquary_treasure_20261120_texture_roughness.png": "1480a6b22c3e8fad18f02c9626bb84b39ddafdfd2dae6f1ef5578257fc555457",
+        "SealedChest/01a1fa18-987e-7091-8cde-658d8ca15dcb/Preview.png": "59cea0eb7c8c249ef5d7861179d6ee12a00753d6bf205b1e5fc89b8f346af037",
+        "SealedChest/01a1fa18-987e-7091-8cde-658d8ca15dcb/SealedChest.fbx": "603809c0a39955ea5754a6eed3d3d03f9c1fee04b9f65c94594fbaab02e0a0af",
+        "SealedChest/01a1fa18-987e-7091-8cde-658d8ca15dcb/SealedChest.glb": "a70b10952fa3754c00da13a6be91f698c81dd46c3236f438dd33712cafd32bc4"
+      }
+    },
+    {
+      "id": "KneelingShrine",
+      "design_observed": "Kneeling hooded figure with hands clasped before the chest on a low hexagonal plinth.",
+      "source_folder": "KneelingShrine/01a1fa18-c23b-7169-bb4f-8067d9cf1b73",
+      "mesh_preview": {
+        "task_id": "01a1fa17-d12b-73e5-ae0a-47fa439a615b",
+        "request_id": "c94f8b7f-b856-4b43-9d43-850b47ac8397",
+        "task_type": "text-to-3d-preview",
+        "prompt": "A single weathered medieval limestone shrine statue, a hooded robed pilgrim kneeling on BOTH knees in prayer, with head bowed slightly forward and BOTH palms pressed vertically together at chest height, hands held clear of the face and clearly visible. Monolithic carved stone, simplified readable folded sleeves and heavy robes pooling across the knees, worn stylized-realistic face shadowed by a generous hood. Integrated low hexagonal limestone plinth, clean flat base. Full sculpture, one object, no offering props, architecture, floor, text, halo, weapons or effects.",
+        "settings": {
+          "ai_model": "meshy-t2.5",
+          "model_type": "smart-topology",
+          "target_polycount": 8200,
+          "topology": "triangle"
+        }
+      },
+      "textured_model": {
+        "task_id": "01a1fa18-c23b-7169-bb4f-8067d9cf1b73",
+        "request_id": "d6091713-92af-4bb7-95f3-cb8194635657",
+        "task_type": "text-to-3d-refine",
+        "texture_prompt": "Muted pale ash-gray weathered limestone, fine pores, small chips on the plinth and hood edges, restrained moss only in the bottom recesses, warm mineral discoloration. Stone throughout including face and hands, no cloth or skin colors, no painted features, no baked shadows or glow.",
+        "settings": {
+          "ai_model": "meshy-7",
+          "enable_pbr": true,
+          "texture_resolution": "2k"
+        }
+      },
+      "files": {
+        "fbx": "KneelingShrine.fbx",
+        "glb": "KneelingShrine.glb",
+        "preview": "Preview.png",
+        "pbr_png_size_by_filename": {
+          "Meshy_AI_A_single_weathered_medieval_limestone_20261120_texture.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_A_single_weathered_medieval_limestone_20261120_texture_metallic.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_A_single_weathered_medieval_limestone_20261120_texture_normal.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_A_single_weathered_medieval_limestone_20261120_texture_roughness.png": [
+            2048,
+            2048
+          ]
+        }
+      },
+      "geometry": {
+        "glb": {
+          "triangles": 8590,
+          "mesh_count": 1,
+          "material_count": 1,
+          "primitive_count": 1,
+          "has_uv": true,
+          "embedded_images": 3,
+          "mesh_nodes": [
+            ""
+          ]
+        },
+        "fbx": {
+          "version": 7400,
+          "meshes": [
+            {
+              "name": "Mesh_0",
+              "triangles": 8590
+            }
+          ],
+          "model_nodes": [
+            [
+              "Mesh_0",
+              "Mesh"
+            ]
+          ],
+          "textures": [
+            {
+              "name": "Image_0",
+              "embedded_bytes": 3334266
+            },
+            {
+              "name": "Image_2",
+              "embedded_bytes": 2664063
+            },
+            {
+              "name": "texture_0_roughness.png",
+              "embedded_bytes": 1310072
+            },
+            {
+              "name": "texture_0_metallic.png",
+              "embedded_bytes": 18514
+            }
+          ]
+        },
+        "meshy_size_xyz": [
+          0.4179690033197403,
+          0.9516599774360657,
+          0.426268994808197
+        ]
+      },
+      "sha256_by_collection_path": {
+        "KneelingShrine/01a1fa18-c23b-7169-bb4f-8067d9cf1b73/KneelingShrine.fbx": "882e97527d88a6dc89a3a796ddff697933e313e844d6ab94d637b449530aa2b5",
+        "KneelingShrine/01a1fa18-c23b-7169-bb4f-8067d9cf1b73/KneelingShrine.glb": "ce5a80540f3a2447a98b1ba47011e4dbfb20103a55bdad291a4afb565a21d6db",
+        "KneelingShrine/01a1fa18-c23b-7169-bb4f-8067d9cf1b73/Meshy_AI_A_single_weathered_medieval_limestone_20261120_texture.png": "0f61009c9222328bed10ac71502b5d4ed11285666fe54834bcbf3cff6a2a827a",
+        "KneelingShrine/01a1fa18-c23b-7169-bb4f-8067d9cf1b73/Meshy_AI_A_single_weathered_medieval_limestone_20261120_texture_metallic.png": "6feaeff4656dd1f667e9702ebfa8884928a1f73ed695278c8dc032489844bdce",
+        "KneelingShrine/01a1fa18-c23b-7169-bb4f-8067d9cf1b73/Meshy_AI_A_single_weathered_medieval_limestone_20261120_texture_normal.png": "592523141e9f3541a69ce9c9bd6ae19ced8e070aa01e62962aabb60ecb7cc493",
+        "KneelingShrine/01a1fa18-c23b-7169-bb4f-8067d9cf1b73/Meshy_AI_A_single_weathered_medieval_limestone_20261120_texture_roughness.png": "bcc717c79ce7009d982b321d063fa5048f025a6149e11a97e09d4c1dd56fe318",
+        "KneelingShrine/01a1fa18-c23b-7169-bb4f-8067d9cf1b73/Preview.png": "8b0050ea86ffd666c7cb388f559a11d7e724de23fa90186cc69935ccc0ee4a75"
+      }
+    },
+    {
+      "id": "StandingShrine",
+      "design_observed": "Standing robed figure with palms together on a rectangular plinth.",
+      "source_folder": "StandingShrine/01a1fa18-d51c-76e6-aad0-592b41744173",
+      "mesh_preview": {
+        "task_id": "01a1fa17-e971-75d9-bf25-f939fc70f216",
+        "request_id": "aba6b29f-dbc1-4bac-b45e-f6bf0456650c",
+        "task_type": "text-to-3d-preview",
+        "prompt": "A single ancient standing medieval shrine statue of a robed keeper in prayer carved entirely from stone. Tall and slim, head bowed, two visible palms pressed together in front of the sternum well below the chin, relaxed elbows, long vertical folds and a plain stone mantle over the shoulders. A heavy rectangular two-step integral stone plinth with chips, stable flat underside. Readable silhouette from first-person distance, lifelike human proportions and a carved weathered surface. Full sculpture, standalone three-dimensional prop, no wall, text, halo, weapons, props, effects or scene.",
+        "settings": {
+          "ai_model": "meshy-t2.5",
+          "model_type": "smart-topology",
+          "target_polycount": 8800,
+          "topology": "triangle"
+        }
+      },
+      "textured_model": {
+        "task_id": "01a1fa18-d51c-76e6-aad0-592b41744173",
+        "request_id": "14310cc8-084b-4be9-8902-ed6a301fb1bf",
+        "task_type": "text-to-3d-refine",
+        "texture_prompt": "Weathered slightly warm blue-gray crypt sandstone, washed mineral streaks, subtle chips and moss low on the plinth, worn lighter edge highlights and matte stone. All parts are carved stone, including face and hands. No painted skin, baked lighting or glow.",
+        "settings": {
+          "ai_model": "meshy-7",
+          "enable_pbr": true,
+          "texture_resolution": "2k"
+        }
+      },
+      "files": {
+        "fbx": "StandingShrine.fbx",
+        "glb": "StandingShrine.glb",
+        "preview": "Preview.png",
+        "pbr_png_size_by_filename": {
+          "Meshy_AI_A_single_ancient_standing_medieval_20261120_texture.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_A_single_ancient_standing_medieval_20261120_texture_metallic.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_A_single_ancient_standing_medieval_20261120_texture_normal.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_A_single_ancient_standing_medieval_20261120_texture_roughness.png": [
+            2048,
+            2048
+          ]
+        }
+      },
+      "geometry": {
+        "glb": {
+          "triangles": 9195,
+          "mesh_count": 1,
+          "material_count": 1,
+          "primitive_count": 1,
+          "has_uv": true,
+          "embedded_images": 3,
+          "mesh_nodes": [
+            ""
+          ]
+        },
+        "fbx": {
+          "version": 7400,
+          "meshes": [
+            {
+              "name": "Mesh_0",
+              "triangles": 9195
+            }
+          ],
+          "model_nodes": [
+            [
+              "Mesh_0",
+              "Mesh"
+            ]
+          ],
+          "textures": [
+            {
+              "name": "Image_0",
+              "embedded_bytes": 2980139
+            },
+            {
+              "name": "Image_2",
+              "embedded_bytes": 2318011
+            },
+            {
+              "name": "texture_0_roughness.png",
+              "embedded_bytes": 1273367
+            },
+            {
+              "name": "texture_0_metallic.png",
+              "embedded_bytes": 21809
+            }
+          ]
+        },
+        "meshy_size_xyz": [
+          0.2617190033197403,
+          0.9511719942092896,
+          0.25976499915122986
+        ]
+      },
+      "sha256_by_collection_path": {
+        "StandingShrine/01a1fa18-d51c-76e6-aad0-592b41744173/Meshy_AI_A_single_ancient_standing_medieval_20261120_texture.png": "9338aefd2ac7ece94e2d027e698b00b235849be81cbc8dc537bd5a0c0cc041d4",
+        "StandingShrine/01a1fa18-d51c-76e6-aad0-592b41744173/Meshy_AI_A_single_ancient_standing_medieval_20261120_texture_metallic.png": "bb310cfcefc71fdf9f99e9d912bae55ce9b12819bad9596c4f69922b47dcaae2",
+        "StandingShrine/01a1fa18-d51c-76e6-aad0-592b41744173/Meshy_AI_A_single_ancient_standing_medieval_20261120_texture_normal.png": "63555bcb2ea796feffc6d3cdfe7f81eca5604ded2b30cc6da7ca969d5eb3ad49",
+        "StandingShrine/01a1fa18-d51c-76e6-aad0-592b41744173/Meshy_AI_A_single_ancient_standing_medieval_20261120_texture_roughness.png": "a8a63ec0240689ef5652d054804e314b84d248fcb24fff89c2d5a73e08c97399",
+        "StandingShrine/01a1fa18-d51c-76e6-aad0-592b41744173/Preview.png": "4aed30805d4d9b0be2378d9686082b6e559048c928bfe3bf9fd53b3288a9eca1",
+        "StandingShrine/01a1fa18-d51c-76e6-aad0-592b41744173/StandingShrine.fbx": "3e6e703f78721d4860e3953319912ec580218c0facacd76ad73e2e82d86bd42f",
+        "StandingShrine/01a1fa18-d51c-76e6-aad0-592b41744173/StandingShrine.glb": "70b302fbc636145dd7d3ea3e052490c4399264210aeebc99427b7234813a693d"
+      }
+    },
+    {
+      "id": "VotiveStand",
+      "design_observed": "Low iron tray with three candles and flame-shaped solid geometry.",
+      "source_folder": "VotiveStand/01a1fa18-c554-7313-8284-0c087274441d",
+      "mesh_preview": {
+        "task_id": "01a1fa18-0fae-7161-969b-1fdbf99b711d",
+        "request_id": "747856e5-fd36-4faa-8228-461a7cb64ed3",
+        "task_type": "text-to-3d-preview",
+        "prompt": "A freestanding medieval crypt votive candle stand with a heavy three-legged wrought iron base and a shallow rectangular iron tray at waist height. Five short unlit beeswax votive candles of staggered heights sit clearly apart on the tray with small pooled wax drips, simple stout stem and readable broad shape. Realistic medieval hand-forged construction, showing use and age, compact standalone game prop with flat ground contact. No flame, light effects, text, floor, wall or surrounding scenery.",
+        "settings": {
+          "ai_model": "meshy-t2",
+          "model_type": "smart-topology",
+          "target_polycount": 3500,
+          "topology": "triangle"
+        }
+      },
+      "textured_model": {
+        "task_id": "01a1fa18-c554-7313-8284-0c087274441d",
+        "request_id": "414ce9b0-bf4b-4c26-a834-543ce915879e",
+        "task_type": "text-to-3d-refine",
+        "texture_prompt": "Soot-dark forged iron with reserved dull rust and gray edge wear. Old matte creamy beeswax with caramel drips and dark short wicks. Restrained weathered crypt palette, no flames, emissive colors or baked lighting.",
+        "settings": {
+          "ai_model": "meshy-7",
+          "enable_pbr": true,
+          "texture_resolution": "2k"
+        }
+      },
+      "files": {
+        "fbx": "VotiveStand.fbx",
+        "glb": "VotiveStand.glb",
+        "preview": "Preview.png",
+        "pbr_png_size_by_filename": {
+          "Meshy_AI_A_freestanding_medieval_crypt_votive_20261120_texture.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_A_freestanding_medieval_crypt_votive_20261120_texture_metallic.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_A_freestanding_medieval_crypt_votive_20261120_texture_normal.png": [
+            2048,
+            2048
+          ],
+          "Meshy_AI_A_freestanding_medieval_crypt_votive_20261120_texture_roughness.png": [
+            2048,
+            2048
+          ]
+        }
+      },
+      "geometry": {
+        "glb": {
+          "triangles": 3396,
+          "mesh_count": 1,
+          "material_count": 1,
+          "primitive_count": 1,
+          "has_uv": true,
+          "embedded_images": 3,
+          "mesh_nodes": [
+            ""
+          ]
+        },
+        "fbx": {
+          "version": 7400,
+          "meshes": [
+            {
+              "name": "Mesh_0",
+              "triangles": 3396
+            }
+          ],
+          "model_nodes": [
+            [
+              "Mesh_0",
+              "Mesh"
+            ]
+          ],
+          "textures": [
+            {
+              "name": "Image_0",
+              "embedded_bytes": 2373935
+            },
+            {
+              "name": "Image_2",
+              "embedded_bytes": 1649408
+            },
+            {
+              "name": "texture_0_roughness.png",
+              "embedded_bytes": 1339084
+            },
+            {
+              "name": "texture_0_metallic.png",
+              "embedded_bytes": 1282838
+            }
+          ]
+        },
+        "meshy_size_xyz": [
+          1,
+          0.904591977596283,
+          0.42630399763584137
+        ]
+      },
+      "sha256_by_collection_path": {
+        "VotiveStand/01a1fa18-c554-7313-8284-0c087274441d/Meshy_AI_A_freestanding_medieval_crypt_votive_20261120_texture.png": "3ba2259a818b7760266fd92f990f8dc7b84e960f5a1b790ef4da85a7280efdad",
+        "VotiveStand/01a1fa18-c554-7313-8284-0c087274441d/Meshy_AI_A_freestanding_medieval_crypt_votive_20261120_texture_metallic.png": "c8afd0304d0cd18080226a69d5f1f20f63339b2e21a457d2bedf5e3d789633fe",
+        "VotiveStand/01a1fa18-c554-7313-8284-0c087274441d/Meshy_AI_A_freestanding_medieval_crypt_votive_20261120_texture_normal.png": "1155c3c8c7e5011e68132f845daaa4969b856e350a14bbb7db8c0f6d3d065da1",
+        "VotiveStand/01a1fa18-c554-7313-8284-0c087274441d/Meshy_AI_A_freestanding_medieval_crypt_votive_20261120_texture_roughness.png": "9c19f4f195fda92ce94af61ca74652fc5dde32ce4189ed1d63ac65f9d26362e3",
+        "VotiveStand/01a1fa18-c554-7313-8284-0c087274441d/Preview.png": "b063d401dc89a1402fcaa58509b53e3667617407d908a9ee99a6441291891171",
+        "VotiveStand/01a1fa18-c554-7313-8284-0c087274441d/VotiveStand.fbx": "a74747df10457fc0075211dbbacde53baa59798ab34b4b67ceb5d12d33c30825",
+        "VotiveStand/01a1fa18-c554-7313-8284-0c087274441d/VotiveStand.glb": "d615d1a3f1ee438428f33fa290a0744c86f8ee10431c0d6c63a2c831fd7d85df"
+      }
+    }
+  ]
+}

@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System;
-using Emberdelve.Core;
 using Emberdelve.Interaction;
 using UnityEngine;
 
@@ -9,6 +8,8 @@ namespace Emberdelve.Level
     /// <summary>Creates one deterministic, collidable door for each planned east/north socket pair.</summary>
     public static class DungeonDoorwaySpawner
     {
+        public const string PrefabResource = "Emberdelve/DungeonDoor";
+
         public static bool TryBuild(DungeonModulePlan plan, Transform[] moduleRoots,
             out List<DungeonDoorInteractable> doors, out string reason)
         {
@@ -17,16 +18,17 @@ namespace Emberdelve.Level
             if (plan == null || !plan.Validate(out reason)) return false;
             if (moduleRoots == null || moduleRoots.Length != plan.Placements.Length)
             { reason = "doorway build requires one module root per plan placement"; return false; }
-            int levelLayer = LayerMask.NameToLayer(GameConfig.LevelLayerName);
-            int interactLayer = LayerMask.NameToLayer(GameConfig.InteractLayerName);
+            GameObject doorPrefab = Resources.Load<GameObject>(PrefabResource);
+            if (doorPrefab == null || doorPrefab.GetComponentInChildren<DungeonDoorInteractable>() == null)
+            { reason = "the dungeon door prefab is missing"; return false; }
             var ids = new HashSet<string>(StringComparer.Ordinal);
             for (int i = 0; i < plan.Placements.Length; i++)
             {
                 DungeonModulePlacement p = plan.Placements[i];
                 if (p.X + 1 < DungeonModulePlan.Width && DungeonModulePlan.Has(p.OpenSockets, DungeonModuleSockets.East))
-                    if (!AddDoor(doors, ids, moduleRoots[i], moduleRoots[i + 1], "door_" + p.X + "_" + p.Y + "_E", DungeonModuleSockets.East, DungeonModuleSockets.West, p.QuarterTurnsClockwise, plan.Placements[i + 1].QuarterTurnsClockwise, levelLayer, interactLayer, out reason)) { DestroyCreated(doors); return false; }
+                    if (!AddDoor(doors, ids, moduleRoots[i], moduleRoots[i + 1], "door_" + p.X + "_" + p.Y + "_E", DungeonModuleSockets.East, DungeonModuleSockets.West, p.QuarterTurnsClockwise, plan.Placements[i + 1].QuarterTurnsClockwise, doorPrefab, out reason)) { DestroyCreated(doors); return false; }
                 if (p.Y + 1 < DungeonModulePlan.Height && DungeonModulePlan.Has(p.OpenSockets, DungeonModuleSockets.North))
-                    if (!AddDoor(doors, ids, moduleRoots[i], moduleRoots[i + DungeonModulePlan.Width], "door_" + p.X + "_" + p.Y + "_N", DungeonModuleSockets.North, DungeonModuleSockets.South, p.QuarterTurnsClockwise, plan.Placements[i + DungeonModulePlan.Width].QuarterTurnsClockwise, levelLayer, interactLayer, out reason)) { DestroyCreated(doors); return false; }
+                    if (!AddDoor(doors, ids, moduleRoots[i], moduleRoots[i + DungeonModulePlan.Width], "door_" + p.X + "_" + p.Y + "_N", DungeonModuleSockets.North, DungeonModuleSockets.South, p.QuarterTurnsClockwise, plan.Placements[i + DungeonModulePlan.Width].QuarterTurnsClockwise, doorPrefab, out reason)) { DestroyCreated(doors); return false; }
             }
             int expected = CountSocketPairs(plan);
             if (doors.Count != expected)
@@ -91,7 +93,7 @@ namespace Emberdelve.Level
         }
 
         private static bool AddDoor(List<DungeonDoorInteractable> doors, HashSet<string> ids, Transform aRoot, Transform bRoot,
-            string id, DungeonModuleSockets aSide, DungeonModuleSockets bSide, byte aRotation, byte bRotation, int levelLayer, int interactLayer, out string reason)
+            string id, DungeonModuleSockets aSide, DungeonModuleSockets bSide, byte aRotation, byte bRotation, GameObject doorPrefab, out string reason)
         {
             reason = string.Empty;
             if (!DungeonDoorInteractable.IsValidDoorId(id) || !ids.Add(id)) { reason = "door id is invalid or duplicated: " + id; return false; }
@@ -106,33 +108,12 @@ namespace Emberdelve.Level
             Vector3 position = (aSocket.position + bSocket.position) * 0.5f;
             bool alongX = aSide == DungeonModuleSockets.North || aSide == DungeonModuleSockets.South;
             Quaternion rotation = Quaternion.Euler(0f, alongX ? 0f : 90f, 0f);
-            GameObject root = new GameObject("Door_" + id);
             // Parent to the canonical lower-index room so assembler cleanup cannot leave stale doors behind.
-            root.transform.SetParent(aRoot, true);
-            root.transform.SetPositionAndRotation(position, rotation);
-
-            GameObject hinge = new GameObject("Hinge");
-            hinge.transform.SetParent(root.transform, false);
-            hinge.transform.localPosition = new Vector3(-1.7f, 0f, 0f);
-            GameObject panel = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            panel.name = "DoorPanel";
-            // A primitive's built-in Standard material is unsupported by the URP player.
-            Material doorMaterial = Resources.Load<Material>("Emberdelve/DoorPanel");
-            if (doorMaterial != null) panel.GetComponent<Renderer>().sharedMaterial = doorMaterial;
-            panel.transform.SetParent(hinge.transform, false);
-            panel.transform.localPosition = new Vector3(1.7f, 1.65f, 0f);
-            panel.transform.localScale = new Vector3(3.4f, 3.3f, 0.22f);
-            panel.layer = levelLayer >= 0 ? levelLayer : 0;
-            Collider blocker = panel.GetComponent<Collider>();
-
-            GameObject probe = new GameObject("InteractionVolume");
-            probe.layer = interactLayer >= 0 ? interactLayer : 0;
-            probe.transform.SetParent(root.transform, false);
-            BoxCollider trigger = probe.AddComponent<BoxCollider>();
-            trigger.isTrigger = true;
-            trigger.size = new Vector3(3.5f, 3.4f, 1.8f);
-            DungeonDoorInteractable door = root.AddComponent<DungeonDoorInteractable>();
-            door.Configure(id, hinge.transform, blocker, 95f);
+            GameObject root = UnityEngine.Object.Instantiate(doorPrefab, position, rotation, aRoot);
+            root.name = "Doorway_" + id;
+            var door = root.GetComponentInChildren<DungeonDoorInteractable>();
+            door.name = "Door_" + id;
+            door.Configure(id);
             doors.Add(door);
             return true;
         }
@@ -152,7 +133,13 @@ namespace Emberdelve.Level
         private static void DestroyCreated(List<DungeonDoorInteractable> doors)
         {
             for (int i = 0; i < doors.Count; i++)
-                if (doors[i] != null && !doors[i].IsSecret) UnityEngine.Object.Destroy(doors[i].gameObject);
+                if (doors[i] != null && !doors[i].IsSecret)
+                {
+                    var root = doors[i].transform.parent.gameObject;
+                    root.SetActive(false);
+                    if (Application.isPlaying) UnityEngine.Object.Destroy(root);
+                    else UnityEngine.Object.DestroyImmediate(root);
+                }
         }
     }
 }

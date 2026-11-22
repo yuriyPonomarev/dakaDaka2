@@ -341,19 +341,24 @@ namespace Emberdelve.Net
                 row.Rig != null && row.PlayerId == row.Rig.PlayerId && ReferenceEquals(target.GetComponent<Emberdelve.Player.PlayerRig>(), row.Rig);
         }
 
-        public bool RequestDescent(ulong sender, NetworkObject target, int floor, int group, int slot)
+        public bool RequestDescent(ulong sender, NetworkObject target, int floor, int group, int slot,
+            DescentPortalIntent intent = DescentPortalIntent.Complete)
         {
             if (!TryResolve(sender, target, out var row)) { _log?.Invoke("descent rejected=identity sender=" + sender); return false; }
             var director = Object.FindFirstObjectByType<RunDirector>();
             if (director == null || !director.RoyaleMode.HasValue || floor < 1 || floor > 2 || group < 0 || group > 2
                 || slot < 0 || slot >= (int)director.RoyaleMode.Value || director.SessionOf(row.Rig)?.Floor != floor)
             { _log?.Invoke("descent rejected=floor-or-slot sender=" + sender); return false; }
+            var encounter = director.FloorCoordinator.EncounterFor(floor);
+            var portal = encounter != null && group < encounter.Groups.Count ? encounter.Groups[group] : null;
+            if (portal == null) return false;
+            if (intent == DescentPortalIntent.Cancel) { portal.CancelHold(row.Rig, slot); return true; }
+            if (intent == DescentPortalIntent.Begin) return portal.BeginHold(row.Rig, slot, out _);
+            if (intent != DescentPortalIntent.Complete) return false;
             double now = Time.realtimeSinceStartupAsDouble;
             if (_lastDescentIntent.TryGetValue(sender, out double last) && now - last < .15) return false;
             _lastDescentIntent[sender] = now;
-            var encounter = director.FloorCoordinator.EncounterFor(floor);
-            string reason = "Missing portal group";
-            bool accepted = encounter != null && group < encounter.Groups.Count && encounter.Groups[group].TryEnter(row.Rig, slot, out reason);
+            bool accepted = portal.CompleteHold(row.Rig, slot, out string reason);
             _log?.Invoke("descent intent sender=" + sender + " floor=" + floor + " group=" + group + " slot=" + slot + " accepted=" + accepted + " reason=" + reason);
             return accepted;
         }
@@ -1063,25 +1068,28 @@ namespace Emberdelve.Net
         }
 
         private static bool ValidateCorpseActor(NetIdentity row, CorpseContainerModel model, out string reason)
+            => ValidateLootAccess(Object.FindFirstObjectByType<RunDirector>(), row?.Rig, model, out reason);
+
+        internal static bool ValidateLootAccess(RunDirector director, Emberdelve.Player.PlayerRig rig,
+            CorpseContainerModel model, out string reason)
         {
-            if (row?.Rig == null || model == null)
+            if (rig == null || model == null)
             {
                 reason = "Player or corpse is unavailable";
                 return false;
             }
-            if (!row.Rig.IsAlive)
+            if (!rig.IsAlive)
             {
                 reason = "The dead cannot loot a corpse";
                 return false;
             }
 
-            RunDirector director = Object.FindFirstObjectByType<RunDirector>();
             if (director == null)
             {
                 reason = "The server run is unavailable";
                 return false;
             }
-            if (!director.IsInteractionActorAdmitted(row.Rig, out reason))
+            if (!director.IsInteractionActorAdmitted(rig, out reason))
             {
                 return false;
             }
@@ -1092,9 +1100,9 @@ namespace Emberdelve.Net
                 foreach (ChestInteractable chest in Object.FindObjectsByType<ChestInteractable>(FindObjectsSortMode.None))
                     if (ReferenceEquals(chest.LootContainer, model)) { source = chest; break; }
                 if (source == null) { reason = "Chest is unavailable"; return false; }
-                if (!source.CanInteract(row.Rig, out reason)) return false;
+                if (!source.CanInteract(rig, out reason)) return false;
             }
-            Vector3 origin = row.Rig.InteractionOrigin;
+            Vector3 origin = rig.InteractionOrigin;
             Vector3 point = model.WorldPosition;
             if (!IsFinite(origin) || !IsFinite(point))
             {

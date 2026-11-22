@@ -10,6 +10,7 @@ using Emberdelve.AI;
 using Emberdelve.Combat;
 using Emberdelve.Core;
 using Emberdelve.Data;
+using Emberdelve.Feedback;
 using Emberdelve.Flow;
 using Emberdelve.Interaction;
 using Emberdelve.Items;
@@ -711,8 +712,38 @@ namespace Emberdelve.EditorTools
 
             // restore the readout to the truth
             GameEvents.RaisePlayerHealth(_p1.PlayerId, _p1.CurrentHealth, _p1.MaxHealth);
+            yield return new WaitForSecondsRealtime(.6f);
+            GameEvents.RaisePlayerDamaged(_p1.PlayerId, new DamageInfo(0f, Vector3.zero, Vector3.forward, Vector3.zero, 0, EntityKind.Enemy, DamageType.Physical, true, false, 1f));
+            Check((float)Field(hud, "_vignetteTimer") <= 0f && toast.text == "Blocked",
+                "a fully absorbed hit shows the block cue without flashing red");
             GameEvents.RaisePlayerDamaged(_p1.PlayerId, new DamageInfo(0f, Vector3.zero, Vector3.forward, Vector3.zero, 0, EntityKind.Enemy, DamageType.Physical, false, false, 0f));
-            Check((float)Field(hud, "_vignetteTimer") > vignetteBefore, "P1's damage event does flash P1's vignette");
+            Check((float)Field(hud, "_vignetteTimer") <= 0f && toast.text != "Hit  -0 HP",
+                "a zero-damage event without a block flag leaves the vignette off");
+
+            var audio = FindFirstObjectByType<WorldAudio>();
+            Check(audio != null && Camera.main != null, "defense presentation has world audio and a camera");
+            if (audio != null && Camera.main != null)
+            {
+                WorldAudio.BindListener(_p1.Look.AimTransform);
+                Vector3 contact = _p1.AimOrigin + _p1.AimDirection;
+                int sparks = Array.FindAll(FindObjectsByType<ImpactFlash>(FindObjectsSortMode.None), x => x.name == "ParrySpark").Length;
+                int before = audio.PlayedCount;
+                GameEvents.RaiseGuardContact(_p1.PlayerId, contact, false);
+                var voices = audio.GetComponentsInChildren<AudioSource>();
+                Check(audio.PlayedCount == before + 1 && Array.Exists(voices, v => v.clip != null && v.clip.name == "sfx_block"),
+                    "a normal block plays the distinct block clip once");
+                Check(Array.FindAll(FindObjectsByType<ImpactFlash>(FindObjectsSortMode.None), x => x.name == "ParrySpark").Length == sparks,
+                    "a normal block does not emit the parry burst");
+                GameEvents.RaiseGuardContact(_p1.PlayerId, contact, true);
+                Check(audio.PlayedCount == before + 2 && Array.Exists(voices, v => v.clip != null && v.clip.name == "sfx_parry"),
+                    "a parry plays the distinct parry clip once");
+                Check(Array.FindAll(FindObjectsByType<ImpactFlash>(FindObjectsSortMode.None), x => x.name == "ParrySpark").Length == sparks + 5
+                    && toast.text == "Parry" && (float)Field(hud, "_vignetteTimer") <= 0f,
+                    "a parry emits a burst, identifies itself in the HUD and keeps the damage vignette off");
+            }
+            GameEvents.RaisePlayerDamaged(_p1.PlayerId, new DamageInfo(5f, Vector3.zero, Vector3.forward, Vector3.zero, 0, EntityKind.Enemy, DamageType.Physical, true, false, .3f, guardBroken: true));
+            Check((float)Field(hud, "_vignetteTimer") > 0f && toast.text == "GUARD BROKEN  -5 HP",
+                "a broken guard with actual HP loss still flashes red");
             yield return null;
         }
 

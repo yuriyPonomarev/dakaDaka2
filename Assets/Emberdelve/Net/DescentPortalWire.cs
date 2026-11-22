@@ -56,7 +56,8 @@ namespace Emberdelve.Net
                 {
                     int index = group.Group * size + slot.Slot;
                     state.SetPosition(index, slot.transform.position);
-                    if (open && group.gameObject.activeSelf && !group.SlotUsed(slot.Slot)) state.Available |= (ushort)(1 << index);
+                    if (open && group.gameObject.activeSelf && group.IsAvailableToParty(session.PartyId)
+                        && !group.SlotUsed(slot.Slot)) state.Available |= (ushort)(1 << index);
                 }
             return state;
         }

@@ -32,7 +32,8 @@ namespace Emberdelve.EditorTools
 
             Vector3 flamePosition = new Vector3(0f, 0.37f, 0.262f);
             GameObject lantern = EmberdelvePolyHavenImport.LoadModel("Lantern_01");
-            if (lantern == null || !TryBuildLanternSconce(root, lantern, out flamePosition))
+            if (!MeshyMapDressing.TryBuildSconce(root, out flamePosition)
+                && (lantern == null || !TryBuildLanternSconce(root, lantern, out flamePosition)))
             {
                 flamePosition = new Vector3(0f, 0.37f, 0.262f);
                 BuildProceduralSconce(root);
@@ -41,6 +42,33 @@ namespace Emberdelve.EditorTools
             Transform flame = BuildFlame(root, EmberdelveMaterials.FlameMat, flamePosition);
 
             if (flicker != null) WireFlicker(flicker, flame);
+        }
+
+        internal static GameObject CreateFixedMeshySconce()
+        {
+            var sconce = new GameObject("Wall_Torch");
+            if (!MeshyMapDressing.TryBuildSconce(sconce.transform, out var flamePosition))
+            {
+                Object.DestroyImmediate(sconce);
+                throw new System.InvalidOperationException("Missing Meshy wall torch model");
+            }
+
+            var material = AssetDatabase.LoadAssetAtPath<Material>(EmberdelvePaths.Materials + "/Torch_Flame.mat");
+            if (material == null)
+            {
+                Object.DestroyImmediate(sconce);
+                throw new System.InvalidOperationException("Missing wall torch flame material");
+            }
+            var flame = BuildFlame(sconce.transform, material, flamePosition);
+            flame.localScale = Vector3.one * .75f;
+            var light = flame.gameObject.AddComponent<Light>();
+            light.type = LightType.Point;
+            light.color = new Color(1f, .61f, .29f);
+            light.range = 5f;
+            light.intensity = 2f;
+            light.shadows = LightShadows.None;
+            flame.gameObject.AddComponent<TorchFlicker>();
+            return sconce;
         }
 
         /// <summary>Reuse the authored soft flame without adding a sconce or another light.</summary>

@@ -26,6 +26,18 @@ namespace Emberdelve.Flow
                 && Swarm.TrySample(elapsed, out sample);
         }
 
+        public bool TryGetPortalStatus(out int openGroups, out double secondsToNextWave)
+        {
+            openGroups = 0;
+            secondsToNextWave = 0;
+            if (Portals == null || !_director.IsRoyaleFloorOpen(_floor)
+                || !_director.TryGetRoyaleFloorClock(_floor, out float elapsed, out _)) return false;
+            for (int i = 0; i < _groups.Count; i++)
+                if (_groups[i].RemainingSlots > 0 && Portals.IsGroupOpen(i, elapsed)) openGroups++;
+            Portals.TryGetSecondsToNextWave(elapsed, out secondsToNextWave);
+            return true;
+        }
+
         public static bool TryCreate(RunDirector director, DungeonModuleSceneAssembler map, int floor,
             int duration, out RoyaleFloorEncounter encounter, out string reason)
         {
@@ -74,9 +86,10 @@ namespace Emberdelve.Flow
                     candidates.Add(new PortalLocation(point.x, point.z)); footprints[new Vector2Int(x, z)] = slots;
                 }
             }
-            PortalLocation[] anchors = System.Array.Empty<PortalLocation>();
+            ulong raidSeed = director.Session?.RaidSeed ?? unchecked((uint)map.CopyAppliedPlan().Seed);
+            var portalRng = new DeterministicRng(RngMix.Combine(RngMix.Combine(raidSeed, RngMix.HashString("royale-portals")), (ulong)floor));
             if (!DescentPortalPlacement.TryChoose(swarm, candidates, floor == 3 ? 1 : 3, clearance, clearance * 2 + 2,
-                unchecked((uint)map.CopyAppliedPlan().Seed ^ (uint)(floor * 7919)), out anchors))
+                portalRng.NextUInt32(), out var anchors))
             { reason = "No reachable portal footprints inside final zone"; return false; }
             var root = new GameObject("Floor" + floor + "_ZoneAndPortals"); root.transform.SetParent(map.transform, false);
             encounter = root.AddComponent<RoyaleFloorEncounter>(); encounter._director = director; encounter._floor = floor; encounter.Swarm = swarm;

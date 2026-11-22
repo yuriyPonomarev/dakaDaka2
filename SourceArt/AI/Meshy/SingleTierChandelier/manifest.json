@@ -1,0 +1,56 @@
+{
+  "asset": "Single Tier Chandelier",
+  "provider": "Meshy",
+  "created_on": "2026-11-20",
+  "geometry": {
+    "task_id": "01a1fa3a-c361-7431-9d92-8de1b20bc3f8",
+    "request_id": "052ada2d-b62e-4a48-b9c5-488a5a1fdadd",
+    "prompt": "Single-tier dark fantasy medieval chandelier, one round horizontal hoop of aged wrought iron. Exactly eight evenly spaced beeswax candles mounted directly on the same hoop. All candle cups share one horizontal plane. One row of candle cups. Eight short candles with wax drips and black wicks. Three equal iron suspension chains rising from the hoop to one small ceiling eyelet. The center of the hoop is empty and open. Restrained hammered iron, rivets, and shallow pointed Gothic details along the single hoop. Open silhouette readable in a dark crypt. No second ring, lower tier, raised candle arms, candles inside the ring, solid flames, large pendant, floor or scene. One complete standalone 3D game prop.",
+    "ai_model": "meshy-t2.5",
+    "target_polycount": 10000,
+    "topology": "triangle"
+  },
+  "texturing": {
+    "task_id": "01a1fa3c-e1c7-73d9-a05f-08b09fccfed9",
+    "request_id": "26381118-85ad-4142-8b94-32f7290b2018",
+    "preview_task_id": "01a1fa3a-c361-7431-9d92-8de1b20bc3f8",
+    "ai_model": "meshy-7",
+    "enable_pbr": true,
+    "texture_resolution": "2k",
+    "texture_prompt": "Deep charcoal forged iron with hand-hammered surface, restrained gray edge wear, subtle brown patina and tiny rust spots. Creamy old ivory beeswax with warm amber wax drips and blackened wick areas. If any flame-shaped shapes remain, color them muted amber gold. Natural PBR materials, no lighting or glow baked into the iron."
+  },
+  "billing": {
+    "before": 1010,
+    "after": 995,
+    "spent": 15
+  },
+  "rights": {
+    "terms": "https://www.meshy.ai/terms-of-use",
+    "license": "Unavailable in task metadata"
+  },
+  "final_model": "01a1fa3c-e1c7-73d9-a05f-08b09fccfed9/SingleTierChandelier.glb",
+  "validation": {
+    "triangles_before": 10158,
+    "triangles_after": 5888,
+    "outer_candles": 6,
+    "outer_candle_seat_span": 0.0009759962558746338,
+    "separate_inner_candles_removed": 2,
+    "joined_inner_fixtures_removed": 3,
+    "support_chains_adjusted": 3,
+    "embedded_textures": 3,
+    "materials": 3
+  },
+  "local_edits": [
+    "Removed inner fixtures, the inner ring and lower central hardware.",
+    "Aligned the tops of the three suspension strands with the ceiling mount.",
+    "Assigned separate wax and emissive amber materials to the six candles on the outer hoop. The flames are static geometry.",
+    "Rendered and reviewed a preview from the edited mesh. Unity integration is pending."
+  ],
+  "sha256": {
+    "01a1fa3a-c361-7431-9d92-8de1b20bc3f8/GeometryPreview.glb": "61d85202c7e8c587412e7d192f195acb1610c1116aac3645caf42618b4e98271",
+    "01a1fa3a-c361-7431-9d92-8de1b20bc3f8/GeometryPreview.png": "84718ac88bc223d5c3e843a3828903e21bad5df68c422596ef92de255b2b9a94",
+    "01a1fa3c-e1c7-73d9-a05f-08b09fccfed9/MeshySource.glb": "9a6d142308ebbc68221c2b48e35daaef99e1a0802c76feb68a10d3252e5b7a7f",
+    "01a1fa3c-e1c7-73d9-a05f-08b09fccfed9/Preview.png": "8b7aaaa37c7131334d00544b350c28cd5ba02c7cbb297a31887d0aa95e245803",
+    "01a1fa3c-e1c7-73d9-a05f-08b09fccfed9/SingleTierChandelier.glb": "7ef07a7f36faf2e7ddbe630182b81b8b775d108419b00d2383400aa8fac7a3cf"
+  }
+}

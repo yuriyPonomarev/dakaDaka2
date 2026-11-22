@@ -8,6 +8,7 @@ using Emberdelve.Data;
 using Emberdelve.Flow;
 using Emberdelve.InputLayer;
 using Emberdelve.Items;
+using Emberdelve.Level;
 using Emberdelve.Player;
 using Emberdelve.Skills;
 
@@ -43,7 +44,10 @@ namespace Emberdelve.UI
         private Text _objectiveLabel;
         private Text _raidCountdownLabel;
         private Image _raidCountdownBack;
+        private Text _royaleZoneLabel;
+        private Image _royaleZoneBack;
         private Text _statusLabel;
+        private Text _spectatorLabel;
         private UnityEngine.UI.Image _impactGuardBuff;
         private UnityEngine.UI.Text _impactGuardLabel;
         private PlayerRig _impactGuardPlayer;
@@ -87,6 +91,9 @@ namespace Emberdelve.UI
         private bool _paused;
         private RunDirector _director;
         private InventoryScreenController _inventoryScreen;
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private DeveloperSpawnPanel _developerSpawn;
+#endif
 
         /// <summary>Widgets of one skill slot. Built once, then updated from SkillSnapshot values.</summary>
         private sealed class SkillSlotWidget
@@ -131,6 +138,7 @@ namespace Emberdelve.UI
         {
             GameEvents.PlayerHealthChanged += OnPlayerHealth;
             GameEvents.PlayerDamaged += OnPlayerDamaged;
+            GameEvents.GuardContact += OnGuardContact;
             GameEvents.DamageDealt += OnDamageDealt;
             GameEvents.ItemCollected += OnItemCollected;
             GameEvents.InventoryChanged += OnInventoryChanged;
@@ -152,8 +160,12 @@ namespace Emberdelve.UI
 
         private void OnDisable()
         {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            _developerSpawn?.Close();
+#endif
             GameEvents.PlayerHealthChanged -= OnPlayerHealth;
             GameEvents.PlayerDamaged -= OnPlayerDamaged;
+            GameEvents.GuardContact -= OnGuardContact;
             GameEvents.DamageDealt -= OnDamageDealt;
             GameEvents.ItemCollected -= OnItemCollected;
             GameEvents.InventoryChanged -= OnInventoryChanged;
@@ -219,11 +231,37 @@ namespace Emberdelve.UI
                 }
             }
 
-            UpdateInventoryScreen();
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            if (_director == null) GameServices.TryGet<RunDirector>(out _director);
+            _developerSpawn?.Tick(_director);
+            if (_developerSpawn == null || !_developerSpawn.IsOpen)
+#endif
+                UpdateInventoryScreen();
             UpdateComboPips();
             UpdateRaidCountdown();
             UpdateWayfinding();
             UpdateImpactGuardBuff();
+            UpdatePortalSpectator();
+        }
+
+        private void UpdatePortalSpectator()
+        {
+            if (_spectatorLabel == null) return;
+            var local = _impactGuardPlayer;
+            bool watching = local != null && local.IsPortalSpectating;
+            if (_crosshair != null && _crosshair.gameObject.activeSelf == watching) _crosshair.gameObject.SetActive(!watching);
+            if (_spectatorLabel.gameObject.activeSelf != watching) _spectatorLabel.gameObject.SetActive(watching);
+            if (!watching) return;
+            _spectatorLabel.text = DescribeSpectator(local.GetComponent<PortalSpectatorCamera>());
+        }
+
+        internal static string DescribeSpectator(PortalSpectatorCamera camera)
+        {
+            if (camera == null || camera.VisibleTarget == null) return "DESCENDING…";
+            var target = camera.VisibleTarget;
+            string name = target.Class != null ? target.Class.displayName : "Ally";
+            return "SPECTATING  " + name + "  #" + target.PlayerId
+                + (camera.TargetCount > 1 ? "   •   TAB  SWITCH ALLY" : "");
         }
 
         private void UpdateImpactGuardBuff()
@@ -357,7 +395,9 @@ namespace Emberdelve.UI
             _nextWayfinding = Time.unscaledTime + .12f;
             if (_director == null) GameServices.TryGet<RunDirector>(out _director);
             PlayerRig player = _director != null ? _director.Player : null;
-            bool visible = player != null && !player.IsDead && _director.Layout != null &&
+            var layout = _director == null ? null : _director.RoyaleMode.HasValue && _director.LocalSession != null
+                ? _director.FloorCoordinator.ActiveLayoutFor(_director.LocalSession.Floor) : _director.Layout;
+            bool visible = player != null && player.IsInPlay && !player.IsDead && layout != null &&
                 _director.State == RunState.Running && _director.LocalPlayerState == RunState.Running &&
                 !_paused && (_inventoryScreen == null || !_inventoryScreen.IsOpen);
             _roomLabel.gameObject.SetActive(visible);
@@ -367,7 +407,7 @@ namespace Emberdelve.UI
             _roomLabel.rectTransform.anchoredPosition = offset;
             _roomBack.rectTransform.anchoredPosition = offset;
             float yaw = player.Look != null ? player.Look.AimTransform.eulerAngles.y : player.transform.eulerAngles.y;
-            string label = Emberdelve.Level.DungeonWayfinding.Heading(yaw) + "  |  " + Emberdelve.Level.DungeonWayfinding.RoomAt(_director.Layout, player.transform.position);
+            string label = DungeonWayfinding.Heading(yaw) + "  |  " + DungeonWayfinding.RoomAt(layout, player.transform.position);
             if (_roomLabel.text != label) _roomLabel.text = label;
         }
 
@@ -376,6 +416,9 @@ namespace Emberdelve.UI
             _canvas = UiFactory.EnsureCanvas("Emberdelve_Hud", 10);
             _root = UiFactory.CreateGroup(_canvas.transform, "HudRoot");
             UiFactory.Stretch(_root);
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            _developerSpawn = new DeveloperSpawnPanel(_root);
+#endif
 
             Color ink = new Color(0.92f, 0.88f, 0.8f, 1f);
             Color dim = new Color(0.75f, 0.7f, 0.62f, 0.75f);
@@ -411,9 +454,26 @@ namespace Emberdelve.UI
             _raidCountdownBack.gameObject.SetActive(false);
             _raidCountdownLabel.gameObject.SetActive(false);
 
+            _royaleZoneBack = UiFactory.CreateImage(_root, "RoyaleZoneBack", new Color(.07f, .06f, .05f, .88f),
+                new Vector2(236f, 28f), new Vector2(-24f, -76f), Vector2.one, Vector2.one);
+            _royaleZoneBack.rectTransform.pivot = Vector2.one;
+            DungeonUiStyle.Surface(_royaleZoneBack);
+            _royaleZoneLabel = UiFactory.CreateText(_royaleZoneBack.transform, "RoyaleZoneLabel", "", 14, ink,
+                TextAnchor.MiddleCenter, FontStyle.Bold);
+            UiFactory.Stretch(_royaleZoneLabel.rectTransform);
+            _royaleZoneLabel.raycastTarget = false;
+            _royaleZoneBack.raycastTarget = false;
+            _royaleZoneBack.gameObject.SetActive(false);
+
             _statusLabel = UiFactory.CreateText(_root, "StatusLabel", "", 16, dim, TextAnchor.UpperLeft);
             UiFactory.SetRect(_statusLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(520f, 26f), new Vector2(24f, -118f), new Vector2(0f, 1f));
+
+            _spectatorLabel = UiFactory.CreateText(_root, "PortalSpectatorLabel", "", 18, ink, TextAnchor.MiddleCenter, FontStyle.Bold);
+            UiFactory.SetRect(_spectatorLabel.rectTransform, new Vector2(.5f, 0f), new Vector2(.5f, 0f),
+                new Vector2(560f, 32f), new Vector2(0f, 126f));
+            _spectatorLabel.raycastTarget = false;
+            _spectatorLabel.gameObject.SetActive(false);
 
             UiFactory.CreateImage(_root, "HealthBack", new Color(0.08f, 0.07f, 0.06f, 0.85f),
                 new Vector2(BarWidth, BarHeight), new Vector2(24f + BarWidth * 0.5f, 44f),
@@ -517,7 +577,11 @@ namespace Emberdelve.UI
                 _raidCountdownBack.gameObject.SetActive(visible);
             if (_raidCountdownLabel != null && _raidCountdownLabel.gameObject.activeSelf != visible)
                 _raidCountdownLabel.gameObject.SetActive(visible);
-            if (!visible || _raidCountdownLabel == null || _raidCountdownBack == null) return;
+            if (!visible || _raidCountdownLabel == null || _raidCountdownBack == null)
+            {
+                if (_royaleZoneBack != null) _royaleZoneBack.gameObject.SetActive(false);
+                return;
+            }
 
             float remaining = _director.RaidSecondsRemaining;
             bool expired = _director.RaidExpired;
@@ -527,8 +591,9 @@ namespace Emberdelve.UI
             bool descend = royale && clock.Floor < 3;
             if (royale && _objectiveLabel != null)
                 _objectiveLabel.text = waiting ? "Preparing the next floor. Your carried loot stays with you."
-                    : descend ? "Stay inside the zone. Find a descent portal to the next floor.\nThe final escape is on floor 3."
+                    : descend ? "Find a red portal and press [F] to descend.\n" + DescentObjective(clock.Floor)
                     : "Recover loot, then hold [F] at the final escape.\nStay inside the zone until you leave.";
+            UpdateRoyaleZone(royale && !waiting ? clock.Floor : 0);
             bool urgent = !waiting && (expired || remaining <= 10f);
             bool warning = !waiting && remaining <= 60f;
             _raidCountdownLabel.text = waiting ? "PREPARING FLOOR " + clock.Floor : expired ? "RAID EXPIRED" :
@@ -539,6 +604,36 @@ namespace Emberdelve.UI
                 warning ? new Color(1f, 0.87f, 0.56f, 1f) : new Color(0.92f, 0.88f, 0.8f, 1f);
             _raidCountdownBack.color = urgent ? new Color(0.28f, 0.06f, 0.04f, 0.94f) :
                 warning ? new Color(0.25f, 0.18f, 0.05f, 0.92f) : new Color(0.07f, 0.06f, 0.05f, 0.88f);
+        }
+
+        private string DescentObjective(int floor)
+        {
+            var encounter = _director.FloorCoordinator.EncounterFor(floor);
+            if (encounter == null || !encounter.TryGetPortalStatus(out int open, out double nextWave)) return "";
+            if (open > 0) return open == 1 ? "1 portal group open inside the safe zone." : open + " portal groups open inside the safe zone.";
+            return nextWave > 0 ? "Next portal wave in " + FormatRaidClock((float)nextWave) + "."
+                : "All portal slots on this floor have been used.";
+        }
+
+        private void UpdateRoyaleZone(int floor)
+        {
+            var actor = _director.Player;
+            var encounter = floor > 0 ? _director.FloorCoordinator.EncounterFor(floor) : null;
+            if (_royaleZoneBack == null) return;
+            if (encounter == null || actor == null || !actor.IsInPlay || actor.IsDead || !encounter.TrySample(out var sample))
+            {
+                _royaleZoneBack.gameObject.SetActive(false);
+                return;
+            }
+            _royaleZoneBack.gameObject.SetActive(true);
+
+            Vector3 position = actor.transform.position;
+            float distance = Vector2.Distance(new Vector2(position.x, position.z), new Vector2((float)sample.X, (float)sample.Z));
+            float outside = distance - (float)sample.Radius;
+            _royaleZoneLabel.text = outside > 0 ? "OUTSIDE ZONE  " + Mathf.CeilToInt(outside) + " m to safety"
+                : sample.Completed ? "FINAL ZONE" : sample.Shrinking ? "ZONE SHRINKING"
+                : "ZONE CLOSES IN " + Mathf.CeilToInt((float)sample.SecondsToBoundary) + " s";
+            _royaleZoneLabel.color = outside > 0 ? new Color(1f, .65f, .45f) : new Color(.92f, .88f, .8f);
         }
 
         private static string FormatRaidClock(float seconds)
@@ -867,8 +962,14 @@ namespace Emberdelve.UI
         private void OnPlayerDamaged(int playerId, DamageInfo info)
         {
             if (!PlayerView.Shows(playerId)) return;
-            _vignetteTimer = VignetteDuration;
+            bool tookDamage = float.IsFinite(info.Amount) && info.Amount > 0f;
+            if (!tookDamage)
+            {
+                if (info.Blocked) GameEvents.RaiseToast(playerId, info.GuardBroken ? "GUARD BROKEN" : "Blocked");
+                return;
+            }
 
+            _vignetteTimer = VignetteDuration;
             // D1b: a broken guard says so (the block was engaged but the hit's impact power reached its resist).
             string label = info.GuardBroken ? "GUARD BROKEN" : info.Blocked ? "Blocked" : "Hit";
             GameEvents.RaiseToast(playerId, $"{label}  -{Mathf.RoundToInt(info.Amount)} HP");
@@ -888,6 +989,11 @@ namespace Emberdelve.UI
                 _hitMarker.gameObject.SetActive(true);
                 _hitMarkerTimer = style.Duration;
             }
+        }
+
+        private void OnGuardContact(int playerId, Vector3 point, bool parried)
+        {
+            if (parried && playerId != GameEvents.NoPlayer && PlayerView.Shows(playerId)) GameEvents.RaiseToast(playerId, "Parry");
         }
 
         /// <summary>B2: look of the hit marker for one hit location. Body (and an unknown location) is the original marker.</summary>

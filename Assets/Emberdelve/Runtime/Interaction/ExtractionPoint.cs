@@ -150,7 +150,7 @@ namespace Emberdelve.Interaction
 
         public bool OnHoldStarted(IInteractionActor actor)
         {
-            if (!NetRole.IsNetworked) return true;
+            if (!NetRole.IsNetworked) return Floor != 3 || CanInteract(actor, out _);
             return TryGetNetworkAuthority(actor, out IExtractionInteractionAuthority authority) &&
                 authority.BeginExtractionHold();
         }

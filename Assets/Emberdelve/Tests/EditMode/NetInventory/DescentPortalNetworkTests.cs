@@ -68,7 +68,7 @@ namespace Emberdelve.Tests.NetInventory
         {
             public bool Ready = true; public int Calls, Floor, Group, Slot;
             public bool DescentReady(int floor) => Ready;
-            public bool RequestDescent(int floor, int group, int slot)
+            public bool RequestDescent(int floor, int group, int slot, DescentPortalIntent intent = DescentPortalIntent.Complete)
             { Calls++; Floor = floor; Group = group; Slot = slot; return true; }
         }
         [Test] public void ClientViewOnlySendsOwnerIntentAndNeverConsumesOrTeleportsLocally()

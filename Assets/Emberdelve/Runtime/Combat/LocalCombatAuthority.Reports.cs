@@ -29,6 +29,7 @@ namespace Emberdelve.Combat
         public HitLocation Location;
         public float LocationMultiplier = 1f;
         public bool Blocked;
+        public bool Parried;
         public float BlockReduction;
         public bool GuardBroken;
         public bool Killed;
@@ -102,7 +103,7 @@ namespace Emberdelve.Combat
         private void ReportHit(CombatHitSource source, ICombatEntity instigator, ICombatEntity target, WeaponData weapon, in DamageInfo damage,
             HitLocation location, float locationMultiplier, float stepMultiplier, float zoneMultiplier, float contactT,
             float charge, float airTime, float airTimeScale,
-            float outgoingMultiplier = -1f, float flatBonus = -1f, float armorRating = -1f)
+            float outgoingMultiplier = -1f, float flatBonus = -1f, float armorRating = -1f, bool parried = false)
         {
             Action<CombatHitReport> listeners = HitResolved;
             if (listeners == null) return;
@@ -117,6 +118,7 @@ namespace Emberdelve.Combat
                 Location = location,
                 LocationMultiplier = locationMultiplier,
                 Blocked = damage.Blocked,
+                Parried = parried,
                 BlockReduction = damage.BlockReduction,
                 GuardBroken = damage.GuardBroken,
                 Killed = target != null && target.IsDead,

@@ -273,7 +273,8 @@ namespace Emberdelve.Combat.Tests
                     }
                     if (botDescent)
                     {
-                        var bot = actors[1]; var brain = bot.GetComponent<RoyaleBotController>();
+                        bool team = director.HasTeamDescent;
+                        var bot = actors[team ? (int)mode : 1]; var brain = bot.GetComponent<RoyaleBotController>();
                         var slot = encounter.Groups[0].GetComponentsInChildren<DescentPortalSlot>(true)[0];
                         bot.Movement.TeleportTo(slot.transform.position - Vector3.up * 1.1f); Physics.SyncTransforms();
                         At(29); brain.Step(.02f);
@@ -282,7 +283,7 @@ namespace Emberdelve.Combat.Tests
                         string carriedKit = LoadoutSnapshot.Capture(bot.Inventory, bot.Equipment).ToJson();
                         string carriedAmmo = CaptureAmmo(bot);
                         At(60.1f);
-                        for (int step = 0; step < 40 && !bot.IsInFloorTransit; step++)
+                        for (int step = 0; step < 160 && !bot.IsInFloorTransit; step++)
                         { brain.Step(.02f); Physics.SyncTransforms(); }
                         Assert.True(bot.IsInFloorTransit, "Normal brain must request the portal transition");
                         Assert.True(slot.Group.SlotUsed(slot.Slot));
@@ -305,13 +306,31 @@ namespace Emberdelve.Combat.Tests
                         var descentDriver = new RoyaleDescentDriver(director, 120, Prepare, Spawn, _ => true);
                         try
                         {
-                            Assert.False(descentDriver.Tick(0, out _), "Living source runners must keep destination admission open");
+                            Assert.False(descentDriver.Tick(0, out reason), reason);
                             Assert.True(bot.IsInFloorTransit);
-                            At(120);
-                            Assert.True(descentDriver.Tick(1, out reason), reason);
+                            Assert.That(bot.IsPortalSpectating, Is.EqualTo(team));
+                            Assert.That(director.SessionOf(bot).Floor, Is.EqualTo(1));
+                            if (team)
+                            {
+                                foreach (var ally in actors)
+                                    if (ally != bot && ally.PartyId == bot.PartyId)
+                                    {
+                                        var position = ally.transform.position;
+                                        ally.Health.ApplyDamage(new DamageInfo(ally.CurrentHealth + 1f, position, Vector3.zero,
+                                            position, 0, EntityKind.Neutral, DamageType.Physical, false, false, 0f));
+                                        Assert.True(ally.IsDead);
+                                    }
+                                Assert.True(director.IsRoyaleFloorOpen(1));
+                                Assert.True(descentDriver.Tick(1, out reason), reason);
+                            }
+                            else
+                            {
+                                At(120);
+                                Assert.True(descentDriver.Tick(1, out reason), reason);
+                            }
                             Assert.That(director.SessionOf(bot).Floor, Is.EqualTo(2));
                             Assert.False(bot.IsInFloorTransit);
-                            Assert.That(coordinator.ReservedCount(2), Is.EqualTo(capacity));
+                            Assert.That(coordinator.ReservedCount(2), Is.EqualTo(team ? capacity - (int)mode + 1 : capacity));
                             Assert.That(LoadoutSnapshot.Capture(bot.Inventory, bot.Equipment).ToJson(), Is.EqualTo(carriedKit));
                             Assert.That(CaptureAmmo(bot), Is.EqualTo(carriedAmmo));
                             Assert.That(brain.Floor, Is.EqualTo(2));
@@ -376,6 +395,11 @@ namespace Emberdelve.Combat.Tests
                 if (!coordinator.TrySpawnBot(floor, party, prefab, character, out bot, out reason)) return false;
                 typeof(PlayerMovement).GetMethod("Awake", Private).Invoke(bot.Movement, null);
                 actors.Add(bot); return true;
+            }
+            if (director.HasTeamDescent)
+            {
+                VerifyTeamArrivals(director, actors, capacity, Prepare, Spawn);
+                return;
             }
             var driver = new RoyaleDescentDriver(director, 120, Prepare, Spawn, _ => ready);
             for (int source = 1; source <= 2; source++)
@@ -457,6 +481,100 @@ namespace Emberdelve.Combat.Tests
                 }
                 else Assert.Null(encounter.FinalExit);
                 ready = false;
+            }
+        }
+
+        private static void VerifyTeamArrivals(RunDirector director, List<PlayerRig> actors, int capacity,
+            RoyaleDescentDriver.PrepareFloor prepare, RoyalePopulationDriver.SpawnBot spawn)
+        {
+            var coordinator = director.FloorCoordinator;
+            var clockStarts = (float[])typeof(RunDirector).GetField("_floorStartedAt", Private).GetValue(director);
+            PlayerRig blocked = null;
+            var driver = new RoyaleDescentDriver(director, 120, prepare, spawn, _ => false,
+                (_, session) => session.Rig != blocked);
+            var lead = actors[0]; var teammate = actors[1];
+            Assert.That(teammate.PartyId, Is.EqualTo(lead.PartyId));
+            var third = director.RoyaleMode == RoyalePartyMode.Trio ? actors[2] : null;
+            for (int source = 1; source <= 2; source++)
+            {
+                int destination = source + 1;
+                clockStarts[source] = director.Elapsed - 62;
+                var sourceEncounter = coordinator.EncounterFor(source);
+                sourceEncounter.Tick();
+                var group = sourceEncounter.Groups[0];
+                var slots = group.GetComponentsInChildren<DescentPortalSlot>(true);
+                bool Enter(PlayerRig actor, DescentPortalSlot slot, out string reason)
+                {
+                    actor.Movement.TeleportTo(slot.transform.position - Vector3.up * 1.1f); Physics.SyncTransforms();
+                    return group.TryEnter(actor, slot.Slot, out reason);
+                }
+                if (!lead.IsInFloorTransit) Assert.True(Enter(lead, slots[0], out string leadReason), leadReason);
+                var lateSlot = System.Array.Find(slots, slot => !group.SlotUsed(slot.Slot));
+                Assert.NotNull(lateSlot);
+                var rival = actors.Find(actor => actor.PartyId != lead.PartyId && director.SessionOf(actor)?.Floor == source);
+                Assert.NotNull(rival);
+                string kit = LoadoutSnapshot.Capture(teammate.Inventory, teammate.Equipment).ToJson();
+                string ammo = CaptureAmmo(teammate);
+                if (source == 1) Assert.False(driver.Tick(0, out _), "Retry a transient planning failure");
+                blocked = teammate;
+                Assert.False(driver.Tick(1, out string reason), reason);
+                Assert.That(director.SessionOf(lead).Floor, Is.EqualTo(source));
+                Assert.True(lead.IsPortalSpectating);
+                Assert.That(director.SessionOf(teammate).Floor, Is.EqualTo(source));
+                Assert.False(teammate.IsInFloorTransit);
+                Assert.True(director.IsRoyaleFloorOpen(source));
+                Assert.False(director.IsRoyaleFloorOpen(destination));
+                Assert.False(Enter(rival, lateSlot, out _), "Another party cannot use the remaining slots");
+                Assert.False(group.SlotUsed(lateSlot.Slot));
+                teammate.Movement.TeleportTo(lateSlot.transform.position - Vector3.up * 1.1f); Physics.SyncTransforms();
+                Assert.True(group.BeginHold(teammate, lateSlot.Slot, out reason), reason);
+                Assert.False(group.CompleteHold(teammate, lateSlot.Slot, out _), "Early completion cannot consume a slot");
+                Assert.True(Enter(teammate, lateSlot, out reason), reason);
+                Assert.False(driver.Tick(2, out _));
+                Assert.True(teammate.IsPortalSpectating);
+                if (third != null)
+                {
+                    Assert.That(director.SessionOf(third).Floor, Is.EqualTo(source));
+                    var thirdSlot = System.Array.Find(slots, slot => !group.SlotUsed(slot.Slot));
+                    Assert.NotNull(thirdSlot);
+                    Assert.True(Enter(third, thirdSlot, out reason), reason);
+                }
+                Assert.False(driver.Tick(2.5f, out _), "Every portal entrant must be ready before the party moves");
+                Assert.False(director.IsRoyaleFloorOpen(destination));
+                blocked = null;
+                Assert.True(driver.Tick(3, out reason), reason);
+                Assert.That(director.SessionOf(lead).Floor, Is.EqualTo(destination));
+                Assert.False(lead.IsPortalSpectating);
+                Assert.That(director.SessionOf(teammate).Floor, Is.EqualTo(destination));
+                Assert.False(teammate.IsPortalSpectating);
+                if (third != null) Assert.That(director.SessionOf(third).Floor, Is.EqualTo(destination));
+                Assert.That(teammate.PartyId, Is.EqualTo(lead.PartyId));
+                Assert.True(director.IsRoyaleFloorOpen(destination));
+                Assert.That(coordinator.ReservedCount(destination), Is.EqualTo(capacity));
+                Assert.True(director.IsRoyaleFloorOpen(source));
+                Assert.That(LoadoutSnapshot.Capture(teammate.Inventory, teammate.Equipment).ToJson(), Is.EqualTo(kit));
+                Assert.That(CaptureAmmo(teammate), Is.EqualTo(ammo));
+                clockStarts[source] = director.Elapsed - 120;
+                driver.Tick(4, out _); // The first fill retries after the simulated third bot failure.
+                driver.Tick(5, out _);
+                Assert.That(coordinator.ReservedCount(destination), Is.EqualTo(capacity));
+                var parties = new Dictionary<int, int>();
+                foreach (var session in director.Players)
+                {
+                    if (session.Floor != destination) continue;
+                    Assert.False(session.Rig.IsInFloorTransit);
+                    parties[session.PartyId] = parties.TryGetValue(session.PartyId, out int n) ? n + 1 : 1;
+                }
+                Assert.That(parties.Count * (int)director.RoyaleMode.Value, Is.EqualTo(capacity));
+                foreach (int members in parties.Values) Assert.That(members, Is.EqualTo((int)director.RoyaleMode.Value));
+                var encounter = coordinator.EncounterFor(destination);
+                Assert.That(encounter.Groups.Count, Is.EqualTo(destination == 3 ? 0 : 3));
+                if (destination == 3)
+                {
+                    encounter.Tick();
+                    Assert.NotNull(encounter.FinalExit);
+                    Assert.True(encounter.FinalExit.gameObject.activeInHierarchy);
+                }
             }
         }
 

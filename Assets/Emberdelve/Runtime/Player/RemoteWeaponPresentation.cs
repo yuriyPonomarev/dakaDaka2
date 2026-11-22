@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Emberdelve.Combat;
 using Emberdelve.Data;
+using Emberdelve.Level;
 using UnityEngine;
 namespace Emberdelve.Player
 {
@@ -11,7 +12,10 @@ namespace Emberdelve.Player
         private PotionDrinkPresentation _drink;
         private float _drinkRaise;
         private Transform _right, _left, _rightElbow, _leftElbow, _rightShoulder, _leftShoulder;
-        private readonly List<BonePose> _modified = new List<BonePose>(6);
+        private Transform _spine;
+        private AttackTelegraphVisual _attackTell;
+        private SwingPatternData _tellPattern;
+        private readonly List<BonePose> _modified = new List<BonePose>(7);
         private struct BonePose { public Transform Bone; public Vector3 Position; public Quaternion Rotation; }
         private void Remember(Transform bone)
         {
@@ -57,13 +61,14 @@ namespace Emberdelve.Player
         public void Bind(PlayerRig rig,GameObject model)
         {
             _rig=rig; _drink=PotionDrinkPresentation.Ensure(rig); _models=WeaponViewModelSet.Load();
-            _right=_left=_rightElbow=_leftElbow=_rightShoulder=_leftShoulder=null;
+            _right=_left=_rightElbow=_leftElbow=_rightShoulder=_leftShoulder=_spine=null;
             var animator=model.GetComponentInChildren<Animator>();
             if(animator!=null && animator.isHuman)
             {
                 _right=animator.GetBoneTransform(HumanBodyBones.RightHand); _left=animator.GetBoneTransform(HumanBodyBones.LeftHand);
                 _rightElbow=animator.GetBoneTransform(HumanBodyBones.RightLowerArm); _leftElbow=animator.GetBoneTransform(HumanBodyBones.LeftLowerArm);
                 _rightShoulder=animator.GetBoneTransform(HumanBodyBones.RightUpperArm); _leftShoulder=animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+                _spine=animator.GetBoneTransform(HumanBodyBones.Chest) ?? animator.GetBoneTransform(HumanBodyBones.Spine);
                 return;
             }
             foreach(var bone in model.GetComponentsInChildren<Transform>())
@@ -74,6 +79,7 @@ namespace Emberdelve.Player
                 if(bone.name=="upperarm.l") _leftShoulder=bone;
                 if(bone.name=="lowerarm.r") _rightElbow=bone;
                 if(bone.name=="lowerarm.l") _leftElbow=bone;
+                if(bone.name=="spine03") _spine=bone;
             }
         }
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -85,11 +91,12 @@ namespace Emberdelve.Player
             foreach(var weapon in Resources.FindObjectsOfTypeAll<WeaponData>()) Weapons[weapon.weaponId]=weapon;
             Weapons.TryGetValue(id,out found); return found;
         }
-        private bool _recoil;
+        private bool _recoil, _bot;
         private float _stopFraction, _recoilProgress;
         public void Present(string main,string off,string pattern,bool guard,bool swing,float elapsed,SwingTiming timing,SwingFrame frame,
-            bool recoil=false,float stopFraction=0f,float recoilProgress=0f)
+            bool recoil=false,float stopFraction=0f,float recoilProgress=0f,bool bot=false)
         {
+            _bot=bot;
             _recoil=recoil; _stopFraction=stopFraction; _recoilProgress=recoilProgress;
             if(main!=_mainId) { _mainId=main; _main=Resolve(main); Replace(ref _mainObject,ref _mainRenderers,_main,true); _patternId=null; }
             if(off!=_offId) { _offId=off; _off=Resolve(off); Replace(ref _offObject,ref _offRenderers,_off,false); }
@@ -136,7 +143,9 @@ namespace Emberdelve.Player
         private void LateUpdate()
         {
             if(_rig==null) return;
-            bool visible=!_rig.IsLocallyControlled && !_rig.IsExtracted && !_rig.IsDead;
+            bool visible=!_rig.IsLocallyControlled && !_rig.IsExtracted && !_rig.IsDead
+                && !DungeonModuleSceneAssembler.IsPositionOnRetiredFloor(transform.position);
+            UpdateBotSwing(visible && !_rig.IsInFloorTransit);
             Visibility(_mainRenderers,visible); Visibility(_offRenderers,visible);
             // The owner's remote model must not leave a second point light/flame running.
             if (_mainObject != null && _main != null && _main.weaponId == HandheldTorchVisual.WeaponId)
@@ -277,6 +286,37 @@ namespace Emberdelve.Player
                         _rig.transform.rotation*Quaternion.Euler(0,-30,0));
                 }
             }
+        }
+
+        private void UpdateBotSwing(bool visible)
+        {
+            bool posing = visible && _bot && _pattern != null && (_recoil || (_swing && _elapsed < _timing.Total));
+            bool warning = posing && _swing && _elapsed < _timing.Windup;
+            if (warning && _tellPattern != _pattern)
+            {
+                if (_attackTell != null)
+                {
+                    _attackTell.gameObject.SetActive(false);
+                    Destroy(_attackTell.gameObject);
+                }
+                _pattern.YawRange(out float minYaw, out float maxYaw);
+                _attackTell = AttackTelegraphVisual.Create(transform, minYaw, maxYaw, new Color(1f, .32f, .18f));
+                _tellPattern = _pattern;
+            }
+            if (_attackTell != null)
+                _attackTell.SetState(warning, warning ? _elapsed / _timing.Windup : 0f, _frame.Rotation * Vector3.forward,
+                    warning ? _pattern.EffectiveReach(_main) : 0f, false);
+
+            if (!posing || _spine == null) return;
+            SwingPose rest = _pattern.RestPose;
+            SwingPose swing = _recoil
+                ? SwingPose.Lerp(_pattern.ActivePose(_stopFraction), rest, _recoilProgress)
+                : _pattern.Evaluate(_elapsed, _timing);
+            float yaw = Mathf.Clamp((swing.Yaw - rest.Yaw) * .3f, -35f, 35f);
+            float pitch = Mathf.Clamp((swing.Pitch - rest.Pitch) * .25f, -25f, 25f);
+            Remember(_spine);
+            Quaternion facing = _rig.transform.rotation;
+            _spine.rotation = facing * Quaternion.Euler(pitch, yaw, 0f) * Quaternion.Inverse(facing) * _spine.rotation;
         }
         private void Reach(Transform shoulder,Transform elbow,Transform wrist,Vector3 target)
         {

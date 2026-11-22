@@ -292,12 +292,14 @@ namespace Emberdelve.Level
             DungeonModulePlanSession.Changed += OnPlanChanged;
             if (!NetRole.IsNetworked)
             {
+                RoyalePartyMode mode = RunContext.SelectedRoyaleMode ?? RoyalePartyMode.Solo;
+                RunContext.SelectRoyaleMode(mode);
                 DungeonModulePlanSession.ClearCurrent();
                 ulong raidSeed = RunContext.ResolveRaidSeed(out _);
                 RunContext.SetNextRaidSeed(raidSeed);
                 int seed = unchecked((int)(raidSeed ^ (raidSeed >> 32)));
                 if (DungeonModulePlanner.TryCreate(seed, catalog.Modules, out DungeonModulePlan plan, out string reason))
-                    DungeonModulePlanSession.Install(plan.WithRoyaleMode(RunContext.SelectedRoyaleMode));
+                    DungeonModulePlanSession.Install(plan.WithRoyaleMode(mode));
                 else Debug.LogError("[DungeonModuleSceneAssembler] Could not create offline map: " + reason, this);
             }
             else if (DungeonModulePlanSession.Current != null)

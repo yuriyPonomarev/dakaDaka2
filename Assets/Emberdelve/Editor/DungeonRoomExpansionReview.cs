@@ -9,11 +9,19 @@ namespace Emberdelve.EditorTools
     {
         public static void RebuildBatch()
         {
-            if (!Application.isBatchMode) throw new InvalidOperationException("Use the isolated batch mirror");
-            DungeonModuleContentBuilder.BuildCatalog();
-            DungeonModuleContentBuilder.BuildRoyaleDestinationCatalogs();
+            RebuildAssetsBatch();
             RenderBatch();
         }
+
+        public static void RebuildAssetsBatch()
+        {
+            if (!Application.isBatchMode) throw new InvalidOperationException("Use the isolated batch mirror");
+            DungeonDoorAuthoring.Build();
+            DungeonModuleContentBuilder.BuildCatalog();
+            DungeonModuleContentBuilder.BuildRoyaleDestinationCatalogs();
+        }
+
+        public static void RefreshDownloadedMaterials() => DownloadedCryptArchitecture.RefreshMaterials();
 
         public static void RenderBatch()
         {

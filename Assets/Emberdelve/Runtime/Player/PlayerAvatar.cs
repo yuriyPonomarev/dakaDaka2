@@ -1,7 +1,9 @@
 using UnityEngine;
+using Emberdelve.AI;
 using Emberdelve.Data;
 using Emberdelve.Combat;
 using Emberdelve.Level;
+using Emberdelve.Core;
 namespace Emberdelve.Player
 {
     // Cosmetic only: follows the existing rig and cannot move it or add hit shapes.
@@ -16,6 +18,7 @@ namespace Emberdelve.Player
         private Vector3 _lastPosition;
         private string _state;
         private RemoteWeaponPresentation _weapons;
+        private MeleeCombat _melee;
         private EquippedArmorView _armor;
         private readonly string[] _armorIds = new string[6];
         private bool _hasArmorIds;
@@ -30,15 +33,15 @@ namespace Emberdelve.Player
         }
         public void PresentUtility(string itemId) { if (_weapons != null) _weapons.PresentUtility(itemId); }
         public void PresentCombat(string main,string off,string pattern,bool guard,bool swing,float elapsed,SwingTiming timing,SwingFrame frame,
-            bool recoil=false,float stopFraction=0f,float recoilProgress=0f)
+            bool recoil=false,float stopFraction=0f,float recoilProgress=0f,bool bot=false)
         {
             _remoteGuard=guard; _remoteSwing=swing || recoil;
-            if(_weapons!=null) _weapons.Present(main,off,pattern,guard,swing,elapsed,timing,frame,recoil,stopFraction,recoilProgress);
+            if(_weapons!=null) _weapons.Present(main,off,pattern,guard,swing,elapsed,timing,frame,recoil,stopFraction,recoilProgress,bot);
         }
         public static void Bind(PlayerRig rig)
         {
             var view=rig.GetComponent<PlayerAvatar>(); if(view==null) view=rig.gameObject.AddComponent<PlayerAvatar>();
-            view._rig=rig; view.RefreshModel();
+            view._rig=rig; view._melee=rig.GetComponent<MeleeCombat>(); view.RefreshModel();
         }
         private void RefreshModel()
         {
@@ -63,6 +66,8 @@ namespace Emberdelve.Player
             if(_armor!=null && _armor.Refresh()) _renderers=_model.GetComponentsInChildren<Renderer>(true);
             bool visible=!_rig.IsLocallyControlled && !_rig.IsExtracted
                 && !DungeonModuleSceneAssembler.IsPositionOnRetiredFloor(transform.position);
+            if (visible && NetRole.RunsSimulation && TryGetComponent<RoyaleBotController>(out _))
+                PresentBotCombat();
             foreach(var renderer in _renderers) if(renderer!=null && renderer.enabled!=visible) renderer.enabled=visible;
             Vector3 delta=transform.position-_lastPosition; _lastPosition=transform.position; delta.y=0;
             float speed=Time.deltaTime>0 ? delta.magnitude/Time.deltaTime : 0;
@@ -73,6 +78,26 @@ namespace Emberdelve.Player
                 if(_animator!=null) _animator.CrossFadeInFixedTime(next,.15f);
                 else if(_animation!=null) _animation.CrossFade(next,.15f);
             }
+        }
+
+        private void PresentBotCombat()
+        {
+            var weapon = _rig.ActiveWeapon;
+            var offhand = _rig.OffhandWeapon;
+            string main = weapon != null ? weapon.weaponId : "";
+            string off = !_rig.IsHoldingUtility && offhand != null && (weapon == null || !weapon.twoHanded)
+                ? offhand.weaponId : "";
+            if (_melee != null && _melee.TryGetSwingPresentation(out var swing))
+            {
+                float stop = Mathf.Clamp01((float)swing.WallContactSample / Mathf.Max(1, swing.SampleCount));
+                float recoil = swing.Timing.WallRecoil > 0f
+                    ? Mathf.Clamp01((swing.Elapsed - swing.Timing.Windup - swing.Timing.Active * stop) / swing.Timing.WallRecoil) : 1f;
+                PresentCombat(main, off, _melee.ActivePattern.patternId, false, !swing.Recoiled, swing.Elapsed,
+                    swing.Timing, swing.PresentationFrame, swing.Recoiled, stop, recoil, true);
+                return;
+            }
+            var frame = new SwingFrame(_rig.AimOrigin, Quaternion.LookRotation(_rig.AimDirection));
+            PresentCombat(main, off, "", _rig.IsGuarding, false, 0f, default, frame, bot: true);
         }
     }
 }

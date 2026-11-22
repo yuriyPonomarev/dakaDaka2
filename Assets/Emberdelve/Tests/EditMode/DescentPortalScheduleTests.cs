@@ -19,6 +19,9 @@ namespace Emberdelve.Rules.Tests.DescentPortals
             Assert.False(schedule.IsGroupOpen(2, 539.999)); Assert.True(schedule.IsGroupOpen(2, 540));
             Assert.True(schedule.IsGroupOpen(2, 599.999)); Assert.False(schedule.IsGroupOpen(0, 600));
             Assert.False(schedule.IsGroupOpen(-1, 550)); Assert.False(schedule.IsGroupOpen(3, 550));
+            Assert.True(schedule.TryGetSecondsToNextWave(0, out double seconds)); Assert.That(seconds, Is.EqualTo(300));
+            Assert.True(schedule.TryGetSecondsToNextWave(300, out seconds)); Assert.That(seconds, Is.EqualTo(120));
+            Assert.False(schedule.TryGetSecondsToNextWave(540, out _));
         }
 
         [Test]

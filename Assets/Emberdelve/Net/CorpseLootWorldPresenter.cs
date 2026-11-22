@@ -32,6 +32,7 @@ namespace Emberdelve.Net
         public void Configure(NetInventoryClient client, PlayerRig rig, float interactionReach)
         {
             if (_client != null) _client.CorpsePresenceReceived -= OnPresence;
+            _offline = null;
             _client = client;
             _rig = rig;
             _interactionReach = !float.IsNaN(interactionReach) && !float.IsInfinity(interactionReach) && interactionReach > 0f
@@ -43,6 +44,7 @@ namespace Emberdelve.Net
         public void ConfigureHost(NetPlayerRig owner, PlayerRig rig, float interactionReach)
         {
             if (_client != null) _client.CorpsePresenceReceived -= OnPresence;
+            _offline = null;
             _client = null;
             _hostOwner = owner;
             _rig = rig;
@@ -69,18 +71,19 @@ namespace Emberdelve.Net
 
         private void EnsureContainerUi()
         {
-            if (Application.isBatchMode) return;
+            if (Application.isBatchMode && (_offline == null || SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)) return;
             if (_containerUi == null) _containerUi = GetComponent<CorpseContainerScreenController>();
             if (_containerUi == null) _containerUi = gameObject.AddComponent<CorpseContainerScreenController>();
             _containerUi.Configure(this, _client, _hostOwner, _rig);
         }
 
-        public bool CanInteract(IInteractionActor actor, out string reason)
+        public bool CanInteract(IInteractionActor actor, out string reason) => CanInteract(actor, 0, out reason);
+
+        internal bool CanInteract(IInteractionActor actor, ulong corpseId, out string reason)
         {
             if (_offline != null)
             {
-                if (actor == null || !ReferenceEquals(actor, _rig)) { reason = "Not your loot"; return false; }
-                return InteractionRules.Validate(actor, this, _interactionReach, out reason);
+                return _offline.CanLoot(actor, corpseId, out reason);
             }
             bool isClientOwner = _client != null && _client.IsOwnerReady;
             bool isHostOwner = _hostOwner != null && _hostOwner.IsServer && _hostOwner.IsOwner &&
@@ -235,6 +238,7 @@ namespace Emberdelve.Net
             }
             GameObject body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             body.name = "CorpseLoot_" + corpseId;
+            if (_offline != null) body.GetComponent<Collider>().isTrigger = true;
             int layer = LayerMask.NameToLayer(GameConfig.InteractLayerName);
             if (layer >= 0) body.layer = layer;
             body.transform.localScale = new Vector3(0.52f, 0.38f, 0.82f);

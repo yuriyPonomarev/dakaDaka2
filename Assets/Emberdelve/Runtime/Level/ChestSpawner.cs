@@ -147,55 +147,53 @@ namespace Emberdelve.Level
 
             if (layout == null || layout.chestSpawns == null || layout.chestSpawns.Count == 0) return;
 
-            int interactLayer = LayerMask.NameToLayer(GameConfig.InteractLayerName);
             bool[,] walkable = layout.BuildWalkableGrid();
             GameObject root = new GameObject("Chests");
             root.transform.SetParent(presentationOnly || _floorRoot != null ? transform : lootHost.transform, false);
+            var visualCounts = new Dictionary<ChestVariant, int>();
 
             for (int i = 0; i < layout.chestSpawns.Count; i++)
             {
                 ChestSpawnSpec spec = layout.chestSpawns[i];
                 if (spec == null || spec.lootTable == null) continue;
 
-                Vector3 center = layout.CellCenterWorld(spec.cell);
-                Vector3 size = SizeFor(spec.variant);
-
-                GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                body.name = ChestName(spec, i, _floorNumber);
-                body.transform.SetParent(root.transform, false);
-                body.transform.position = center + Vector3.up * (size.y * 0.5f);
-                body.transform.localScale = size;
-                if (interactLayer >= 0) body.layer = interactLayer;
-
-                Renderer bodyRenderer = body.GetComponent<Renderer>();
-                if (bodyRenderer != null && spec.bodyMaterial != null) bodyRenderer.sharedMaterial = spec.bodyMaterial;
-
-                // The lid is a separate block so opening a chest is visible, not just a toast.
-                GameObject lid = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                lid.name = body.name + "_Lid";
-                lid.transform.SetParent(body.transform, false);
-                lid.transform.localPosition = new Vector3(0f, size.y * 0.5f, 0f);
-                lid.transform.localScale = new Vector3(size.x, size.y * 0.28f, size.z);
-                if (interactLayer >= 0) lid.layer = interactLayer;
-
-                Collider lidCollider = lid.GetComponent<Collider>();
-                if (lidCollider != null) lidCollider.isTrigger = false;
-
-                Renderer lidRenderer = lid.GetComponent<Renderer>();
-                if (lidRenderer != null && spec.lidMaterial != null) lidRenderer.sharedMaterial = spec.lidMaterial;
-
-                ChestInteractable chest = body.AddComponent<ChestInteractable>();
-                chest.Configure(spec.variant, spec.lootTable, spec.seed, presentationOnly ? null : lootHost);
-                if (presentationOnly) chest.SetPresentationOnly();
-                chest.ConfigureBody(size, lid.transform);
-
-                // V2: dress the blockout cubes with a model (visual only; colliders, layers and wiring above are untouched).
-                ChestVisualSet.Attach(chest, body, lid, spec.variant, size, FacingYaw(layout, walkable, spec.cell));
-
-                _chests.Add(chest);
+                visualCounts.TryGetValue(spec.variant, out int visualIndex);
+                _chests.Add(CreateChest(spec, root.transform, layout.CellCenterWorld(spec.cell), ChestName(spec, i, _floorNumber),
+                    lootHost, presentationOnly, FacingYaw(layout, walkable, spec.cell), (visualIndex & 1) != 0));
+                visualCounts[spec.variant] = visualIndex + 1;
             }
 
             Debug.Log($"[Emberdelve][ChestSpawner] spawned {_chests.Count} chest(s) from layout '{layout.levelName}'");
+        }
+
+        internal static ChestInteractable CreateChest(ChestSpawnSpec spec, Transform parent, Vector3 ground, string name,
+            MonoBehaviour lootHost, bool presentationOnly, float yaw, bool useAlternate)
+        {
+            int interactLayer = LayerMask.NameToLayer(GameConfig.InteractLayerName);
+            Vector3 size = SizeFor(spec.variant);
+
+            GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            body.name = name;
+            body.transform.SetParent(parent, false);
+            body.transform.position = ground + Vector3.up * (size.y * .5f);
+            body.transform.localScale = size;
+            if (interactLayer >= 0) body.layer = interactLayer;
+            if (spec.bodyMaterial != null) body.GetComponent<Renderer>().sharedMaterial = spec.bodyMaterial;
+
+            GameObject lid = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            lid.name = name + "_Lid";
+            lid.transform.SetParent(body.transform, false);
+            lid.transform.localPosition = new Vector3(0f, size.y * .5f, 0f);
+            lid.transform.localScale = new Vector3(size.x, size.y * .28f, size.z);
+            if (interactLayer >= 0) lid.layer = interactLayer;
+            if (spec.lidMaterial != null) lid.GetComponent<Renderer>().sharedMaterial = spec.lidMaterial;
+
+            ChestInteractable chest = body.AddComponent<ChestInteractable>();
+            chest.Configure(spec.variant, spec.lootTable, spec.seed, presentationOnly ? null : lootHost);
+            if (presentationOnly) chest.SetPresentationOnly();
+            chest.ConfigureBody(size, lid.transform);
+            ChestVisualSet.Attach(chest, body, lid, spec.variant, size, yaw, useAlternate);
+            return chest;
         }
 
         /// <summary>

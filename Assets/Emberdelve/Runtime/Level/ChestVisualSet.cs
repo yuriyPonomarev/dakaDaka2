@@ -20,6 +20,8 @@ namespace Emberdelve.Level
             public ChestVariant variant;
             [Tooltip("The model (an imported FBX). Instantiated per chest; its colliders, if any, are removed.")]
             public GameObject model;
+            [Tooltip("Optional alternate chosen consistently by the chest ID.")]
+            public GameObject alternateModel;
             [Tooltip("Multiplied into the model's colours (white = untouched).")]
             public Color tint = Color.white;
             [Tooltip("Child whose name contains this text is the lid. Empty/no match: the chest has no lid animation.")]
@@ -54,7 +56,8 @@ namespace Emberdelve.Level
         /// <paramref name="yawDegrees"/> turns the model (0 or 180: the collider box stays axis aligned). Returns the model
         /// root, or null when no model is configured (the blockout cubes then stay visible).
         /// </summary>
-        public static GameObject Attach(ChestInteractable chest, GameObject body, GameObject lid, ChestVariant variant, Vector3 size, float yawDegrees)
+        public static GameObject Attach(ChestInteractable chest, GameObject body, GameObject lid, ChestVariant variant, Vector3 size,
+            float yawDegrees, bool? useAlternate = null)
         {
             if (chest == null || body == null) return null;
 
@@ -62,7 +65,10 @@ namespace Emberdelve.Level
             Entry entry = set != null ? set.Find(variant) : null;
             if (entry == null) return null;
 
-            GameObject visual = Instantiate(entry.model);
+            GameObject model = entry.model;
+            if (entry.alternateModel != null && (useAlternate ?? UsesAlternateModel(chest.ChestId)))
+                model = entry.alternateModel;
+            GameObject visual = Instantiate(model);
             visual.name = body.name + "_Visual";
             visual.transform.SetParent(body.transform.parent, false);
 
@@ -117,6 +123,15 @@ namespace Emberdelve.Level
             }
 
             return null;
+        }
+
+        private static bool UsesAlternateModel(string chestId)
+        {
+            // The same authored ID selects the same mesh on every player.
+            uint hash = 2166136261;
+            foreach (char character in chestId)
+                hash = unchecked((hash ^ character) * 16777619);
+            return (hash & 1) != 0;
         }
 
         private static bool TryGetBounds(Renderer[] renderers, out Bounds bounds)

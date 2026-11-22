@@ -60,7 +60,51 @@ namespace Emberdelve.EditorTools
                 int before = _failures; RunMode(exe, runDir, mode);
                 if (_failures != before) break; // Diagnose the first integration failure before more expensive launches.
             }
+            if (_failures == 0 && (_modeOnly == null || _modeOnly == "duo")) RunDeathSpectator(exe, runDir);
             return _failures == 0 ? 0 : 1;
+        }
+
+        private static void RunDeathSpectator(string exe, string root)
+        {
+            string dir = Path.Combine(root, "death-spectator"); Directory.CreateDirectory(dir);
+            string hostLog = Path.Combine(dir, "host.log"), clientLog = Path.Combine(dir, "client.log");
+            string hostQuit = Path.Combine(dir, "host.quit"), clientQuit = Path.Combine(dir, "client.quit");
+            string command = Path.Combine(dir, "descent.request");
+            int port = FreeUdpPort();
+            Check(port > 0, "death spectator free port"); if (port <= 0) return;
+            string common = " -ember-port " + port + " -ember-net-autoquit 150 -ember-royale-descent-proof-file " + Q(command);
+            Process host = null, client = null;
+            try
+            {
+                host = Launch(exe, hostLog, "-ember-net host -ember-royale-mode duo -ember-royale-map-proof"
+                    + " -ember-slot spectator-host -ember-class warrior" + common + " -ember-net-quit-file " + Q(hostQuit));
+                bool listening = host != null && WaitForLog(hostLog, "listening", 40, host);
+                Check(listening, "death spectator host listening"); if (!listening) return;
+                client = Launch(exe, clientLog, "-ember-net client -ember-royale-observe -ember-slot spectator-client -ember-class archer"
+                    + common + " -ember-net-quit-file " + Q(clientQuit));
+                bool ready = client != null && WaitForLog(hostLog, "Royale geometry proof BOTH DESTINATIONS ACKNOWLEDGED", 45, host);
+                Check(ready, "death spectator client and both destinations are ready"); if (!ready) return;
+                File.WriteAllText(command, "death-spectator-start");
+                string allyId = null;
+                for (int floor = 1; floor <= 3; floor++)
+                {
+                    Match following = WaitForRegex(clientLog, @"\[RoyalePortal\] death spectator floor=" + floor
+                        + @" target=(\d+) ownerStillOnFloor=1 sameParty=True", 15, client);
+                    allyId ??= following?.Groups[1].Value;
+                    bool followed = following != null && following.Groups[1].Value == allyId;
+                    Check(followed, "dead remote owner watches the same living teammate on floor " + floor);
+                    if (!followed) return;
+                    if (floor < 3) File.WriteAllText(command, "death-spectator-" + floor);
+                }
+                File.WriteAllText(command, "death-spectator-exit");
+                Check(WaitForLog(clientLog, "[RoyalePortal] death spectator returned to own result", 15, client),
+                    "dead remote owner sees their own result when the last ally extracts");
+            }
+            finally
+            {
+                if (client != null) { File.WriteAllText(clientQuit, "quit"); Check(WaitForExit(client, 20), "death spectator client shut down"); }
+                if (host != null) { File.WriteAllText(hostQuit, "quit"); Check(WaitForExit(host, 20), "death spectator host shut down"); }
+            }
         }
 
         private static void RunMode(string exe, string root, string mode)
@@ -157,6 +201,13 @@ namespace Emberdelve.EditorTools
                 Check(WaitForLog(clientLog, "[RoyaleMap] source retired floor=" + (floor - 1), 15, client),
                     mode + " client retires acknowledged source floor" + (floor - 1));
                 string destinationText = ReadShared(hostLog);
+                if (mode != "solo")
+                {
+                    Check(destinationText.Contains("Royale team lead spectating source=" + (floor - 1) + " teammateStillOnSource=True"),
+                        mode + " floor" + floor + " first entrant waits in spectator while ally still plays");
+                    if (floor == 3) Check(ReadShared(clientLog).Contains("[RoyalePortal] local spectator follows ally floor=2"),
+                        mode + " remote owner follows an ally with the spectator camera");
+                }
                 if (botLoot != null)
                 {
                     string botId = botLoot.Groups[1].Value, botNetworkId = "";
