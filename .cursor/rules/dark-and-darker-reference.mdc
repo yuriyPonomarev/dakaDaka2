@@ -1,0 +1,8 @@
+---
+description: Require the local extracted/decompiled Dark and Darker reference for game systems, modules and environment changes.
+alwaysApply: true
+---
+
+# Required Dark and Darker reference
+
+Follow [the mandatory reference rule](../../AGENTS.md#required-dark-and-darker-reference) before designing or changing game systems, modules or environment assembly. Inspect relevant material under `C:/Users/yrapa/Downloads/DarkAndDarker-extracted` and record exact sources and adaptation choices. For module work, start with [the local reference inventory](../../Tasks/DARKER_MODULE_REFERENCE_20261122.md). Distinguish verified facts from inference and report unavailable/undecoded details; do not present guessed measurements or layouts as matching the original.

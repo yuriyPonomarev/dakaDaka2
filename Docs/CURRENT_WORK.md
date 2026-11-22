@@ -4,6 +4,8 @@ Updated 22 November 2026. The ONLY development checkout is `C:/Users/yrapa/OneDr
 
 Runner and project rules updated 22 November. The Windows entry points validate the development root and test mirror before writing, preserve Unity locks and serialize runs. Reports and skill text select zero gameplay scenarios. Proof: 28 harness tests in `Logs/harness/editor-guard-20261122-tests.txt`, EditMode 16/16, NetProof 35/35 and NetAdmission 107/107 in `Logs/runs/20261122-050757-383`. Build output copying was checked with temporary player files. The shared visual and asset procedures are linked in AGENTS.md. Its [Unity pipeline rule](../AGENTS.md#unity-pipeline) now gives the named MCP connections priority for interactive Editor work.
 
+User requirement added 22 November: game-system, module and environment changes must consult the local extracted/decompiled Dark and Darker and record exact evidence/adaptation choices. See [the mandatory reference rule](../AGENTS.md#required-dark-and-darker-reference); mirrored by the always-applied Cursor rule. Documentation-only change; source directory and links verified, no Unity run.
+
 ## Current slice: repair depth artifacts and architectural joins
 
 The user rejected the prior result with visible floating/colliding architecture. Earlier traversal-only visual proof was inadequate. Active report: [MODULE_JOINS_20261122](../Tasks/MODULE_JOINS_20261122.md).

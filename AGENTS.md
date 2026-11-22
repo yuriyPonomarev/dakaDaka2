@@ -29,6 +29,14 @@ The existing raid was accepted in milestone7f203c9c. On9 November the user autho
 For each slice choose one concrete acceptance scenario. Prefer an existing focused fixture plus the directly affected runtime scenario; use the full EditMode suite only when changes cross fixture boundaries or isolation is uncertain. Inspect a broad planner result and explicitly justify a narrower selection using the verification matrix instead of automatically running every selected gate.
 Do not add tests for cosmetic/documentation changes or duplicate existing proof. Do add a focused regression for item loss, duplication, authority violations and other critical defects. Passing checks are repeated only after relevant changes or new failures. Summarize results and keep raw logs out of conversation. No extra tooling/refactors unless they unblock the current feature.
 
+## Required Dark and Darker reference
+
+Use the local extracted/decompiled Dark and Darker as the primary reference when designing or changing game systems, level modules and environment assembly. This is an explicit user requirement (22 November 2026), not optional inspiration. Before implementation, inspect the relevant local material and record the exact source paths, observed behavior/structure and intended adaptation in the task report.
+
+Source root: `C:/Users/yrapa/Downloads/DarkAndDarker-extracted`. For modules, start with [the verified local reference inventory](Tasks/DARKER_MODULE_REFERENCE_20261122.md), then inspect the relevant room/kit packages: layout families, entrances and connections, height changes, stairs, wall/arch/door construction, furnishing and secret mechanisms. Compare the implemented result against that evidence as well as our depth/join checks.
+
+Distinguish decoded facts from inference. Package names and label counts alone do not establish dimensions, transforms, connectivity or gameplay behavior. If a needed detail cannot be decoded or the source is unavailable, record that limitation and identify any original design choice explicitly; do not claim a reference match from memory or a guess. Follow existing project asset-source rules for implementation.
+
 ## Verification matrix
 
 | Change | Required focused proof |
