@@ -1,0 +1,12 @@
+---
+description: Always develop DakaDaka in DakaDaka_clean_handoff
+alwaysApply: true
+---
+
+The only development checkout on this machine is `C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff` (user instruction, 22 November 2026).
+
+Set `workdir` explicitly and verify `git rev-parse --show-toplevel` before mutations. Read AGENTS.md and Docs/CURRENT_WORK.md. Give every worker this exact path.
+
+The sibling `DakaDaka` is read-only legacy material. Recover its work into this checkout; never edit gameplay, import assets, run builders, commit or push there. Old chats, newer commits and inherited cwd do not override this rule.
+
+`DakaDaka_ci` is only the disposable test/build mirror of this checkout. Never synchronize it from DakaDaka. Never close or automate Play mode in the user's main Editor.

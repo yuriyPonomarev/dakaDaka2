@@ -6,7 +6,7 @@ User-approved process reset: 8 November 2026.
 
 ## Start here (keep context small)
 
-On this machine, the primary development checkout for all agents is `C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff`. Open, edit, commit and run project commands from this checkout. `../DakaDaka` is the preserved old checkout with a different Git history, not the development source. On other machines, use the checkout cloned from the current GitHub `main` instead of the machine-specific path.
+On this machine, the only development checkout for all agents is `C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff` (explicit user instruction reinforced 22 November 2026). Set every mutating command's workdir to this exact path and verify `git rev-parse --show-toplevel` before work. Every delegated task must name it. Open, edit, import/generate assets, run builders, commit and push only from this checkout. `../DakaDaka` is read-only legacy material with a different Git history: compare or recover work from it into clean_handoff, but never develop or commit there, even if an older chat used it or its commits are newer. `../DakaDaka_ci` is only the disposable test/build mirror synchronized from clean_handoff, never from DakaDaka. On other machines, use the checkout cloned from the current GitHub `main` instead of the machine-specific path.
 
 Read Docs/CURRENT_WORK.md first, then only the active task report and relevant code.
 Docs/ROADMAP.md owns milestone order; CURRENT_WORK owns current status and three next actions.
