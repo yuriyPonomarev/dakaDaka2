@@ -43,6 +43,8 @@ Do not add tests for cosmetic/documentation changes or duplicate existing proof.
 Compile + focused proof per slice. One full `Run-All.ps1 -Set all -EditMode` after integration or before accepting a baseline/build. Repeat passing checks only after relevant changes or new evidence. After a full run and a test-fixture-only correction, rerun the affected scenario (and failing seed); do not restart the entire suite solely to obtain one green aggregate. Record combined evidence honestly; reserve the next full run for substantive integration/release. Never reduce expectations to obtain green.
 Readiness is separate: implemented -> automated proof -> visual proof -> accepted. Report seed/version/run path; old passes do not validate later changes. Generated maps need more than one layout for targeted acceptance.
 
+For every visual check follow [the shared visual verification procedure](Tools/LocalTesting/unity-tester/references/graphical-review.md), including save isolation, recording and delivery.
+
 ## Harness commands (read Docs/HARNESS.md for details)
 
 - Before a slice: `python Tools/harness.py checkpoint Logs/harness/before-<slice>.json` (content comparison, NEVER acceptance).
@@ -61,12 +63,12 @@ Readiness is separate: implemented -> automated proof -> visual proof -> accepte
 Never close the user's Editor or invoke EditorApplication.Exit in it. Batch/playmode/scene-opening/network gates run only on ../DakaDaka_ci, using the primary development checkout as the runner source.
 CLI in the main project (installed Pipeline command names; query if names differ):
 - `unity status --format json`
-- `unity command editor set_auto_tick --enable true`
-- `unity command script recompile`, then `script recompile_status`
-- `unity command test run --mode editor --filter <fixture> --async_tests true`, then `test status`
+- `unity command editor set_auto_tick --project-path <absolute-development-root> --enable true`
+- `unity command script recompile --project-path <absolute-development-root>`, then query `script recompile_status` against the same path.
+- `unity command test run --project-path <absolute-development-root> --mode editor --filter <fixture> --async_tests true`, then query `test status` against the same path.
 Read only test summary/errors; do not print entire successful test trees.
 If async test state is stuck, diagnose/cancel that test before starting another. Never start overlapping mirror runs.
-Direct local file edits and CLI are allowed; MCP is optional. No shell-within-shell deletion/moving.
+Verify the target project first and pass its absolute path with `--project-path` for every Editor-driving CLI command. Use MCP only when its configured target matches the intended checkout or mirror. Direct local file edits and CLI are allowed. No shell-within-shell deletion/moving.
 
 Mirror: `powershell -NoProfile -ExecutionPolicy Bypass -File Tools/Run-All.ps1 -Set <gate-or-set> [-EditMode] [-Build] [-NoBuildCache]`.
 Runner checks mirror lock, syncs source, runs batch Unity, writes Logs/runs/<stamp>/summary.txt + run.json.
@@ -79,6 +81,7 @@ Playable builds follow accepted integration, not every edit. Network guide: Docs
 - Client sends intent; server decides damage/items/outcomes. Shields never parry.
 - Shared ScriptableObjects immutable at runtime; item UID/affixes belong to instances.
 - NUnit EditMode preferred for new logic tests. No source-text grep assertions in gameplay gates.
-- Assets free/CC0 only; license/source in Docs/ASSET_PLAN.md.
+- For a 3D asset brief or integration, start with the [project 3D skill](.agents/skills/unity-3d-prompts/SKILL.md). It links to the Meshy and Tripo workflows.
+- Follow [asset sources and usage rights](Docs/ASSET_PLAN.md#asset-sources-and-usage-rights) for third-party, original and owner-supplied material.
 - Exclude Art/Materials/*.mat drift and ProjectSettings/Packages/com.unity.pipeline/ from commits.
 - Do not bundle old unverified work into a supposedly completed slice. Explain mixed-worktree limitations.

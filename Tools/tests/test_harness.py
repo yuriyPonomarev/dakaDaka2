@@ -21,6 +21,29 @@ class SelectionTests(unittest.TestCase):
             self.assertEqual(p["gates"], [])
             self.assertFalse(p["editMode"])
 
+    def test_written_instructions_and_task_reports_do_not_schedule_unity(self):
+        docs = ["Tasks/GAME_AUDIO_20261122.md", ".agents/skills/unity-3d-prompts/SKILL.md",
+                ".cursor/rules/unity-visual-verification.mdc", "Tools/LocalTesting/unity-tester/references/graphical-review.md"]
+        self.assertFalse(self.plan(*docs)["editMode"])
+        self.assertEqual(self.plan(*docs)["gates"], [])
+        for path in ["Tasks/example.cs", ".agents/skills/tool.py"]:
+            self.assertTrue(self.plan(*docs, path)["requiresFullApproval"])
+
+    def test_audio_routes_combine_with_other_changes(self):
+        base = "Assets/Emberdelve/"
+        player = base + "Runtime/Feedback/PlayerActionAudio.cs"
+        expected = {"NetCombat", "NetInventory", "NetRoyale"}
+        self.assertEqual(set(self.plan(player)["gates"]), expected)
+        self.assertEqual(self.plan(player)["editModeFilter"], "AudioTests")
+        self.assertEqual(self.plan(player, "Assets/Other/new.cs")["editModeFilter"], "Emberdelve")
+        for asset in ["ArrowImpact_01.wav.meta", "manifest.json"]:
+            bank = base + "Resources/Emberdelve/Audio/Sfx/" + asset
+            plan = self.plan(player, bank, "Tasks/GAME_AUDIO_20261122.md")
+            self.assertEqual(set(plan["gates"]), expected | {"NetDoor", "NetSkill"})
+            self.assertTrue(plan["editMode"])
+            self.assertFalse(plan["requiresFullApproval"])
+        self.assertTrue(self.plan(player, "Packages/manifest.json")["requiresFullApproval"])
+
     def test_unknown_or_shared_change_fails_broad(self):
         for path in ["Packages/manifest.json", "Assets/Other/new.cs", "Assets/Emberdelve/Runtime/Player/PlayerRig.cs"]:
             p = self.plan(path)

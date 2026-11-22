@@ -29,6 +29,6 @@ For original examples and candidate budgets, read [prompt-library.md](references
 - Meshy: read [meshy-unity-assets](../meshy-unity-assets/SKILL.md).
 - User asks only for prompts: deliver the brief and stop without submitting tasks.
 - User asks for generation: continue within the already approved scope/budget; clarify only missing decisions that affect cost or result. Installation of these instructions itself grants no spending authority.
-- Keep source downloads in `SourceArt/AI/<provider>/<asset-id>/<task-id>/`; import reviewed deliverables into `Assets/Emberdelve/Art/Models/AI/<provider>/<asset-id>/` only when integration is requested. These are proposed new locations, not existing content.
-- Preserve original downloads and task lineage. Record provenance and check the actual license against `AGENTS.md` before integration; never label an AI output CC0 by assumption.
+- Keep source downloads in `SourceArt/AI/<provider>/<asset-id>/<task-id>/`; import reviewed deliverables into `Assets/Emberdelve/Art/Models/AI/<provider>/<asset-id>/` only when integration is requested. Preserve existing asset paths and Unity GUIDs when revising an import.
+- Preserve original downloads and task lineage. Apply the [project asset sourcing rules](../../../Docs/ASSET_PLAN.md#asset-sources-and-usage-rights) to the specific download and intended use before integration.
 - Inspect a preview if available and the actual mesh before calling it game-ready. A successful provider task establishes generation, not Unity acceptance.

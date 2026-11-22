@@ -59,7 +59,8 @@ def changed(root, since):
 
 def select(paths, sets):
     selected, reasons = set(), []
-    edit, harness_tests, broad = False, False, False
+    harness_tests, broad = False, False
+    required_filters = set()
     def add(names):
         for name in names:
             selected.update(sets[name] if name in sets else [name])
@@ -69,24 +70,46 @@ def select(paths, sets):
             raise ValueError("Expected project-relative path: " + raw)
         p = p.removesuffix(".meta")
         gates, why = [], ""
-        if p.startswith("Docs/") or p in ("AGENTS.md", "README.md", ".gitignore", ".gitattributes"):
+        file_edit = False
+        fixture = "Emberdelve"
+        if (p.startswith("Docs/") or p in ("AGENTS.md", "README.md", ".gitignore", ".gitattributes")
+                or (p.endswith(".md") and p.startswith(("Tasks/", ".agents/skills/", "Tools/LocalTesting/", "Tools/Audio/")))
+                or (p.startswith(".cursor/rules/") and p.endswith(".mdc"))):
             why = "documentation only"
         elif p.startswith("Tools/tests/") or p in ("Tools/harness.py", "Tools/Get-WorkStatus.ps1", "Tools/Configure-TestFirewall.ps1"):
             harness_tests, why = True, "harness tooling tests"
         elif p.startswith("Assets/Emberdelve/Tests/") and p.endswith(".cs"):
-            edit, why = True, "EditMode tests changed; no automatic gameplay replay"
-        elif p in ("Tools/Run-All.ps1", "Tools/Run-EmberdelveEditModeTests.ps1", "Tools/gate-sets.json") or p.startswith("Assets/Emberdelve/Editor/EmberdelvePlayerBuildCache"):
-            gates, why, edit, harness_tests = ["NetProof", "NetAdmission"], "runner/cache: focused real-process smoke", True, True
+            file_edit, why = True, "EditMode tests changed; no automatic gameplay replay"
+            if p in ("Assets/Emberdelve/Tests/EditMode/Visual/GameAudioTests.cs", "Assets/Emberdelve/Tests/EditMode/Visual/SpatialAudioTests.cs"):
+                fixture = "AudioTests"
+        elif p in ("Tools/Run-All.ps1", "Tools/MirrorGuard.ps1", "Tools/Run-GatesAfterEditorExit.ps1",
+                   "Tools/Run-EmberdelveGates.ps1", "Tools/Run-EmberdelveEditModeTests.ps1",
+                   "Tools/net/Build-NetPlayable.bat", "Tools/gate-sets.json") or p.startswith("Assets/Emberdelve/Editor/EmberdelvePlayerBuildCache"):
+            gates, why, file_edit, harness_tests = ["NetProof", "NetAdmission"], "runner/cache: focused real-process smoke", True, True
         elif p in ("Assets/Emberdelve/Runtime/Interaction/WorldLightInteractable.cs", "Assets/Emberdelve/Net/NetWorldLights.cs"):
-            gates, why, edit = ["NetDoor", "NetFinal", "Visual"], "world-light interaction, authority and late join; focused light tests also required", True
+            gates, why, file_edit = ["NetDoor", "NetFinal", "Visual"], "world-light interaction, authority and late join; focused light tests also required", True
         elif p in ("Assets/Emberdelve/Runtime/Feedback/WorldLightAppearance.cs", "Assets/Emberdelve/Resources/Emberdelve/LocalLightHaze.shader", "Assets/Emberdelve/Runtime/Level/MoonlitRuinsEnvironment.cs"):
-            gates, why, edit = ["Visual", "NetFinal"], "lighting presentation and player/late-join camera setup", True
+            gates, why, file_edit = ["Visual", "NetFinal"], "lighting presentation and player/late-join camera setup", True
         elif p in ("Assets/Emberdelve/Runtime/Feedback/WorldAudio.cs", "Assets/Emberdelve/Runtime/Feedback/WorldFootsteps.cs", "Assets/Emberdelve/Runtime/Feedback/FlameAudio.cs", "Assets/Emberdelve/Runtime/Feedback/DungeonAmbience.cs", "Assets/Emberdelve/Runtime/Feedback/ProceduralAudio.cs", "Assets/Emberdelve/Runtime/Feedback/FeedbackDirector.cs"):
-            gates, why, edit = ["NetCombat", "NetDoor", "NetFinal", "Visual"], "spatial audio, combat presentation and lit/covered room state; audio fixtures also required", True
+            gates, why, file_edit = ["NetCombat", "NetDoor", "NetFinal", "Visual"], "spatial audio, combat presentation and lit/covered room state; audio fixtures also required", True
+        elif p == "Assets/Emberdelve/Runtime/Feedback/PlayerActionAudio.cs":
+            gates, why, file_edit = ["NetCombat", "NetInventory", "NetRoyale"], "weapon actions, equipment and floor transitions", True
+            fixture = "AudioTests"
+        elif p == "Assets/Emberdelve/Runtime/Feedback/SoundEventWindow.cs":
+            gates, why, file_edit = ["NetCombat"], "deduplicating replicated hit sounds", True
+            fixture = "AudioTests"
+        elif p in ("Assets/Emberdelve/Runtime/UI/UiSoundFeedback.cs", "Assets/Emberdelve/Runtime/Feedback/LocalGameAudio.cs"):
+            gates, why, file_edit = ["Visual", "NetInventory"], "local UI and inventory feedback", True
+            fixture = "AudioTests"
+        elif (p == "Assets/Emberdelve/Runtime/Feedback/GameSoundBank.cs"
+              or p.startswith("Assets/Emberdelve/Resources/Emberdelve/Audio/Sfx/") and (p.endswith(".wav") or p.endswith("/manifest.json"))
+              or p in ("Tools/Audio/SynthesizeGameSfx.cjs", "Tools/Audio/BuildRecordedFoley.py")):
+            gates, why, file_edit = ["NetCombat", "NetSkill", "NetDoor", "NetInventory"], "shared cue bank, audio fixture and affected emitters", True
+            fixture = "AudioTests"
         elif p in ("Assets/Emberdelve/Resources/Emberdelve/ImpactFlash.shader", "Assets/Emberdelve/Runtime/Feedback/ImpactFlash.cs", "Assets/Emberdelve/Runtime/Feedback/WallStopFeedback.cs"):
-            gates, why, edit = ["Visual", "NetCombat", "CombatFlow"], "retained impact shader and contact presentation", True
+            gates, why, file_edit = ["Visual", "NetCombat", "CombatFlow"], "retained impact shader and contact presentation", True
         elif p == "Assets/Emberdelve/Runtime/Level/DungeonWayfinding.cs":
-            gates, why, edit = ["CombatHud", "NetFinal"], "read-only occupied-room navigation; no geometry or placement mutation", True
+            gates, why, file_edit = ["CombatHud", "NetFinal"], "read-only occupied-room navigation; no geometry or placement mutation", True
         elif p.startswith("Assets/Emberdelve/Editor/"):
             name = Path(p).stem
             match = re.fullmatch(r"Emberdelve(.+)Gate", name)
@@ -95,15 +118,15 @@ def select(paths, sets):
             elif name == "EmberdelveRuntimeSmokeTest":
                 gates, why = ["RuntimeSmokeTest.RunCombatFlow"], "only combat smoke fixture changed"
             elif name == "EmberdelveWindowsBuild":
-                gates, why, edit = ["NetProof", "NetAdmission", "NetFinal"], "both player build profiles changed", True
+                gates, why, file_edit = ["NetProof", "NetAdmission", "NetFinal"], "both player build profiles changed", True
             else:
-                gates, why, edit, broad = ["all"], "shared editor/build infrastructure: conservative full coverage", True, True
+                gates, why, file_edit, broad = ["all"], "shared editor/build infrastructure: conservative full coverage", True, True
         elif p.startswith("Assets/Emberdelve/Runtime/Player/") and Path(p).stem in ("FirstPersonArmsDriver", "WeaponVisualRig"):
-            gates, why, edit = ["Hands", "Visual", "NetCombat", "ProjectileBlock", "SweptMelee"], "hands and gameplay guard geometry", True
+            gates, why, file_edit = ["Hands", "Visual", "NetCombat", "ProjectileBlock", "SweptMelee"], "hands and gameplay guard geometry", True
         elif p.startswith("Assets/Emberdelve/Runtime/Level/"):
-            gates, why, edit = ["NetMovement", "NetFinal", "NetDoor", "NetInventory", "NetRoyale", "RuntimeSmokeTest.RunCombatFlow"], "level geometry, authoritative placement and three-floor handoffs", True
+            gates, why, file_edit = ["NetMovement", "NetFinal", "NetDoor", "NetInventory", "NetRoyale", "RuntimeSmokeTest.RunCombatFlow"], "level geometry, authoritative placement and three-floor handoffs", True
         elif p.startswith("Assets/Emberdelve/Runtime/Items/"):
-            gates, why, edit = ["combat", "NetInventory", DROP, "NetExtraction", "NetCombat", "NetMovement", "NetSkill"], "inventory/equipment affects stats, ownership and outcomes", True
+            gates, why, file_edit = ["combat", "NetInventory", DROP, "NetExtraction", "NetCombat", "NetMovement", "NetSkill"], "inventory/equipment affects stats, ownership and outcomes", True
         elif p.startswith("Assets/Emberdelve/Net/") or p.startswith("Assets/Emberdelve/NetRules/"):
             name = Path(p).stem
             if name in ("NetEnemyViews", "EnemyHitPresentationQueue", "BloodHitWindow", "NetCombatFx"):
@@ -120,17 +143,23 @@ def select(paths, sets):
                 gates, why = ["NetMovement", "NetFinal", "NetCombat"], "movement prediction, joins and combat positioning"
             else:
                 gates, why = ["net"], "shared network code/protocol: all network scenarios"
-            edit = True
+            file_edit = True
         elif p.startswith("Assets/Emberdelve/Runtime/AI/"):
-            gates, why, edit = ["EnemySweep", "NetCombat", "NetDoor", "Visual", "RuntimeSmokeTest.RunCombatFlow"], "AI, telegraphs and doors", True
+            gates, why, file_edit = ["EnemySweep", "NetCombat", "NetDoor", "Visual", "RuntimeSmokeTest.RunCombatFlow"], "AI, telegraphs and doors", True
         else:
-            gates, why, edit, broad = ["all"], "unmapped/shared input: do not silently omit coverage", True, True
+            gates, why, file_edit, broad = ["all"], "unmapped/shared input: do not silently omit coverage", True, True
+        if file_edit:
+            required_filters.add(fixture)
         add(gates)
         reasons.append({"path": raw, "reason": why, "gates": gates})
     # Stable suite order and no duplicate subsets.
     ordered = [x for x in sets["all"] if x in selected]
     ordered += sorted(selected - set(ordered))
-    return {"schema": 1, "files": sorted(set(paths)), "gates": ordered, "editMode": edit,
+    edit_filter = "Emberdelve" if required_filters else None
+    if required_filters == {"AudioTests"}:
+        edit_filter = "AudioTests"
+    return {"schema": 1, "files": sorted(set(paths)), "gates": ordered, "editMode": bool(required_filters),
+            "editModeFilter": edit_filter,
             "harnessTests": harness_tests, "requiresFullApproval": broad or len(ordered) == len(sets["all"]),
             "reasons": reasons, "note": "Heuristic routing, not a coverage proof. No passing test result is reused."}
 
@@ -178,7 +207,7 @@ def main(argv=None):
     command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "Tools/Run-All.ps1"]
     command += ["-Set", ",".join(plan["gates"])] if plan["gates"] else ["-SkipGates"]
     if plan["editMode"]:
-        command.append("-EditMode")
+        command += ["-EditMode", "-EditModeFilter", plan["editModeFilter"]]
     if args.no_build_cache:
         command.append("-NoBuildCache")
     command += ["-SelectionPlan", str(evidence)]

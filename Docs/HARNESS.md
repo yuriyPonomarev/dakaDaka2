@@ -25,7 +25,7 @@ python Tools/harness.py plan --files Assets/Emberdelve/Net/NetEnemyViews.cs
 python Tools/harness.py run --files Assets/Emberdelve/Net/NetEnemyViews.cs
 ```
 
-`--files` deliberately limits the claim to those files; it does not certify the whole tree. Unknown/shared dependencies fall back to all + EditMode. A full selection requires `--allow-full` on `run`; planning always remains read-only. Inspect and explain that expensive choice before launching. Empty/docs-only plans do not launch Unity. Test-only changes run EditMode without gameplay gates. The fast EditMode suite remains whole; selection primarily saves expensive gameplay/process scenarios.
+`--files` deliberately limits the claim to those files; it does not certify the whole tree. Unknown/shared dependencies fall back to all + EditMode. A full selection requires `--allow-full` on `run`; planning always remains read-only. Inspect and explain that expensive choice before launching. Empty/docs-only plans do not launch Unity. Test-only changes run EditMode without gameplay gates. An audio-only change to the cue bank, player action cues, event window, UI sounds or audio fixtures uses the `AudioTests` filter. A second change requiring broader EditMode coverage restores the `Emberdelve` filter. Written task reports, project skills and Cursor rules select zero Unity scenarios; an executable beside a document still follows its own routing.
 
 Routing lives in Tools/harness.py, validated by Tools/tests/test_harness.py. It is an explicit conservative map, not a compiler dependency graph. Update routing and its tests whenever a new subsystem/cross-system dependency is introduced. Source/data changes not safely mapped must remain broad. Gate selection is deduplicated and retains suite order.
 
@@ -57,11 +57,13 @@ Cache has no automatic eviction yet. Invalid/old payloads remain for diagnosis; 
 `Tools/Run-All.ps1 -Set <gate-list-or-set> [-EditMode] [-Build] [-NoBuildCache]` stays available.
 `-SkipGates -EditMode` runs only NUnit. Plans are copied to each run's selection-plan.json; run.json also records cache/selection options. `Tools/Get-WorkStatus.ps1` prints concise results and distinguishes explicit cancellation from a discovered regression.
 
+Start PowerShell in the development Git root and use the scripts from that checkout. All Windows batch entry points validate the source and sibling mirror. They share a process lock across synchronization, tests and builds, and refuse a busy Editor or a remaining Unity lock. Keep evidence under the primary or mirror Logs directory. The network build shortcut also uses this runner and keeps its existing default player location. A focused verification can pass `-EditMode -EditModeFilter <fixture>`.
+
 Only one coordinator owns the mirror. Do not launch overlapping runs. No package upgrades, changes to game assertions, or main-Editor Play mode are required for this harness.
 
 ## Tools / skills
 
-Use the installed Unity Pipeline for compile/status and focused editor access; the mirror runner owns process/playmode checks. Use the existing computer-use tooling for actual visual/input acceptance and installed Unity UI/animation-specific skills when their tasks arise. The installed Memory Profiler and Recorder packages are useful during measured performance/visual passes, not every edit. Git + this document + AGENTS are sufficient for task handoff; no new MCP server or external service is needed for this optimization.
+Check the configured Unity MCP project path before use. If it points to the read-only legacy copy, use the CLI with the explicit absolute project path. For visual review follow the [shared capture procedure](../Tools/LocalTesting/unity-tester/references/graphical-review.md). Use the installed Unity Pipeline for compile/status and focused editor access; the mirror runner owns process/playmode checks. Use the existing computer-use tooling for actual visual/input acceptance and installed Unity UI/animation-specific skills when their tasks arise. The installed Memory Profiler and Recorder packages are useful during measured performance/visual passes, not every edit. Git + this document + AGENTS are sufficient for task handoff; no new MCP server or external service is needed for this optimization.
 
 A separate project skill would duplicate these instructions today. Consider one only when a reusable workflow spans multiple projects. Do not install plugins or add background services merely because they exist.
 

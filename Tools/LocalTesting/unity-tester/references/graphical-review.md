@@ -1,15 +1,25 @@
-# Unity graphical verification in this project
+# Visual verification in Unity
 
-Use only when the task requires it. Follow the task's named versioned helper and TESTER_CONTRACT; do not use an unknown or user-owned Editor. The current project already has Pipeline; do not install, update, or change packages.
+## Before Play
 
-1. Verify the actual Editor project, clean scene and Play state, then use the assigned saved scene. The installed CLI's current command catalog is authoritative. Prior working project commands include `unity status`, `unity command editor status --project-path <project> --format json`, `unity command editor set_auto_tick`, `unity command editor.playmode set_run_in_background`, and `unity command editor.playmode start` / `stop`. Check actual command parameters when needed; old flat command names in generic skill examples may not apply.
-2. Save prior transient state. Enable only necessary session-only ticking/background overrides. Launch the assigned helper promptly after Play starts and wait for a living actor. Never revive an actor or bypass equipment/admission rules to satisfy a probe. If setup fails, report it; only retry a fresh Play session when appropriate and authorized by the brief.
-3. Example for the existing D4c1 probe, as two separate calls, with frame/time advancement in between:
+- From the development checkout, verify the absolute project path of a separate, visible Editor for the synchronized mirror (`../DakaDaka_ci`). Bring its Game view forward. Pass that absolute mirror path to each Editor command with `--project-path`.
+- Start the mirror Editor with `--ember-profile-dir` pointing to a fresh directory under its `Logs/acceptance/<run>/`. Confirm the actual argument before opening the review scene or entering Play. Keep personal saves and the user's working Editor outside the scenario.
+- Check the assigned scene, Play state and transient settings. Use the installed Pipeline command catalog and the versioned helper for the task. Record the original settings so they can be restored.
 
-   `unity command script run --project-path <project> --format json -- --file AgentScripts/ReviewD4c1.cs --entry ReviewD4c1.Prepare`
+## Record and deliver
 
-   `unity command script run --project-path <project> --format json -- --file AgentScripts/ReviewD4c1.cs --entry ReviewD4c1.Measure`
+1. Start Unity Recorder before the action. Record the visible Game view and Unity game audio through the outcome. Save the MP4 and evidence together under `Logs/acceptance/<run>/`.
+2. Execute the assigned scenario with real frame progression. For a player scenario, wait for a living actor. Preserve equipment and admission rules. For viewport checks, measure actual `Screen.width` and `Screen.height` alongside the requested dimensions.
+3. Open the MP4, verify that it shows the action and its result, and check the game audio track. Attach the video in the current chat after each run with the scenario and outcome. If display or recording fails, diagnose and retry on the mirror. Report the blocker if a usable recording cannot be produced.
+4. Restore transient settings and window changes. Stop Play and gracefully close only the verified review Editor owned by the run. Confirm its exit and lock release. Leave Unity lock files intact. Report measured results and any visual or listening judgement actually performed.
 
-   Store the complete JSON envelopes in fresh evidence files. Check transport success, script success, returned result, failures, actual viewport and measured bounds. Do not rebuild a dynamic UI immediately before counting its children: Unity can defer destruction until a frame boundary. For this specific helper only, `python Tools/LocalTesting/summarize_render.py <prepare.json> <measure.json>` checks its envelope and measurement invariants. The raw JSON and screenshot remain evidence.
-4. Capture the screen-composited game view where required. Requested screenshot dimensions do not establish actual `Screen.width`/`Screen.height`; record both. Stop once the assigned viewport proof is complete; do not rediscover or force optional sizes when unavailable.
-5. Restore the exact original transient settings and any window changes, stop Play, close only the verified owned Editor gracefully, and confirm process exit and lock absence. Never delete the lock file. Distinguish numeric results from subjective visual review.
+## Existing D4c1 viewport probe
+
+Call Prepare and Measure separately, allowing real frames to advance between them.
+
+```powershell
+unity command script run --project-path <absolute-mirror> --format json -- --file AgentScripts/ReviewD4c1.cs --entry ReviewD4c1.Prepare
+unity command script run --project-path <absolute-mirror> --format json -- --file AgentScripts/ReviewD4c1.cs --entry ReviewD4c1.Measure
+```
+
+Store both JSON envelopes. Check the command and script results, failures, actual viewport and measured bounds. Unity can defer UI child destruction until the frame boundary. For this helper, `python Tools/LocalTesting/summarize_render.py <prepare.json> <measure.json>` checks the recorded measurements. Retain the raw JSON and screenshot with the video.

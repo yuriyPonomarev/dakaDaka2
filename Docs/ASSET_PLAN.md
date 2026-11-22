@@ -1,5 +1,15 @@
 # Asset plan and sourcing
 
+## Asset sources and usage rights
+
+| Source | Evidence to record before integration |
+|---|---|
+| Third-party downloads, including free packs and recordings | Prefer CC0. For any other free license, verify that the project permits it and that its terms cover the intended use and distribution. Keep the creator, source, exact license, attribution obligations and file hashes in the asset manifest. |
+| Original project art or audio | Record the author or generator, source files, inputs and output hashes. For work incorporating third-party inputs, carry their licenses and attribution through to the derived asset. |
+| Owner-supplied or generated files, including Meshy and Tripo | Identify the supplied archive or generation task, source files, hashes and applicable rights for this exact asset. Record any limits on use or redistribution. Owner delivery or a successful generation establishes provenance only. |
+
+Where use rights are unclear, retain the source record and resolve the missing terms before a new integration or distribution. Existing entries below describe the evidence available for each asset.
+
 ## Downloaded Meshy architecture (22 November 2026)
 
 The follow-up architecture pass uses the owner's downloaded Meshy StonePillar and RusticBarrel archives, plus the project's existing SealedChest source as a closed funerary reliquary. The exact source/archive hashes are in `Art/Models/AI/Meshy/DownloadedArchitecture/manifest.json`. These archives are owner-supplied and are not represented as CC0. Existing OvergrownArch geometry supplies cropped arch crowns and stone-facing pieces with original UVs. Shared display meshes limit repeated geometry; original sources remain intact. Pillars use the dungeon's world-space stone material to avoid the downloaded albedo's baked blue/black patches; their source geometry and original albedo are retained. Physical rooms, stair routes and secret controls are preserved. See `Tasks/DOWNLOADED_ARCHITECTURE_20261122.md` for the exact scope and review evidence.

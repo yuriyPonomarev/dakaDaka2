@@ -8,23 +8,38 @@ param(
     [int]$EditModeMinimumTests=1,
     [switch]$Relaunch
 )
-$ErrorActionPreference='Continue'
-New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-$wrapLog=Join-Path $OutputDirectory 'wrapper.log'
-"wait pid=$EditorPid $(Get-Date -Format o)" | Add-Content $wrapLog
-$p=Get-Process -Id $EditorPid -ErrorAction SilentlyContinue
-if($p){ $p.WaitForExit(600000) | Out-Null }
-$lock=Join-Path $ProjectPath 'Temp/UnityLockfile'
-for($i=0;$i -lt 60 -and (Test-Path -LiteralPath $lock);$i++){
-    try { Remove-Item -LiteralPath $lock -Force -ErrorAction Stop } catch { Start-Sleep -Seconds 1 }
+$ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'MirrorGuard.ps1')
+$mirror = Resolve-TestMirror $ProjectPath
+$editor = Get-Process -Id $EditorPid -ErrorAction SilentlyContinue
+if ($editor -and !$editor.HasExited) {
+    $process = Get-CimInstance Win32_Process -Filter "Name='Unity.exe' AND ProcessId=$EditorPid" -ErrorAction Stop
+    if (!$editor.HasExited) {
+        if (!$process -or (Get-RunnerUnityProject $process) -ne $mirror) {
+            throw "REFUSED: PID $EditorPid does not identify the mirror Editor"
+        }
+        if (!$editor.WaitForExit(600000)) { throw "REFUSED: mirror Editor $EditorPid is still running after the wait" }
+    }
 }
-"editor gone $(Get-Date -Format o)" | Add-Content $wrapLog
-if($EditModeFilter){
-    & (Join-Path $ProjectPath 'Tools/Run-EmberdelveEditModeTests.ps1') -ProjectPath $ProjectPath -TestFilter $EditModeFilter -MinimumTests $EditModeMinimumTests -UnityExe $UnityExe -OutputDirectory (Join-Path $OutputDirectory 'editmode') *>&1 | Add-Content $wrapLog
-    "editmode exit=$LASTEXITCODE $(Get-Date -Format o)" | Add-Content $wrapLog
-}
-$gateOut=Join-Path $OutputDirectory 'gates'
-& (Join-Path $ProjectPath 'Tools/Run-EmberdelveGates.ps1') -ProjectPath $ProjectPath -Methods $Methods -UnityExe $UnityExe -OutputDirectory $gateOut *>&1 | Add-Content $wrapLog
-"gates exit=$LASTEXITCODE $(Get-Date -Format o)" | Add-Content $wrapLog
-Set-Content -LiteralPath (Join-Path $OutputDirectory 'DONE') -Value "$LASTEXITCODE"
-if($Relaunch){ Start-Process -FilePath $UnityExe -ArgumentList @('-projectPath',('"'+$ProjectPath+'"')) }
+$OutputDirectory = Resolve-VerificationOutput $OutputDirectory $mirror
+$lease = Enter-MirrorRun
+try {
+    Assert-MirrorIdle $mirror
+    New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+    $wrapLog = Join-Path $OutputDirectory 'wrapper.log'
+    $result = 0
+    if ($EditModeFilter) {
+        & (Join-Path $PSScriptRoot 'Run-EmberdelveEditModeTests.ps1') -ProjectPath $mirror -TestFilter $EditModeFilter -MinimumTests $EditModeMinimumTests -UnityExe $UnityExe -OutputDirectory (Join-Path $OutputDirectory 'editmode') *>&1 | Add-Content $wrapLog
+        $result = $LASTEXITCODE
+    }
+    if ($result -eq 0) {
+        & (Join-Path $PSScriptRoot 'Run-EmberdelveGates.ps1') -ProjectPath $mirror -Methods $Methods -UnityExe $UnityExe -OutputDirectory (Join-Path $OutputDirectory 'gates') *>&1 | Add-Content $wrapLog
+        $result = $LASTEXITCODE
+    }
+    Set-Content -LiteralPath (Join-Path $OutputDirectory 'DONE') -Value $result
+    if ($Relaunch) {
+        Assert-MirrorIdle $mirror
+        Start-Process -FilePath $UnityExe -ArgumentList @('-projectPath',('"'+$mirror+'"'))
+    }
+    exit $result
+} finally { Exit-MirrorRun $lease }

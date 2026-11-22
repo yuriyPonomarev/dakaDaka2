@@ -7,11 +7,15 @@ param(
     [ValidateRange(30,3600)][int]$TimeoutSeconds=900
 )
 $ErrorActionPreference='Stop'
-$resolvedProject=(Resolve-Path -LiteralPath $ProjectPath).Path
+. (Join-Path $PSScriptRoot 'MirrorGuard.ps1')
+$resolvedProject = Resolve-TestMirror $ProjectPath
+$lease = Enter-MirrorRun
+try {
+Assert-MirrorIdle $resolvedProject
 if(!(Test-Path -LiteralPath $UnityExe -PathType Leaf)){throw 'Unity executable does not exist'}
 if(!(Test-Path -LiteralPath (Join-Path $resolvedProject 'Assets') -PathType Container)){throw 'Not a Unity project'}
 if(!$OutputDirectory){$OutputDirectory=Join-Path $resolvedProject ('Logs/gates-'+(Get-Date -Format 'yyyyMMdd-HHmmss-fff'))}
-$resolvedOutput=[IO.Path]::GetFullPath($OutputDirectory)
+$resolvedOutput = Resolve-VerificationOutput $OutputDirectory $resolvedProject
 New-Item -ItemType Directory -Path $resolvedOutput -Force | Out-Null
 $summaryPath=Join-Path $resolvedOutput 'summary.json'
 $results=[Collections.Generic.List[object]]::new()
@@ -20,7 +24,7 @@ foreach($method in $Methods){
     if($method -notmatch '^[A-Za-z_][A-Za-z0-9_.]+$'){throw "Invalid execute method: $method"}
     $logPath=Join-Path $resolvedOutput ($method+'.log')
     if(Test-Path -LiteralPath $logPath){throw "Refusing to overwrite existing evidence: $logPath"}
-    if(Test-Path -LiteralPath (Join-Path $resolvedProject 'Temp/UnityLockfile')){throw 'Unity project is already locked; close its Editor first'}
+    Assert-MirrorIdle $resolvedProject
     $arguments=@('-batchmode','-nographics','-projectPath',('"'+$resolvedProject+'"'),'-executeMethod',$method,'-logFile',('"'+$logPath+'"'))
     $started=[DateTime]::UtcNow
     $ownedProcess=Start-Process -FilePath $UnityExe -ArgumentList $arguments -PassThru -WindowStyle Hidden
@@ -79,4 +83,4 @@ foreach($method in $Methods){
 }
 Write-Output ('Evidence: '+$summaryPath)
 if($anyFailed){exit 1}else{exit 0}
-
+} finally { Exit-MirrorRun $lease }

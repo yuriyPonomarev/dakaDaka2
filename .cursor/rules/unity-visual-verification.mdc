@@ -5,7 +5,4 @@ alwaysApply: true
 
 # Unity visual verification
 
-- Run every visual check in a separate, visible Unity window for the test copy at ../DakaDaka_ci. Bring its Game view forward for the user while the check runs and keep the working editor session intact.
-- Record the full visual scenario as an MP4 with Unity game audio. Start recording before the action being checked and keep it running through the result. Use the installed Unity Recorder and save the file with the run evidence in Logs/acceptance.
-- Check that the MP4 plays, shows the relevant action and result, and has an audio track. Attach the video in the current chat after each run with a short summary of what was checked.
-- If display or recording fails, diagnose and retry in the test copy. Report a blocker when the visible run or usable video cannot be produced.
+Follow the [project visual verification procedure](../../Tools/LocalTesting/unity-tester/references/graphical-review.md) for every visual check.

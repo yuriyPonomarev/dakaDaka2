@@ -8,13 +8,16 @@ param(
     [ValidateRange(30,3600)][int]$TimeoutSeconds=900
 )
 $ErrorActionPreference='Stop'
-$project=(Resolve-Path -LiteralPath $ProjectPath).Path
+. (Join-Path $PSScriptRoot 'MirrorGuard.ps1')
+$project = Resolve-TestMirror $ProjectPath
+$lease = Enter-MirrorRun
+try {
+Assert-MirrorIdle $project
 if(!(Test-Path -LiteralPath $UnityExe -PathType Leaf)){throw 'Unity executable missing'}
 if(!(Test-Path -LiteralPath (Join-Path $project 'Assets') -PathType Container)){throw 'Not a Unity project'}
 if($TestFilter -notmatch '^[A-Za-z_][A-Za-z0-9_.]*$'){throw 'Expected a fully qualified test namespace or class'}
-if(Test-Path -LiteralPath (Join-Path $project 'Temp/UnityLockfile')){throw 'Project is locked; close its Editor first'}
 if(!$OutputDirectory){$OutputDirectory=Join-Path $project ('Logs/editmode-'+(Get-Date -Format 'yyyyMMdd-HHmmss-fff'))}
-$output=[IO.Path]::GetFullPath($OutputDirectory)
+$output = Resolve-VerificationOutput $OutputDirectory $project
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 $xmlPath=Join-Path $output 'results.xml'
 $logPath=Join-Path $output 'editor.log'
@@ -57,3 +60,4 @@ Write-Output ((@('FAIL','PASS')[[int]$passed])+' EditMode tests='+$tests+' failu
 $problems | ForEach-Object {Write-Output $_}
 Write-Output ('Evidence: '+$summaryPath)
 if($passed){exit 0}else{exit 1}
+} finally { Exit-MirrorRun $lease }
