@@ -69,6 +69,7 @@ namespace Emberdelve.EditorTools
                 WeatheredTraversalSurfaces.Apply(root);
                 if (DungeonLayoutFamilies.Gallery(spec.Kind, spec.Variant)) StairSurfaceSeparation.Apply(root);
                 DungeonPitJointBacking.Apply(root);
+                    DungeonLayoutFurnishing.Apply(root);
                 string path = PrefabFolder + "/" + spec.Name + ".prefab";
                 GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, path);
                 UnityEngine.Object.DestroyImmediate(root);
@@ -129,6 +130,7 @@ namespace Emberdelve.EditorTools
                     WeatheredTraversalSurfaces.Apply(root);
                     if (DungeonLayoutFamilies.Gallery(spec.Kind, spec.Variant)) StairSurfaceSeparation.Apply(root);
                     DungeonPitJointBacking.Apply(root);
+                    DungeonLayoutFurnishing.Apply(root);
                     try
                     {
                         var prefab = PrefabUtility.SaveAsPrefabAsset(root, PrefabFolder + "/" + theme + "/" + spec.Name + ".prefab");

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Emberdelve.Core;
 using Emberdelve.Interaction;
 using Emberdelve.Level;
+using Unity.Collections;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -18,6 +19,12 @@ namespace Emberdelve.EditorTools
         private const float Height = 2.32f;
         private const float SpringLine = 1.60f;
         private const float Thickness = .21f;
+        // The downloaded grille is a solid mesh with finished faces on both sides.
+        // A rear-mounted opaque slab used to cover its +Z ironwork completely.
+        // Keep the timber inside that grille, leaving both authored metal faces visible.
+        private const float WoodCoreThickness = .020f;
+        private const float WoodRimHalfDepth = .100f;
+        private const float WoodRimWidth = .065f;
         // A module seam falls between two columns of navigation cells. Center the passage on one lane.
         private const float LaneOffset = .77f;
         private const float SocketHalf = 2.02f;
@@ -57,9 +64,10 @@ namespace Emberdelve.EditorTools
                 var blocker = panel.gameObject.AddComponent<BoxCollider>();
                 blocker.size = new Vector3(Width, Height, Thickness);
 
-                AddArchedPiece(hinge, "DarkWoodBacking", new Vector3(Width * .5f, 0, Thickness * .5f - .034f),
+                var backing = AddArchedPiece(hinge, "DarkWoodBacking", new Vector3(Width * .5f, 0, 0),
                     FittedBackingMesh(),
                     Load<Material>("Assets/Emberdelve/Art/Materials/Wood_Planks.mat"));
+                PlaceWoodCore(backing);
 
                 var visual = Child(hinge, "RustboundLeaf", Vector3.zero);
                 var instance = (GameObject)PrefabUtility.InstantiatePrefab(model, visual);
@@ -137,7 +145,7 @@ namespace Emberdelve.EditorTools
                 || backing.GetComponentsInChildren<Collider>(true).Length != 0)
                 throw new InvalidOperationException("The authored wood backing must be visual-only.");
             backingFilter.sharedMesh = FittedBackingMesh();
-            backing.localPosition = new Vector3(Width * .5f, 0, Thickness * .5f - .034f);
+            PlaceWoodCore(backing);
 
             var arch = root.transform.Find("StoneFrame/StoneArch");
             if (arch == null || !arch.TryGetComponent<MeshFilter>(out var filter)
@@ -182,6 +190,95 @@ namespace Emberdelve.EditorTools
                 wallRenderer.sharedMaterial = renderer.sharedMaterial;
                 wallRenderer.enabled = true;
             }
+            ValidateTwoSidedLeaf(root);
+        }
+
+        private static void PlaceWoodCore(Transform backing)
+        {
+            // Same fitted contour and UVs, entirely inside the existing 210mm leaf.
+            // This is real geometric separation, not double-sided shader/depth bias.
+            backing.localPosition = new Vector3(Width * .5f, 0, 0);
+            backing.localRotation = Quaternion.identity;
+            backing.localScale = Vector3.one;
+        }
+
+        [MenuItem("Emberdelve/Visual/Validate Saved Dungeon Door Faces")]
+        public static void ValidateSavedVisuals()
+        {
+            var root = PrefabUtility.LoadPrefabContents(PrefabPath);
+            try { ValidateTwoSidedLeaf(root); }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+        }
+
+        private static void ValidateTwoSidedLeaf(GameObject root)
+        {
+            var hinge = root.transform.Find("Door/Hinge");
+            var backing = hinge != null ? hinge.Find("DarkWoodBacking") : null;
+            var visual = hinge != null ? hinge.Find("RustboundLeaf") : null;
+            if (backing == null || visual == null || backing.GetComponentsInChildren<Collider>(true).Length != 0)
+                throw new InvalidOperationException("Door needs its original grille and a visual-only timber core.");
+            var core = backing.GetComponent<MeshFilter>();
+            var coreBounds = core.sharedMesh.bounds;
+            float coreNear = backing.localPosition.z + coreBounds.min.z * backing.localScale.z;
+            float coreFar = backing.localPosition.z + coreBounds.max.z * backing.localScale.z;
+            if (Mathf.Abs(coreNear + WoodRimHalfDepth) > .0001f
+                || Mathf.Abs(coreFar - WoodRimHalfDepth) > .0001f
+                || (backing.localScale - Vector3.one).sqrMagnitude > .000001f)
+                throw new InvalidOperationException("The solid timber rim must fit inside the unchanged 210mm leaf.");
+            var innerContour = BackingContour(.005f + WoodRimWidth);
+            ValidateClosedCore(core.sharedMesh);
+            coreNear = -WoodCoreThickness * .5f;
+            coreFar = WoodCoreThickness * .5f;
+            bool InsideCore(Vector3 point)
+            {
+                var p = new Vector2(point.x - Width * .5f, point.y);
+                for (int i = 0; i < innerContour.Count; i++)
+                {
+                    Vector2 edge = innerContour[(i + 1) % innerContour.Count] - innerContour[i];
+                    Vector2 delta = p - innerContour[i];
+                    if (edge.x * delta.y - edge.y * delta.x < 0) return false;
+                }
+                return true;
+            }
+
+            float frontArea = 0, rearArea = 0;
+            foreach (var filter in visual.GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (!filter.TryGetComponent<MeshRenderer>(out var renderer) || !renderer.enabled) continue;
+                var toHinge = hinge.worldToLocalMatrix * filter.transform.localToWorldMatrix;
+                // Editor snapshot also supports imported meshes with Read/Write disabled;
+                // validation must not change the original FBX importer just to inspect it.
+                using var snapshot = MeshUtility.AcquireReadOnlyMeshData(filter.sharedMesh);
+                var data = snapshot[0];
+                using var vertices = new NativeArray<Vector3>(data.vertexCount, Allocator.Temp);
+                data.GetVertices(vertices);
+                for (int submesh = 0; submesh < data.subMeshCount; submesh++)
+                {
+                    var descriptor = data.GetSubMesh(submesh);
+                    if (descriptor.topology != MeshTopology.Triangles) continue;
+                    using var triangles = new NativeArray<int>(descriptor.indexCount, Allocator.Temp);
+                    data.GetIndices(triangles, submesh);
+                    for (int i = 0; i < triangles.Length; i += 3)
+                    {
+                        Vector3 a = toHinge.MultiplyPoint3x4(vertices[triangles[i]]);
+                        Vector3 b = toHinge.MultiplyPoint3x4(vertices[triangles[i + 1]]);
+                        Vector3 c = toHinge.MultiplyPoint3x4(vertices[triangles[i + 2]]);
+                        // Count only faces over the thin central panel, clear of the
+                        // bevelled perimeter rebate as well as clear in depth.
+                        if (!InsideCore(a) || !InsideCore(b) || !InsideCore(c)) continue;
+                        // Area projected onto the door plane, not a count of tiny edge faces.
+                        float orientedArea = Vector3.Cross(b - a, c - a).z * .5f;
+                        const float separation = .003f;
+                        if (Mathf.Max(a.z, Mathf.Max(b.z, c.z)) < coreNear - separation && orientedArea < 0)
+                            frontArea -= orientedArea;
+                        if (Mathf.Min(a.z, Mathf.Min(b.z, c.z)) > coreFar + separation && orientedArea > 0)
+                            rearArea += orientedArea;
+                    }
+                }
+            }
+            if (frontArea < .15f || rearArea < .15f)
+                throw new InvalidOperationException($"Both door faces require exposed imported ironwork: front={frontArea:F3}, rear={rearArea:F3} m2.");
+            Debug.Log($"[DungeonDoorAuthoring] Both original Meshy faces exposed: front={frontArea:F3}, rear={rearArea:F3} m2; centred timber={WoodCoreThickness:F3} m; unchanged leaf={Thickness:F3} m.");
         }
 
         public static void BuildWithPreview()
@@ -268,16 +365,10 @@ namespace Emberdelve.EditorTools
             return existing;
         }
 
-        private static Mesh FittedBackingMesh()
+        private static List<Vector2> BackingContour(float inset)
         {
-            const string folder = "Assets/Emberdelve/Art/Generated/ArchitecturalJoins";
-            const string path = folder + "/DoorBacking_ApertureInset5mm.asset";
-            var saved = AssetDatabase.LoadAssetAtPath<Mesh>(path);
-            if (saved != null) return saved;
             const int segments = 20;
-            const float inset = .005f, halfDepth = .034f;
-            // Copy the actual twenty-segment aperture, then offset every edge inward by
-            // the same distance. Rescaling an ellipse changes the side/crown gaps unevenly.
+            // Match the actual twenty-segment aperture with a true edge offset.
             var aperture = new List<Vector2> { new Vector2(-Width * .5f, 0), new Vector2(Width * .5f, 0) };
             for (int i = 0; i <= segments; i++)
             {
@@ -293,6 +384,21 @@ namespace Emberdelve.EditorTools
                 Vector2 a = new Vector2(-previous.y, previous.x), b = new Vector2(-next.y, next.x);
                 contour.Add(aperture[i] + (a + b) * (inset / (1f + Vector2.Dot(a, b))));
             }
+            return contour;
+        }
+
+        private static Mesh FittedBackingMesh()
+        {
+            const string folder = "Assets/Emberdelve/Art/Generated/ArchitecturalJoins";
+            const string path = folder + "/DoorCore_Rebated65mm_v1.asset";
+            var saved = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            if (saved != null)
+            {
+                RepairOuterRimUvs(saved);
+                return saved;
+            }
+            var outer = BackingContour(.005f);
+            var inner = BackingContour(.005f + WoodRimWidth);
             var vertices = new List<Vector3>(); var triangles = new List<int>(); var uv = new List<Vector2>();
             void Face(Vector3 a, Vector3 b, Vector3 c)
             {
@@ -303,21 +409,98 @@ namespace Emberdelve.EditorTools
                 }
                 triangles.Add(first); triangles.Add(first + 1); triangles.Add(first + 2);
             }
-            for (int i = 0; i < contour.Count; i++)
+            for (int i = 0; i < outer.Count; i++)
             {
-                Vector2 a = contour[i], b = contour[(i + 1) % contour.Count];
-                Vector3 frontA = new Vector3(a.x, a.y, -halfDepth), frontB = new Vector3(b.x, b.y, -halfDepth);
-                Vector3 backA = new Vector3(a.x, a.y, halfDepth), backB = new Vector3(b.x, b.y, halfDepth);
-                Face(new Vector3(0, 1, -halfDepth), frontB, frontA);
-                Face(new Vector3(0, 1, halfDepth), backA, backB);
+                int j = (i + 1) % outer.Count;
+                Vector3 frontA = new Vector3(outer[i].x, outer[i].y, -WoodRimHalfDepth);
+                Vector3 frontB = new Vector3(outer[j].x, outer[j].y, -WoodRimHalfDepth);
+                Vector3 backA = new Vector3(outer[i].x, outer[i].y, WoodRimHalfDepth);
+                Vector3 backB = new Vector3(outer[j].x, outer[j].y, WoodRimHalfDepth);
+                Vector3 innerFrontA = new Vector3(inner[i].x, inner[i].y, -WoodCoreThickness * .5f);
+                Vector3 innerFrontB = new Vector3(inner[j].x, inner[j].y, -WoodCoreThickness * .5f);
+                Vector3 innerBackA = new Vector3(inner[i].x, inner[i].y, WoodCoreThickness * .5f);
+                Vector3 innerBackB = new Vector3(inner[j].x, inner[j].y, WoodCoreThickness * .5f);
+                // One closed solid: outside edge, two bevelled rebates, two inset faces.
+                // No old full slab or independent overlapping ring remains underneath.
                 AddQuad(frontA, frontB, backB, backA, vertices, triangles, uv);
+                AddQuad(frontA, innerFrontA, innerFrontB, frontB, vertices, triangles, uv);
+                AddQuad(backA, backB, innerBackB, innerBackA, vertices, triangles, uv);
+                Face(new Vector3(0, 1, -WoodCoreThickness * .5f), innerFrontB, innerFrontA);
+                Face(new Vector3(0, 1, WoodCoreThickness * .5f), innerBackA, innerBackB);
             }
-            var mesh = new Mesh { name = "Door backing - uniform 5mm aperture clearance" };
+            var mesh = new Mesh { name = "Door timber core - closed 65mm perimeter rebate" };
             mesh.SetVertices(vertices); mesh.SetTriangles(triangles, 0); mesh.SetUVs(0, uv);
             mesh.RecalculateNormals(); mesh.RecalculateTangents(); mesh.RecalculateBounds();
+            ValidateClosedCore(mesh);
+            RepairOuterRimUvs(mesh);
             if (!AssetDatabase.IsValidFolder(folder)) AssetDatabase.CreateFolder("Assets/Emberdelve/Art/Generated", "ArchitecturalJoins");
             AssetDatabase.CreateAsset(mesh, path);
             return mesh;
+        }
+
+        private static void RepairOuterRimUvs(Mesh mesh)
+        {
+            // XY projection collapses the side-wall UVs across Z, stretching one
+            // texture column into bands. Unwrap only the outer wall by depth and
+            // contour distance. Position/index data and the asset GUID stay intact.
+            var contour = BackingContour(.005f);
+            var points = mesh.vertices;
+            var uv = mesh.uv;
+            const int verticesPerSegment = 18;
+            if (points.Length != contour.Count * verticesPerSegment || uv.Length != points.Length)
+                throw new InvalidOperationException("Unexpected door rebate topology; refuse to replace its UVs.");
+            float distance = 0;
+            bool changed = false;
+            for (int i = 0; i < contour.Count; i++)
+            {
+                float nextDistance = distance + Vector2.Distance(contour[i], contour[(i + 1) % contour.Count]);
+                int first = i * verticesPerSegment;
+                for (int j = 0; j < 4; j++)
+                {
+                    Vector3 point = points[first + j];
+                    float expectedDepth = j < 2 ? -WoodRimHalfDepth : WoodRimHalfDepth;
+                    if (Mathf.Abs(point.z - expectedDepth) > .00001f)
+                        throw new InvalidOperationException("Unexpected door rim face layout.");
+                    var value = new Vector2(point.z + .5f, (j == 1 || j == 2 ? nextDistance : distance) * .45f);
+                    if ((uv[first + j] - value).sqrMagnitude <= 1e-12f) continue;
+                    uv[first + j] = value;
+                    changed = true;
+                }
+                distance = nextDistance;
+            }
+            if (!changed) return;
+            mesh.uv = uv;
+            mesh.RecalculateTangents();
+            EditorUtility.SetDirty(mesh);
+            if (AssetDatabase.Contains(mesh)) AssetDatabase.SaveAssetIfDirty(mesh);
+        }
+
+        private static void ValidateClosedCore(Mesh mesh)
+        {
+            var points = mesh.vertices;
+            var indices = mesh.triangles;
+            var welded = new Dictionary<Vector3, int>();
+            var edges = new Dictionary<(int, int), int>();
+            int Vertex(Vector3 point)
+            {
+                if (!welded.TryGetValue(point, out int id)) welded.Add(point, id = welded.Count);
+                return id;
+            }
+            void Edge(int a, int b)
+            {
+                var key = a < b ? (a, b) : (b, a);
+                edges.TryGetValue(key, out int count); edges[key] = count + 1;
+            }
+            for (int i = 0; i < indices.Length; i += 3)
+            {
+                Vector3 a = points[indices[i]], b = points[indices[i + 1]], c = points[indices[i + 2]];
+                if (Vector3.Cross(b - a, c - a).sqrMagnitude < 1e-12f)
+                    throw new InvalidOperationException("Door core contains a degenerate face.");
+                int ia = Vertex(a), ib = Vertex(b), ic = Vertex(c);
+                Edge(ia, ib); Edge(ib, ic); Edge(ic, ia);
+            }
+            foreach (var edge in edges)
+                if (edge.Value != 2) throw new InvalidOperationException("Door core must be a single closed surface without duplicate internal faces.");
         }
 
         private static void AddQuad(Vector3 a, Vector3 b, Vector3 c, Vector3 d,

@@ -284,6 +284,7 @@ namespace Emberdelve.EditorTools
                     WeatheredTraversalSurfaces.Apply(root);
                     if(Gallery(definition.Kind,variant))StairSurfaceSeparation.Apply(root);
                     DungeonPitJointBacking.Apply(root);
+                    DungeonLayoutFurnishing.Apply(root);
                     ValidateGeometry(root);
                     if(!definition.HasValidSockets(out string issue))throw new InvalidOperationException(issue);
                     PrefabUtility.SaveAsPrefabAsset(root,path);

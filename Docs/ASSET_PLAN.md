@@ -256,3 +256,8 @@ The source crown receives a separate seated lower-course derivative plus physica
 
 
 Final join derivatives also include `Art/Generated/PitJointBacking`: widened versions of the two existing lower-floor meshes and two closed8-vertex stone wedges beneath recessed stair joints. They close bevel/tread views into the background, preserve floor height and all gameplay components, and retain source GUID/dependency hashes for regeneration. `Socket_UpperInfill` and seated arch capitals are original closed masonry derived from the existing project kit, not imported reference-game geometry.
+
+
+## Layout-aware furnishing (22 November 2026)
+
+Reuses the existing licensed CC0 PolyHaven WoodenTable_01, wooden_stool_01, wooden_bookshelf_worn, wooden_crate_02, wooden_bucket_01, wine_barrel_01 and wooden_candlestick imports, plus existing owner-supplied Meshy StandingShrine and VotiveStand. All original manifests/materials/source meshes remain intact. Authoring fits uniform scale to actual imported bounds and gives furniture physical collision; no new source download or generation. GothicCabinet_01 stays lobby-only. The existing RustboundGate leaf keeps its original Meshy faces; its opaque wooden backing becomes a joined thin core with a deeper perimeter rebate inside the leaf. The pale industrial rack was rejected during this pass. See Tasks/LAYOUT_FURNISHING_20261122.md for source-reference evidence and acceptance status.

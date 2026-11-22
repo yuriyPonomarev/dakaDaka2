@@ -65,7 +65,7 @@ public sealed class LayoutFamilyReviewRunner : MonoBehaviour
     private float low, high;
     private int captures;
     private bool cornersOnly;
-    private bool diagnosticLight, inspectionLightActive;
+    private bool diagnosticLight, inspectionLightActive, furnishingReview;
     private IEnumerator Start()
     {
         var stack = new System.Collections.Generic.Stack<IEnumerator>(); stack.Push(Review());
@@ -85,7 +85,8 @@ public sealed class LayoutFamilyReviewRunner : MonoBehaviour
         string seed = args[Array.IndexOf(args, "-emberdelveRaidSeed") + 1];
         string tag = args[Array.IndexOf(args, "-emberWallReviewTag") + 1];
         cornersOnly=tag.StartsWith("corners-final",StringComparison.Ordinal);
-        diagnosticLight=tag.StartsWith("geometry-final",StringComparison.Ordinal);
+        furnishingReview=tag.StartsWith("furnishing",StringComparison.Ordinal);
+        diagnosticLight=tag.StartsWith("geometry-final",StringComparison.Ordinal) || furnishingReview;
         output = Path.GetFullPath("Logs/acceptance/layout-families-20261122/live-" + seed + "-" + tag);
         Directory.CreateDirectory(output); yield return null;
         var movie = ScriptableObject.CreateInstance<MovieRecorderSettings>();
@@ -121,6 +122,19 @@ public sealed class LayoutFamilyReviewRunner : MonoBehaviour
         bool doorsOnly=tag.StartsWith("door-final",StringComparison.Ordinal);
         if(!doorsOnly)
         {
+        // Native follow-up also walks into both furnished side chambers using normal input.
+        if(tag.StartsWith("furnished-native",StringComparison.Ordinal))
+        {
+            foreach(float side in new[]{-1f,1f})
+            {
+                yield return Navigate(new Vector3(side*9,0,-8));
+                Vector3 look=room.TransformPoint(new Vector3(side*9-2.45f,1,-7.8f))-player.transform.position;
+                player.Look.ApplyAimPose(Mathf.Atan2(look.x,look.z)*Mathf.Rad2Deg,16);
+                inspectionLabel="PLAYER / FURNISHED SIDE CHAMBER / "+(side<0?"WEST":"EAST");
+                for(int i=0;i<45;i++)yield return null;
+                ScreenCapture.CaptureScreenshot(Path.Combine(output,"player-furnished-chamber-"+(side<0?"west":"east")+".png"));yield return null;
+            }
+        }
         // Normal player input: arrival court -> raised welcome dais -> court.
         yield return Navigate(new Vector3(0,0,5));
         yield return Hold("arrival-court",30);
@@ -131,6 +145,7 @@ public sealed class LayoutFamilyReviewRunner : MonoBehaviour
         if(high<.8f || !player.IsInPlay || player.CurrentHealth<health-.01f)throw new Exception("Arrival dais traversal failed");
         }
         yield return InspectAssembly(!doorsOnly && seed == "12345", doorsOnly);
+        if(!player.IsInPlay)throw new Exception("Inspection interrupted by zone death; split or shorten diagnostic capture before acceptance");
         AssertNoAI();
         recorder.StopRecording(); recorder=null;
         File.WriteAllText(Path.Combine(output,"result.txt"), "PASS seed="+seed+" proof="+(doorsOnly?"door-motion":"traversal-and-assembly")+" frames="+(Time.frameCount-start)+" viewport="+Screen.width+"x"+Screen.height+" minY="+low+" maxY="+high+" health="+player.CurrentHealth+" AI=0\nNormal new Solo raid, saved AI off. "+(doorsOnly?"Labelled free-camera door inspection; no traversal claim.":"Ordinary walking proof followed by labelled free-camera assembly inspection.")+" No player teleport or AI deactivation. "+(diagnosticLight?"An explicitly labelled camera light is used for seam/catalogue geometry inspection after ordinary gameplay and map views.":"No lighting override.")+"\n");
@@ -208,6 +223,48 @@ public sealed class LayoutFamilyReviewRunner : MonoBehaviour
                 doorway.name="Inspection_Doorway_"+direction;
             }
             yield return InspectView(camera,instance.transform,new Vector3(0,7.4f,-12),new Vector3(0,0,3),"catalog-"+prefab.name+"-overview",18);
+            if(furnishingReview)
+            {
+                Physics.SyncTransforms();
+                int furnishingIndex=0;
+                var furnishing=instance.transform.Find("Layout_Furnishings");
+                if(furnishing==null)throw new Exception("Missing furnishing "+instance.name);
+                foreach(Transform item in furnishing)
+                {
+                    if(!item.name.StartsWith("Floor_"))continue;
+                    var rs=item.GetComponentsInChildren<MeshRenderer>();var b=rs[0].bounds;foreach(var r in rs)b.Encapsulate(r.bounds);
+                    Vector3 target=new Vector3(b.center.x,b.min.y+Mathf.Min(1,b.size.y*.6f),b.center.z);
+                    Vector3 from=Vector3.zero;bool found=false;
+                    foreach(float distance in new[]{3.3f,2.4f,1.8f})
+                    {
+                        if(found)break;
+                        foreach(var offset in new[]{item.forward,item.right,-item.forward,-item.right})
+                        {
+                            Vector3 candidate=b.center+offset*distance;candidate.y=b.min.y+1.7f;
+                            Vector3 localCandidate=instance.transform.InverseTransformPoint(candidate);
+                            if(Mathf.Abs(localCandidate.x)>16.8f || Mathf.Abs(localCandidate.z)>16.8f)continue;
+                            int mask=LayerMask.GetMask(Emberdelve.Core.GameConfig.LevelLayerName);
+                            if(Physics.CheckSphere(candidate,.18f,mask,QueryTriggerInteraction.Ignore))continue;
+                            Vector3 delta=target-candidate;
+                            bool blocked=Physics.RaycastAll(candidate,delta.normalized,delta.magnitude,mask,QueryTriggerInteraction.Ignore)
+                                .Any(h=>!h.transform.IsChildOf(item) && h.distance<delta.magnitude-.3f);
+                            if(!blocked){from=candidate;found=true;break;}
+                        }
+                    }
+                    if(!found)throw new Exception("No readable furniture view "+instance.name+" "+item.name);
+                    inspectionLabel="FURNISHING / "+prefab.name+" / "+item.name;
+                    yield return InspectView(camera,instance.transform,instance.transform.InverseTransformPoint(from),instance.transform.InverseTransformPoint(target),"furniture-"+prefab.name+"-"+(furnishingIndex++)+"-"+item.name,8);
+                }
+                for(int side=0;side<4;side++)
+                {
+                    var yaw=Quaternion.Euler(0,side*90,0);
+                    Vector3 from=yaw*new Vector3(0,1.75f,-14),to=yaw*new Vector3(0,2,3);
+                    if(definition.Kind==DungeonModuleKind.Shrine && side==2){from=new Vector3(3,3.5f,12);to=new Vector3(0,1.7f,-8);}
+                    inspectionLabel="FURNISHED CIRCULATION / "+prefab.name+" / "+side;
+                    yield return InspectView(camera,instance.transform,from,to,"furnished-room-"+prefab.name+"-"+side,8);
+                }
+                Object.Destroy(instance);yield return null;continue;
+            }
             if(diagnosticLight)yield return InspectCorners(camera,instance);
             if(cornersOnly)
             {
