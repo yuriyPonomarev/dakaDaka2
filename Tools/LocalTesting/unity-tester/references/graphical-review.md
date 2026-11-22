@@ -2,7 +2,7 @@
 
 ## Before Play
 
-- From the development checkout, verify the absolute project path of a separate, visible Editor for the synchronized mirror (`../DakaDaka_ci`). Bring its Game view forward. Pass that absolute mirror path to each Editor command with `--project-path`.
+- From the development checkout, verify the absolute project path of a separate, visible Editor for the synchronized mirror (`../DakaDaka_ci`). Prefer the `unity_ci` MCP connection for review commands. Confirm its reported path is the mirror and that the coordinator owns this review session, then bring its Game view forward. If a command requires the CLI, pass the same absolute mirror path with `--project-path`.
 - Start the mirror Editor with `--ember-profile-dir` pointing to a fresh directory under its `Logs/acceptance/<run>/`. Confirm the actual argument before opening the review scene or entering Play. Keep personal saves and the user's working Editor outside the scenario.
 - Check the assigned scene, Play state and transient settings. Use the installed Pipeline command catalog and the versioned helper for the task. Record the original settings so they can be restored.
 
@@ -15,7 +15,7 @@
 
 ## Existing D4c1 viewport probe
 
-Call Prepare and Measure separately, allowing real frames to advance between them.
+Call Prepare and Measure separately, allowing real frames to advance between them. Use the CLI examples below when the evidence checker requires its JSON envelopes or when the mirror MCP tool is unavailable.
 
 ```powershell
 unity command script run --project-path <absolute-mirror> --format json -- --file AgentScripts/ReviewD4c1.cs --entry ReviewD4c1.Prepare

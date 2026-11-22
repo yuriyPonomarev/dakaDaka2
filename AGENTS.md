@@ -60,15 +60,24 @@ For every visual check follow [the shared visual verification procedure](Tools/L
 
 ## Unity pipeline
 
+Use Unity MCP first for interactive Editor commands. Select the connection by task and confirm that its reported project path matches the intended checkout before changing Editor state.
+
+| Connection | Project | Use |
+|---|---|---|
+| `unity` | `DakaDaka_clean_handoff` | Development in the working Editor, including inspecting assets and prefabs, reading the Console, recompiling scripts and focused EditMode checks. |
+| `unity_ci` | `DakaDaka_ci` | Interactive verification in the coordinator-owned mirror Editor, including scene opening for review, automated Play Mode and recorded scenarios. |
+
+Use the project harness for synchronization, batch tests, network gates and builds so mirror locking and evidence collection stay in effect. If the selected MCP connection or operation is unavailable, use the Unity CLI for the **same project** with an explicit absolute `--project-path`. If the mirror exposes only status, check mirror availability and ownership before starting an interactive review. A busy mirror is never a reason to run that review on the working Editor.
+
 Never close the user's Editor or invoke EditorApplication.Exit in it. Batch/playmode/scene-opening/network gates run only on ../DakaDaka_ci, using the primary development checkout as the runner source.
-CLI in the main project (installed Pipeline command names; query if names differ):
+CLI fallback examples for the working Editor (verify installed command names):
 - `unity status --format json`
 - `unity command editor set_auto_tick --project-path <absolute-development-root> --enable true`
 - `unity command script recompile --project-path <absolute-development-root>`, then query `script recompile_status` against the same path.
 - `unity command test run --project-path <absolute-development-root> --mode editor --filter <fixture> --async_tests true`, then query `test status` against the same path.
 Read only test summary/errors; do not print entire successful test trees.
 If async test state is stuck, diagnose/cancel that test before starting another. Never start overlapping mirror runs.
-Verify the target project first and pass its absolute path with `--project-path` for every Editor-driving CLI command. Use MCP only when its configured target matches the intended checkout or mirror. Direct local file edits and CLI are allowed. No shell-within-shell deletion/moving.
+Direct local file edits are allowed. No shell-within-shell deletion/moving.
 
 Mirror: `powershell -NoProfile -ExecutionPolicy Bypass -File Tools/Run-All.ps1 -Set <gate-or-set> [-EditMode] [-Build] [-NoBuildCache]`.
 Runner checks mirror lock, syncs source, runs batch Unity, writes Logs/runs/<stamp>/summary.txt + run.json.
