@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace Emberdelve.EditorTools
 {
-    // The masonry footprint and collision use the same closed mesh.
+    // Original closed profiles own collision; softened derivatives are visual only.
     internal static class RuinsWallProfile
     {
         private const string Folder = "Assets/Emberdelve/Art/Generated/RuinsWalls";
@@ -94,9 +94,24 @@ namespace Emberdelve.EditorTools
             if (!wall.TryGetComponent<MeshFilter>(out var filter)) filter = wall.AddComponent<MeshFilter>();
             if (!wall.TryGetComponent<MeshRenderer>(out var renderer)) renderer = wall.AddComponent<MeshRenderer>();
             if (!wall.TryGetComponent<MeshCollider>(out var collider)) collider = wall.AddComponent<MeshCollider>();
-            filter.sharedMesh = mesh;
+            string visualPath = AssetDatabase.GetAssetPath(mesh).Replace("/FoldedMasonry_", "/WeatheredMasonry_");
+            var visual = AssetDatabase.LoadAssetAtPath<Mesh>(visualPath);
+            // If authored profiles change, use the matching collision surface until the
+            // documented Export -> Blender -> Import pass refreshes its bevel derivative.
+            filter.sharedMesh = visual != null && visual.name.EndsWith("_" + GeometryFingerprint(mesh), StringComparison.Ordinal) ? visual : mesh;
             renderer.sharedMaterial = stone;
             collider.sharedMesh = mesh;
+        }
+
+        internal static string GeometryFingerprint(Mesh mesh)
+        {
+            using var bytes = new System.IO.MemoryStream();
+            using var writer = new System.IO.BinaryWriter(bytes);
+            foreach (Vector3 p in mesh.vertices) { writer.Write(p.x); writer.Write(p.y); writer.Write(p.z); }
+            foreach (int index in mesh.triangles) writer.Write(index);
+            writer.Flush();
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            return BitConverter.ToString(sha.ComputeHash(bytes.ToArray())).Replace("-", "").Substring(0, 16);
         }
 
         private static Mesh Profile(int index, bool inwardPositive, bool rebuild = false)

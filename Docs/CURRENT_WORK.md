@@ -4,16 +4,17 @@ Updated 22 November 2026. The ONLY development checkout is `C:/Users/yrapa/OneDr
 
 Runner and project rules updated 22 November. The Windows entry points validate the development root and test mirror before writing, preserve Unity locks and serialize runs. Reports and skill text select zero gameplay scenarios. Proof: 28 harness tests in `Logs/harness/editor-guard-20261122-tests.txt`, EditMode 16/16, NetProof 35/35 and NetAdmission 107/107 in `Logs/runs/20261122-050757-383`. Build output copying was checked with temporary player files. The shared visual and asset procedures are linked in AGENTS.md. Its [Unity pipeline rule](../AGENTS.md#unity-pipeline) now gives the named MCP connections priority for interactive Editor work.
 
-## Current slice: recorded Foley and spatial sound
+## Current slice: softer stone walls
 
-The user rejected the synthetic timbre of bd3975ba0 and requested natural, spacious sounds with distance-dependent volume. Report: [NATURAL_AUDIO_20261122](../Tasks/NATURAL_AUDIO_20261122.md).
+The user requested less sharp wall models, then explicitly requested temporarily disabling bots during environment inspection. Report: [SOFT_WALLS_20261122](../Tasks/SOFT_WALLS_20261122.md).
 
-- Replaced the active49-family/151-clip bank with edits of real CC0 recordings; stable filenames/GUIDs.132 selected originals, authors/licenses and exact take provenance are retained. Designed magic/UI cues arrange recorded materials; wood steps and stone mechanisms are explicitly labelled material composites. Existing48s melodic music remains.
-- World audio has category-specific smooth distance falloff, stereo direction, attached moving emitters and smoothed wall attenuation/filtering. Short1.05s stone-room reflections; actual active/spectator AudioListener controls acoustics. UI and personal run notifications remain local.
-- Action audio now covers authority actors and client observers through existing replicated edges. Hurt/death/equipment/skills follow actors. Initial snapshots/floor transitions stay silent; no protocol, damage, inventory custody or level changes.
-- Asset checks pass:151 unique mono48k PCM16 files,8.78MiB,95.855s total; byte-for-byte reproduction and independent source/PCM checks. Preview50.520s: `Logs/acceptance/natural-audio-20261122/RecordedSfx-preview.wav`. Audio fixtures8/8+5/5 pass; final NetCombat399/399 and NetSkill127/127 pass (`Logs/runs/20261122-052407-639`).
+- Six visual-only wall derivatives add3.5cm rounded edges and corrected weighted shading. Nine outdoor prefabs replace90MeshFilter references; every collider, transform and gameplay component is unchanged. Source fingerprints prevent stale derivatives after future profile edits.
+- Meshy-derived stone pier/crown retain geometry/UV/GUIDs; repaired normals remove backwards lighting corners and ImportedStone has less gloss/bump. Existing source assets are preserved.
+- Focused planner fixture21/21 passes. Wrapper's minimum146 was mistakenly copied from the earlier broader suite; raw XML passes and the original wrapperFAIL is retained/explained. Cosmetic scope does not justify network/full-suite repeats.
+- Final visible seeds12345/67890 each:300frames,1280×720,80walls/80original colliders,14.46m walk,21AI actors disabled, living full-health player.9.97s MP4s with stereo48k audio decoded and frames inspected; delivered in-chat. Independent6meshes×8scale normal audit passes. Evidence: `Logs/acceptance/soft-walls-20261122`.
+- Bots were temporarily deactivated in the current primary Play session and the isolated review sessions at the user's request. Spawn settings/prefabs unchanged; a fresh ordinary raid restores them. Primary Editor remains open; owned mirror reviews closed and locks released.
 
-- Final visible seed12345:19 ordinary raid checks,38 cumulative source/geometry checks and6 recorded-output comparisons across8cases pass. Normal6.97s gameplay and separate21.27s controlled MP4s have stereo48k audio. Same impact is22.13dB quieter at18m than2m; wall adds13.67dB at8m. Fixed contacts no longer follow a moving pool owner. Final artifacts: `Logs/acceptance/natural-audio-20261122/live-12345-final2`. All172 changed Unity assets/source files match the tested mirror; primary Editor remained open and mirror closed cleanly. Listening acceptance remains with the user.
+Previous audio slice4b410795a is complete:151recorded CC0 effects, spatial distance/occlusion, audio fixtures8/8+5/5, NetCombat399/399+NetSkill127/127, ordinary/controlled recordings and measured distance attenuation. Report: [NATURAL_AUDIO_20261122](../Tasks/NATURAL_AUDIO_20261122.md). Listening acceptance remains with the user.
 
 ## Preserved baseline and limitations
 
@@ -27,6 +28,6 @@ Old stash `Preserve audio completion and inherited Unity drift before Sol integr
 
 ## Next three actions
 
-1. User listening review using the new recorded-effect reel and final ordinary/controlled videos; tune specific timbres or levels from concrete feedback.
-2. Extend close-up context review to individual weapons, consumables and cache mechanisms when requested; the brief raid recording does not claim every cue was heard in context.
-3. Keep old integration test debt separate and preserve inherited material/settings drift. No broad suite rerun or push without a relevant reason.
+1. User visual review of softened wall edges using the comparison PNG and final no-bot gameplay recordings.
+2. Keep environment inspection free of AI when requested; current temporary deactivation does not change normal raid spawning.
+3. Preserve inherited material/settings drift and prior integration debt; no broad suite rerun or push without a relevant reason.

@@ -151,7 +151,7 @@ Room props/sky (13 November): reuses existing CC0 PolyHaven wooden_crate_02, win
 
 ### Moonlit Ruins room shapes (21 November 2026)
 
-Six original folded masonry meshes in `Art/Generated/RuinsWalls` share the existing `World_Stone_Wall` material. They provide recessed wall runs, collapsed crowns, weathered buttresses and two diagonal corners in each outdoor room. A shared mesh supplies both the visible wall and its physics surface. No additional source assets are required.
+Six original folded masonry meshes in `Art/Generated/RuinsWalls` share the existing `World_Stone_Wall` material. They provide recessed wall runs, collapsed crowns, weathered buttresses and two diagonal corners in each outdoor room. The original six meshes retain the physics surface. Six visual-only WeatheredMasonry derivatives add 3.5 cm three-segment bevels, weighted normals and a source geometry fingerprint. Nine outdoor prefabs use these surfaces; collider meshes, transforms and gameplay footprints remain unchanged. Inputs and the Blender reproduction recipe are in SourceArt/Environment/WeatheredWalls. No additional third-party source assets are required.
 
 ### Rustbound dungeon doors (21 November 2026)
 

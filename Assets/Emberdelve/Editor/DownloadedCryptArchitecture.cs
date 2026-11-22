@@ -264,6 +264,22 @@ namespace Emberdelve.EditorTools
             AssetDatabase.SaveAssets();
         }
 
+        [MenuItem("Emberdelve/Visual/Soften Downloaded Stone Surfaces")]
+        public static void RefreshWeatheredStoneSurfaces()
+        {
+            // Update shared display assets in place: every existing room/door reference and GUID
+            // remains valid. Never regenerate sources, colliders or the whole prefab catalog here.
+            foreach (string name in new[] { "OvergrownArchStonePier", "OvergrownArchCrown" })
+            {
+                var mesh = Required<Mesh>(Folder + "/" + name + ".asset");
+                RebuildWeatheredNormals(mesh);
+                EditorUtility.SetDirty(mesh);
+                AssetDatabase.SaveAssetIfDirty(mesh);
+            }
+            var material = StoneMaterial();
+            AssetDatabase.SaveAssetIfDirty(material);
+        }
+
         private static Material StoneMaterial()
         {
             string path = Folder + "/ImportedStone.mat";
@@ -273,6 +289,10 @@ namespace Emberdelve.EditorTools
                 material = new Material(Required<Material>(Community + "/OvergrownArch/OvergrownArch.mat"));
                 AssetDatabase.CreateAsset(material, path);
             }
+            // Weathered masonry should not acquire hard, polished highlights at every LOD facet.
+            // Keep the downloaded albedo/normal maps; this only moderates their material response.
+            material.SetFloat("_Smoothness", .25f);
+            material.SetFloat("_BumpScale", .55f);
             material.enableInstancing = true;
             EditorUtility.SetDirty(material);
             return material;
@@ -337,16 +357,17 @@ namespace Emberdelve.EditorTools
             var mesh = new Mesh { name = "Downloaded_" + name, indexFormat = IndexFormat.UInt32 };
             mesh.SetVertices(vertices); mesh.SetNormals(outputNormals); mesh.SetUVs(0, outputUv); mesh.SetTriangles(triangles, 0);
             mesh.RecalculateBounds(); mesh.RecalculateTangents();
-            var reduced = Reduce(mesh, name == "OvergrownArchCrown" ? 4500 : 700);
+            var reduced = Reduce(mesh, name == "OvergrownArchCrown" ? 4500 : 700, weatheredStone: true);
             Object.DestroyImmediate(mesh);
             AssetDatabase.CreateAsset(reduced, path);
             return reduced;
         }
 
         // A deterministic display LOD of the downloaded surface. Position clusters share a centroid
-        // across UV seams, while retained corners keep their original UV/normal attributes.
+        // across UV seams, while retained corners keep their original UV attributes. Cropped stone
+        // reconstructs normals after displacement; other existing prop LODs retain their source normals.
         // The original FBX and source mesh remain intact for a higher-detail rebuild if needed.
-        private static Mesh Reduce(Mesh source, int budget)
+        private static Mesh Reduce(Mesh source, int budget, bool weatheredStone = false)
         {
             Vector3[] points = source.vertices;
             int[] original = source.triangles;
@@ -400,8 +421,134 @@ namespace Emberdelve.EditorTools
             mesh.SetVertices(output); mesh.SetNormals(normals); mesh.SetUVs(0, uv); mesh.SetTriangles(indices, 0);
             if (sourceNormals.Length != points.Length) mesh.RecalculateNormals();
             mesh.RecalculateTangents(); mesh.RecalculateBounds();
+            if (weatheredStone) RebuildWeatheredNormals(mesh);
             Debug.Log($"[DownloadedArchitecture] {source.name}: {original.Length / 3} -> {indices.Count / 3} triangles (budget {budget}).");
             return mesh;
+        }
+
+        private readonly struct StoneCorner
+        {
+            public readonly int Vertex, EdgeA, EdgeB;
+            public readonly Vector3 Normal;
+            public readonly float Weight;
+            public StoneCorner(int vertex, int edgeA, int edgeB, Vector3 normal, float weight)
+            { Vertex = vertex; EdgeA = edgeA; EdgeB = edgeB; Normal = normal; Weight = weight; }
+            public bool SharesEdge(StoneCorner other) => EdgeA == other.EdgeA || EdgeA == other.EdgeB
+                || EdgeB == other.EdgeA || EdgeB == other.EdgeB;
+        }
+
+        private static void RebuildWeatheredNormals(Mesh mesh)
+        {
+            Vector3[] points = mesh.vertices;
+            int[] indices = mesh.triangles;
+            Vector2[] uv = mesh.uv;
+            var positionIds = new int[points.Length];
+            var positions = new Dictionary<Vector3Int, int>();
+            var groups = new List<List<StoneCorner>>();
+            // Derived crop/LOD corners have duplicated positions for UV seams. Welding is only
+            // for adjacency; no position, UV, triangle, crop border or collider is moved.
+            const float weldTolerance = .00001f;
+            for (int i = 0; i < points.Length; i++)
+            {
+                Vector3 p = points[i] / weldTolerance;
+                var key = new Vector3Int(Mathf.RoundToInt(p.x), Mathf.RoundToInt(p.y), Mathf.RoundToInt(p.z));
+                if (!positions.TryGetValue(key, out int id))
+                { id = groups.Count; positions.Add(key, id); groups.Add(new List<StoneCorner>()); }
+                positionIds[i] = id;
+            }
+            for (int i = 0; i < indices.Length; i += 3)
+            {
+                int a = indices[i], b = indices[i + 1], c = indices[i + 2];
+                Vector3 cross = Vector3.Cross(points[b] - points[a], points[c] - points[a]);
+                if (cross.sqrMagnitude < 1e-20f) continue;
+                Vector3 normal = cross / Mathf.Sqrt(cross.sqrMagnitude);
+                for (int corner = 0; corner < 3; corner++)
+                {
+                    int vertex = indices[i + corner], next = indices[i + (corner + 1) % 3], previous = indices[i + (corner + 2) % 3];
+                    float angle = Vector3.Angle(points[next] - points[vertex], points[previous] - points[vertex]) * Mathf.Deg2Rad;
+                    groups[positionIds[vertex]].Add(new StoneCorner(vertex, positionIds[next], positionIds[previous], normal, angle));
+                }
+            }
+            string before = StoneNormalMetrics(mesh.normals, points, indices, positionIds, groups.Count);
+            var result = new Vector3[points.Length];
+            float threshold = Mathf.Cos(65f * Mathf.Deg2Rad);
+            foreach (var corners in groups)
+            {
+                var visited = new bool[corners.Count];
+                var frontier = new int[corners.Count];
+                for (int seed = 0; seed < corners.Count; seed++)
+                {
+                    Array.Clear(visited, 0, visited.Length);
+                    int read = 0, count = 1;
+                    frontier[0] = seed; visited[seed] = true;
+                    Vector3 sum = Vector3.zero;
+                    while (read < count)
+                    {
+                        StoneCorner current = corners[frontier[read++]];
+                        sum += current.Normal * current.Weight;
+                        for (int candidate = 0; candidate < corners.Count; candidate++)
+                        {
+                            if (visited[candidate] || !current.SharesEdge(corners[candidate])) continue;
+                            // Gate against both the seed and this edge. Never smooth across an
+                            // opposite-facing sheet or gradually walk around a sharp corner.
+                            if (Vector3.Dot(corners[seed].Normal, corners[candidate].Normal) < threshold
+                                || Vector3.Dot(current.Normal, corners[candidate].Normal) < threshold) continue;
+                            visited[candidate] = true;
+                            frontier[count++] = candidate;
+                        }
+                    }
+                    result[corners[seed].Vertex] += sum.normalized * corners[seed].Weight;
+                }
+            }
+            Vector3[] oldNormals = mesh.normals;
+            for (int i = 0; i < result.Length; i++)
+                result[i] = result[i].sqrMagnitude > 1e-12f ? result[i].normalized
+                    : oldNormals.Length == result.Length ? oldNormals[i] : Vector3.up;
+            mesh.SetNormals(result);
+            mesh.RecalculateTangents();
+
+            // A normal-only refresh must retain exact render/collision correspondence and UVs.
+            Vector3[] afterPoints = mesh.vertices;
+            int[] afterIndices = mesh.triangles;
+            Vector2[] afterUv = mesh.uv;
+            if (afterPoints.Length != points.Length || afterIndices.Length != indices.Length || afterUv.Length != uv.Length)
+                throw new InvalidOperationException("Stone normal refresh changed mesh layout: " + mesh.name);
+            for (int i = 0; i < points.Length; i++)
+                if (!points[i].Equals(afterPoints[i])) throw new InvalidOperationException("Stone normal refresh moved a vertex: " + mesh.name);
+            for (int i = 0; i < indices.Length; i++)
+                if (indices[i] != afterIndices[i]) throw new InvalidOperationException("Stone normal refresh changed a face: " + mesh.name);
+            for (int i = 0; i < uv.Length; i++)
+                if (!uv[i].Equals(afterUv[i])) throw new InvalidOperationException("Stone normal refresh changed UVs: " + mesh.name);
+            string after = StoneNormalMetrics(result, points, indices, positionIds, groups.Count);
+            Debug.Log($"[WeatheredStone] {mesh.name}: {points.Length} vertices / {indices.Length / 3} triangles unchanged; positions, faces and UVs exact. Normals BEFORE {before}; AFTER {after}.");
+        }
+
+        private static string StoneNormalMetrics(Vector3[] normals, Vector3[] points, int[] indices, int[] positionIds, int groupCount)
+        {
+            if (normals.Length != points.Length) return "missing normals";
+            int corners = 0, backwards = 0;
+            double angleSum = 0;
+            for (int i = 0; i < indices.Length; i += 3)
+            {
+                Vector3 face = Vector3.Cross(points[indices[i + 1]] - points[indices[i]], points[indices[i + 2]] - points[indices[i]]);
+                if (face.sqrMagnitude < 1e-20f) continue;
+                face /= Mathf.Sqrt(face.sqrMagnitude);
+                for (int j = 0; j < 3; j++)
+                {
+                    Vector3 normal = normals[indices[i + j]].normalized;
+                    float dot = Mathf.Clamp(Vector3.Dot(face, normal), -1f, 1f);
+                    angleSum += Mathf.Acos(dot) * Mathf.Rad2Deg;
+                    if (dot < 0) backwards++;
+                    corners++;
+                }
+            }
+            var sums = new Vector3[groupCount];
+            for (int i = 0; i < normals.Length; i++) sums[positionIds[i]] += normals[i].normalized;
+            var deviations = new float[normals.Length];
+            for (int i = 0; i < normals.Length; i++) deviations[i] = Vector3.Angle(normals[i], sums[positionIds[i]]);
+            Array.Sort(deviations);
+            float p90 = deviations.Length == 0 ? 0 : deviations[Mathf.Min(deviations.Length - 1, Mathf.FloorToInt(deviations.Length * .9f))];
+            return $"backwards corners {backwards}/{corners}, mean face angle {angleSum / Math.Max(1, corners):F2} deg, coincident-normal p90 {p90:F2} deg";
         }
 
         private readonly struct Corner
