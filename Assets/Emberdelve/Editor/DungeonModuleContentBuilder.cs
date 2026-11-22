@@ -69,6 +69,7 @@ namespace Emberdelve.EditorTools
                 if (spec.Kind == DungeonModuleKind.Entry) CommunityRuinsTrial.Apply(root);
                 MeshyMapDressing.ApplyWayside(root);
                 DownloadedCryptArchitecture.Apply(root);
+                WeatheredTraversalSurfaces.Apply(root);
                 string path = PrefabFolder + "/" + spec.Name + ".prefab";
                 GameObject prefab = PrefabUtility.SaveAsPrefabAsset(root, path);
                 UnityEngine.Object.DestroyImmediate(root);
@@ -128,6 +129,7 @@ namespace Emberdelve.EditorTools
                     DungeonRoomProps.Apply(root);
                     MeshyMapDressing.ApplyWayside(root);
                     DownloadedCryptArchitecture.Apply(root);
+                    WeatheredTraversalSurfaces.Apply(root);
                     try
                     {
                         var prefab = PrefabUtility.SaveAsPrefabAsset(root, PrefabFolder + "/" + theme + "/" + spec.Name + ".prefab");

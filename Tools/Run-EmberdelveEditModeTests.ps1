@@ -11,6 +11,9 @@ $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'MirrorGuard.ps1')
 $project = Resolve-TestMirror $ProjectPath
 $lease = Enter-MirrorRun
+$previousRaidAi = $env:EMBER_RAID_AI
+$env:EMBER_RAID_AI = 'on'
+Write-Output 'Verification AI override: on (normal raid population)'
 try {
 Assert-MirrorIdle $project
 if(!(Test-Path -LiteralPath $UnityExe -PathType Leaf)){throw 'Unity executable missing'}
@@ -60,4 +63,8 @@ Write-Output ((@('FAIL','PASS')[[int]$passed])+' EditMode tests='+$tests+' failu
 $problems | ForEach-Object {Write-Output $_}
 Write-Output ('Evidence: '+$summaryPath)
 if($passed){exit 0}else{exit 1}
-} finally { Exit-MirrorRun $lease }
+} finally {
+    if ($null -eq $previousRaidAi) { Remove-Item Env:EMBER_RAID_AI -ErrorAction SilentlyContinue }
+    else { $env:EMBER_RAID_AI = $previousRaidAi }
+    Exit-MirrorRun $lease
+}

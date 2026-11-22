@@ -66,6 +66,7 @@ namespace Emberdelve.Level
         private RoyalePartyMode? _royaleSpawnMode;
         private HashSet<Vector2Int> _reachableNav;
         private EnemyAgent[] _initialEnemies = Array.Empty<EnemyAgent>();
+        private bool _initialAiSuppressed;
         private LootPickup[] _initialLoot = Array.Empty<LootPickup>();
         private DungeonModulePlan _appliedPlan;
         public RoyalePartyMode? AppliedRoyaleMode => _royaleSpawnMode;
@@ -77,7 +78,12 @@ namespace Emberdelve.Level
             if (RuntimeContentRetired || _stagedFloor || !RuntimeMapValidationComplete || _runtimeLayout.enemySpawns.Count != _initialEnemies.Length
                 || _runtimeLayout.lootSpawns.Count != _initialLoot.Length) return false;
             foreach (var enemy in _initialEnemies)
-                if (enemy == null || !enemy.EnsureRuntimeInitialized()) return false;
+            {
+                if (enemy == null || enemy.Data == null) return false;
+                // Authored scene monsters still have validated placements and definitions. In inspection
+                // they are never activated/initialized; a disabled actor cannot satisfy normal readiness.
+                if (_initialAiSuppressed ? enemy.gameObject.activeSelf : !enemy.EnsureRuntimeInitialized()) return false;
+            }
             foreach (var loot in _initialLoot) if (loot == null) return false;
             reason = null; return true;
         }
@@ -1052,11 +1058,16 @@ namespace Emberdelve.Level
             PlayerRig sceneRig = FindFirstObjectByType<PlayerRig>(FindObjectsInactive.Include);
             if (sceneRig != null) sceneRig.transform.position = _runtimeLayout.PlayerSpawnWorld(0) + Vector3.up * 0.15f;
 
+            var director = FindFirstObjectByType<RunDirector>(FindObjectsInactive.Include);
+            _initialAiSuppressed = !NetRole.IsClientOnly && director != null
+                && !GameConfig.ShouldPopulateRaidWithAi(director.Config);
+
             for (int i = 0; i < enemies.Length; i++)
             {
                 Vector2Int cell = _runtimeLayout.enemySpawns[i].cell;
                 enemies[i].transform.position = _runtimeLayout.CellCenterWorld(cell);
                 enemies[i].ConfigureNavigationGrid(_runtimeNav);
+                if (_initialAiSuppressed) enemies[i].gameObject.SetActive(false);
             }
 
             for (int i = 0; i < loot.Length; i++)

@@ -25,6 +25,7 @@ MonoBehaviour:
   interactionAuthorityRange: 3
   maxPartySize: 3
   friendlyFire: 0
+  populateRaidWithAi: 0
   inventoryGridWidth: 10
   inventoryGridHeight: 5
   inventoryCapacity: 8

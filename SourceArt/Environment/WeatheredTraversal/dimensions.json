@@ -1,0 +1,968 @@
+{
+    "version": 1,
+    "surfaceCount": 2802,
+    "variants": [
+        {
+            "key": "Traversal_v1_22000_100000_300000_b40",
+            "size": {
+                "x": 0.2199999988079071,
+                "y": 1.0,
+                "z": 3.0
+            },
+            "bevel": 0.03999999910593033,
+            "segments": 3,
+            "instances": 4,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab:Crypt_Shrine/Terrace_45[36]/Parapet[25]"
+        },
+        {
+            "key": "Traversal_v1_22000_100000_400000_b40",
+            "size": {
+                "x": 0.2199999988079071,
+                "y": 1.0,
+                "z": 4.0
+            },
+            "bevel": 0.03999999910593033,
+            "segments": 3,
+            "instances": 32,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Parapet[13]"
+        },
+        {
+            "key": "Traversal_v1_28000_110000_575000_b40",
+            "size": {
+                "x": 0.2800000011920929,
+                "y": 1.100000023841858,
+                "z": 5.75
+            },
+            "bevel": 0.03999999910593033,
+            "segments": 3,
+            "instances": 120,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_Parapet[6]"
+        },
+        {
+            "key": "Traversal_v1_360000_105000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 1.0499999523162842,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 18,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Stair_6[6]"
+        },
+        {
+            "key": "Traversal_v1_360000_120000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 1.2000000476837159,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 18,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Stair_7[7]"
+        },
+        {
+            "key": "Traversal_v1_360000_135000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 1.350000023841858,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 18,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Stair_8[8]"
+        },
+        {
+            "key": "Traversal_v1_360000_150000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 1.5,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 18,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Stair_9[9]"
+        },
+        {
+            "key": "Traversal_v1_360000_15000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 0.15000000596046449,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 18,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Stair_0[0]"
+        },
+        {
+            "key": "Traversal_v1_360000_165000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 1.649999976158142,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 18,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Stair_10[10]"
+        },
+        {
+            "key": "Traversal_v1_360000_180000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 1.7999999523162842,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 18,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Stair_11[11]"
+        },
+        {
+            "key": "Traversal_v1_360000_195000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 1.9500000476837159,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 2,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab:Crypt_Shrine/Terrace_45[36]/Stair_12[12]"
+        },
+        {
+            "key": "Traversal_v1_360000_210000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 2.0999999046325685,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 2,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab:Crypt_Shrine/Terrace_45[36]/Stair_13[13]"
+        },
+        {
+            "key": "Traversal_v1_360000_225000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 2.25,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 2,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab:Crypt_Shrine/Terrace_45[36]/Stair_14[14]"
+        },
+        {
+            "key": "Traversal_v1_360000_240000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 2.4000000953674318,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 2,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab:Crypt_Shrine/Terrace_45[36]/Stair_15[15]"
+        },
+        {
+            "key": "Traversal_v1_360000_255000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 2.549999952316284,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 2,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab:Crypt_Shrine/Terrace_45[36]/Stair_16[16]"
+        },
+        {
+            "key": "Traversal_v1_360000_270000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 2.700000047683716,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 2,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab:Crypt_Shrine/Terrace_45[36]/Stair_17[17]"
+        },
+        {
+            "key": "Traversal_v1_360000_285000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 2.8499999046325685,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 2,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab:Crypt_Shrine/Terrace_45[36]/Stair_18[18]"
+        },
+        {
+            "key": "Traversal_v1_360000_300000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 3.0,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 2,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab:Crypt_Shrine/Terrace_45[36]/Stair_19[19]"
+        },
+        {
+            "key": "Traversal_v1_360000_30000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 0.30000001192092898,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 18,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Stair_1[1]"
+        },
+        {
+            "key": "Traversal_v1_360000_315000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 3.1500000953674318,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 2,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab:Crypt_Shrine/Terrace_45[36]/Stair_20[20]"
+        },
+        {
+            "key": "Traversal_v1_360000_330000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 3.299999952316284,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 2,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab:Crypt_Shrine/Terrace_45[36]/Stair_21[21]"
+        },
+        {
+            "key": "Traversal_v1_360000_345000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 3.450000047683716,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 2,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab:Crypt_Shrine/Terrace_45[36]/Stair_22[22]"
+        },
+        {
+            "key": "Traversal_v1_360000_360000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 3.5999999046325685,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 2,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab:Crypt_Shrine/Terrace_45[36]/Stair_23[23]"
+        },
+        {
+            "key": "Traversal_v1_360000_45000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 0.44999998807907107,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 18,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Stair_2[2]"
+        },
+        {
+            "key": "Traversal_v1_360000_60000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 0.6000000238418579,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 18,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Stair_3[3]"
+        },
+        {
+            "key": "Traversal_v1_360000_75000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 0.75,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 18,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Stair_4[4]"
+        },
+        {
+            "key": "Traversal_v1_360000_90000_31000_b25",
+            "size": {
+                "x": 3.5999999046325685,
+                "y": 0.8999999761581421,
+                "z": 0.3100000023841858
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 18,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Stair_5[5]"
+        },
+        {
+            "key": "Traversal_v1_400000_100000_24000_b40",
+            "size": {
+                "x": 4.0,
+                "y": 1.0,
+                "z": 0.23999999463558198
+            },
+            "bevel": 0.03999999910593033,
+            "segments": 3,
+            "instances": 18,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Rear_Parapet[21]"
+        },
+        {
+            "key": "Traversal_v1_400000_180000_400000_b40",
+            "size": {
+                "x": 4.0,
+                "y": 1.7999999523162842,
+                "z": 4.0
+            },
+            "bevel": 0.03999999910593033,
+            "segments": 3,
+            "instances": 16,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab:Crypt_Entry/Terrace_45[36]/Upper_Deck[12]"
+        },
+        {
+            "key": "Traversal_v1_400000_360000_300000_b40",
+            "size": {
+                "x": 4.0,
+                "y": 3.5999999046325685,
+                "z": 3.0
+            },
+            "bevel": 0.03999999910593033,
+            "segments": 3,
+            "instances": 2,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab:Crypt_Shrine/Terrace_45[36]/Upper_Deck[24]"
+        },
+        {
+            "key": "Traversal_v1_40000_150000_1000000_b40",
+            "size": {
+                "x": 0.4000000059604645,
+                "y": 1.5,
+                "z": 10.0
+            },
+            "bevel": 0.03999999910593033,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Undercroft_RetainingWest[12]"
+        },
+        {
+            "key": "Traversal_v1_450000_105000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 1.0499999523162842,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_6[6]"
+        },
+        {
+            "key": "Traversal_v1_450000_120000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 1.2000000476837159,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_7[7]"
+        },
+        {
+            "key": "Traversal_v1_450000_135000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 1.350000023841858,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_8[8]"
+        },
+        {
+            "key": "Traversal_v1_450000_150000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 1.5,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_9[9]"
+        },
+        {
+            "key": "Traversal_v1_450000_15000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 0.15000000596046449,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_0[0]"
+        },
+        {
+            "key": "Traversal_v1_450000_165000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 1.649999976158142,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_10[10]"
+        },
+        {
+            "key": "Traversal_v1_450000_180000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 1.7999999523162842,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_11[11]"
+        },
+        {
+            "key": "Traversal_v1_450000_195000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 1.9500000476837159,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_12[12]"
+        },
+        {
+            "key": "Traversal_v1_450000_210000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 2.0999999046325685,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_13[13]"
+        },
+        {
+            "key": "Traversal_v1_450000_225000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 2.25,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_14[14]"
+        },
+        {
+            "key": "Traversal_v1_450000_240000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 2.4000000953674318,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_15[15]"
+        },
+        {
+            "key": "Traversal_v1_450000_255000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 2.549999952316284,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_16[16]"
+        },
+        {
+            "key": "Traversal_v1_450000_270000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 2.700000047683716,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_17[17]"
+        },
+        {
+            "key": "Traversal_v1_450000_285000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 2.8499999046325685,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_18[18]"
+        },
+        {
+            "key": "Traversal_v1_450000_300000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 3.0,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_19[19]"
+        },
+        {
+            "key": "Traversal_v1_450000_30000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 0.30000001192092898,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_1[1]"
+        },
+        {
+            "key": "Traversal_v1_450000_315000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 3.1500000953674318,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_20[20]"
+        },
+        {
+            "key": "Traversal_v1_450000_330000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 3.299999952316284,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_21[21]"
+        },
+        {
+            "key": "Traversal_v1_450000_345000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 3.450000047683716,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_22[22]"
+        },
+        {
+            "key": "Traversal_v1_450000_360000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 3.5999999046325685,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_23[23]"
+        },
+        {
+            "key": "Traversal_v1_450000_375000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 3.75,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_24[24]"
+        },
+        {
+            "key": "Traversal_v1_450000_390000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 3.9000000953674318,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_25[25]"
+        },
+        {
+            "key": "Traversal_v1_450000_45000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 0.44999998807907107,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_2[2]"
+        },
+        {
+            "key": "Traversal_v1_450000_60000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 0.6000000238418579,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_3[3]"
+        },
+        {
+            "key": "Traversal_v1_450000_75000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 0.75,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_4[4]"
+        },
+        {
+            "key": "Traversal_v1_450000_90000_30500_b25",
+            "size": {
+                "x": 4.5,
+                "y": 0.8999999761581421,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_SouthStairs[4]/Tread_5[5]"
+        },
+        {
+            "key": "Traversal_v1_500000_105000_30500_b25",
+            "size": {
+                "x": 5.0,
+                "y": 1.0499999523162842,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Undercroft_SouthStairs[10]/Tread_6[6]"
+        },
+        {
+            "key": "Traversal_v1_500000_110000_25000_b40",
+            "size": {
+                "x": 5.0,
+                "y": 1.100000023841858,
+                "z": 0.25
+            },
+            "bevel": 0.03999999910593033,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_EndParapet[1]"
+        },
+        {
+            "key": "Traversal_v1_500000_120000_30500_b25",
+            "size": {
+                "x": 5.0,
+                "y": 1.2000000476837159,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Undercroft_SouthStairs[10]/Tread_7[7]"
+        },
+        {
+            "key": "Traversal_v1_500000_135000_30500_b25",
+            "size": {
+                "x": 5.0,
+                "y": 1.350000023841858,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Undercroft_SouthStairs[10]/Tread_8[8]"
+        },
+        {
+            "key": "Traversal_v1_500000_150000_30500_b25",
+            "size": {
+                "x": 5.0,
+                "y": 1.5,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Undercroft_SouthStairs[10]/Tread_9[9]"
+        },
+        {
+            "key": "Traversal_v1_500000_15000_30500_b25",
+            "size": {
+                "x": 5.0,
+                "y": 0.15000000596046449,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Undercroft_SouthStairs[10]/Tread_0[0]"
+        },
+        {
+            "key": "Traversal_v1_500000_30000_30500_b25",
+            "size": {
+                "x": 5.0,
+                "y": 0.30000001192092898,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Undercroft_SouthStairs[10]/Tread_1[1]"
+        },
+        {
+            "key": "Traversal_v1_500000_390000_575000_b40",
+            "size": {
+                "x": 5.0,
+                "y": 3.9000000953674318,
+                "z": 5.75
+            },
+            "bevel": 0.03999999910593033,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Western_Gallery[78]/Gallery_Deck[0]"
+        },
+        {
+            "key": "Traversal_v1_500000_45000_30500_b25",
+            "size": {
+                "x": 5.0,
+                "y": 0.44999998807907107,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Undercroft_SouthStairs[10]/Tread_2[2]"
+        },
+        {
+            "key": "Traversal_v1_500000_60000_30500_b25",
+            "size": {
+                "x": 5.0,
+                "y": 0.6000000238418579,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Undercroft_SouthStairs[10]/Tread_3[3]"
+        },
+        {
+            "key": "Traversal_v1_500000_60000_400000_b40",
+            "size": {
+                "x": 5.0,
+                "y": 0.6000000238418579,
+                "z": 4.0
+            },
+            "bevel": 0.03999999910593033,
+            "segments": 3,
+            "instances": 30,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Undercroft_Floor[9]"
+        },
+        {
+            "key": "Traversal_v1_500000_75000_30500_b25",
+            "size": {
+                "x": 5.0,
+                "y": 0.75,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Undercroft_SouthStairs[10]/Tread_4[4]"
+        },
+        {
+            "key": "Traversal_v1_500000_90000_30500_b25",
+            "size": {
+                "x": 5.0,
+                "y": 0.8999999761581421,
+                "z": 0.3050000071525574
+            },
+            "bevel": 0.02500000037252903,
+            "segments": 3,
+            "instances": 60,
+            "example": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab:Crypt_Crypt_Entry/Undercroft_SouthStairs[10]/Tread_5[5]"
+        }
+    ],
+    "prefabs": [
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Entry.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Extraction.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Hall_01.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Hall_02.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Hall_03.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Ossuary_01.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Ossuary_02.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Shrine.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Skybridge.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt/Crypt_Crypt_Vault.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Entry.prefab",
+            "surfaces": 99
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Extraction.prefab",
+            "surfaces": 99
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Hall_01.prefab",
+            "surfaces": 115
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Hall_02.prefab",
+            "surfaces": 115
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Hall_03.prefab",
+            "surfaces": 115
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Ossuary_01.prefab",
+            "surfaces": 115
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Ossuary_02.prefab",
+            "surfaces": 115
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Shrine.prefab",
+            "surfaces": 127
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Skybridge.prefab",
+            "surfaces": 127
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Crypt_Vault.prefab",
+            "surfaces": 115
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Infernal/Infernal_Crypt_Entry.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Infernal/Infernal_Crypt_Extraction.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Infernal/Infernal_Crypt_Hall_01.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Infernal/Infernal_Crypt_Hall_02.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Infernal/Infernal_Crypt_Hall_03.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Infernal/Infernal_Crypt_Ossuary_01.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Infernal/Infernal_Crypt_Ossuary_02.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Infernal/Infernal_Crypt_Shrine.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Infernal/Infernal_Crypt_Skybridge.prefab",
+            "surfaces": 83
+        },
+        {
+            "path": "Assets/Emberdelve/Prefabs/DungeonModules/Infernal/Infernal_Crypt_Vault.prefab",
+            "surfaces": 83
+        }
+    ]
+}

@@ -266,7 +266,7 @@ Mechanics, rules and number *shapes* are game systems. The items below are expre
 - **Text and data:**
   - No wiki text, item descriptions or lore copied into the game.
   - Don't bulk-import DaD's numeric tables (item stats, curve breakpoints). Use the same *shape* (diminishing returns, caps, ±% bands) with our own authored values, tuned in our own playtests.
-- **Code and leaks:** never use leaked builds, server code or decompiled DaD files. The DaD/Nexon dispute concerned trade secrets and project materials, not game mechanics [U]. Public wiki-level mechanics knowledge is the boundary.
+- **Code and reference sources:** do not use leaked builds or server code. On22 November2026 the user explicitly authorized read-only inspection of the existing local extracted Dark and Darker room packages as a module-construction reference. That specific reference task is permitted; imported game art remains subject to the separate rule above. Record verified observations and distinguish unreadable dimensions/transforms from evidence: see `Tasks/DARKER_MODULE_REFERENCE_20261122.md`.
 - **Lore and setting:** keep Emberdelve's ember/ash crypt identity. Don't recreate DaD's specific locations, factions or story.
 
 ---

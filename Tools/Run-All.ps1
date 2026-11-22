@@ -39,6 +39,9 @@ if ($PlayableOutput) {
     Assert-NoRunnerLink $destination
 }
 $lease = Enter-MirrorRun
+$previousRaidAi = $env:EMBER_RAID_AI
+$env:EMBER_RAID_AI = 'on'
+Write-Output 'Verification AI override: on (normal raid population)'
 try {
 Assert-MirrorIdle $ci
 if(!(Test-Path -LiteralPath $UnityExe -PathType Leaf)){Write-Output 'REFUSED: Unity executable missing'; exit 1}
@@ -193,4 +196,8 @@ $run=[pscustomobject]@{passed=$allPassed;set=$Set;stamp=$stamp;editmode=$editSum
 Get-Content -LiteralPath $summaryTxt | ForEach-Object {Write-Output $_}
 Write-Output ('Evidence: ' + $outDir)
 if($allPassed){exit 0}else{exit 1}
-} finally { Exit-MirrorRun $lease }
+} finally {
+    if ($null -eq $previousRaidAi) { Remove-Item Env:EMBER_RAID_AI -ErrorAction SilentlyContinue }
+    else { $env:EMBER_RAID_AI = $previousRaidAi }
+    Exit-MirrorRun $lease
+}

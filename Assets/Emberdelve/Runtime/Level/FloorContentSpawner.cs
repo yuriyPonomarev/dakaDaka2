@@ -44,7 +44,10 @@ namespace Emberdelve.Level
             var root = new GameObject("Floor" + floor + "_Content");
             root.transform.SetParent(floorRoot, false);
             var content = root.AddComponent<FloorContentSpawner>();
-            for (int i = 0; i < visuals.Count; i++)
+            // Keep validating the authored content above even during inspection. Only population changes;
+            // loot, navigation and the inactive staging/activation barrier remain identical.
+            bool populateAi = GameConfig.ShouldPopulateRaidWithAi(config);
+            for (int i = 0; populateAi && i < visuals.Count; i++)
             {
                 var spec = layout.enemySpawns[i];
                 var agent = EnemyAgent.CreateForFloor(spec.enemy, nav, config, host, root.transform,

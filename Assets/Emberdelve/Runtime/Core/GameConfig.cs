@@ -40,6 +40,22 @@ namespace Emberdelve.Core
         [Tooltip("Members of one party can hurt each other. OFF by default (open DND_PARITY question); players of different parties always can (PvP).")]
         public bool friendlyFire = false;
 
+        [Header("Raid inspection")]
+        [Tooltip("Populate new raids with rival bots and monsters. Disable temporarily for map inspection; EMBER_RAID_AI=on restores normal population for this process. Change before entering a raid.")]
+        public bool populateRaidWithAi = true;
+
+        public const string RaidAiEnvironmentVariable = "EMBER_RAID_AI";
+
+        /// <summary>Process override for isolated combat proofs, otherwise the authored raid setting.
+        /// Never writes the shared asset or caches state across lobby/raid scene reloads.</summary>
+        public static bool ShouldPopulateRaidWithAi(GameConfig config)
+        {
+            string value = System.Environment.GetEnvironmentVariable(RaidAiEnvironmentVariable)?.Trim();
+            if (string.Equals(value, "on", System.StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.Equals(value, "off", System.StringComparison.OrdinalIgnoreCase)) return false;
+            return config == null || config.populateRaidWithAi;
+        }
+
         [Header("Inventory")]
         [Tooltip("Carried items live in a width x height cell grid. A 2x3 sword needs a 2x3 hole.")]
         public int inventoryGridWidth = 10;

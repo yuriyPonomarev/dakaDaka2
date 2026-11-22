@@ -197,6 +197,7 @@ namespace Emberdelve.Flow
         {
             rig = null; reason = "Destination bot admission is unavailable";
             if (NetRole.IsClientOnly || _director == null || party < 0
+                || !GameConfig.ShouldPopulateRaidWithAi(_director.Config)
                 || !_floors.TryGetValue(floor, out var target) || target.Map == null
                 || !target.Map.gameObject.activeInHierarchy) return false;
             bool started = _director.TryGetRoyaleFloorClock(floor, out _, out _);
@@ -291,7 +292,8 @@ namespace Emberdelve.Flow
         public bool TryGetVacantParty(int floor, out int party)
         {
             party = -1;
-            if (!_floors.TryGetValue(floor, out var target) || !target.AdmissionClosed) return false;
+            if (NetRole.IsClientOnly || _director == null || !GameConfig.ShouldPopulateRaidWithAi(_director.Config)
+                || !_floors.TryGetValue(floor, out var target) || !target.AdmissionClosed) return false;
             var roster = new RoyaleRoster(target.Mode);
             if (target.ActorSlots.Count >= roster.Capacity) return false;
             for (int group = 0; group < roster.PartyCapacity; group++)
@@ -315,7 +317,7 @@ namespace Emberdelve.Flow
         {
             reason = "Population is not complete";
             if (NetRole.IsClientOnly || !_floors.TryGetValue(floor, out var target) || !target.AdmissionClosed
-                || target.ActorSlots.Count != new RoyaleRoster(target.Mode).Capacity
+                || !PopulationReady(target)
                 || _director.TryGetRoyaleFloorClock(floor, out _, out _)) return false;
             if (!TryActivate(floor, out reason)) return false;
             if (target.Encounter == null && !RoyaleFloorEncounter.TryCreate(_director, target.Map, floor, durationSeconds,
@@ -332,6 +334,21 @@ namespace Emberdelve.Flow
             if (!_director.TryStartRoyaleFloor(floor, durationSeconds, out reason)) return false;
             foreach (var rig in arrivals) if (!TryArrive(rig, floor, out reason)) return false;
             return true;
+        }
+
+        private bool PopulationReady(Floor target)
+        {
+            int count = target.ActorSlots.Count;
+            int capacity = new RoyaleRoster(target.Mode).Capacity;
+            if (GameConfig.ShouldPopulateRaidWithAi(_director.Config)) return count == capacity;
+            if (count == 0 || count > capacity) return false;
+            // Inspection admits real humans only through the normal admission/landing barriers.
+            // An empty or stale/bot-only reservation must never start a floor clock.
+            foreach (var session in _director.Players)
+                if (target.ActorSlots.ContainsKey(session.PlayerId) && !session.IsBot && !session.HasResult
+                    && session.State == RunState.Running && session.Rig != null
+                    && session.Rig.gameObject.activeInHierarchy && !session.Rig.IsDead) return true;
+            return false;
         }
 
         internal bool TryOpenTeamDestination(int floor, int durationSeconds, out string reason)
