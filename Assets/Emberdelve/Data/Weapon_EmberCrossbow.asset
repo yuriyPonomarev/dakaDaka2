@@ -44,7 +44,6 @@ MonoBehaviour:
   riposteWithOffhandShield: 0
   riposteWindow: 1
   riposteDamageMultiplier: 1.5
-  parryBladeRegion: {x: 0, y: 1}
   riposteSwingPatterns: 
   riposteStrikeGap: 0.1
   twoHanded: 1

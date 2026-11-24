@@ -16,16 +16,14 @@ EditMode via MCP: EnemyAttackVariantTests 6/6, NetEnemyPresentationWireTests 24/
 
 Motion review: baked-mesh frame strips (front/side) of the Minion clip; body yaw within 1.9 deg of idle, strike sagittal in front. Overhead farthest tip 1.44 m vs diagonal 1.66 m (same attack range). Not yet done: native in-game recording / user acceptance of the motion and of the shorter overhead reach.
 
-Follow-up commit: player sword timing data regenerated from `EmberdelveAssetLibrary` (user decision: code-authored values are canonical; report [SWORD_DATA_CANONICAL_20261124](Tasks/SWORD_DATA_CANONICAL_20261124.md)). Mirror run 20261124-161719-222: SweptMelee 730/0, CombatFlow 588/0, ActionSpeed 196/0, Riposte 144/0, BladeDefense 361/0, CombatData 22/0, D3Content 53/0, Hands 92/0, CombatAuthority 51/0, TurnCeiling 122/0, DrawSpeed 253/0, ReloadSpeed 171/0, EnemySweep 194/0, NetCombat 398/0; RunCombatFlow 264/2 (baseline HUD passives / skill cooldown only).
-
 Only slice files are committed; inherited material/model/Oasis/settings drift and ~30 `.mat` files rewritten by an earlier library rebuild remain uncommitted. No push. Bots remain disabled in new raids until explicitly restored.
 
 ## Preserved baseline and limitations
 
-Lighting 55c5379ed: [LAYOUT_LIGHTING_20261122](Tasks/LAYOUT_LIGHTING_20261122.md). Furnishing 6f00729f8, layouts b59f72dc5, integration 19519855b. `EmberdelveAssetLibrary.BuildAll` is the source of truth for weapon/pattern data: regenerate and commit Data assets together with tuning changes. Remaining smoke baseline: HUD names both passives, skill slot cooldown.
+Lighting 55c5379ed: [LAYOUT_LIGHTING_20261122](Tasks/LAYOUT_LIGHTING_20261122.md). Furnishing 6f00729f8, layouts b59f72dc5, integration 19519855b. Committed player sword data (Weapon_AshenShortSword, Pattern_SwordSlash*) differs from what `EmberdelveAssetLibrary.BuildAll` authors; user decision pending on which values are canonical.
 
 ## Next three actions
 
 1. User reviews the overhead attack in a raid (enemies must be enabled for the review) and the shorter overhead reach.
-2. User checks the player sword combo feel with the regenerated timing (longer step recovery/windup than the previously committed data).
+2. Decide the canonical player sword timing data (commit BuildAll values or keep committed ones and fix the gate expectations).
 3. Resume authorized unfinished gameplay work from ROADMAP; restore raid AI only on explicit request.
