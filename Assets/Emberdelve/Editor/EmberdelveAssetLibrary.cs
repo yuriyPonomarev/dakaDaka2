@@ -1351,11 +1351,26 @@ namespace Emberdelve.EditorTools
             for (int i = 0; i < guids.Length; i++) paths.Add(AssetDatabase.GUIDToAssetPath(guids[i]));
             paths.Sort(System.StringComparer.Ordinal);
 
-            List<ItemData> items = new List<ItemData>(paths.Count);
+            List<ItemData> found = new List<ItemData>(paths.Count);
             for (int i = 0; i < paths.Count; i++)
             {
                 ItemData item = AssetDatabase.LoadAssetAtPath<ItemData>(paths[i]);
-                if (item != null) items.Add(item);
+                if (item != null) found.Add(item);
+            }
+
+            // Idempotent against the committed catalog: entries already listed keep their position (lookups are by id, but a path re-sort
+            // would rewrite the asset on every build), items that no longer exist drop out, new items append in path order.
+            List<ItemData> items = new List<ItemData>(found.Count);
+            if (ItemCatalogAsset.Items != null)
+            {
+                foreach (ItemData existing in ItemCatalogAsset.Items)
+                {
+                    if (existing != null && found.Contains(existing) && !items.Contains(existing)) items.Add(existing);
+                }
+            }
+            foreach (ItemData item in found)
+            {
+                if (!items.Contains(item)) items.Add(item);
             }
 
             if (ItemCatalogAsset.EditorSetContents(items.ToArray(), Affixes))
@@ -1927,8 +1942,10 @@ namespace Emberdelve.EditorTools
                 new SwingKey(0.5f, new Vector3(0.10f, 0.10f, 0.90f), -10f, 5f),
                 new SwingKey(1f, new Vector3(-0.35f, -0.30f, 0.75f), -45f, 40f));
             SetPatternTiming(SwordRiposteCut, 0.36f, 0.30f, 0.36f);
-            SetPatternTiming(SwordSlashLeftToRight, 0.24f, 0.30f, 0.30f);
-            SetPatternTiming(SwordSlashRightToLeft, 0.24f, 0.30f, 0.30f);
+            // Canonical (user decision 24 Nov 2026, Docs/Tasks/SWORD_DATA_CANONICAL_20261124.md): the slash patterns are 0.28 / 0.30 / 0.34 s,
+            // slightly slower than the weapon's legacy windupTime / recoveryTime (0.24 / 0.30), which the swept path does not read.
+            SetPatternTiming(SwordSlashLeftToRight, 0.28f, 0.30f, 0.34f);
+            SetPatternTiming(SwordSlashRightToLeft, 0.28f, 0.30f, 0.34f);
 
             // Rapier thrust: a narrow line straight ahead, reach (2.7 + 0.45) x 0.74 = 2.33 m. Not an arc: a target 20
             // degrees off the line is missed at range - the documented consequence of a thrust.
@@ -2084,9 +2101,15 @@ namespace Emberdelve.EditorTools
                 out SwingKey rest, out float activeSeconds, Emberdelve.AI.EnemyAttackPhase.OverheadVariant)) return null;
 
             float sweepRadius = weapon.hitSphereRadius;
+            // The committed overhead pattern has no trail material (the narrow rebuild menu runs without the material library); keep what is on
+            // disk so BuildAll stays idempotent against the canonical data instead of swapping in the shared swing trail.
+            SwingPatternData existing = AssetDatabase.LoadAssetAtPath<SwingPatternData>(EmberdelvePaths.Data + "/" + assetName + ".asset");
+            bool hadAsset = existing != null;
+            Material keptTrail = hadAsset ? existing.trailMaterial : null;
             SwingPatternData p = AuthorPattern(assetName, patternId, SwingKind.Overhead, weapon,
                 1f, weapon.reach - length, sweepRadius, 0.020f, 2, 1f, keys);
             if (p == null) return null;
+            if (hadAsset) p.trailMaterial = keptTrail;
 
             p.restBase = rest.basePos;
             p.restYaw = rest.bladeYaw;
@@ -2227,9 +2250,9 @@ namespace Emberdelve.EditorTools
                 // slash / slash / overhead at 1.00 / 1.05 / 1.10; the follow-up slash winds up a little quicker
                 Sword.comboSteps = new[]
                 {
-                    new ComboStep(0, 1.00f, 1f, 1f),
-                    new ComboStep(1, 1.05f, 0.85f, 1f),
-                    new ComboStep(2, 1.10f, 1f, 1f)
+                    new ComboStep(0, 1.00f, 1f, 0.5f),
+                    new ComboStep(1, 1.05f, 0.6f, 0.5f),
+                    new ComboStep(2, 1.10f, 0.6f, 1f)
                 };
                 Sword.comboWindow = 0.70f;
                 Sword.comboFinisherRecovery = 0.35f;
@@ -2258,9 +2281,9 @@ namespace Emberdelve.EditorTools
                 // thrust x3, the pattern repeated; the follow-ups are a touch quicker
                 Rapier.comboSteps = new[]
                 {
-                    new ComboStep(0, 1.00f, 1f, 1f),
-                    new ComboStep(0, 1.05f, 0.9f, 0.9f),
-                    new ComboStep(0, 1.10f, 0.9f, 1f)
+                    new ComboStep(0, 1.00f, 1f, 0.25f),
+                    new ComboStep(0, 1.05f, 0.35f, 0.25f),
+                    new ComboStep(0, 1.10f, 0.35f, 1f)
                 };
                 Rapier.comboWindow = 0.60f;
                 Rapier.comboFinisherRecovery = 0.30f;
@@ -2506,10 +2529,10 @@ namespace Emberdelve.EditorTools
                 // slash / slash / thrust / overhead finisher
                 ArmingSword.comboSteps = new[]
                 {
-                    new ComboStep(0, 1.00f, 1f, 1f),
-                    new ComboStep(1, 1.05f, 0.85f, 1f),
-                    new ComboStep(3, 1.10f, 0.90f, 0.9f),
-                    new ComboStep(2, 1.15f, 1f, 1f)
+                    new ComboStep(0, 1.00f, 1f, 0.5f),
+                    new ComboStep(1, 1.05f, 0.6f, 0.5f),
+                    new ComboStep(3, 1.10f, 0.6f, 0.5f),
+                    new ComboStep(2, 1.15f, 0.6f, 1f)
                 };
                 ArmingSword.comboWindow = 0.70f;
                 ArmingSword.comboFinisherRecovery = 0.38f;
@@ -2567,9 +2590,9 @@ namespace Emberdelve.EditorTools
                 // slash / slash / overhead finisher; the follow-up slash winds up a little quicker
                 TwoHandedSword.comboSteps = new[]
                 {
-                    new ComboStep(0, 1.00f, 1f, 1f),
-                    new ComboStep(1, 1.05f, 0.85f, 1f),
-                    new ComboStep(2, 1.15f, 1f, 1f)
+                    new ComboStep(0, 1.00f, 1f, 0.25f),
+                    new ComboStep(1, 1.05f, 0.35f, 0.25f),
+                    new ComboStep(2, 1.15f, 0.35f, 1f)
                 };
                 TwoHandedSword.comboWindow = 0.80f;
                 TwoHandedSword.comboFinisherRecovery = 0.50f;

@@ -160,6 +160,23 @@ namespace Emberdelve.EditorTools
             Close(status.Timing.Active, active, label + " active"); Close(status.Timing.Recovery, recovery, label + " recovery");
             Close(status.Timing.WallRecoil, recoil, label + " recoil"); Close(status.RepeatInterval, interval, label + " interval");
         }
+        /// <summary>
+        /// Expected accepted timing of step 0 / pattern 0 of <paramref name="weapon"/> at <paramref name="rate"/>, derived from the loaded weapon data
+        /// (the committed tuned sword timing is canonical, Docs/Tasks/SWORD_DATA_CANONICAL_20261124.md): the authority swings the first chain step, so the
+        /// authored values are weapon.ComboTiming(0, pattern 0) (the pattern's own windup / active / recovery / recoil scaled by combo step 1's scales), each
+        /// divided by the action rate, active floored at .02 s, and the repeat interval the larger of max(.1, cooldown / rate) x the .8 authority grace and the swing length.
+        /// </summary>
+        private static void Expect(WeaponData weapon, float rate, out float windup, out float active, out float recovery, out float recoil, out float interval)
+        {
+            SwingTiming t = weapon.ComboTiming(0, weapon.swingPatterns[0]);
+            windup = t.Windup / rate; active = Math.Max(.02f, t.Active / rate); recovery = t.Recovery / rate; recoil = t.WallRecoil / rate;
+            interval = Math.Max(Math.Max(.1f, weapon.cooldown / rate) * .8f, windup + active + recovery);
+        }
+        private void Timing(MeleeSwingStatus status, float rate, WeaponData weapon, string label)
+        {
+            Expect(weapon, rate, out float w, out float a, out float r, out float recoil, out float interval);
+            Timing(status, rate, w, a, r, recoil, interval, label);
+        }
         private void CheckClass(CharacterClassData source, float x, bool archer)
         {
             PlayerRig rig = Rig(source, x); _clock = 0;
@@ -171,18 +188,19 @@ namespace Emberdelve.EditorTools
             MeleeCombat melee = rig.GetComponent<MeleeCombat>();
             Check(melee.TryBeginSwing(0), "real MeleeCombat uses sender-bound authority begin");
             Check(_authority.TryGetMeleeSwingStatus(melee.LastSwingId, out MeleeSwingStatus first), "real MeleeCombat accepted status");
-            Timing(first, archer ? 1.12f : 1f, archer ? .2142857143f : .24f, archer ? .2678571429f : .3f,
-                archer ? .2678571429f : .3f, archer ? .3125f : .35f, archer ? .75f : .84f, "bare literal timing");
-            Close(melee.ActiveTiming.Active, archer ? .2678571429f : .3f, "client consumes authority timing once");
-            Close(melee.CooldownRemaining, archer ? .75f : .84f, "client consumes complete accepted interval");
+            float rate = archer ? 1.12f : 1f;
+            Expect(_sword, rate, out float bareWindup, out float bareActive, out _, out _, out float bareInterval);
+            Timing(first, rate, _sword, "bare derived timing");
+            Close(melee.ActiveTiming.Active, bareActive, "client consumes authority timing once");
+            Close(melee.CooldownRemaining, bareInterval, "client consumes complete accepted interval");
             WeaponVisualRig visual = rig.Loadout.Visual;
             Check(visual != null && visual.IsSwinging, "actual first-person visual received the accepted swing");
             if (visual != null)
             {
-                visual.ApplySwingTime(archer ? .3482142857f : .39f);
+                visual.ApplySwingTime(bareWindup + bareActive * .5f);
                 Vector3 expected = rig.Look.AimTransform.TransformPoint(_sword.swingPatterns[0].ActivePose(.5f).Base);
                 Check(Vector3.Distance(visual.BladeBase, expected) < .0001f,
-                    "visual reaches authored midpoint at the independent accepted-time literal");
+                    "visual reaches authored midpoint at the accepted windup + half the accepted active time");
             }
             Check(rig.Inventory.TryAdd(_boots, 1) && rig.Equipment.TryEquipItem(_boots, out string equipReason), "actual boots equipped during swing");
             EffectiveStatsSnapshot worn = rig.EffectiveStats;
@@ -200,9 +218,7 @@ namespace Emberdelve.EditorTools
             Check(!_authority.TryBeginMeleeSwing(rig.CombatSender, in before, out _, out _), "one millisecond before accepted interval refused");
             _clock = first.RepeatInterval;
             MeleeSwingStatus next = Begin(rig, "next swing accepted at exact prior interval");
-            Timing(next, archer ? 1.1333333333f : 1.02f, archer ? .2117647059f : .2352941176f,
-                archer ? .2647058824f : .2941176471f, archer ? .2647058824f : .2941176471f,
-                archer ? .3088235294f : .3431372549f, archer ? .7411764706f : .8235294118f, "boots literal timing");
+            Timing(next, archer ? 1.1333333333f : 1.02f, _sword, "boots derived timing");
             Check(rig.Equipment.TryUnequip(EquipmentSlot.Feet, out _), "boots unequipped during second swing");
             Close(worn.ActionSpeedFactor, archer ? 1.1333333333f : 1.02f, "old worn capture immutable after removal");
             Close(rig.EffectiveStats.ActionSpeedFactor, archer ? 1.12f : 1f, "remove boots restores action baseline");
@@ -237,11 +253,14 @@ namespace Emberdelve.EditorTools
             Check(melee.TryBeginSwing(0), "slow real MeleeCombat begins through its authority");
             Check(_authority.TryGetMeleeSwingStatus(melee.LastSwingId, out MeleeSwingStatus accepted),
                 "slow client has an accepted authority record");
-            Timing(accepted, .82f, .2926829268f, .3658536585f, .3658536585f,
-                .4268292683f, 1.0243902439f, "DEX1 independent timing");
-            Close(melee.CooldownRemaining, 1.0243902439f, "slow client HUD uses accepted interval, not raw weapon cooldown");
-            Check(melee.CooldownRemaining > _sword.cooldown,
-                "a slow actor legitimately needs longer than the authored neutral weapon cooldown");
+            Timing(accepted, .82f, _sword, "DEX1 derived timing");
+            Expect(_sword, .82f, out _, out _, out _, out _, out float slowInterval);
+            Close(melee.CooldownRemaining, slowInterval, "slow client HUD uses accepted interval, not raw weapon cooldown");
+            // The authority's repeat floor is max(0.8 x cooldown / rate, swing total), not the raw cooldown, so compare against the
+            // neutral actor's own accepted interval for the same weapon.
+            Expect(_sword, 1f, out _, out _, out _, out _, out float neutralInterval);
+            Check(melee.CooldownRemaining > neutralInterval,
+                "a slow actor legitimately needs longer than the neutral actor's repeat interval");
             _clock = accepted.RepeatInterval; _authority.StepSwings();
         }
         private void CheckCustomRates(CharacterClassData warrior)
@@ -254,7 +273,7 @@ namespace Emberdelve.EditorTools
             CombatRegistry.Register(target.CombatId, target); _registered.Add(target);
             EffectiveStatsSnapshot slowCapture = rig.EffectiveStats;
             MeleeSwingStatus slow = Begin(rig, "slow authored action rate accepted");
-            Timing(slow, .5f, .48f, .6f, .6f, .7f, 1.68f, "slow literal timing");
+            Timing(slow, .5f, weapon, "slow derived timing");
             // Editing a profile alone cannot change a running Stats owner or an immutable old capture.
             rig.Class.attributeCurveProfile.action[0].value = 2f;
             rig.Class.attributeCurveProfile.action[1].value = 2f;
@@ -276,7 +295,7 @@ namespace Emberdelve.EditorTools
             Check(!_authority.TryBeginMeleeSwing(rig.CombatSender, in early, out _, out _), "fast regear cannot bypass the prior slow floor");
             _clock = slow.RepeatInterval;
             MeleeSwingStatus fast = Begin(rig, "fast swing starts at exact prior accepted interval");
-            Timing(fast, 2f, .12f, .15f, .15f, .175f, .42f, "fast literal timing");
+            Timing(fast, 2f, weapon, "fast derived timing");
             Check(slow.SampleCount > fast.SampleCount, "slower accepted active phase reserves more aim-turn samples");
             target.Received.Clear();
             SetRate(rig, .5f);
@@ -289,7 +308,7 @@ namespace Emberdelve.EditorTools
             if (target.Received.Count > 0) Close(target.Received[0].Amount, 34.944f, "fast body damage unchanged");
             _clock = slow.RepeatInterval + fast.RepeatInterval + .001f;
             MeleeSwingStatus slowAgain = Begin(rig, "slow regear does not extend previous fast repeat interval");
-            Close(slowAgain.RepeatInterval, 1.68f, "newly accepted slow swing receives its own slow interval");
+            Close(slowAgain.RepeatInterval, slow.RepeatInterval, "newly accepted slow swing receives its own slow interval");
             _clock = 10f; _authority.StepSwings();
 
             WeaponData tiny = StaticWeapon(true);
@@ -347,7 +366,7 @@ namespace Emberdelve.EditorTools
             var intent = new MeleeSwingIntent(enemy.CombatId, _sword.weaponId, 0, 0, 0, 0, CombatRegistry.NextSequence(enemy.CombatId));
             Check(_authority.TryBeginMeleeSwing(in intent, out int id, out string reason), "non-action-source enemy begins normally: " + reason);
             _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus status);
-            Timing(status, 1f, .24f, .3f, .3f, .35f, .84f, "enemy authored timings unchanged");
+            Timing(status, 1f, _sword, "enemy authored timings unchanged");
             foreach (float factor in new[] { float.NaN, 0f, -1f, float.PositiveInfinity, float.Epsilon, 1e-20f })
             {
                 var rated = new RatedActor { CombatId = CombatRegistry.AllocateId(), Weapon = _sword,
@@ -358,7 +377,7 @@ namespace Emberdelve.EditorTools
                 _authority.TryGetMeleeSwingStatus(rateId, out MeleeSwingStatus safe);
                 if (factor == 1e-20f) Check(safe.SampleCount == SwingGeometry.MaxSamples && !float.IsInfinity(safe.Timing.Total),
                     "extreme finite duration keeps sample count bounded before int conversion");
-                else Timing(safe, 1f, .24f, .3f, .3f, .35f, .84f, "invalid rate or arithmetic falls back to neutral");
+                else Timing(safe, 1f, _sword, "invalid rate or arithmetic falls back to neutral");
             }
         }
         private class EnemyActor : ICombatEntity, IActiveWeaponProvider, IAimPoseProvider

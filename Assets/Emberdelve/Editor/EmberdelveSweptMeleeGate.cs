@@ -451,10 +451,21 @@ namespace Emberdelve.EditorTools
                 }
             }
 
-            Near(_sword.windupTime, _sword.swingPatterns[0].windupTime, 1e-5f, "slash windup mirrors the weapon timing");
-            Near(_sword.activeWindow, _sword.swingPatterns[0].activeTime, 1e-5f, "slash active mirrors the weapon timing");
-            Near(_sword.recoveryTime, _sword.swingPatterns[0].recoveryTime, 1e-5f, "slash recovery mirrors the weapon timing");
-            Near(_rapier.windupTime, _rapier.swingPatterns[0].windupTime, 1e-5f, "thrust windup mirrors the weapon timing");
+            // The pattern is the authority of a swept weapon's timing (WeaponData.DisplayTiming; nothing in gameplay reads the weapon's own
+            // windupTime / recoveryTime for melee, they are the build's authoring seed). The committed sword data is canonical (24 Nov 2026,
+            // Docs/Tasks/SWORD_DATA_CANONICAL_20261124.md): the slash patterns are deliberately a little slower than the weapon seed, so the old
+            // "mirrors the weapon timing" equality no longer holds. What must hold is that every consumer of the weapon's timing (card, tooltip,
+            // HUD) reads the pattern, and that the swing-length floor derives from it.
+            {
+                SwingPatternData slash0 = _sword.swingPatterns[0];
+                Near(slash0.windupTime, _sword.DisplayWindup, 1e-5f, "slash display windup is the pattern's, not the weapon seed's");
+                Near(slash0.activeTime, _sword.DisplayActive, 1e-5f, "slash display active is the pattern's");
+                Near(slash0.recoveryTime, _sword.DisplayRecovery, 1e-5f, "slash display recovery is the pattern's");
+                SwingPatternData thrust0 = _rapier.swingPatterns[0];
+                Near(thrust0.windupTime, _rapier.DisplayWindup, 1e-5f, "thrust display windup is the pattern's");
+                Check(slash0.windupTime >= _sword.windupTime - 1e-5f && slash0.recoveryTime >= _sword.recoveryTime - 1e-5f,
+                    "the canonical slash pattern is at least as slow as the weapon's authoring seed (the seed is a floor, never faster than the swing)");
+            }
 
             // ---- reach numbers (effective reach from the eye)
             Near(2.291f, _sword.swingPatterns[0].EffectiveReach(_sword), 1e-3f, "sword effective reach is about 2.3 m at the eye (H1 retune)");
@@ -1286,9 +1297,13 @@ namespace Emberdelve.EditorTools
             Check(Try(Intent(who, 0), out r), "after a full cooldown a swing is accepted");
             _clock += 0.50f; _authority.StepSwings();
             Check(!Try(Intent(who, 0), out r) && r.Contains("in progress"), "begin while the previous swing still runs is rejected (" + r + ")");
-            _clock += 0.36f; _authority.StepSwings();      // 0.86 s: the swing is over and the interval floor (0.84 s) has passed
-            Check(_authority.ActiveSwingCount == 0, "the swing is over after its 0.84 s");
-            Check(Try(Intent(who, 0), out r), "0.86 s after the begin a new swing is accepted (" + r + ")");
+            // The repeat interval is the larger of the weapon cooldown x the authority grace (0.8) and the full length of the swing that was
+            // begun (windup + active + recovery of the pattern step 0 uses), derived from the loaded data so a retune cannot stale this number.
+            float slashTotal = _sword.swingPatterns[0].Timing.Total;
+            float repeatFloor = Mathf.Max(0.8f * _sword.cooldown, slashTotal);
+            _clock += repeatFloor + 0.02f - 0.50f; _authority.StepSwings();      // the swing is over and the interval floor has passed
+            Check(_authority.ActiveSwingCount == 0, $"the swing is over after its {slashTotal:F2} s");
+            Check(Try(Intent(who, 0), out r), $"{repeatFloor + 0.02f:F2} s after the begin a new swing is accepted ({r})");
             for (int i = 0; i < 400; i++) { _clock += 0.01f; _authority.StepSwings(); }
             Cooldown(2f);
 
@@ -1481,6 +1496,7 @@ namespace Emberdelve.EditorTools
                         bool ok = _authority.TryBeginMeleeSwingAsOwner(Intent(s.Who, pattern[i], null, null, i), out int id, out string why);
                         Check(ok, $"production: chain step {i + 1} is accepted with its own pattern ({why})");
                         if (!ok) break;
+                        float begun = _clock;
                         float simulated = 0f;
                         MeleeSwingStatus st = default;
                         while (simulated < 4f)
@@ -1490,6 +1506,12 @@ namespace Emberdelve.EditorTools
                             _authority.StepSwings();
                             if (_authority.TryGetMeleeSwingStatus(id, out st) && st.Finished) break;
                         }
+
+                        // A quick chain step (short recovery scale) can be over before the repeat interval of the swing (the weapon cooldown x the
+                        // authority grace 0.8, or the step's own length if longer) has passed; the authority refuses an earlier follow-up. The
+                        // interval is derived from the loaded weapon and pattern, so a retune cannot stale it. Both are inside the combo window.
+                        float repeatFloor = Mathf.Max(0.8f * _sword.cooldown, _sword.ComboTiming(i, _sword.swingPatterns[pattern[i]]).Total);
+                        if (_clock - begun < repeatFloor) { _clock = begun + repeatFloor + 0.005f; _authority.StepSwings(); }
 
                         Check(st.ComboStep == i && Mathf.Abs(st.StepMultiplier - step[i]) < 1e-5f, $"production: step {i + 1} carries the chain multiplier x{step[i]:F2} ({st.StepMultiplier:F2})");
                         bool hit = d.Received.Count == 1 && st.Hits.Count == 1;
@@ -1606,10 +1628,13 @@ namespace Emberdelve.EditorTools
                 _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus st);
                 Check(st.WallStopped && st.Finished, $"the swing was stopped by the wall and is over at 0.70 s ({st.EndReason})");
                 Check(!Begin(w, SlashBack, out _, out reason) && reason.Contains("cooldown"), "0.70 s: refused (cooldown, " + reason + ")");
-                _clock += 0.08f; _authority.StepSwings();     // 0.78 s: past 0.8 x 0.92 = 0.736 s but before the 0.84 s floor
-                Check(!Begin(w, SlashBack, out _, out reason) && reason.Contains("cooldown"), "0.78 s: still refused, the pattern's 0.84 s is the floor after a wall stop (" + reason + ")");
-                _clock += 0.08f; _authority.StepSwings();     // 0.86 s
-                Check(Begin(w, SlashBack, out _, out reason), "0.86 s: accepted (" + reason + ")");
+                // The floor after a wall stop is the full swing length of the pattern (derived from the data), never less than 0.8 x the weapon cooldown.
+                float wallFloor = Mathf.Max(0.8f * _sword.cooldown, _sword.swingPatterns[Slash].Timing.Total);
+                Check(wallFloor > 0.70f + 0.02f, $"the wall test is meaningful: the repeat floor {wallFloor:F2} s is later than the 0.70 s probe");
+                _clock += (wallFloor - 0.04f) - 0.70f; _authority.StepSwings();     // just before the floor
+                Check(!Begin(w, SlashBack, out _, out reason) && reason.Contains("cooldown"), $"{wallFloor - 0.04f:F2} s: still refused, the pattern's {wallFloor:F2} s is the floor after a wall stop ({reason})");
+                _clock += 0.06f; _authority.StepSwings();     // just after the floor
+                Check(Begin(w, SlashBack, out _, out reason), $"{wallFloor + 0.02f:F2} s: accepted ({reason})");
                 _clock += 2f; _authority.StepSwings();
                 w.Dispose();
             }

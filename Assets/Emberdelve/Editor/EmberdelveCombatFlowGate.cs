@@ -317,8 +317,24 @@ namespace Emberdelve.EditorTools
         /// <summary>Begin + run to the end of one chain step. Returns the status (default when refused).</summary>
         private MeleeSwingStatus SwingStep(Scenario s, int step, out bool accepted, out string reason)
         {
+            float begun = _clock;
             accepted = Begin(s, step, out int id, out reason);
-            return accepted ? Finish(id) : default;
+            if (!accepted) return default;
+            MeleeSwingStatus status = Finish(id);
+
+            // A quick chain step (short recovery scale) can end before the authority's repeat interval of that swing: the weapon cooldown x the
+            // authority grace (0.8), or the step's own length when longer. A follow-up before it is refused ("attack faster than weapon
+            // cooldown"), so a caller that chains steps back to back waits for it. Derived from the loaded weapon and pattern.
+            WeaponData weapon = s.Who.Weapon;
+            if (weapon != null)
+            {
+                int patternIndex = ChainPattern(weapon, step);
+                SwingPatternData pattern = weapon.swingPatterns != null && patternIndex >= 0 && patternIndex < weapon.swingPatterns.Length ? weapon.swingPatterns[patternIndex] : null;
+                float repeatFloor = Mathf.Max(0.8f * weapon.cooldown, weapon.ComboTiming(step, pattern).Total);
+                if (_clock - begun < repeatFloor) Advance(begun + repeatFloor + 0.005f - _clock);
+            }
+
+            return status;
         }
 
         private void Advance(float seconds)
@@ -560,7 +576,8 @@ namespace Emberdelve.EditorTools
                 s.Dispose();
             }
 
-            // timing: step 2's windup is 0.85 of the pattern's, the finisher has +0.35 s recovery
+            // timing: each step's windup / recovery are the pattern's scaled by that step's authored scales (read from the canonical weapon data,
+            // Docs/Tasks/SWORD_DATA_CANONICAL_20261124.md), the finisher adds comboFinisherRecovery
             {
                 Scenario s = NewScenario(_sword);
                 AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
@@ -571,15 +588,18 @@ namespace Emberdelve.EditorTools
                 _authority.TryGetMeleeSwingStatus(thirdId, out MeleeSwingStatus third);
                 SwingPatternData p0 = _sword.swingPatterns[0], p1 = _sword.swingPatterns[1], p2 = _sword.swingPatterns[2];
                 Near(p0.windupTime, a.Timing.Windup, 1e-5f, "step 1 uses the pattern's own windup");
-                Near(p1.windupTime * 0.85f, b.Timing.Windup, 1e-5f, "step 2 winds up at x0.85 (data tweak)");
-                Near(p1.recoveryTime, b.Timing.Recovery, 1e-5f, "step 2 recovery as authored");
-                Near(p2.recoveryTime + _sword.comboFinisherRecovery, third.Timing.Recovery, 1e-5f, "step 3 (the finisher) recovers +0.35 s longer");
-                Near(p2.TotalTime + _sword.comboFinisherRecovery, third.Timing.Total, 1e-5f, "the finisher's whole swing is longer by exactly the finisher recovery");
+                ComboStep c1 = _sword.comboSteps[1], c2 = _sword.comboSteps[2];
+                Check(c1.windupScale < 1f, $"step 2 winds up quicker than its pattern (x{c1.windupScale:F2})");
+                Near(p1.windupTime * c1.windupScale, b.Timing.Windup, 1e-5f, $"step 2 winds up at its authored x{c1.windupScale:F2}");
+                Near(p1.recoveryTime * c1.recoveryScale, b.Timing.Recovery, 1e-5f, $"step 2 recovery is the pattern's at its authored x{c1.recoveryScale:F2}");
+                Near(p2.recoveryTime * c2.recoveryScale + _sword.comboFinisherRecovery, third.Timing.Recovery, 1e-5f, "step 3 (the finisher) recovers comboFinisherRecovery longer");
+                Near(p2.windupTime * c2.windupScale + p2.activeTime + p2.recoveryTime * c2.recoveryScale + _sword.comboFinisherRecovery, third.Timing.Total, 1e-5f,
+                    "the finisher's whole swing is its scaled pattern plus exactly the finisher recovery");
 
                 // the authority holds the next swing back for the finisher's full length
                 Finish(thirdId);
                 float finisherEnd = startOfThird + third.Timing.Total;
-                _clock = startOfThird + p2.TotalTime + 0.05f;
+                _clock = finisherEnd - 0.05f;
                 Check(!BeginForged(s.Who, 0, 0, out string tooSoon) && tooSoon.Contains("cooldown"), $"a new chain cannot start before the finisher's recovery ends ({tooSoon})");
                 _clock = finisherEnd + 0.01f;
                 Check(Begin(s, 0, out int again, out string okReason), $"after the finisher's recovery a fresh chain starts ({okReason})");
@@ -1145,8 +1165,9 @@ namespace Emberdelve.EditorTools
                 for (int step = 0; step < 3; step++)
                 {
                     last = SwingStep(s, step, out bool stepOk, out string stepWhy);
+                    // SwingStep already waits for the authority's repeat floor (derived from the data), which is inside the combo window
+                    // (the window runs 0.7 s past the active end); an extra fixed pause would push the next step past it.
                     Check(stepOk, $"tip chain: step {step + 1} accepted ({stepWhy})");
-                    Advance(0.5f);
                 }
                 Check(last.Hits.Count == 1, "tip chain: step 3 hits");
                 if (last.Hits.Count == 1)
@@ -1372,7 +1393,9 @@ namespace Emberdelve.EditorTools
             Check(_authority.TryBeginMeleeSwingAsOwner(intent, out int swingId, out string why), $"move phases: the rig's swing is accepted ({why})");
 
             SwingPatternData slash = _sword.swingPatterns[0];
-            float w = slash.windupTime, a = slash.activeTime, r = slash.recoveryTime;
+            // the rig swings chain step 1: the pattern's timing as the authority resolves it (the combo step scales applied)
+            SwingTiming stepOne = _sword.ComboTiming(0, slash);
+            float w = stepOne.Windup, a = stepOne.Active, r = stepOne.Recovery;
 
             _clock = t0 + w * 0.5f;
             Near(idleWalk * 0.85f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "windup: walk x0.85");
@@ -1386,12 +1409,13 @@ namespace Emberdelve.EditorTools
             _authority.StepSwings();
             Near(idleWalk, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "after the swing: walk back to the held-weapon speed");
 
-            // chain step 2 winds up 15 percent quicker, so 0.22 s in it is already the hit phase (x0.70); step 1 would still be winding up
+            // chain step 2 winds up quicker (its windupScale), so 0.22 s in it is already the hit phase (x0.70); step 1 would still be winding up
             float t1 = _clock;
             MeleeSwingIntent second = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 1, 1, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
             Check(_authority.TryBeginMeleeSwingAsOwner(second, out int secondId, out why), $"move phases: step 2 accepted ({why})");
             _clock = t1 + 0.22f;
-            Check(0.22f > slash.windupTime * 0.85f && 0.22f < slash.windupTime, "move phases: 0.22 s is inside step 1's windup but past step 2's");
+            float step2Windup = _sword.swingPatterns[1].windupTime * _sword.comboSteps[1].windupScale;
+            Check(0.22f > step2Windup && 0.22f < slash.windupTime, $"move phases: 0.22 s is inside step 1's windup ({slash.windupTime:F2} s) but past step 2's ({step2Windup:F2} s)");
             Near(idleWalk * 0.70f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "step 2: the shorter windup also moves the hit-phase slowdown earlier");
             _clock = t1 + 2f;
             _authority.StepSwings();
@@ -1877,11 +1901,11 @@ namespace Emberdelve.EditorTools
             float t0 = _clock;
             MeleeSwingIntent intent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
             Check(_authority.TryBeginMeleeSwingAsOwner(intent, out int swingId, out string why), $"swap lock: a swing begins ({why})");
-            SwingPatternData p = _sword.swingPatterns[0];
+            SwingTiming p = _sword.ComboTiming(0, _sword.swingPatterns[0]);   // chain step 1 as the authority resolves it
             _authority.TryGetExpectedComboStep(_rig.CombatId, out int comboBefore);
             int acceptedBefore = _authority.AcceptedCount;
 
-            foreach ((string phase, float at) c in new[] { ("windup", p.windupTime * 0.5f), ("active", p.windupTime + p.activeTime * 0.5f), ("recovery", p.windupTime + p.activeTime + p.recoveryTime * 0.5f) })
+            foreach ((string phase, float at) c in new[] { ("windup", p.Windup * 0.5f), ("active", p.Windup + p.Active * 0.5f), ("recovery", p.Windup + p.Active + p.Recovery * 0.5f) })
             {
                 _clock = t0 + c.at;
                 _toasts.Clear();
@@ -1896,7 +1920,7 @@ namespace Emberdelve.EditorTools
             }
 
             // the swing ends, nothing was queued, then the swap works again
-            _clock = t0 + p.TotalTime + 0.05f;
+            _clock = t0 + p.Total + 0.05f;
             _authority.StepSwings();
             Check(!_authority.IsSwingInProgress(_rig.CombatId), "swap lock: the swing is over");
             yield return null;
