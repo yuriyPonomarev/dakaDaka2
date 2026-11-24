@@ -177,6 +177,52 @@ namespace Emberdelve.Tests.NetInventory
         }
 
         [Test]
+        public void AttackVariantSurvivesNetworkSerializationAndIsRangeChecked()
+        {
+            for (byte variant = 0; variant <= EnemyPresentationWire.MaxAttackVariant; variant++)
+            {
+                var state = Valid();
+                state.Flags = 0;
+                state.AttackPhase = 2;
+                state.PhaseDuration = 0.25f;
+                state.PhaseElapsed = 0.1f;
+                state.AttackVariant = variant;
+                using (var writer = new FastBufferWriter(256, Allocator.Temp))
+                {
+                    writer.WriteValueSafe(state);
+                    using (var reader = new FastBufferReader(writer, Allocator.Temp))
+                    {
+                        reader.ReadValueSafe(out EnemyPresentationWire decoded);
+                        Assert.That(decoded.IsValid, Is.True);
+                        Assert.That(decoded.AttackVariant, Is.EqualTo(variant));
+                    }
+                }
+            }
+
+            var forged = Valid();
+            forged.AttackVariant = (byte)(EnemyPresentationWire.MaxAttackVariant + 1);
+            Assert.That(forged.IsValid, Is.False, "an attack variant no client animates is refused");
+            Assert.That(EnemyPresentationWire.CurrentVersion, Is.EqualTo((byte)5), "the attack variant is a wire v5 field");
+        }
+
+        [Test]
+        public void OverheadAttackHasItsOwnClockWindowAndAnimatorState()
+        {
+            var windup = new Emberdelve.AI.EnemyAttackPhase(1, 0f, 1f);
+            var active = new Emberdelve.AI.EnemyAttackPhase(2, 0f, 0.3f);
+            var recovery = new Emberdelve.AI.EnemyAttackPhase(3, 0f, 0.4f);
+            int o = Emberdelve.AI.EnemyAttackPhase.OverheadVariant;
+            Assert.That(windup.NormalizedTime(0f, false, o), Is.Zero);
+            Assert.That(windup.NormalizedTime(100f, false, o), Is.EqualTo(Emberdelve.AI.EnemyAttackPhase.OverheadSweepStart).Within(1e-5f));
+            Assert.That(active.NormalizedTime(100f, false, o), Is.EqualTo(Emberdelve.AI.EnemyAttackPhase.OverheadSweepEnd).Within(1e-5f));
+            Assert.That(recovery.NormalizedTime(100f, false, o), Is.EqualTo(Emberdelve.AI.EnemyAttackPhase.OverheadRecoveryEnd).Within(1e-5f));
+            Assert.That(active.NormalizedTime(100f, false, 0), Is.EqualTo(Emberdelve.AI.EnemyAttackPhase.SweepEnd).Within(1e-5f), "the diagonal window is unchanged");
+            Assert.That(active.NormalizedTime(100f, true, o), Is.EqualTo(Emberdelve.AI.EnemyAttackPhase.ClubSweepEnd).Within(1e-5f), "the club never uses the overhead window");
+            Assert.That(Emberdelve.AI.EnemyAttackPhase.StateName(o), Is.EqualTo("Overhead"));
+            Assert.That(Emberdelve.AI.EnemyAttackPhase.StateName(0), Is.EqualTo("Attack"));
+        }
+
+        [Test]
         public void WallRecoveryUsesTheContactSampleAndRecoilDuration()
         {
             var status = new Emberdelve.Combat.MeleeSwingStatus(1, 1,

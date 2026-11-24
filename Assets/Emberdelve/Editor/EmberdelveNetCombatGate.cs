@@ -920,10 +920,11 @@ namespace Emberdelve.EditorTools
             Match stateHitB = WaitForRegex(logB, @"\[client\] enemy-animation-state id=" + targetEnemyId + @" state=Hit kind=", 8, b);
             Check(stateHitA != null, "client A AnimatorStateInfo entered the actual Hit state");
             Check(stateHitB != null, "late-joining client B AnimatorStateInfo entered the actual Hit state");
-            Match stateAttackA = WaitForRegex(logA, @"\[client\] enemy-animation-state id=" + targetEnemyId + @" state=Attack kind=", 8, a);
-            Match stateAttackB = WaitForRegex(logB, @"\[client\] enemy-animation-state id=" + targetEnemyId + @" state=Attack kind=", 8, b);
-            Check(stateAttackA != null, "client A AnimatorStateInfo entered the actual Attack state");
-            Check(stateAttackB != null, "late-joining client B AnimatorStateInfo entered the actual Attack state");
+            // The Servitor has two attacks (diagonal "Attack", vertical "Overhead"); the server chose one, the proxy must be in that state.
+            Match stateAttackA = WaitForRegex(logA, @"\[client\] enemy-animation-state id=" + targetEnemyId + @" state=(Attack|Overhead) kind=", 8, a);
+            Match stateAttackB = WaitForRegex(logB, @"\[client\] enemy-animation-state id=" + targetEnemyId + @" state=(Attack|Overhead) kind=", 8, b);
+            Check(stateAttackA != null, "client A AnimatorStateInfo entered the actual Attack (or Overhead) state");
+            Check(stateAttackB != null, "late-joining client B AnimatorStateInfo entered the actual Attack (or Overhead) state");
             Match stateDeathA = WaitForRegex(logA, @"\[client\] enemy-animation-state id=" + targetEnemyId + @" state=Death kind=", 8, a);
             Match stateDeathB = WaitForRegex(logB, @"\[client\] enemy-animation-state id=" + targetEnemyId + @" state=Death kind=", 8, b);
             Check(stateDeathA != null, "client A AnimatorStateInfo entered the actual Death state");

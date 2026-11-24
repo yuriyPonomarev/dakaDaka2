@@ -305,7 +305,8 @@ namespace Emberdelve.EditorTools
         {
             yield return null;
             yield return null;
-            yield return RunAll();
+            try { yield return RunAll(); }
+            finally { EnemyAttackChoice.Override = -1; }
             Debug.Log($"{Tag} {(_failures == 0 ? "PASS" : "FAIL")} checks={_checks} failures={_failures}");
             EmberdelveGateExit.Exit(_failures == 0 ? 0 : 1);
         }
@@ -335,6 +336,7 @@ namespace Emberdelve.EditorTools
             IEnumerator[] flows =
             {
                 RealAttack(_servitor, _claw, 15f, "claw"),
+                RealAttack(_servitor, _claw, 15f, "claw overhead", 1),
                 RealAttack(_warden, _maul, 26f, "maul"),
                 CinderWardenFight(),
                 LegacyRefused(),
@@ -351,6 +353,7 @@ namespace Emberdelve.EditorTools
             for (int i = 0; i < flows.Length; i++)
             {
                 IEnumerator flow = flows[i];
+                EnemyAttackChoice.Override = 0;   // the diagonal unless a flow pins the overhead itself
                 int before = _checks;
                 int failuresBefore = _failures;
                 bool threw = false;
@@ -401,9 +404,11 @@ namespace Emberdelve.EditorTools
 
         private void PatternData()
         {
-            CheckPattern(_claw, _servitor, "Pattern_ClawSlash", "Minion", 1f, "claw");
-            CheckPattern(_claw, _servitor, "Pattern_ClawSlash", "Rogue", 1f, "claw (rogue body)");
-            CheckPattern(_maul, _warden, "Pattern_MaulSweep", "Warrior", EmberdelveEnemyVisualFactory.EliteScale, "maul");
+            CheckPattern(_claw, _servitor, "Pattern_ClawSlash", "Minion", 1f, "claw", 0, 2);
+            CheckPattern(_claw, _servitor, "Pattern_ClawSlash", "Rogue", 1f, "claw (rogue body)", 0, 2);
+            CheckPattern(_claw, _servitor, "Pattern_ClawOverhead", "Minion", 1f, "claw overhead", 1, 2);
+            CheckPattern(_claw, _servitor, "Pattern_ClawOverhead", "Rogue", 1f, "claw overhead (rogue body)", 1, 2);
+            CheckPattern(_maul, _warden, "Pattern_MaulSweep", "Warrior", EmberdelveEnemyVisualFactory.EliteScale, "maul", 0, 1);
         }
 
         /// <summary>
@@ -411,18 +416,21 @@ namespace Emberdelve.EditorTools
         /// window (re-baked here from the shipped variant: model, clip, weapon, grip), the segment is as long as the weapon, the telegraph
         /// wedge is the pattern's yaw range and the brain starts the blow inside the weapon's reach.
         /// </summary>
-        private void CheckPattern(WeaponData weapon, EnemyData enemy, string assetName, string variant, float scale, string label)
+        private void CheckPattern(WeaponData weapon, EnemyData enemy, string assetName, string variant, float scale, string label,
+            int patternIndex, int expectedPatterns)
         {
-            Check(weapon.UsesSweptMelee && weapon.swingPatterns != null && weapon.swingPatterns.Length == 1, $"{label}: the weapon has exactly one swing pattern");
-            if (!weapon.UsesSweptMelee || weapon.swingPatterns == null || weapon.swingPatterns.Length != 1) return;
+            bool overhead = patternIndex == EnemyAttackPhase.OverheadVariant;
+            Check(weapon.UsesSweptMelee && weapon.swingPatterns != null && weapon.swingPatterns.Length == expectedPatterns,
+                $"{label}: the weapon has exactly {expectedPatterns} swing pattern(s)");
+            if (!weapon.UsesSweptMelee || weapon.swingPatterns == null || weapon.swingPatterns.Length != expectedPatterns) return;
 
-            SwingPatternData pattern = weapon.swingPatterns[0];
+            SwingPatternData pattern = weapon.swingPatterns[patternIndex];
             Check(pattern != null && pattern.name == assetName, $"{label}: the pattern asset is {assetName}");
             if (pattern == null) return;
 
             Check(pattern.Validate(out string problem), $"{label}: the pattern validates ({problem})");
             bool baked = EmberdelveEnemyVisualFactory.TryBakeSwing(variant, scale, pattern.keys.Length, out SwingKey[] keys, out float reach,
-                out float length, out _, out float activeSeconds);
+                out float length, out _, out float activeSeconds, patternIndex);
             Check(baked, $"{label}: the {variant} attack can be baked (model, clip and weapon are present)");
             if (baked)
             {
@@ -435,11 +443,24 @@ namespace Emberdelve.EditorTools
                 }
                 Check(worst < 0.01f, $"{label}: every key is the {variant}'s visible weapon at that instant (worst {worst:F3} m)");
                 Near(length, pattern.BladeLength(weapon), 0.01f, $"{label}: the swept segment is as long as the visible weapon ({length:F2} m)");
-                Near(reach, weapon.reach, 0.01f, $"{label}: the weapon reach is the farthest tip distance ({reach:F2} m)");
+                if (overhead) Check(reach <= weapon.reach + 0.01f && reach >= weapon.reach - 0.35f, $"{label}: the overhead's farthest tip ({reach:F2} m) lies within the weapon reach ({weapon.reach:F2} m)");
+                else Near(reach, weapon.reach, 0.01f, $"{label}: the weapon reach is the farthest tip distance ({reach:F2} m)");
                 Near(activeSeconds, pattern.activeTime, 1e-3f, $"{label}: the active window plays the clip's sweep window ({activeSeconds:F2} s)");
             }
 
             pattern.YawRange(out float minYaw, out float maxYaw);
+            if (overhead)
+            {
+                SwingKey first = pattern.keys[0], last = pattern.keys[pattern.keys.Length - 1];
+                Check(pattern.kind == SwingKind.Overhead, $"{label}: the pattern is an Overhead swing");
+                Check(first.basePos.y > last.basePos.y + 0.3f, $"{label}: the weapon comes down ({first.basePos.y:F2} -> {last.basePos.y:F2})");
+                Check(last.bladePitch - first.bladePitch > 70f && last.bladePitch > 25f, $"{label}: the blade turns from raised to pointing down ({first.bladePitch:F0} -> {last.bladePitch:F0})");
+                Check(last.basePos.z > 0.3f, $"{label}: the chop ends in front of the body (z {last.basePos.z:F2})");
+                Check(Mathf.Abs(last.basePos.x) < 0.35f && Mathf.Abs(last.bladeYaw) < 25f, $"{label}: the chop ends along the committed facing (x {last.basePos.x:F2}, yaw {last.bladeYaw:F0})");
+                Near(0.10f, pattern.windupTime, 1e-4f, $"{label}: the pattern windup is 0.10 s");
+                Check(weapon.impactZones == null || weapon.impactZones.Length == 0, $"{label}: no impact zones");
+                return;
+            }
             Check(maxYaw - minYaw >= 40f && maxYaw - minYaw <= 200f, $"{label}: the blade yaw range is a drawable wedge ({minYaw:F0}..{maxYaw:F0})");
             Check(pattern.keys[0].bladeYaw > pattern.keys[pattern.keys.Length - 1].bladeYaw, $"{label}: the blow travels from the attacker's right to the left");
             Near(enemy.attackTelegraphCone, maxYaw - minYaw, 0.01f, $"{label}: the pattern's yaw range equals the enemy's telegraph cone ({enemy.attackTelegraphCone:F0})");
@@ -453,8 +474,9 @@ namespace Emberdelve.EditorTools
         // 2. a real EnemyAgent attacks end to end
         // ------------------------------------------------------------------------------------------------
 
-        private IEnumerator RealAttack(EnemyData data, WeaponData weapon, float baseDamage, string label)
+        private IEnumerator RealAttack(EnemyData data, WeaponData weapon, float baseDamage, string label, int variant = 0)
         {
+            EnemyAttackChoice.Override = variant;
             FakePlayer player = NewPlayer(new Vector3(0f, 0f, Standoff));
             EnemyAgent enemy = null;
             yield return Spawn(data, Vector3.zero, 0f, false, e => enemy = e);
@@ -473,8 +495,9 @@ namespace Emberdelve.EditorTools
             if (visual != null)
             {
                 yield return null;
-                SwingPatternData pattern = weapon.swingPatterns[0];
-                pattern.YawRange(out float minYaw, out float maxYaw);
+                SwingPatternData pattern = weapon.swingPatterns[variant];
+                enemy.GetTelegraphWedge(variant, out float minYaw, out float maxYaw);
+                Check(enemy.AttackVariantIndex == variant, $"{label}: the windup warns attack {variant} (agent reports {enemy.AttackVariantIndex})");
                 Near(minYaw, visual.MinYawDegrees, 1e-3f, $"{label}: the telegraph starts at the pattern's lowest yaw");
                 Near(maxYaw, visual.MaxYawDegrees, 1e-3f, $"{label}: the telegraph ends at the pattern's highest yaw");
                 Near((maxYaw - minYaw) * 0.5f, visual.HalfAngleDegrees, 1e-3f, $"{label}: the telegraph half angle is half the pattern's yaw range");

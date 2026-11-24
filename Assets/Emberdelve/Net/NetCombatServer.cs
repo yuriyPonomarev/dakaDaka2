@@ -718,7 +718,7 @@ namespace Emberdelve.Net
                     previous.SwingsBegun != current.SwingsBegun || previous.HitSequence != current.HitSequence ||
                     previous.WindupSeconds != current.WindupSeconds || previous.SwingSeconds != current.SwingSeconds ||
                     previous.AttackPhase != current.AttackPhase || previous.PhaseDuration != current.PhaseDuration ||
-                    previous.RecoilStart != current.RecoilStart;
+                    previous.RecoilStart != current.RecoilStart || previous.AttackVariant != current.AttackVariant;
                 _enemyPresentation[id] = current;
                 if (changed)
                 {
@@ -792,8 +792,26 @@ namespace Emberdelve.Net
                 PhaseDuration = phase.Duration,
                 RecoilStart = phase.RecoilStart,
                 WakeElapsed = agent != null && agent.Brain != null ? agent.Brain.WakeElapsed : 0f,
+                AttackVariant = agent != null ? WireAttackVariant(agent) : (byte)0,
                 SampleTime = NetworkManager.Singleton != null ? NetworkManager.Singleton.ServerTime.Time : 0d
             };
+        }
+
+        private static bool _loggedUnknownVariant;
+
+        // Variants the clients can animate go out as they are; an unknown index is sent as the original attack and reported once (never silently
+        // shown as the overhead).
+        private static byte WireAttackVariant(EnemyAgent agent)
+        {
+            int variant = agent.AttackVariantIndex;
+            if (variant >= 0 && variant <= EnemyPresentationWire.MaxAttackVariant) return (byte)variant;
+            if (!_loggedUnknownVariant)
+            {
+                _loggedUnknownVariant = true;
+                UnityEngine.Debug.LogError(NetTuning.LogPrefix + "enemy " + agent.CombatId + " chose attack variant " + variant +
+                    " which no client animates (max " + EnemyPresentationWire.MaxAttackVariant + "); sending the original attack.");
+            }
+            return 0;
         }
 
         // The server reads the actual authored visual binding. Data.elite is only a fail-safe when no built visual/controller is present.

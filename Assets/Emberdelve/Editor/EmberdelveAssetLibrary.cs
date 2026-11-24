@@ -1880,6 +1880,8 @@ namespace Emberdelve.EditorTools
         // ---------------------------------------------------------------- D1c4 enemy swing patterns
 
         public static SwingPatternData ClawSlash;
+        /// <summary>The Servitor's second attack (pattern index 1): the vertical overhead chop, baked from the derived overhead clip.</summary>
+        public static SwingPatternData ClawOverhead;
         public static SwingPatternData MaulSweep;
 
         /// <summary>D1c4: the pattern windup of an enemy swing. The brain's windup (the telegraph) comes first; this is the short wind-back the swing adds. Proposal, needs a playtest.</summary>
@@ -1988,7 +1990,11 @@ namespace Emberdelve.EditorTools
             MaulSweep = BakeEnemyPattern("Pattern_MaulSweep", "maul_sweep", ClawElite, Warden, "Warrior", EmberdelveEnemyVisualFactory.EliteScale, 0.20f, 0.50f)
                 ?? AuthorEnemyPattern("Pattern_MaulSweep", "maul_sweep", ClawElite, Warden, 0.70f, 0.22f, -0.10f, 0.50f);
 
-            AssignPatterns(Claw, ClawSlash);
+            // Servitor attack 2: the vertical overhead (pattern index 1), baked from the derived overhead clip after the diagonal bake has set the
+            // weapon's own reach and sweep radius (the two patterns share them). Without the art the Servitor keeps its single diagonal attack.
+            ClawOverhead = BakeOverheadPattern("Pattern_ClawOverhead", "claw_overhead", Claw, "Minion", 0.40f);
+            if (ClawOverhead != null) AssignPatterns(Claw, ClawSlash, ClawOverhead);
+            else AssignPatterns(Claw, ClawSlash);
             AssignPatterns(ClawElite, MaulSweep);
 
             // A one-step "chain" would only add a second place to author the multiplier; the weapons stay chainless (step 0 only).
@@ -2064,6 +2070,58 @@ namespace Emberdelve.EditorTools
             Debug.Log($"[Emberdelve][EnemySwing] {patternId}: baked from {variant} x{scale:F2}, weapon {length:F2} m, reach {p.EffectiveReach(weapon):F2} m, " +
                 $"active {activeSeconds:F2} s, blade yaw {minYaw:F0}..{maxYaw:F0}:{line}");
             return p;
+        }
+
+        /// <summary>
+        /// The Servitor's vertical overhead: thirteen keys of the held blade through the overhead clip's sweep window
+        /// (EnemyAttackPhase.OverheadSweepStart..End), SwingKind.Overhead. Reach and sweep radius are the weapon's (set by the diagonal bake), so this
+        /// only fits its own segment length (the visible blade) and timing; the enemy's attack range / telegraph cone stay the diagonal's.
+        /// </summary>
+        private static SwingPatternData BakeOverheadPattern(string assetName, string patternId, WeaponData weapon, string variant, float recovery)
+        {
+            if (weapon == null) return null;
+            if (!EmberdelveEnemyVisualFactory.TryBakeSwing(variant, 1f, 13, out SwingKey[] keys, out float reach, out float length,
+                out SwingKey rest, out float activeSeconds, Emberdelve.AI.EnemyAttackPhase.OverheadVariant)) return null;
+
+            float sweepRadius = weapon.hitSphereRadius;
+            SwingPatternData p = AuthorPattern(assetName, patternId, SwingKind.Overhead, weapon,
+                1f, weapon.reach - length, sweepRadius, 0.020f, 2, 1f, keys);
+            if (p == null) return null;
+
+            p.restBase = rest.basePos;
+            p.restYaw = rest.bladeYaw;
+            p.restPitch = rest.bladePitch;
+            p.restRoll = 0f;
+            SetPatternTiming(p, EnemySwingWindup, activeSeconds, recovery);
+            p.wallRecoilTime = 0.30f;
+            EditorUtility.SetDirty(p);
+
+            var line = new System.Text.StringBuilder();
+            foreach (SwingKey k in keys) line.Append($" [{k.t:F2} yaw {k.bladeYaw:F0} pitch {k.bladePitch:F0} base ({k.basePos.x:F2},{k.basePos.y:F2},{k.basePos.z:F2})]");
+            Debug.Log($"[Emberdelve][EnemySwing] {patternId}: baked from {variant} overhead clip, weapon {length:F2} m, farthest tip {reach:F2} m, " +
+                $"effective reach {p.EffectiveReach(weapon):F2} m, active {activeSeconds:F2} s:{line}");
+            return p;
+        }
+
+        [MenuItem("Emberdelve/Visual/Rebuild Servitor Overhead Attack")]
+        public static void MenuRebuildServitorOverhead() { Debug.Log("[Emberdelve][EnemySwing] servitor overhead rebuilt: " + RebuildServitorOverhead()); }
+
+        /// <summary>
+        /// Rebuilds ONLY the Servitor overhead attack (no BuildAll): the overhead clips, controllers, prefabs and Resources copies of the variants that have
+        /// it, the baked Pattern_ClawOverhead and Weapon_HollowClaw's pattern list [Pattern_ClawSlash (as it is on disk), Pattern_ClawOverhead].
+        /// </summary>
+        internal static bool RebuildServitorOverhead()
+        {
+            WeaponData claw = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_HollowClaw.asset");
+            SwingPatternData slash = AssetDatabase.LoadAssetAtPath<SwingPatternData>(EmberdelvePaths.Data + "/Pattern_ClawSlash.asset");
+            if (claw == null || slash == null) { Debug.LogError("[Emberdelve][EnemySwing] Weapon_HollowClaw / Pattern_ClawSlash missing; run the full build once."); return false; }
+
+            bool visuals = EmberdelveEnemyVisualFactory.EnsureOverheadVariants();
+            SwingPatternData overhead = BakeOverheadPattern("Pattern_ClawOverhead", "claw_overhead", claw, "Minion", 0.40f);
+            if (overhead == null) { Debug.LogError("[Emberdelve][EnemySwing] overhead bake failed (art missing?)."); return false; }
+            AssignPatterns(claw, slash, overhead);
+            AssetDatabase.SaveAssets();
+            return visuals;
         }
 
         private static SwingPatternData AuthorEnemyPattern(string assetName, string patternId, WeaponData weapon, EnemyData enemy,

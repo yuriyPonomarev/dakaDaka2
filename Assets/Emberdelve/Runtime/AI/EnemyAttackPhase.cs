@@ -41,7 +41,30 @@ namespace Emberdelve.AI
         public const float ClubSweepEnd = 0.90f;
         public const float ClubRecoveryEnd = 0.99f;
 
-        public static EnemyAttackPhase Recovery(in MeleeSwingStatus status, bool club = false)
+        /// <summary>Attack variants of a Servitor-style sword enemy: 0 = diagonal chop (Sword_Attack), 1 = vertical overhead (derived clip).</summary>
+        public const int DiagonalVariant = 0;
+        public const int OverheadVariant = 1;
+        public const string DiagonalState = "Attack";
+        public const string OverheadState = "Overhead";
+
+        // The derived overhead clip (EmberdelveEnemyVisualFactory.BuildOverheadClip) is authored to this timeline, in normalized clip time:
+        // weapon raised over the head until 0.38, brought straight down in front of the body 0.42..0.56 (the sweep window), recovering to 0.92.
+        public const float OverheadSweepStart = 0.42f;
+        public const float OverheadSweepEnd = 0.56f;
+        public const float OverheadRaiseEnd = 0.38f;
+        public const float OverheadChopLeadSeconds = 0.12f;
+        public const float OverheadRecoveryEnd = 0.92f;
+
+        public static string StateName(int variant) => variant == OverheadVariant ? OverheadState : DiagonalState;
+
+        /// <summary>Sweep window (normalized clip time) of a sword attack variant.</summary>
+        public static void SweepWindow(int variant, out float start, out float end)
+        {
+            if (variant == OverheadVariant) { start = OverheadSweepStart; end = OverheadSweepEnd; }
+            else { start = SweepStart; end = SweepEnd; }
+        }
+
+        public static EnemyAttackPhase Recovery(in MeleeSwingStatus status, bool club = false, int variant = 0)
         {
             if (status.Recoiled)
             {
@@ -49,30 +72,35 @@ namespace Emberdelve.AI
                 float stoppedAt = status.Timing.Windup + status.Timing.Active * status.WallContactSample /
                     Mathf.Max(1, status.SampleCount);
                 float contact = Mathf.Clamp01((float)status.WallContactSample / Mathf.Max(1, status.SampleCount));
-                return new EnemyAttackPhase(4, status.Elapsed - stoppedAt, status.Timing.WallRecoil,
-                    Mathf.Lerp(club ? ClubSweepStart : SweepStart, club ? ClubSweepEnd : SweepEnd, contact));
+                float recoilFrom, recoilTo;
+                if (club) { recoilFrom = ClubSweepStart; recoilTo = ClubSweepEnd; }
+                else SweepWindow(variant, out recoilFrom, out recoilTo);
+                return new EnemyAttackPhase(4, status.Elapsed - stoppedAt, status.Timing.WallRecoil, Mathf.Lerp(recoilFrom, recoilTo, contact));
             }
             return new EnemyAttackPhase(3, status.Elapsed - status.Timing.ActiveEnd, status.Timing.Recovery);
         }
 
-        public float NormalizedTime(float age = 0f, bool club = false)
+        public float NormalizedTime(float age = 0f, bool club = false, int variant = 0)
         {
             float fraction = Mathf.Clamp01((Elapsed + Mathf.Max(0f, age)) / Mathf.Max(0.02f, Duration));
-            float start = club ? ClubSweepStart : SweepStart;
-            float end = club ? ClubSweepEnd : SweepEnd;
+            bool overhead = !club && variant == OverheadVariant;
+            float start = club ? ClubSweepStart : overhead ? OverheadSweepStart : SweepStart;
+            float end = club ? ClubSweepEnd : overhead ? OverheadSweepEnd : SweepEnd;
+            float raiseEnd = overhead ? OverheadRaiseEnd : RaiseEnd;
+            float recoveryEnd = club ? ClubRecoveryEnd : overhead ? OverheadRecoveryEnd : RecoveryEnd;
             switch (Phase)
             {
                 case 1:
                 {
                     if (club) return Mathf.Lerp(0f, start, fraction);
-                    float lead = Mathf.Clamp(ChopLeadSeconds / Duration, 0f, 0.5f);
+                    float lead = Mathf.Clamp((overhead ? OverheadChopLeadSeconds : ChopLeadSeconds) / Duration, 0f, 0.5f);
                     float split = 1f - lead;
                     return fraction < split
-                        ? Mathf.Lerp(0f, RaiseEnd, fraction / Mathf.Max(1e-4f, split))
-                        : Mathf.Lerp(RaiseEnd, start, (fraction - split) / Mathf.Max(1e-4f, lead));
+                        ? Mathf.Lerp(0f, raiseEnd, fraction / Mathf.Max(1e-4f, split))
+                        : Mathf.Lerp(raiseEnd, start, (fraction - split) / Mathf.Max(1e-4f, lead));
                 }
                 case 2: return Mathf.Lerp(start, end, fraction);
-                case 3: return Mathf.Lerp(end, club ? ClubRecoveryEnd : RecoveryEnd, fraction);
+                case 3: return Mathf.Lerp(end, recoveryEnd, fraction);
                 case 4: return Mathf.Lerp(RecoilStart, 0f, fraction);
                 default: return 0f;
             }

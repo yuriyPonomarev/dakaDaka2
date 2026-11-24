@@ -172,7 +172,15 @@ namespace Emberdelve.Tests.Visual
             Dictionary<string, AnimatorState> states = new Dictionary<string, AnimatorState>();
             for (int i = 0; i < machine.states.Length; i++) states[machine.states[i].state.name] = machine.states[i].state;
 
-            Assert.AreEqual(EmberdelveEnemyVisualFactory.StateNames.Length, states.Count);
+            bool hasOverhead = EmberdelveEnemyVisualFactory.Find(name).Overhead;
+            Assert.AreEqual(EmberdelveEnemyVisualFactory.StateNames.Length + (hasOverhead ? 1 : 0), states.Count);
+            Assert.AreEqual(hasOverhead, states.ContainsKey(EnemyAttackPhase.OverheadState), "only the sword Servitor bodies carry the second (overhead) attack state");
+            if (hasOverhead)
+            {
+                Assert.IsNotNull(states[EnemyAttackPhase.OverheadState].motion, "the overhead state has its derived clip");
+                Assert.IsTrue(((AnimationClip)states[EnemyAttackPhase.OverheadState].motion).humanMotion, "the overhead clip is a Humanoid clip");
+                Assert.AreEqual(EnemyVisualDriver.AttackSpeedParameter, states[EnemyAttackPhase.OverheadState].speedParameter);
+            }
             for (int i = 0; i < EmberdelveEnemyVisualFactory.StateNames.Length; i++)
             {
                 string state = EmberdelveEnemyVisualFactory.StateNames[i];

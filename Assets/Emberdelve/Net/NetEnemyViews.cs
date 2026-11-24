@@ -239,6 +239,7 @@ namespace Emberdelve.Net
         private static readonly int HitHash = Animator.StringToHash("Hit");
         private static readonly int DeadHash = Animator.StringToHash("Dead");
         private static readonly int AttackStateHash = Animator.StringToHash("Attack");
+        private static readonly int OverheadStateHash = Animator.StringToHash("Overhead");
         private static readonly int HitStateHash = Animator.StringToHash("Hit");
         private static readonly int DeathStateHash = Animator.StringToHash("Death");
         private Vector3 _target;
@@ -262,6 +263,8 @@ namespace Emberdelve.Net
         private float _wakeElapsed;
         private int _enemyId;
         private byte _visualKind;
+        private int _attackVariant;
+        private int _overheadHash;
         private int _lastAnimatorStateHash;
 
         public void SetIdentity(int enemyId, byte visualKind)
@@ -327,6 +330,7 @@ namespace Emberdelve.Net
                 Emberdelve.Feedback.WorldAudio.PlayAttached(Emberdelve.Feedback.WorldSound.Swing, transform, Vector3.up, .8f);
             bool starting = state.AttackPhase != 0 && (_attackPhase.Phase == 0 || initial);
             _attackPhase = new EnemyAttackPhase(state.AttackPhase, state.PhaseElapsed, state.PhaseDuration, state.RecoilStart);
+            _attackVariant = state.AttackVariant;
             _phaseSampleTime = state.SampleTime;
             _phaseReceivedAt = Time.unscaledTime;
             _wasWindingUp = state.IsWindingUp;
@@ -371,7 +375,9 @@ namespace Emberdelve.Net
                 if (HasParameter(HitHash, AnimatorControllerParameterType.Trigger)) _animator.ResetTrigger(HitHash);
                 _animator.SetFloat(AttackSpeedHash, 0f);
                 // Extrapolate within this phase only. Never predict damage/recovery before the authority announces it.
-                _animator.Play("Attack", 0, _attackPhase.NormalizedTime(age, _visualKind == EnemyPresentationWire.CinderWardenKind));
+                bool club = _visualKind == EnemyPresentationWire.CinderWardenKind;
+                int variant = !club && _attackVariant == EnemyAttackPhase.OverheadVariant && HasOverheadState() ? EnemyAttackPhase.OverheadVariant : 0;
+                _animator.Play(EnemyAttackPhase.StateName(variant), 0, _attackPhase.NormalizedTime(age, club, variant));
             }
             else if (_phaseDriven)
             {
@@ -379,6 +385,12 @@ namespace Emberdelve.Net
                 _animator.SetFloat(AttackSpeedHash, 1f);
                 _animator.CrossFadeInFixedTime("Idle", 0.08f);
             }
+        }
+
+        private bool HasOverheadState()
+        {
+            if (_overheadHash == 0) _overheadHash = Animator.StringToHash(EnemyAttackPhase.OverheadState);
+            return _animator != null && _animator.HasState(0, _overheadHash);
         }
 
         public void SetDead()
@@ -487,7 +499,7 @@ namespace Emberdelve.Net
             if (hash == _lastAnimatorStateHash) return;
             _lastAnimatorStateHash = hash;
 
-            string name = hash == AttackStateHash ? "Attack" : hash == HitStateHash ? "Hit" : hash == DeathStateHash ? "Death" : null;
+            string name = hash == AttackStateHash ? "Attack" : hash == OverheadStateHash ? "Overhead" : hash == HitStateHash ? "Hit" : hash == DeathStateHash ? "Death" : null;
             if (name == null) return;
             Debug.Log(NetTuning.LogPrefix + "[client] enemy-animation-state id=" + _enemyId + " state=" + name + " kind=" + VisualKindName() +
                       " normalized=" + state.normalizedTime.ToString("F2", CultureInfo.InvariantCulture));

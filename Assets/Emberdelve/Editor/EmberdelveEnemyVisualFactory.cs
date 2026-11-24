@@ -53,6 +53,8 @@ namespace Emberdelve.EditorTools
             public float OffHandSize;      // metres, shield diameter
             public bool GlowingEyes;
             public bool Pauldrons;
+            /// <summary>Also builds the derived vertical-overhead attack clip, controller state and sweep (the Servitor bodies).</summary>
+            public bool Overhead;
             // Humanoid clip names (without the "Rig|" / "Armature|" take prefix).
             public string Idle, Walk, Run, Attack, Hit, Death;
             public float WalkPlayback = 1f, RunPlayback = 1f;
@@ -62,9 +64,9 @@ namespace Emberdelve.EditorTools
         {
             // Minion and Rogue share the Hollow Servitor's data, so they hold the same blade (same model, length and grip): the swept path
             // baked from the Minion (TryBakeSwing) is the path both of them show.
-            new Variant { Name = "Minion", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyBlade", MainHandSource = "knights_sword", MainHandLength = 0.95f,
+            new Variant { Name = "Minion", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyBlade", MainHandSource = "knights_sword", MainHandLength = 0.95f, Overhead = true,
                 Idle = "Sword_Idle", Walk = "Zombie_Walk_Fwd_Loop", Run = "Zombie_Walk_Fwd_Loop", RunPlayback = 1.7f, Attack = AttackClip, Hit = "Hit_Chest", Death = "Death01" },
-            new Variant { Name = "Rogue", Body = FemaleBody, MeshName = "Undead_Mannequin_F", MainHand = "Weapon_RustyBlade", MainHandSource = "knights_sword", MainHandLength = 0.95f,
+            new Variant { Name = "Rogue", Body = FemaleBody, MeshName = "Undead_Mannequin_F", MainHand = "Weapon_RustyBlade", MainHandSource = "knights_sword", MainHandLength = 0.95f, Overhead = true,
                 Idle = "Sword_Idle", Walk = "Walk_Loop", Run = "Jog_Fwd_Loop", Attack = AttackClip, Hit = "Hit_Head", Death = "Death01" },
             new Variant { Name = "Warrior", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyHammer", MainHandSource = "ornate_war_hammer", MainHandLength = 0.8f,
                 OffHand = "Weapon_RustyShield", OffHandSource = "kite_shield", OffHandSize = 0.7f, Pauldrons = true,
@@ -112,6 +114,7 @@ namespace Emberdelve.EditorTools
         public static string NetResourcePath(string variant) { return "Assets/Emberdelve/Resources/Emberdelve/NetEnemyVisuals/EnemyVisual_" + variant + ".prefab"; }
         public static string ControllerPath(string variant) { return Folder + "/EnemyVisual_" + variant + ".controller"; }
         public static string AttackClipPath(string variant) { return Folder + "/EnemyVisual_" + variant + "_Attack.anim"; }
+        public static string OverheadClipPath(string variant) { return Folder + "/EnemyVisual_" + variant + "_Overhead.anim"; }
 
         public static Variant Find(string name)
         {
@@ -144,6 +147,21 @@ namespace Emberdelve.EditorTools
 
             AssetDatabase.SaveAssets();
             _done = true;
+            return ok;
+        }
+
+        /// <summary>Rebuilds only the variants that have the overhead attack (controller with the Overhead state, overhead clip, prefab, Resources copy); the other enemy visuals are not touched.</summary>
+        internal static bool EnsureOverheadVariants()
+        {
+            if (!EmberdelveQuaterniusImport.EnsureConfigured()) return false;
+            EmberdelveWeaponModels.EnsureAll(false);
+            EmberdelveUndeadMaterials.EnsureAll();
+            if (!EmberdelveSkeletonAssets.EnsureConfigured()) return false;
+            EmberdelveVisualSetup.EnsureFolder(Folder);
+
+            bool ok = true;
+            for (int i = 0; i < Variants.Length; i++) if (Variants[i].Overhead) ok &= Build(Variants[i]);
+            AssetDatabase.SaveAssets();
             return ok;
         }
 
@@ -240,7 +258,7 @@ namespace Emberdelve.EditorTools
             return model;
         }
 
-        private static Avatar FindAvatar(string fbxPath)
+        internal static Avatar FindAvatar(string fbxPath)
         {
             Object[] assets = AssetDatabase.LoadAllAssetsAtPath(fbxPath);
             for (int i = 0; i < assets.Length; i++)
@@ -251,6 +269,17 @@ namespace Emberdelve.EditorTools
 
             return null;
         }
+
+        /// <summary>The model as the swing bake builds it (mesh, fit height, identity yaw is the caller's business).</summary>
+        internal static GameObject CreateBakeModel(Transform parent, GameObject fbx, Mesh mesh, Material material, Avatar avatar)
+        {
+            GameObject model = CreateModel(fbx, parent, mesh, material, avatar, null);
+            FitHeight(model.transform, NormalHeight);
+            return model;
+        }
+
+        internal static void AttachMainHandForBake(Variant variant, GameObject fbx, Mesh mesh, Material material, Avatar avatar, Animator animator) =>
+            AttachMainHand(variant, fbx, mesh, material, avatar, animator);
 
         /// <summary>Scales the model uniformly so its skinned meshes are <paramref name="height"/> metres tall (units of the FBX are not assumed).</summary>
         private static void FitHeight(Transform model, float height)
@@ -666,6 +695,20 @@ namespace Emberdelve.EditorTools
             AddExit(attack, idle, 0.9f, 0.15f);
             AddExit(hit, idle, 0.85f, 0.1f);
 
+            // The second melee attack (vertical overhead): reached only by the presentation clock (driver / client proxy Play it by
+            // name), never by the Attack trigger, which stays the diagonal chop.
+            if (variant.Overhead)
+            {
+                AnimationClip overheadClip = EmberdelveEnemyOverheadClip.CreateAsset(variant);
+                if (overheadClip != null)
+                {
+                    AnimatorState overhead = AddState(machine, EnemyAttackPhase.OverheadState, overheadClip, new Vector3(560f, -70f, 0f));
+                    overhead.speedParameterActive = true;
+                    overhead.speedParameter = EnemyVisualDriver.AttackSpeedParameter;
+                    AddExit(overhead, idle, 0.9f, 0.15f);
+                }
+            }
+
             // A shield bearer keeps the shield up through every move: layer 1 holds the left arm in the guard (the drivers let it go
             // while dead, dormant or waking: EnemyDormantPose.BlendShieldArm). The right-arm attack on layer 0 is untouched.
             if (!string.IsNullOrEmpty(variant.OffHand))
@@ -749,7 +792,7 @@ namespace Emberdelve.EditorTools
         /// phase that plays the window at the clip's own pace (x <see cref="SweepPlaybackStretch"/>). False when the art is missing.
         /// </summary>
         public static bool TryBakeSwing(string variantName, float scale, int keyCount, out SwingKey[] keys, out float reach,
-            out float length, out SwingKey rest, out float activeSeconds)
+            out float length, out SwingKey rest, out float activeSeconds, int attackVariant = 0)
         {
             keys = null;
             reach = length = activeSeconds = 0f;
@@ -765,7 +808,10 @@ namespace Emberdelve.EditorTools
             Material bodyMaterial = EmberdelveSkeletonAssets.MaterialFor(variant.Name);
             EmberdelveWeaponModels.Spec spec = EmberdelveWeaponModels.Find(variant.MainHandSource);
             AnimationClip idle = FindClip(variant.Idle);
-            AnimationClip attack = RuntimeAttackClip(variant);
+            bool overhead = attackVariant == EnemyAttackPhase.OverheadVariant;
+            if (overhead && !variant.Overhead) return false;
+            AnimationClip attack = overhead ? EmberdelveEnemyOverheadClip.Build(variant) : RuntimeAttackClip(variant);
+            EnemyAttackPhase.SweepWindow(attackVariant, out float sweepStart, out float sweepEnd);
             if (source == null || source.sharedMesh == null || bodyMaterial == null || spec == null || attack == null || idle == null)
             {
                 if (attack != null) Object.DestroyImmediate(attack);
@@ -800,12 +846,12 @@ namespace Emberdelve.EditorTools
                 }
 
                 rest = Sample(idle, 0.3f, 0f, out _, out _);
-                activeSeconds = Mathf.Round((EnemyAttackPhase.SweepEnd - EnemyAttackPhase.SweepStart) * attack.length * SweepPlaybackStretch * 100f) / 100f;
+                activeSeconds = Mathf.Round((sweepEnd - sweepStart) * attack.length * SweepPlaybackStretch * 100f) / 100f;
                 keys = new SwingKey[keyCount];
                 for (int i = 0; i < keyCount; i++)
                 {
                     float t = i / (float)(keyCount - 1);
-                    SwingKey key = Sample(attack, Mathf.Lerp(EnemyAttackPhase.SweepStart, EnemyAttackPhase.SweepEnd, t), t, out Vector3 tip, out length);
+                    SwingKey key = Sample(attack, Mathf.Lerp(sweepStart, sweepEnd, t), t, out Vector3 tip, out length);
                     if (i > 0) key.bladeYaw = keys[i - 1].bladeYaw + Mathf.DeltaAngle(keys[i - 1].bladeYaw, key.bladeYaw);
                     keys[i] = key;
                     reach = Mathf.Max(reach, new Vector2(tip.x - eye.x, tip.z - eye.z).magnitude);

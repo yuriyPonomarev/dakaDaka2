@@ -43,6 +43,9 @@ namespace Emberdelve.AI
         private float _attackPlayedAt = -10f;
         private float _attackPlaybackDuration;
         private float _attackClipLength = 1f;
+        private float _overheadClipLength = 1f;
+        private bool _hasOverhead;
+        private int _phaseVariant;
         private bool _dead;
         private bool _hasParameters;
         private int _speedHash, _attackSpeedHash, _attackHash, _hitHash, _deadHash;
@@ -71,6 +74,7 @@ namespace Emberdelve.AI
                 animator.applyRootMotion = false;
                 _hasParameters = animator.runtimeAnimatorController != null;
                 CacheAttackClipLength();
+                _hasOverhead = animator.runtimeAnimatorController != null && animator.HasState(0, Animator.StringToHash(EnemyAttackPhase.OverheadState));
             }
         }
 
@@ -96,11 +100,11 @@ namespace Emberdelve.AI
             AnimationClip[] clips = controller.animationClips;
             for (int i = 0; i < clips.Length; i++)
             {
-                if (clips[i] != null && clips[i].name.IndexOf("Attack", System.StringComparison.OrdinalIgnoreCase) >= 0)
-                {
+                if (clips[i] == null) continue;
+                if (clips[i].name.IndexOf(EnemyAttackPhase.OverheadState, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    _overheadClipLength = Mathf.Max(0.2f, clips[i].length);
+                else if (clips[i].name.IndexOf("Attack", System.StringComparison.OrdinalIgnoreCase) >= 0)
                     _attackClipLength = Mathf.Max(0.2f, clips[i].length);
-                    return;
-                }
             }
         }
 
@@ -170,16 +174,23 @@ namespace Emberdelve.AI
                     _releasing = false;
                 }
 
-                float target = phase.NormalizedTime(club: _agent.UsesCinderClub);
+                // The attack the server brain chose for this blow (the overhead has its own clip and state).
+                int variant = !_agent.UsesCinderClub && _hasOverhead && _agent.AttackVariantIndex == EnemyAttackPhase.OverheadVariant
+                    ? EnemyAttackPhase.OverheadVariant : EnemyAttackPhase.DiagonalVariant;
+                if (_phaseDriven) variant = _phaseVariant;
+                string stateName = EnemyAttackPhase.StateName(variant);
+                float clipLength = variant == EnemyAttackPhase.OverheadVariant ? _overheadClipLength : _attackClipLength;
+                float target = phase.NormalizedTime(club: _agent.UsesCinderClub, variant: variant);
                 if (!_phaseDriven)
                 {
+                    _phaseVariant = variant;
                     // Enter the attack with a short blend from whatever locomotion pose the body is in (no first-frame pop).
                     _phaseDriven = true;
                     _blendInUntil = Time.time + AttackBlendIn;
                     animator.ResetTrigger(_attackHash);
                     animator.ResetTrigger(_hitHash);
                     animator.SetFloat(_attackSpeedHash, 0f);
-                    animator.CrossFadeInFixedTime("Attack", AttackBlendIn, 0, target * _attackClipLength);
+                    animator.CrossFadeInFixedTime(stateName, AttackBlendIn, 0, target * clipLength);
                     _lastTarget = target;
                     return;
                 }
@@ -187,7 +198,7 @@ namespace Emberdelve.AI
                 {
                     // Keep the blend alive; advance the attack state at the phase rate instead of re-playing it.
                     float rate = (target - _lastTarget) / dt;
-                    animator.SetFloat(_attackSpeedHash, Mathf.Max(0f, rate * _attackClipLength));
+                    animator.SetFloat(_attackSpeedHash, Mathf.Max(0f, rate * clipLength));
                     _lastTarget = target;
                     return;
                 }
@@ -197,7 +208,7 @@ namespace Emberdelve.AI
                 // Smooth the scrub target slightly so frame hitches never jump the pose.
                 float smoothed = Mathf.Abs(target - _lastTarget) > 0.2f ? target : Mathf.Lerp(_lastTarget, target, 1f - Mathf.Exp(-dt / 0.03f));
                 _lastTarget = smoothed;
-                animator.Play("Attack", 0, smoothed);
+                animator.Play(stateName, 0, smoothed);
                 animator.Update(0f);
             }
             else

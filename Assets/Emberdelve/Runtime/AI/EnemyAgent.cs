@@ -80,6 +80,14 @@ namespace Emberdelve.AI
         private Vector3 _latchedDirection;
         private SwingPhase _swingPhase;
 
+        // Attack variant (index into the attack weapon's swing patterns). Chosen on the authority side when a windup starts, so the
+        // telegraph shows the blow that will really come; frozen into _swingVariant when the swing begins.
+        private int _pendingVariant;
+        private int _swingVariant;
+        private bool _wasWindingUp;
+        private System.Random _variantRandom;
+        private int _telegraphVariant;
+
         /// <summary>Height above the root of the swing's eye: the origin the attack has always been aimed from.</summary>
         public const float AttackEyeHeight = 1.2f;
 
@@ -227,7 +235,7 @@ namespace Emberdelve.AI
                         return new EnemyAttackPhase(1, telegraph + status.Elapsed, telegraph + timing.Windup);
                     if (status.Phase == SwingPhase.Active)
                         return new EnemyAttackPhase(2, status.Elapsed - timing.Windup, timing.Active);
-                    return EnemyAttackPhase.Recovery(status, UsesCinderClub);
+                    return EnemyAttackPhase.Recovery(status, UsesCinderClub, AttackVariantIndex);
                 }
                 if (_brain != null && _brain.IsWindingUp)
                 {
@@ -241,13 +249,33 @@ namespace Emberdelve.AI
         }
 
         /// <summary>The swing pattern this monster's attack weapon swings (its first pattern), or null for a weapon without one.</summary>
-        public SwingPatternData AttackPattern
+        public SwingPatternData AttackPattern => AttackPatternAt(AttackVariantIndex);
+
+        /// <summary>Number of attacks this monster can choose between (the attack weapon's patterns; the Cinder Warden's club has one).</summary>
+        public int AttackVariantCount
         {
             get
             {
                 WeaponData weapon = data != null ? data.attackWeapon : null;
-                return weapon != null && weapon.TryResolveSwingPattern(0, 0, out SwingPatternData pattern) ? pattern : null;
+                if (weapon == null || weapon.swingPatterns == null || UsesCinderClub) return 1;
+                return Mathf.Max(1, weapon.swingPatterns.Length);
             }
+        }
+
+        /// <summary>The attack of the swing in flight, else the one the current/next windup warns (0 = the original attack).</summary>
+        public int AttackVariantIndex => _swingId != 0 ? _swingVariant : _pendingVariant;
+
+        /// <summary>Pattern index <paramref name="index"/> of the attack weapon, or null when the weapon does not allow it.</summary>
+        public SwingPatternData AttackPatternAt(int index)
+        {
+            WeaponData weapon = data != null ? data.attackWeapon : null;
+            return weapon != null && weapon.TryResolveSwingPattern(0, index, out SwingPatternData pattern) ? pattern : null;
+        }
+
+        private void PickAttackVariant()
+        {
+            if (_variantRandom == null) _variantRandom = new System.Random(unchecked(System.Environment.TickCount * 397 + _combatId * 7919));
+            _pendingVariant = UsesCinderClub ? 0 : EnemyAttackChoice.PickFor(data != null ? data.attackWeapon : null, _variantRandom);
         }
 
         /// <summary>Radius of the telegraph: the pattern's effective reach from the eye (the legacy reach number for a weapon without a pattern).</summary>
@@ -269,7 +297,7 @@ namespace Emberdelve.AI
             {
                 SwingPatternData pattern = AttackPattern;
                 if (pattern == null) return Mathf.Clamp(data != null ? data.attackTelegraphCone : 120f, 40f, 200f) * 0.5f;
-                pattern.YawRange(out float min, out float max);
+                GetTelegraphWedge(AttackVariantIndex, out float min, out float max);
                 return (max - min) * 0.5f;
             }
         }
@@ -394,23 +422,74 @@ namespace Emberdelve.AI
 
             // D1c4: the telegraph is the ground projection of the swing pattern (its yaw range at its effective reach). A weapon
             // without a pattern cannot attack any more (the arc-less claw path is closed for pose providers); warn once.
-            SwingPatternData attackPattern = AttackPattern;
-            if (UsesCinderClub && attackPattern != null)
-            {
-                _telegraph = AttackTelegraphVisual.Create(transform, data.attackTelegraphCone, data.telegraphColor);
-            }
-            else if (attackPattern != null)
-            {
-                attackPattern.YawRange(out float minYaw, out float maxYaw);
-                _telegraph = AttackTelegraphVisual.Create(transform, minYaw, maxYaw, data.telegraphColor);
-            }
-            else
-            {
+            if (AttackPatternAt(0) == null)
                 Debug.LogWarning("[EnemyAgent] " + data.displayName + ": the attack weapon has no swing pattern, so this monster cannot attack.", this);
-                _telegraph = AttackTelegraphVisual.Create(transform, data.attackTelegraphCone, data.telegraphColor);
-            }
+            ApplyTelegraph(0);
             IsRuntimeInitialized = true;
             return true;
+        }
+
+        /// <summary>
+        /// Shows the ground wedge of attack variant <paramref name="variant"/> on the one telegraph visual (its mesh is rebuilt in place only when
+        /// the range changes). The Cinder Warden keeps its legacy cone and never changes.
+        /// </summary>
+        private void ApplyTelegraph(int variant)
+        {
+            _telegraphVariant = variant;
+            float minYaw, maxYaw;
+            if (UsesCinderClub || AttackPatternAt(variant) == null)
+            {
+                float half = Mathf.Clamp(data.attackTelegraphCone, 40f, 200f) * 0.5f;
+                minYaw = -half; maxYaw = half;
+            }
+            else GetTelegraphWedge(variant, out minYaw, out maxYaw);
+
+            if (_telegraph == null) _telegraph = AttackTelegraphVisual.Create(transform, minYaw, maxYaw, data.telegraphColor);
+            else _telegraph.SetWedge(minYaw, maxYaw);
+        }
+
+        /// <summary>Margin (degrees) added to the overhead strip beyond the farthest lateral tip of the baked sweep, and its clamp.</summary>
+        public const float OverheadStripMargin = 6f, OverheadStripMin = 12f, OverheadStripMax = 40f;
+
+        /// <summary>
+        /// The warned wedge of attack <paramref name="variant"/>: the pattern's blade yaw range. The Servitor's vertical overhead (variant 1; never
+        /// the Cinder Warden's club, which keeps its raw yaw range) is a narrow strip along the facing instead, because a near-vertical blade's yaw
+        /// is meaningless (it reads 60 degrees off at the top); its half angle covers the farthest lateral tip of the baked sweep plus a margin.
+        /// </summary>
+        public void GetTelegraphWedge(int variant, out float minYaw, out float maxYaw)
+        {
+            SwingPatternData pattern = AttackPatternAt(variant);
+            if (pattern == null)
+            {
+                float half = Mathf.Clamp(data != null ? data.attackTelegraphCone : 120f, 40f, 200f) * 0.5f;
+                minYaw = -half; maxYaw = half;
+                return;
+            }
+            if (!UsesCinderClub && variant == EnemyAttackPhase.OverheadVariant)
+            {
+                float strip = OverheadStripHalfAngle(pattern, data.attackWeapon);
+                minYaw = -strip; maxYaw = strip;
+                return;
+            }
+            pattern.YawRange(out minYaw, out maxYaw);
+        }
+
+        /// <summary>Half angle of the overhead strip: the largest lateral angle of the sweep's blade tips (those in front of the eye) plus a margin, clamped.</summary>
+        public static float OverheadStripHalfAngle(SwingPatternData pattern, WeaponData weapon)
+        {
+            float widest = 0f;
+            if (pattern != null && weapon != null && pattern.keys != null)
+            {
+                float length = pattern.BladeLength(weapon);
+                for (int i = 0; i < pattern.keys.Length; i++)
+                {
+                    SwingKey key = pattern.keys[i];
+                    Vector3 tip = key.basePos + Quaternion.Euler(key.bladePitch, key.bladeYaw, 0f) * Vector3.forward * length;
+                    if (tip.z < 0.3f) continue;
+                    widest = Mathf.Max(widest, Mathf.Atan2(Mathf.Abs(tip.x), tip.z) * Mathf.Rad2Deg);
+                }
+            }
+            return Mathf.Clamp(widest + OverheadStripMargin, OverheadStripMin, OverheadStripMax);
         }
 
         private void OnDestroy()
@@ -557,6 +636,12 @@ namespace Emberdelve.AI
             PollSwing();
 
             BrainOrder order = _brain.Tick(dt, Time.time, transform.position, transform.forward, target);
+
+            // A new windup picks the attack it will deliver (authority side only; this component does not exist on pure clients).
+            bool windingNow = _brain.IsWindingUp;
+            if (windingNow && !_wasWindingUp) PickAttackVariant();
+            _wasWindingUp = windingNow;
+            if (_telegraph != null && _telegraphVariant != AttackVariantIndex && (windingNow || _swingId != 0)) ApplyTelegraph(AttackVariantIndex);
 
             // D1c4: the windup was the telegraph; its end begins the authority's swept swing along the committed direction.
             // Whether it lands is the sweep's business (arc, reach, walls), not a wedge check made here.
@@ -800,13 +885,16 @@ namespace Emberdelve.AI
 
             flatDirection.y = 0f;
             _latchedDirection = flatDirection.sqrMagnitude < 0.0001f ? TelegraphDirection() : flatDirection.normalized;
+            if (!EnemyAttackChoice.IsValid(_pendingVariant, AttackVariantCount)) _pendingVariant = 0;
             _swingLatched = true;
             TryGetAimPose(out _, out float yaw, out float pitch);
 
             // Same per-combat-id allocator the player's components use, so an enemy that ever carries two attack sources
             // cannot collide with itself.
             int sequence = CombatRegistry.NextSequence(_combatId);
-            MeleeSwingIntent intent = new MeleeSwingIntent(_combatId, weapon.weaponId, 0, 0, yaw, pitch, sequence);
+            // The pattern index is the server brain's choice; the authority validates it against the weapon's patterns.
+            int variant = _pendingVariant;
+            MeleeSwingIntent intent = new MeleeSwingIntent(_combatId, weapon.weaponId, variant, 0, yaw, pitch, sequence);
 
             if (!authority.TryBeginMeleeSwing(intent, out int swingId, out reason))
             {
@@ -817,6 +905,7 @@ namespace Emberdelve.AI
             }
 
             _swingId = swingId;
+            _swingVariant = variant;
             _swingResolved = false;
             _swingPhase = SwingPhase.Windup;
             LastSwingId = swingId;

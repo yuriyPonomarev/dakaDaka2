@@ -298,7 +298,9 @@ namespace Emberdelve.Net
     /// <summary>Versioned server-authored enemy presentation state. Gameplay decisions and health stay exclusively on the server.</summary>
     public struct EnemyPresentationWire : INetworkSerializable
     {
-        public const byte CurrentVersion = 4;
+        public const byte CurrentVersion = 5;
+        /// <summary>Highest attack variant a client will animate (0 = diagonal chop, 1 = vertical overhead).</summary>
+        public const byte MaxAttackVariant = 1;
         public const byte CinderWardenKind = 4;
         public const byte WindingUpFlag = 1;
         public const byte DeadFlag = 2;
@@ -320,6 +322,8 @@ namespace Emberdelve.Net
         public float RecoilStart;
         public double SampleTime;
         public float WakeElapsed;
+        /// <summary>Server-chosen attack (pattern index) of the current windup/swing; selects which attack clip a client plays.</summary>
+        public byte AttackVariant;
 
         public bool IsWindingUp => (Flags & WindingUpFlag) != 0;
         public bool IsDormant => (Flags & DormantFlag) != 0;
@@ -332,7 +336,7 @@ namespace Emberdelve.Net
         public string VisualKindName => NameOfVisual(VisualKind);
         public bool IsValid => Version == CurrentVersion && Enemy > 0 && VisualKind <= CinderWardenKind && (Flags & ~KnownFlags) == 0 &&
                                !((IsDormant || IsWaking) && (IsDead || IsWindingUp || AttackPhase != 0)) && !(IsDormant && IsWaking) &&
-                               float.IsFinite(WakeElapsed) && WakeElapsed >= 0f && WakeElapsed <= 5f &&
+                               AttackVariant <= MaxAttackVariant && float.IsFinite(WakeElapsed) && WakeElapsed >= 0f && WakeElapsed <= 5f &&
                                !float.IsNaN(WindupSeconds) && !float.IsInfinity(WindupSeconds) && WindupSeconds >= 0f && WindupSeconds <= 10f &&
                                float.IsFinite(SwingSeconds) && SwingSeconds >= 0f && SwingSeconds <= 30f && AttackPhase <= 4 &&
                                float.IsFinite(PhaseElapsed) && PhaseElapsed >= 0f &&
@@ -357,6 +361,7 @@ namespace Emberdelve.Net
             serializer.SerializeValue(ref RecoilStart);
             serializer.SerializeValue(ref SampleTime);
             serializer.SerializeValue(ref WakeElapsed);
+            serializer.SerializeValue(ref AttackVariant);
         }
     }
 }

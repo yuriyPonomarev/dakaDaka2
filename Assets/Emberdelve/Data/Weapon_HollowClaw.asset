@@ -27,6 +27,7 @@ MonoBehaviour:
   hitSphereRadius: 0.16
   swingPatterns:
   - {fileID: 11400000, guid: fddc2bd433cd0ee4e97d181c0fafbd51, type: 2}
+  - {fileID: 11400000, guid: 4cee6de63e7d07447922a7a552f0495c, type: 2}
   comboSteps: []
   comboWindow: 0.7
   comboFinisherRecovery: 0.35

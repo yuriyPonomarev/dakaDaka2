@@ -426,7 +426,10 @@ namespace Emberdelve.EditorTools
             // ---- pattern data
             Check(_sword.UsesSweptMelee && _sword.swingPatterns.Length == 4, "the sword has four swing patterns (three chain patterns and the riposte cut)");
             Check(_rapier.UsesSweptMelee && _rapier.swingPatterns.Length == 1, "the rapier has one swing pattern");
-            Check(_claw.UsesSweptMelee && _claw.swingPatterns.Length == 1 && !_crossbow.UsesSweptMelee, "D1c4: the enemy claw has one swing pattern (the telegraph wedge swept) and the crossbow has none");
+            Check(_claw.UsesSweptMelee && _claw.swingPatterns.Length == 2 && !_crossbow.UsesSweptMelee, "D1c4: the enemy claw has two swing patterns (diagonal chop + vertical overhead, each a swept telegraph wedge) and the crossbow has none");
+            Check(_claw.swingPatterns.Length == 2 && _claw.swingPatterns[0] != null && _claw.swingPatterns[0].kind == SwingKind.HorizontalRightToLeft
+                  && _claw.swingPatterns[1] != null && _claw.swingPatterns[1].kind == SwingKind.Overhead && _claw.swingPatterns[0].Validate(out _) && _claw.swingPatterns[1].Validate(out _),
+                "the claw's pattern 0 is the diagonal chop and pattern 1 the overhead, both valid");
             Check(_sword.swingPatterns[0].kind == SwingKind.HorizontalRightToLeft && _sword.swingPatterns[1].kind == SwingKind.HorizontalLeftToRight
                   && _sword.swingPatterns[2].kind == SwingKind.Overhead && _rapier.swingPatterns[0].kind == SwingKind.Thrust,
                 "sword = slash R->L, slash L->R, overhead (Dark and Darker order); rapier = thrust");

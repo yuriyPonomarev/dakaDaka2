@@ -173,6 +173,7 @@ namespace Emberdelve.EditorTools
 
             private void OnDestroy()
             {
+                Emberdelve.AI.EnemyAttackChoice.Override = -1;
                 if (_smokeProfile == null) return;
                 // The same isolated-session seam as OfflineProfileTests; never dispose another session.
                 if (ReferenceEquals(OfflineProfileSession.Current, _smokeProfile))
@@ -232,6 +233,9 @@ namespace Emberdelve.EditorTools
 
             private IEnumerator Run()
             {
+                // The measurements below (warned wedge, strafe spots, riposte intercept) are authored for the Servitor's diagonal chop; the
+                // overhead attack has its own coverage in EmberdelveEnemySweepGate. Pin the server brain's random choice to pattern 0.
+                Emberdelve.AI.EnemyAttackChoice.Override = 0;
                 yield return WaitFrames(25);
 
                 _rig = FindLocalSmokeRig();
@@ -793,6 +797,9 @@ namespace Emberdelve.EditorTools
                 // Standing-lane LOS must use the standing center, not a dormant bone offset.
                 WakeStandingTarget(enemy);
                 Check(!enemy.IsDormant && !enemy.IsWaking, "telegraph placement uses the awake enemy hit pose");
+                // Isolation: the lane search below yields for many frames; a live enemy could swing at the player meanwhile and spend its
+                // weapon cooldown, so the windup measured afterwards would be refused as "faster than cooldown". It is re-enabled once placed.
+                enemy.enabled = false;
                 if (!PlacePlayerInClearLane(3f, 0.5f, "defense telegraph", out _, out _) ||
                     !TryPlaceEnemyBesideSpawn(enemy, _rig.transform.position, 1, DominantAxis(_rig.transform.forward), out Vector3 enemySpot))
                 {
@@ -807,8 +814,15 @@ namespace Emberdelve.EditorTools
                 Check(HitScanner.HasLineOfSight(_rig.AimOrigin, enemy.CombatCenter, telegraphMask, 0.3f) &&
                     HitScanner.HasLineOfSight(_rig.GetMuzzlePosition(), enemy.CombatCenter, telegraphMask, 0.3f),
                     "placed standing telegraph target is visible from both eye and muzzle");
+                EnemyDiag("telegraph enemy before re-enable", enemy);
+                // WakeStandingTarget ticks the awake brain by EnemyBrain.WakeSeconds (1.25 s) in one go, which shortens the brain's own attack cooldown
+                // but not the authority's: an enemy that swung shortly before would order its next blow too early and be refused as "faster than weapon
+                // cooldown" (nothing lands). Wait, in real time and with the enemy frozen, until the authority would accept this enemy's next swing.
+                if (enemy.Data != null) yield return WaitForWeaponReady(enemy.CombatId, enemy.Data.attackWeapon);
                 enemy.enabled = true;
+                float enableAt = Time.time;
                 yield return WaitFrames(3);
+                EnemyDiag($"telegraph enemy 3 frames after re-enable (+{Time.time - enableAt:F2} s game time)", enemy);
 
                 // Let the real brain start a real windup.
                 float deadline = Time.unscaledTime + 9f;
@@ -841,12 +855,15 @@ namespace Emberdelve.EditorTools
                 }
 
                 float healthBeforeStrike = _rig.CurrentHealth;
+                EnemyDiag("telegraph enemy at the measured windup", enemy);
+                if (healthBeforeStrike < _rig.MaxHealth) Debug.Log($"[Emberdelve][Smoke:{Mode}] note: the player was already hurt before the measured windup ({healthBeforeStrike:F0}/{_rig.MaxHealth:F0}); swings begun by this enemy: {enemy.SwingsBegun}");
                 _capturedValid = false;
                 _rig.Health.Damaged += CaptureDamage;
                 deadline = Time.unscaledTime + 3f;
                 while (_rig.CurrentHealth >= healthBeforeStrike && Time.unscaledTime < deadline) yield return null;
 
                 float strikeDamage = healthBeforeStrike - _rig.CurrentHealth;
+                EnemyDiag("telegraph enemy after the measured window", enemy);
                 Check(strikeDamage > 0f, $"the windup resolved into a real hit ({healthBeforeStrike:F0} -> {_rig.CurrentHealth:F0})");
 
                 if (_capturedValid && strikeDamage > 0f)
@@ -5997,6 +6014,17 @@ namespace Emberdelve.EditorTools
                 }
                 else _rig.transform.rotation = aim;
                 Physics.SyncTransforms();
+            }
+
+            /// <summary>Permanent diagnostic: what this enemy and the authority's cooldown clock say (swings begun, last accepted attack, remaining cooldown, chosen attack).</summary>
+            private void EnemyDiag(string label, EnemyAgent e)
+            {
+                if (e == null) return;
+                float last = _localAuthority != null ? _localAuthority.LastAttackTimeFor(e.CombatId) : float.NegativeInfinity;
+                float remaining = _localAuthority != null && e.Data != null ? _localAuthority.WeaponCooldownRemaining(e.CombatId, e.Data.attackWeapon) : -1f;
+                Debug.Log($"[Emberdelve][Smoke:{Mode}] diag {label}: enemy #{e.CombatId} swingsBegun={e.SwingsBegun} lastSwing={e.LastSwingId} variant={e.AttackVariantIndex} " +
+                    $"override={Emberdelve.AI.EnemyAttackChoice.Override} winding={e.IsWindingUp} state={(e.Brain != null ? e.Brain.State.ToString() : "n/a")} " +
+                    $"now={Time.time:F2} lastAccepted={last:F2} cooldownRemaining={remaining:F2} dt={Time.deltaTime:F3} maxDt={Time.maximumDeltaTime:F2} timeScale={Time.timeScale:F2}");
             }
 
             private static void WakeStandingTarget(EnemyAgent target)

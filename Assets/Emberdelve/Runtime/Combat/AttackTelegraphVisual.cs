@@ -95,6 +95,18 @@ namespace Emberdelve.Combat
             _renderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
         }
 
+        /// <summary>Redraws the wedge for another yaw range in place (no new object); a no-op when the range is unchanged.</summary>
+        public void SetWedge(float minYawDegrees, float maxYawDegrees)
+        {
+            if (_filter == null) return;
+            if (Mathf.Approximately(minYawDegrees, MinYawDegrees) && Mathf.Approximately(maxYawDegrees, MaxYawDegrees)) return;
+            MinYawDegrees = minYawDegrees;
+            MaxYawDegrees = maxYawDegrees;
+            if (_mesh != null) Destroy(_mesh);
+            _mesh = BuildWedge(minYawDegrees, maxYawDegrees);
+            _filter.sharedMesh = _mesh;
+        }
+
         /// <summary>Drives the wedge from the enemy's windup state every frame.</summary>
         public void SetState(bool active, float progress, Vector3 flatDirection, float length, bool whiffed)
         {

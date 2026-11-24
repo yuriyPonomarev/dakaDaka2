@@ -1,0 +1,88 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cb55b4f173a010344bfb125cbedb5e60, type: 3}
+  m_Name: Pattern_ClawOverhead
+  m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.SwingPatternData
+  patternId: claw_overhead
+  kind: 2
+  windupTime: 0.1
+  activeTime: 0.25
+  recoveryTime: 0.4
+  wallRecoilTime: 0.3
+  damageMultiplier: 1
+  impactPowerScale: 1.2
+  windupMoveMultiplier: 0.85
+  activeMoveMultiplier: 0.7
+  recoveryMoveMultiplier: 0.85
+  maxTargets: 2
+  reachScale: 1
+  reachInset: 0.7220006
+  sweepRadius: 0.16
+  contactWindow: 0.02
+  trailMaterial: {fileID: 0}
+  restBase: {x: 0.5283891, y: -0.120361686, z: -0.48773834}
+  restYaw: 26.873802
+  restPitch: 51.369476
+  restRoll: 0
+  keys:
+  - t: 0
+    basePos: {x: 0.21988282, y: 0.36243057, z: 0.14615011}
+    bladeYaw: -0.0058259866
+    bladePitch: -69.992294
+  - t: 0.083333336
+    basePos: {x: 0.21791592, y: 0.35749662, z: 0.15278774}
+    bladeYaw: 0.0049588573
+    bladePitch: -68.268364
+  - t: 0.16666667
+    basePos: {x: 0.21239714, y: 0.34573567, z: 0.17294662}
+    bladeYaw: -0.027176153
+    bladePitch: -63.360523
+  - t: 0.25
+    basePos: {x: 0.20363188, y: 0.33285224, z: 0.20758909}
+    bladeYaw: 0.009865332
+    bladePitch: -55.781746
+  - t: 0.33333334
+    basePos: {x: 0.19181566, y: 0.3189547, z: 0.26040682}
+    bladeYaw: -0.0006021969
+    bladePitch: -45.9291
+  - t: 0.41666666
+    basePos: {x: 0.1780254, y: 0.29616022, z: 0.3309561}
+    bladeYaw: 0.025448442
+    bladePitch: -34.297558
+  - t: 0.5
+    basePos: {x: 0.16142175, y: 0.24820232, z: 0.41035727}
+    bladeYaw: -0.09521806
+    bladePitch: -21.0738
+  - t: 0.5833333
+    basePos: {x: 0.14700244, y: 0.17008197, z: 0.47160977}
+    bladeYaw: 0.05262223
+    bladePitch: -7.3649306
+  - t: 0.6666667
+    basePos: {x: 0.12996009, y: 0.06257999, z: 0.48784348}
+    bladeYaw: -0.0027061403
+    bladePitch: 7.039815
+  - t: 0.75
+    basePos: {x: 0.113527626, y: -0.04855311, z: 0.47438738}
+    bladeYaw: 0.0008431887
+    bladePitch: 21.406122
+  - t: 0.8333333
+    basePos: {x: 0.0973954, y: -0.15190864, z: 0.44287372}
+    bladeYaw: -0.015331128
+    bladePitch: 35.31785
+  - t: 0.9166667
+    basePos: {x: 0.082578346, y: -0.2420581, z: 0.39885706}
+    bladeYaw: 0.001944161
+    bladePitch: 48.33833
+  - t: 1
+    basePos: {x: 0.070551485, y: -0.30838257, z: 0.35353982}
+    bladeYaw: -0.0020841593
+    bladePitch: 58.89511
