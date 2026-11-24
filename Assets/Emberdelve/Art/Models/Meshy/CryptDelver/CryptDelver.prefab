@@ -50,11 +50,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -7092291942939365847, guid: c3f3333dbe743c348a500c860f7cc32c, type: 3}
       propertyPath: m_LocalRotation.x
-      value: -0.08162052
+      value: -0.08162054
       objectReference: {fileID: 0}
     - target: {fileID: -7092291942939365847, guid: c3f3333dbe743c348a500c860f7cc32c, type: 3}
       propertyPath: m_LocalRotation.z
-      value: -0.062263727
+      value: -0.062263735
       objectReference: {fileID: 0}
     - target: {fileID: -6830911681308609851, guid: c3f3333dbe743c348a500c860f7cc32c, type: 3}
       propertyPath: m_LocalRotation.x
@@ -83,5 +83,27 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: c3f3333dbe743c348a500c860f7cc32c, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 5647351897594247940}
   m_SourcePrefab: {fileID: 100100000, guid: c3f3333dbe743c348a500c860f7cc32c, type: 3}
+--- !u!1 &3204368771788804463 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: c3f3333dbe743c348a500c860f7cc32c, type: 3}
+  m_PrefabInstance: {fileID: 2358018934556240958}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &5647351897594247940
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3204368771788804463}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a6f3654e90afabc40a281f682b422a86, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.AI.LocomotionStrides
+  walk: 1.11
+  run: 4.21

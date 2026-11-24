@@ -205,11 +205,33 @@ namespace Emberdelve.AI
         public uint DamageSequence { get; private set; }
         public float WindupSeconds => data != null ? Mathf.Clamp(data.attackWindup, 0f, 10f) : 0f;
 
+        /// <summary>A bowman: its attack weapon is ranged, so it draws and looses arrows through the projectile authority instead of swinging.</summary>
+        public bool IsArcher => data != null && data.IsArcher;
+
+        /// <summary>Arrows this archer has loosed that the authority accepted.</summary>
+        public int ArrowsLoosed { get; private set; }
+
+        /// <summary>Why the last shot was refused (empty when it was accepted).</summary>
+        public string LastShotRejectReason { get; private set; } = string.Empty;
+
+        /// <summary>Half-width (degrees) of the archer's ground strip telegraph along the aim.</summary>
+        public const float ArcherStripHalfAngle = 2.5f;
+
+        // Archer state: where the draw is aimed (the target's chest at the end of the draw) and when the last arrow left the bow.
+        private Vector3 _aimPoint;
+        private bool _hasAimPoint;
+        private float _shotAt = -100f;
+        private int _drawTargetId;
+
+        /// <summary>The widest angle (degrees) between where the archer faces and where it looses; beyond it the shot is refused.</summary>
+        public const float ArcherMaxShotOffFacing = 40f;
+
         /// <summary>Accepted authority timing when swinging; authored first-step timing during the telegraph.</summary>
         public float AttackSwingSeconds
         {
             get
             {
+                if (IsArcher) return EnemyAttackPhase.ArcherReleaseSeconds + EnemyAttackPhase.ArcherRecoverySeconds;
                 if (_swingId != 0 && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) &&
                     authority.TryGetMeleeSwingStatus(_swingId, out MeleeSwingStatus status))
                     return status.Timing.Total;
@@ -226,6 +248,7 @@ namespace Emberdelve.AI
             get
             {
                 if (IsDead) return default;
+                if (IsArcher) return ArcherPresentation();
                 float telegraph = Mathf.Max(0.05f, WindupSeconds);
                 if (_swingId != 0 && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) &&
                     authority.TryGetMeleeSwingStatus(_swingId, out MeleeSwingStatus status) && !status.Finished)
@@ -328,6 +351,15 @@ namespace Emberdelve.AI
         public bool TryGetAimPose(out Vector3 eye, out float yawDegrees, out float pitchDegrees)
         {
             eye = AttackOrigin;
+            if (IsArcher && _hasAimPoint)
+            {
+                // The bow is aimed at the target's chest as seen at the end of the draw, pitched up for the arrow's drop.
+                Vector3 toAim = _aimPoint - eye;
+                yawDegrees = Mathf.Atan2(toAim.x, toAim.z) * Mathf.Rad2Deg;
+                WeaponData bow = data.attackWeapon;
+                TryBallisticPitch(eye, _aimPoint, bow != null ? bow.projectileSpeed : 30f, ArrowGravity(bow), out pitchDegrees);
+                return true;
+            }
             Vector3 direction = _swingLatched ? _latchedDirection : TelegraphDirection();
             yawDegrees = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
             if (UsesCinderClub) yawDegrees = Mathf.DeltaAngle(0f, yawDegrees + EnemyAttackPhase.ClubAimYaw);
@@ -422,7 +454,7 @@ namespace Emberdelve.AI
 
             // D1c4: the telegraph is the ground projection of the swing pattern (its yaw range at its effective reach). A weapon
             // without a pattern cannot attack any more (the arc-less claw path is closed for pose providers); warn once.
-            if (AttackPatternAt(0) == null)
+            if (!IsArcher && AttackPatternAt(0) == null)
                 Debug.LogWarning("[EnemyAgent] " + data.displayName + ": the attack weapon has no swing pattern, so this monster cannot attack.", this);
             ApplyTelegraph(0);
             IsRuntimeInitialized = true;
@@ -437,7 +469,12 @@ namespace Emberdelve.AI
         {
             _telegraphVariant = variant;
             float minYaw, maxYaw;
-            if (UsesCinderClub || AttackPatternAt(variant) == null)
+            if (IsArcher)
+            {
+                // An archer warns with a narrow strip along its aim (its length follows the target), lit through the draw.
+                minYaw = -ArcherStripHalfAngle; maxYaw = ArcherStripHalfAngle;
+            }
+            else if (UsesCinderClub || AttackPatternAt(variant) == null)
             {
                 float half = Mathf.Clamp(data.attackTelegraphCone, 40f, 200f) * 0.5f;
                 minYaw = -half; maxYaw = half;
@@ -645,7 +682,22 @@ namespace Emberdelve.AI
 
             // D1c4: the windup was the telegraph; its end begins the authority's swept swing along the committed direction.
             // Whether it lands is the sweep's business (arc, reach, walls), not a wedge check made here.
-            if (order.RequestAttack && target != null) TryBeginAttack(TelegraphDirection(), out _);
+            if (IsArcher)
+            {
+                // The draw belongs to the target it started on: it tracks that target, and the arrow flies at where its chest was when the
+                // string is released. If the brain switched targets mid-draw (an aggressor), the release looses nothing.
+                int targetId = target != null ? target.CombatId : 0;
+                if (windingNow && _drawTargetId == 0) _drawTargetId = targetId;
+                bool drawnOnThis = target != null && targetId == _drawTargetId;
+                if ((windingNow || order.RequestAttack) && drawnOnThis) { _aimPoint = order.FaceTowards; _hasAimPoint = true; }
+                if (order.RequestAttack && target != null)
+                {
+                    if (drawnOnThis) TryShootArrow(out _);
+                    else LastShotRejectReason = "the target changed during the draw";
+                }
+                if (!windingNow) _drawTargetId = 0;
+            }
+            else if (order.RequestAttack && target != null) TryBeginAttack(TelegraphDirection(), out _);
 
             RotateTowards(order.FaceTowards, dt);
 
@@ -808,6 +860,12 @@ namespace Emberdelve.AI
 
             // The wedge stays lit through the windup and the swing's own windup and active phases, then flashes when the swing found nothing.
             bool striking = _swingId != 0 && _swingPhase != SwingPhase.Recovery;
+            if (IsArcher)
+            {
+                float length = _hasAimPoint ? new Vector2(_aimPoint.x - transform.position.x, _aimPoint.z - transform.position.z).magnitude : 0f;
+                _telegraph.SetState(winding && _hasAimPoint, progress, TelegraphDirection(), Mathf.Clamp(length, 1f, 40f), false);
+                return;
+            }
             _telegraph.SetState(winding || striking || whiffed,
                 winding ? progress : 1f,
                 _swingLatched ? _latchedDirection : TelegraphDirection(),
@@ -872,6 +930,91 @@ namespace Emberdelve.AI
         /// pose, the weapon and the pattern are the agent's own and the authority validates everything (alive, weapon in hand,
         /// cooldown on its clock, no swing running, aim consistent); nothing about hits or damage is decided here.
         /// </summary>
+        // ------------------------------------------------------------------ archer (ranged undead)
+
+        /// <summary>The archer's presentation clock: phase 1 = the brain's draw (windup), 2 = the release, 3 = lowering the bow.</summary>
+        private EnemyAttackPhase ArcherPresentation()
+        {
+            if (_brain != null && _brain.IsWindingUp)
+            {
+                float windup = Mathf.Max(0.05f, WindupSeconds);
+                return new EnemyAttackPhase(1, windup - _brain.WindupRemaining, windup);
+            }
+            float since = Time.time - _shotAt;
+            if (since >= 0f && since < EnemyAttackPhase.ArcherReleaseSeconds)
+                return new EnemyAttackPhase(2, since, EnemyAttackPhase.ArcherReleaseSeconds);
+            since -= EnemyAttackPhase.ArcherReleaseSeconds;
+            if (since >= 0f && since < EnemyAttackPhase.ArcherRecoverySeconds)
+                return new EnemyAttackPhase(3, since, EnemyAttackPhase.ArcherRecoverySeconds);
+            return default;
+        }
+
+        /// <summary>The gravity the authority will fly this bow's arrow with (zero when it simulates straight flights).</summary>
+        private static float ArrowGravity(WeaponData bow)
+        {
+            if (bow == null) return 0f;
+            if (GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) && authority is LocalCombatAuthority local && !local.SimulateBallistics)
+                return 0f;
+            return Mathf.Clamp(bow.projectileGravity, 0f, 100f);
+        }
+
+        /// <summary>
+        /// Pitch (degrees, positive down, the aim-pose convention) of the flatter launch angle that carries a projectile of
+        /// <paramref name="speed"/> under <paramref name="gravity"/> from <paramref name="from"/> through <paramref name="to"/>. False when the
+        /// point is out of ballistic reach (the pitch is then the straight line, which falls short).
+        /// </summary>
+        public static bool TryBallisticPitch(Vector3 from, Vector3 to, float speed, float gravity, out float pitchDegrees)
+        {
+            Vector3 delta = to - from;
+            float dx = new Vector2(delta.x, delta.z).magnitude;
+            float dy = delta.y;
+            float straight = -Mathf.Atan2(dy, Mathf.Max(dx, 1e-4f)) * Mathf.Rad2Deg;
+            if (gravity <= 1e-4f || dx < 0.05f || speed <= 0.1f) { pitchDegrees = straight; return true; }
+            float v2 = speed * speed;
+            float discriminant = v2 * v2 - gravity * (gravity * dx * dx + 2f * dy * v2);
+            if (discriminant < 0f) { pitchDegrees = straight; return false; }
+            float tangent = (v2 - Mathf.Sqrt(discriminant)) / (gravity * dx);
+            pitchDegrees = -Mathf.Atan(tangent) * Mathf.Rad2Deg;
+            return true;
+        }
+
+        /// <summary>
+        /// Looses one arrow at the aim point through the authority (the same validated <see cref="ICombatAuthority.LaunchProjectile"/> a player's
+        /// bow uses: alive, ranged weapon in hand, cooldown on the authority clock, origin at this monster's eye, direction equal to its own aim
+        /// pose, muzzle not inside a wall). The flight, hit location, shields and walls are the authority's; nothing is decided here.
+        /// </summary>
+        public bool TryShootArrow(out string reason)
+        {
+            reason = string.Empty;
+            if (IsDead) { reason = "dead"; return false; }
+            WeaponData bow = ActiveWeapon;
+            if (bow == null || !bow.IsRanged) { reason = "no ranged weapon in hand"; return false; }
+            if (!_hasAimPoint) { reason = "no aim point"; return false; }
+            if (!GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)) { reason = "no combat authority"; return false; }
+            if (!TryGetAimPose(out Vector3 eye, out float yaw, out float pitch)) { reason = "no aim pose"; return false; }
+
+            Vector3 facing = transform.forward;
+            if (Mathf.Abs(Mathf.DeltaAngle(Mathf.Atan2(facing.x, facing.z) * Mathf.Rad2Deg, yaw)) > ArcherMaxShotOffFacing)
+            { reason = "the aim is not in front of the archer"; LastShotRejectReason = reason; return false; }
+
+            Vector3 direction = Quaternion.Euler(pitch, yaw, 0f) * Vector3.forward;
+            int sequence = CombatRegistry.NextSequence(_combatId);
+            AttackIntent intent = new AttackIntent(_combatId, Kind, bow, 1f, eye, direction, Mathf.Max(1f, bow.rangedRange), sequence, Time.time);
+            if (!authority.LaunchProjectile(intent))
+            {
+                reason = authority is LocalCombatAuthority local && !string.IsNullOrEmpty(local.LastAttackRejectReason)
+                    ? local.LastAttackRejectReason : "the authority refused the arrow";
+                LastShotRejectReason = reason;
+                return false;
+            }
+
+            _shotAt = Time.time;
+            ArrowsLoosed++;
+            SwingsBegun++;
+            LastShotRejectReason = string.Empty;
+            return true;
+        }
+
         public bool TryBeginAttack(Vector3 flatDirection, out string reason)
         {
             reason = string.Empty;

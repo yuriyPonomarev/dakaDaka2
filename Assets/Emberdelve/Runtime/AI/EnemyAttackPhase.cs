@@ -57,6 +57,57 @@ namespace Emberdelve.AI
 
         public static string StateName(int variant) => variant == OverheadVariant ? OverheadState : DiagonalState;
 
+        // The archer's bow clip (EmberdelveEnemyArcherClip), played in the archer controller's "Attack" state, in normalized clip time: the bow
+        // comes up and the right hand sets the string until ArcherDrawStart, the string is drawn to the cheek by ArcherDrawEnd (held there for the
+        // rest of the brain's windup: the visible telegraph), released ArcherDrawEnd..ArcherReleaseEnd, and the bow lowered by ArcherRecoveryEnd.
+        public const float ArcherDrawStart = 0.20f;
+        public const float ArcherDrawEnd = 0.45f;
+        public const float ArcherReleaseEnd = 0.50f;
+        public const float ArcherRecoveryEnd = 0.92f;
+
+        /// <summary>Seconds of the windup spent raising and drawing; a longer windup holds the full draw for the remainder.</summary>
+        public const float ArcherDrawSeconds = 0.75f;
+
+        /// <summary>Presentation seconds of the release (phase 2) and of lowering the bow (phase 3) after the server launched the arrow.</summary>
+        public const float ArcherReleaseSeconds = 0.08f;
+        public const float ArcherRecoverySeconds = 0.6f;
+
+        /// <summary>Normalized time in the bow clip for this phase (archers only; the melee windows above are untouched).</summary>
+        public float ArcherNormalizedTime(float age = 0f)
+        {
+            float t = Elapsed + Mathf.Max(0f, age);
+            switch (Phase)
+            {
+                case 1: return Mathf.Lerp(0f, ArcherDrawEnd, Mathf.Clamp01(t / Mathf.Max(0.05f, Mathf.Min(ArcherDrawSeconds, Duration))));
+                case 2: return Mathf.Lerp(ArcherDrawEnd, ArcherReleaseEnd, Mathf.Clamp01(t / Mathf.Max(0.02f, Duration)));
+                case 3: return Mathf.Lerp(ArcherReleaseEnd, ArcherRecoveryEnd, Mathf.Clamp01(t / Mathf.Max(0.02f, Duration)));
+                default: return 0f;
+            }
+        }
+
+        /// <summary>End of the bow clip's hold after the release; the bow is lowered from here to ArcherRecoveryEnd.</summary>
+        public const float ArcherHoldEnd = 0.62f;
+
+        /// <summary>How far the bow is raised from its carry pose to the shooting grip (0..1) at a normalized time of the bow clip.</summary>
+        public static float ArcherBowRaise(float normalized)
+        {
+            float x;
+            if (normalized <= 0f) return 0f;
+            if (normalized <= ArcherDrawStart) x = normalized / ArcherDrawStart;
+            else if (normalized <= ArcherHoldEnd) return 1f;
+            else x = 1f - Mathf.Clamp01((normalized - ArcherHoldEnd) / (ArcherRecoveryEnd - ArcherHoldEnd));
+            x = Mathf.Clamp01(x);
+            return x * x * (3f - 2f * x);
+        }
+
+        /// <summary>How far the bow string is drawn (0..1) at a normalized time of the bow clip: pulled from ArcherDrawStart to ArcherDrawEnd, slack after the release.</summary>
+        public static float ArcherBowDraw(float normalized)
+        {
+            if (normalized <= ArcherDrawStart || normalized > ArcherDrawEnd + 0.005f) return 0f;
+            float x = Mathf.Clamp01((normalized - ArcherDrawStart) / (ArcherDrawEnd - ArcherDrawStart));
+            return x * x * (3f - 2f * x);
+        }
+
         /// <summary>Sweep window (normalized clip time) of a sword attack variant.</summary>
         public static void SweepWindow(int variant, out float start, out float end)
         {

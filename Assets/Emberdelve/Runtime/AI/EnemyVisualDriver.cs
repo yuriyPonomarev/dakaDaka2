@@ -46,6 +46,12 @@ namespace Emberdelve.AI
         private float _overheadClipLength = 1f;
         private bool _hasOverhead;
         private int _phaseVariant;
+        private EnemyBowRig _bowRig;
+        private LocomotionStrides _strides;
+        private Vector3 _velocity;
+        private float _bodyTurn;
+        private int _locoScaleHash;
+        private bool _hasLocoScale;
         private bool _dead;
         private bool _hasParameters;
         private int _speedHash, _attackSpeedHash, _attackHash, _hitHash, _deadHash;
@@ -76,6 +82,12 @@ namespace Emberdelve.AI
                 CacheAttackClipLength();
                 _hasOverhead = animator.runtimeAnimatorController != null && animator.HasState(0, Animator.StringToHash(EnemyAttackPhase.OverheadState));
             }
+            _bowRig = GetComponent<EnemyBowRig>();
+            _strides = GetComponent<LocomotionStrides>();
+            _locoScaleHash = Animator.StringToHash(LocomotionGait.ScaleParameter);
+            if (animator != null)
+                foreach (AnimatorControllerParameter p in animator.parameters)
+                    if (p.nameHash == _locoScaleHash && p.type == AnimatorControllerParameterType.Float) _hasLocoScale = true;
         }
 
         private void Start()
@@ -151,12 +163,22 @@ namespace Emberdelve.AI
             float raw = delta.magnitude / dt;
             float blend = 1f - Mathf.Exp(-dt / Mathf.Max(0.01f, speedSmoothing));
             _speed = Mathf.Lerp(_speed, raw, blend);
+            _velocity = Vector3.Lerp(_velocity, delta / dt, blend);
             animator.SetFloat(_speedHash, _speed);
 
             EnemyAttackPhase phase = _agent.AttackPresentation;
+            ApplyGait(phase.Phase == 0, dt);
+            bool archer = _agent.IsArcher;
             if (phase.Phase == 2 && _soundPhase != 2)
-                Emberdelve.Feedback.WorldAudio.PlayAttached(_agent.UsesCinderClub ? Emberdelve.Feedback.WorldSound.BluntSwing : Emberdelve.Feedback.WorldSound.Swing, _agent.transform, Vector3.up, .8f);
+                Emberdelve.Feedback.WorldAudio.PlayAttached(archer ? Emberdelve.Feedback.WorldSound.Bow :
+                    _agent.UsesCinderClub ? Emberdelve.Feedback.WorldSound.BluntSwing : Emberdelve.Feedback.WorldSound.Swing, _agent.transform, Vector3.up, .8f);
             _soundPhase = phase.Phase;
+            if (_bowRig != null)
+            {
+                float bowTime = archer ? phase.ArcherNormalizedTime() : 0f;
+                _bowRig.SetRaise(archer ? EnemyAttackPhase.ArcherBowRaise(bowTime) : 0f);
+                _bowRig.SetDraw(archer && phase.Phase == 1 ? EnemyAttackPhase.ArcherBowDraw(bowTime) : 0f);
+            }
             if (phase.Phase != 0)
             {
                 // Recovery hands the body back to idle with a long blend instead of holding the lunge and snapping at its end.
@@ -175,12 +197,13 @@ namespace Emberdelve.AI
                 }
 
                 // The attack the server brain chose for this blow (the overhead has its own clip and state).
-                int variant = !_agent.UsesCinderClub && _hasOverhead && _agent.AttackVariantIndex == EnemyAttackPhase.OverheadVariant
+                int variant = !archer && !_agent.UsesCinderClub && _hasOverhead && _agent.AttackVariantIndex == EnemyAttackPhase.OverheadVariant
                     ? EnemyAttackPhase.OverheadVariant : EnemyAttackPhase.DiagonalVariant;
                 if (_phaseDriven) variant = _phaseVariant;
                 string stateName = EnemyAttackPhase.StateName(variant);
                 float clipLength = variant == EnemyAttackPhase.OverheadVariant ? _overheadClipLength : _attackClipLength;
-                float target = phase.NormalizedTime(club: _agent.UsesCinderClub, variant: variant);
+                // The archer's bow clip has its own timeline (draw held through the windup, release, lower).
+                float target = archer ? phase.ArcherNormalizedTime() : phase.NormalizedTime(club: _agent.UsesCinderClub, variant: variant);
                 if (!_phaseDriven)
                 {
                     _phaseVariant = variant;
@@ -225,6 +248,21 @@ namespace Emberdelve.AI
                 _phaseDriven = false;
                 _releasing = false;
             }
+        }
+
+        /// <summary>
+        /// Speed-matched locomotion: the walk/run loop plays at the rate of the measured ground speed (backward for a retreat), and the body turns
+        /// a little toward a sideways move. The body turn eases back to the facing while an attack is presented (the attack is aimed by the root).
+        /// </summary>
+        private void ApplyGait(bool free, float dt)
+        {
+            bool running = animator.GetCurrentAnimatorStateInfo(0).IsName("Run");
+            float stride = LocomotionStrides.StrideOf(this, _strides, running);
+            LocomotionGait.Resolve(_velocity, _agent.transform.forward, stride, 1f, out float rate, out float turn);
+            if (_hasLocoScale) animator.SetFloat(_locoScaleHash, rate);
+            float target = free ? turn : 0f;
+            _bodyTurn = Mathf.Lerp(_bodyTurn, target, 1f - Mathf.Exp(-dt / 0.15f));
+            transform.localRotation = Quaternion.Euler(0f, _bodyTurn, 0f);
         }
 
         public static float AttackPlaybackSeconds(bool fromWindup, float telegraphSeconds, float swingSeconds) =>

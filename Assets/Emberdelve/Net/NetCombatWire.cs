@@ -298,10 +298,12 @@ namespace Emberdelve.Net
     /// <summary>Versioned server-authored enemy presentation state. Gameplay decisions and health stay exclusively on the server.</summary>
     public struct EnemyPresentationWire : INetworkSerializable
     {
-        public const byte CurrentVersion = 5;
+        public const byte CurrentVersion = 6;   // v6: the skeleton archer visual kind
         /// <summary>Highest attack variant a client will animate (0 = diagonal chop, 1 = vertical overhead).</summary>
         public const byte MaxAttackVariant = 1;
         public const byte CinderWardenKind = 4;
+        public const byte ArcherKind = 5;
+        public const byte MaxVisualKind = ArcherKind;
         public const byte WindingUpFlag = 1;
         public const byte DeadFlag = 2;
         public const byte DormantFlag = 4;
@@ -331,10 +333,10 @@ namespace Emberdelve.Net
         public bool IsDead => (Flags & DeadFlag) != 0;
         public static string NameOfVisual(byte kind) => kind switch
         {
-            0 => "Minion", 1 => "Rogue", 2 => "Warrior", 3 => "Mage", CinderWardenKind => "CinderWarden", _ => "Unknown"
+            0 => "Minion", 1 => "Rogue", 2 => "Warrior", 3 => "Mage", CinderWardenKind => "CinderWarden", ArcherKind => "Archer", _ => "Unknown"
         };
         public string VisualKindName => NameOfVisual(VisualKind);
-        public bool IsValid => Version == CurrentVersion && Enemy > 0 && VisualKind <= CinderWardenKind && (Flags & ~KnownFlags) == 0 &&
+        public bool IsValid => Version == CurrentVersion && Enemy > 0 && VisualKind <= MaxVisualKind && (Flags & ~KnownFlags) == 0 &&
                                !((IsDormant || IsWaking) && (IsDead || IsWindingUp || AttackPhase != 0)) && !(IsDormant && IsWaking) &&
                                AttackVariant <= MaxAttackVariant && float.IsFinite(WakeElapsed) && WakeElapsed >= 0f && WakeElapsed <= 5f &&
                                !float.IsNaN(WindupSeconds) && !float.IsInfinity(WindupSeconds) && WindupSeconds >= 0f && WindupSeconds <= 10f &&

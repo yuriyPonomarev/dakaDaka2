@@ -210,9 +210,10 @@ namespace Emberdelve.Net
 
         private static string F(float value) { return value.ToString("F1", CultureInfo.InvariantCulture); }
 
-        private static GameObject LoadVisual(byte visualKind)
+        /// <summary>The authored visual a proxy of <paramref name="visualKind"/> wears (an unknown kind falls back to the Minion).</summary>
+        public static GameObject LoadVisual(byte visualKind)
         {
-            string name = EnemyPresentationWire.NameOfVisual(visualKind <= EnemyPresentationWire.CinderWardenKind ? visualKind : (byte)0);
+            string name = EnemyPresentationWire.NameOfVisual(visualKind <= EnemyPresentationWire.MaxVisualKind ? visualKind : (byte)0);
             return Resources.Load<GameObject>(VisualResourcePath + name);
         }
 
@@ -248,6 +249,11 @@ namespace Emberdelve.Net
         private Vector3 _previousSnapshotPosition;
         private float _previousSnapshotTime;
         private float _snapshotSpeed;
+        private Vector3 _snapshotVelocity, _visualVelocity;
+        private float _bodyTurn;
+        private LocomotionStrides _strides;
+        private bool _hasLocoScale;
+        private static readonly int LocoScaleHash = Animator.StringToHash(LocomotionGait.ScaleParameter);
         private float _visualSpeed;
         // Rebound once during CreateProxy so Entry can retain presentation edges received before the first pose.
         private EnemyHitPresentationQueue _pendingHits = new EnemyHitPresentationQueue();
@@ -266,6 +272,8 @@ namespace Emberdelve.Net
         private int _attackVariant;
         private int _overheadHash;
         private int _lastAnimatorStateHash;
+        private EnemyBowRig _bowRig;
+        private bool IsArcherVisual => _visualKind == EnemyPresentationWire.ArcherKind;
 
         public void SetIdentity(int enemyId, byte visualKind)
         {
@@ -318,6 +326,12 @@ namespace Emberdelve.Net
             Transform blood = visual.transform.Find("BloodHit");
             if (blood != null) Object.Destroy(blood.gameObject);
             SetVisualAnimator(visual.GetComponentInChildren<Animator>());
+            _bowRig = visual.GetComponent<EnemyBowRig>();
+            _strides = visual.GetComponent<LocomotionStrides>();
+            _hasLocoScale = false;
+            if (_animator != null)
+                foreach (AnimatorControllerParameter p in _animator.parameters)
+                    if (p.nameHash == LocoScaleHash && p.type == AnimatorControllerParameterType.Float) _hasLocoScale = true;
             if (wasDead) SetDead();
         }
 
@@ -326,7 +340,8 @@ namespace Emberdelve.Net
             if (!state.IsValid || _animator == null) return;
             var footsteps = GetComponent<Emberdelve.Feedback.WorldFootsteps>();
             if (footsteps != null) footsteps.Audible = !state.IsDead && !state.IsDormant && !state.IsWaking;
-            if (!initial && !state.IsDead && state.AttackPhase == 2 && _attackPhase.Phase != 2)
+            // An archer's release is heard from its arrow's shot event (NetCombatFx.OnShot); the proxy only voices melee swings.
+            if (!initial && !state.IsDead && state.AttackPhase == 2 && _attackPhase.Phase != 2 && !IsArcherVisual)
                 Emberdelve.Feedback.WorldAudio.PlayAttached(Emberdelve.Feedback.WorldSound.Swing, transform, Vector3.up, .8f);
             bool starting = state.AttackPhase != 0 && (_attackPhase.Phase == 0 || initial);
             _attackPhase = new EnemyAttackPhase(state.AttackPhase, state.PhaseElapsed, state.PhaseDuration, state.RecoilStart);
@@ -375,6 +390,18 @@ namespace Emberdelve.Net
                 if (HasParameter(HitHash, AnimatorControllerParameterType.Trigger)) _animator.ResetTrigger(HitHash);
                 _animator.SetFloat(AttackSpeedHash, 0f);
                 // Extrapolate within this phase only. Never predict damage/recovery before the authority announces it.
+                if (IsArcherVisual)
+                {
+                    // The bow clip: draw held through the windup, release, lower; the bow rig follows the same clock.
+                    float bowTime = _attackPhase.ArcherNormalizedTime(age);
+                    _animator.Play(EnemyAttackPhase.DiagonalState, 0, bowTime);
+                    if (_bowRig != null)
+                    {
+                        _bowRig.SetRaise(EnemyAttackPhase.ArcherBowRaise(bowTime));
+                        _bowRig.SetDraw(_attackPhase.Phase == 1 ? EnemyAttackPhase.ArcherBowDraw(bowTime) : 0f);
+                    }
+                    return;
+                }
                 bool club = _visualKind == EnemyPresentationWire.CinderWardenKind;
                 int variant = !club && _attackVariant == EnemyAttackPhase.OverheadVariant && HasOverheadState() ? EnemyAttackPhase.OverheadVariant : 0;
                 _animator.Play(EnemyAttackPhase.StateName(variant), 0, _attackPhase.NormalizedTime(age, club, variant));
@@ -384,6 +411,7 @@ namespace Emberdelve.Net
                 _phaseDriven = false;
                 _animator.SetFloat(AttackSpeedHash, 1f);
                 _animator.CrossFadeInFixedTime("Idle", 0.08f);
+                if (_bowRig != null) { _bowRig.SetRaise(0f); _bowRig.SetDraw(0f); }
             }
         }
 
@@ -447,6 +475,7 @@ namespace Emberdelve.Net
             _previousSnapshotTime = Time.unscaledTime;
             _snapshotSpeed = 0f;
             _visualSpeed = 0f;
+            _snapshotVelocity = _visualVelocity = Vector3.zero;
             transform.position = where;
             transform.rotation = Quaternion.Euler(0f, yaw, 0f);
         }
@@ -459,6 +488,7 @@ namespace Emberdelve.Net
             displacement.y = 0f;
             // Estimate locomotion from the authoritative position samples, not from eased render-frame motion.
             _snapshotSpeed = elapsed > 0.01f && elapsed <= 2f ? displacement.magnitude / elapsed : 0f;
+            _snapshotVelocity = elapsed > 0.01f && elapsed <= 2f ? displacement / elapsed : Vector3.zero;
             _previousSnapshotPosition = where;
             _previousSnapshotTime = now;
             _target = where;
@@ -482,10 +512,25 @@ namespace Emberdelve.Net
                 float requestedSpeed = Time.unscaledTime - _previousSnapshotTime <= StaleSnapshotSeconds ? _snapshotSpeed : 0f;
                 float blend = 1f - Mathf.Exp(-8f * Time.unscaledDeltaTime);
                 _visualSpeed = Mathf.Lerp(_visualSpeed, requestedSpeed, blend);
+                _visualVelocity = Vector3.Lerp(_visualVelocity, requestedSpeed > 0f ? _snapshotVelocity : Vector3.zero, blend);
                 _animator.SetFloat(SpeedHash, _visualSpeed < SpeedParameterCutoff ? 0f : _visualSpeed);
+                ApplyGait();
             }
             ApplyAttackClock();
             TryPlayPendingHit(_wasWindingUp, false);
+        }
+
+        /// <summary>Speed-matched locomotion on the proxy, the same rule as the server's visual driver (LocomotionGait).</summary>
+        private void ApplyGait()
+        {
+            bool running = _animator.GetCurrentAnimatorStateInfo(0).IsName("Run");
+            LocomotionGait.Resolve(_visualVelocity, transform.forward, LocomotionStrides.StrideOf(_animator, _strides, running), 1f,
+                out float rate, out float turn);
+            if (_hasLocoScale) _animator.SetFloat(LocoScaleHash, rate);
+            Transform visual = _animator.transform.parent != null && _animator.transform.parent != transform ? _animator.transform.parent : _animator.transform;
+            float target = _attackPhase.Phase == 0 ? turn : 0f;
+            _bodyTurn = Mathf.Lerp(_bodyTurn, target, 1f - Mathf.Exp(-Time.deltaTime / 0.15f));
+            visual.localRotation = Quaternion.Euler(0f, _bodyTurn, 0f);
         }
 
         private void LateUpdate()

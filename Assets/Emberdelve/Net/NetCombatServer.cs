@@ -467,7 +467,9 @@ namespace Emberdelve.Net
                  " charge=" + F(r.Charge) + " radius=" + F(r.Radius) + " length=" + F(r.Length));
 
             NetPlayerRig carrier = conn != null ? conn.NetRig : null;
-            if (carrier == null || !carrier.IsSpawned) return; // an enemy's arrow: not replicated (documented split)
+            // An enemy's arrow (the skeleton archer) goes out on any spawned player object: the RPC reaches every client.
+            if ((carrier == null || !carrier.IsSpawned) && IsEnemyInstigator(r.InstigatorId)) carrier = BroadcastCarrier();
+            if (carrier == null || !carrier.IsSpawned) return;
             try
             {
                 carrier.CombatShotRpc(new CombatShotWire
@@ -493,10 +495,13 @@ namespace Emberdelve.Net
             _log("combat-flight-end serial=" + end.Serial + " instigator=" + end.InstigatorId + " target=" + end.TargetId + " air=" + F(end.AirTime) +
                  " x=" + F(end.Position.x) + " y=" + F(end.Position.y) + " z=" + F(end.Position.z));
 
-            if (!_byCombatId.TryGetValue(end.InstigatorId, out Conn conn) || conn.NetRig == null || !conn.NetRig.IsSpawned) return;
+            _byCombatId.TryGetValue(end.InstigatorId, out Conn conn);
+            NetPlayerRig carrier = conn != null ? conn.NetRig : null;
+            if ((carrier == null || !carrier.IsSpawned) && IsEnemyInstigator(end.InstigatorId)) carrier = BroadcastCarrier();
+            if (carrier == null || !carrier.IsSpawned) return;
             try
             {
-                conn.NetRig.CombatFlightEndRpc(new CombatFlightEndWire
+                carrier.CombatFlightEndRpc(new CombatFlightEndWire
                 {
                     Serial = (uint)Mathf.Max(0, end.Serial),
                     X = end.Position.x, Y = end.Position.y, Z = end.Position.z,
@@ -504,6 +509,17 @@ namespace Emberdelve.Net
                 });
             }
             catch (Exception e) { _logError("combat flight event threw: " + e.Message); }
+        }
+
+        private static bool IsEnemyInstigator(int combatId) =>
+            CombatRegistry.TryGet(combatId, out ICombatEntity entity) && entity != null && entity.Kind == EntityKind.Enemy;
+
+        /// <summary>Any spawned player object; its ClientsAndHost RPCs carry world events that belong to no player (an enemy's arrow).</summary>
+        private NetPlayerRig BroadcastCarrier()
+        {
+            foreach (Conn c in _conns.Values)
+                if (c != null && c.NetRig != null && c.NetRig.IsSpawned) return c.NetRig;
+            return null;
         }
 
         private void OnHit(CombatHitReport r)
@@ -822,6 +838,7 @@ namespace Emberdelve.Net
             EnemyVisualDriver driver = agent.GetComponentInChildren<EnemyVisualDriver>(true);
             RuntimeAnimatorController controller = driver != null && driver.Animator != null ? driver.Animator.runtimeAnimatorController : null;
             string name = controller != null ? controller.name : string.Empty;
+            if (name.EndsWith("_Archer", StringComparison.Ordinal) || agent.IsArcher) return EnemyPresentationWire.ArcherKind;
             if (name.EndsWith("_Rogue", StringComparison.Ordinal)) return 1;
             if (name.EndsWith("_Warrior", StringComparison.Ordinal)) return 2;
             if (name.EndsWith("_Mage", StringComparison.Ordinal)) return 3;

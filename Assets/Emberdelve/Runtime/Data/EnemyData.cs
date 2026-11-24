@@ -16,7 +16,23 @@ namespace Emberdelve.Data
         public string displayName = "Hollow Servitor";
         public bool isElite = false;
         public bool IsCinderWarden => enemyId == CinderWardenId;
+        public const string ArcherVisual = "Archer";
+        /// <summary>A ranged undead: its attack weapon is a projectile weapon (a bow), so it keeps its distance and shoots instead of swinging.</summary>
+        public bool IsArcher => attackWeapon != null && attackWeapon.IsRanged;
         public float BodyScale => IsCinderWarden ? 1.50f : isElite ? 1.25f : 1f;
+
+        /// <summary>
+        /// The authored visual variant a monster of <paramref name="enemy"/> wears at spawn record <paramref name="spawnIndex"/>: the Cinder Warden's
+        /// own model, the Archer for a bowman, the Warrior for elites, and Minion / Rogue alternating for the rest so a room does not look cloned.
+        /// One source for the scene builder, the modular assembler and the floor content spawner.
+        /// </summary>
+        public static string VisualVariantFor(EnemyData enemy, int spawnIndex)
+        {
+            if (enemy != null && enemy.IsCinderWarden) return CinderWardenVisual;
+            if (enemy != null && enemy.IsArcher) return ArcherVisual;
+            if (enemy != null && enemy.isElite) return "Warrior";
+            return (spawnIndex & 1) == 0 ? "Minion" : "Rogue";
+        }
 
         [Header("Vitals")]
         public int maxHealth = 70;
@@ -31,6 +47,13 @@ namespace Emberdelve.Data
         [Tooltip("Total angle of the warned wedge. D1c4: this is also the yaw range of the attack weapon's swing pattern (the data build authors the pattern from it), so the telegraph is the ground projection of the swept swing that really lands. The pattern's timing (windup, active, recovery), reach and sweep radius are data on the pattern and the weapon, not here.")]
         [Range(40f, 200f)] public float attackTelegraphCone = 120f;
         public Color telegraphColor = new Color(1f, 0.32f, 0.18f, 1f);
+
+        [Header("Ranged (archers only)")]
+        [Tooltip("Preferred distance band (m). Closer than min the archer backs off or strafes; farther than max it advances.")]
+        public float rangedMinDistance = 6f;
+        public float rangedMaxDistance = 14f;
+        [Tooltip("Closer than this (m) the archer flees instead of drawing, unless it is cornered (then it shoots anyway).")]
+        public float rangedFleeDistance = 3.5f;
 
         [Header("Movement")]
         public float patrolSpeed = 1.05f;

@@ -213,6 +213,8 @@ namespace Emberdelve.AI
                 return TickMoveTo(self, _lastKnownPosition, _data.patrolSpeed);
             }
 
+            if (_data.IsArcher) return TickRangedChase(self, target, targetCenter, visible, now);
+
             float distance = DistanceXZ(self, targetCenter);
 
             if (distance <= _data.attackRange && visible && WithinMeleeHeight(self, targetCenter))
@@ -246,9 +248,13 @@ namespace Emberdelve.AI
         {
             if (target == null)
             {
+                // The target died or left: the windup ends with nothing delivered (it must not stay lit, or an archer stay drawn).
                 _state = EnemyState.Chase;
+                _windingUp = false;
                 return BrainOrder.Hold(self);
             }
+
+            if (_data.IsArcher) return TickRangedAttack(self, targetCenter, visible, dt);
 
             float distance = DistanceXZ(self, targetCenter);
 
@@ -297,6 +303,140 @@ namespace Emberdelve.AI
             }
 
             return faceOnly;
+        }
+
+        // ------------------------------------------------------------------ ranged (archer) tactics
+        // A bowman has no melee: it holds a distance band, needs a clear line to the target, draws (the windup is the visible
+        // telegraph: bow raised, string pulled) and releases when the draw ends. Close in, it backs off or strafes; cornered, it
+        // shoots anyway. Melee monsters never reach this code.
+
+        private float _strafeSign = 1f;
+        private float _strafeFlipAt;
+
+        /// <summary>True when the last retreat search found nowhere to go while the target was inside the flee distance.</summary>
+        public bool IsCornered { get; private set; }
+
+        public const float ArcherRetreatStep = 3f;
+
+        /// <summary>Seconds an archer keeps backing away from a target inside its flee distance before it draws at point blank anyway (a
+        /// faster player who follows it would otherwise keep it from ever shooting).</summary>
+        public const float ArcherFleeBudget = 1.5f;
+        private float _fleeSince = -1f;
+
+        private static readonly float[] RetreatAngles = { 0f, 35f, -35f, 70f, -70f, 110f, -110f };
+
+        private bool TryRetreatPoint(Vector3 self, Vector3 away, out Vector3 point)
+        {
+            away.y = 0f;
+            if (away.sqrMagnitude < 0.0001f) away = Vector3.back;
+            away.Normalize();
+            for (int i = 0; i < RetreatAngles.Length; i++)
+            {
+                Vector3 direction = Quaternion.Euler(0f, RetreatAngles[i], 0f) * away;
+                Vector3 candidate = self + direction * ArcherRetreatStep;
+                if (_nav != null && !_nav.IsWalkableWorld(candidate)) continue;
+                if (Physics.Raycast(self + Vector3.up * 0.6f, direction, ArcherRetreatStep + 0.4f, _levelMask, QueryTriggerInteraction.Ignore)) continue;
+                point = candidate;
+                return true;
+            }
+            point = self;
+            return false;
+        }
+
+        private bool TryStrafePoint(Vector3 self, Vector3 targetCenter, float now, out Vector3 point)
+        {
+            if (now >= _strafeFlipAt) { _strafeSign = -_strafeSign; _strafeFlipAt = now + 2.4f; }
+            Vector3 radial = self - targetCenter; radial.y = 0f;
+            if (radial.sqrMagnitude < 0.0001f) { point = self; return false; }
+            Vector3 side = Vector3.Cross(Vector3.up, radial.normalized) * _strafeSign;
+            for (int k = 0; k < 2; k++)
+            {
+                Vector3 candidate = self + side * 2.2f;
+                if ((_nav == null || _nav.IsWalkableWorld(candidate)) &&
+                    !Physics.Raycast(self + Vector3.up * 0.6f, side, 2.6f, _levelMask, QueryTriggerInteraction.Ignore)) { point = candidate; return true; }
+                side = -side; _strafeSign = -_strafeSign;
+            }
+            point = self;
+            return false;
+        }
+
+        private BrainOrder TickRangedChase(Vector3 self, ICombatEntity target, Vector3 targetCenter, bool visible, float now)
+        {
+            if (!visible && now - Mathf.Max(_lastSeenAt, _lastHeardAt) > _data.memoryDuration)
+            {
+                _state = EnemyState.Investigate;
+                _investigateUntil = now + Mathf.Max(0.5f, _data.investigateTime);
+                return TickMoveTo(self, _lastKnownPosition, _data.patrolSpeed);
+            }
+
+            float distance = DistanceXZ(self, targetCenter);
+            float maxRange = Mathf.Max(_data.rangedMinDistance + 1f, _data.rangedMaxDistance);
+
+            if (visible && distance <= maxRange)
+            {
+                bool tooClose = distance < _data.rangedFleeDistance;
+                bool canFlee = TryRetreatPoint(self, self - targetCenter, out Vector3 fleePoint);
+                if (tooClose && canFlee) { if (_fleeSince < 0f) _fleeSince = now; }
+                else _fleeSince = -1f;
+                bool fledTooLong = _fleeSince >= 0f && now - _fleeSince > ArcherFleeBudget;
+                IsCornered = tooClose && (!canFlee || fledTooLong);
+                if (_attackCooldownLeft <= 0f && (!tooClose || IsCornered))
+                {
+                    // Ready and clear: the draw starts on the next tick.
+                    _state = EnemyState.Attack;
+                    _windingUp = false;
+                    _attackConsumed = false;
+                    _windupLeft = 0f;
+                    return new BrainOrder(self, 0f, false, targetCenter);
+                }
+
+                if (distance < _data.rangedMinDistance && canFlee)
+                    return new BrainOrder(fleePoint, _data.chaseSpeed, false, targetCenter);
+                if (_attackCooldownLeft > 0f && TryStrafePoint(self, targetCenter, now, out Vector3 strafe))
+                    return new BrainOrder(strafe, _data.patrolSpeed * 1.4f, false, targetCenter);
+                return new BrainOrder(self, 0f, false, targetCenter);
+            }
+
+            IsCornered = false;
+            Vector3 destination = visible ? targetCenter : _lastKnownPosition;
+            BrainOrder move = TickMoveTo(self, destination, _data.chaseSpeed);
+            return new BrainOrder(move.MoveTo, move.Speed, false, targetCenter);
+        }
+
+        private BrainOrder TickRangedAttack(Vector3 self, Vector3 targetCenter, bool visible, float dt)
+        {
+            float distance = DistanceXZ(self, targetCenter);
+            float maxRange = Mathf.Max(_data.rangedMinDistance + 1f, _data.rangedMaxDistance);
+            BrainOrder faceOnly = new BrainOrder(self, 0f, false, targetCenter);
+
+            // Losing the line (or the range) breaks the draw; nothing is released.
+            if (!visible || distance > maxRange * 1.25f)
+            {
+                _state = EnemyState.Chase;
+                _windingUp = false;
+                return faceOnly;
+            }
+
+            if (!_windingUp)
+            {
+                if (_attackCooldownLeft > 0f) { _state = EnemyState.Chase; return faceOnly; }
+                _windingUp = true;
+                _windupLeft = Mathf.Max(0.05f, _data.attackWindup);
+                _attackConsumed = false;
+                _telegraphDirection = FlattenDirection(targetCenter - self);
+                return faceOnly;
+            }
+
+            _windupLeft -= dt;
+            _telegraphDirection = FlattenDirection(targetCenter - self);
+            if (_windupLeft > 0f) return faceOnly;
+
+            _windingUp = false;
+            _attackCooldownLeft = Mathf.Max(0.2f, _data.attackCooldown);
+            _state = EnemyState.Chase;
+            if (_attackConsumed) return faceOnly;
+            _attackConsumed = true;
+            return new BrainOrder(self, 0f, true, targetCenter);
         }
 
         private BrainOrder TickMoveTo(Vector3 self, Vector3 destination, float speed)

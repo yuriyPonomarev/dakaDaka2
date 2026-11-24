@@ -45,7 +45,8 @@ namespace Emberdelve.EditorTools
             }
             Color tint = name == "Warrior" ? new Color(0.58f, 0.53f, 0.44f) :
                 name == "Rogue" ? new Color(0.49f, 0.50f, 0.46f) :
-                name == "Mage" ? new Color(0.65f, 0.60f, 0.53f) : new Color(0.62f, 0.58f, 0.49f);
+                name == "Mage" ? new Color(0.65f, 0.60f, 0.53f) :
+                name == "Archer" ? new Color(0.52f, 0.52f, 0.47f) : new Color(0.62f, 0.58f, 0.49f);
             material.SetTexture("_BaseMap", AssetDatabase.LoadAssetAtPath<Texture2D>(TexturePath));
             material.SetColor("_BaseColor", tint);
             material.SetFloat("_Smoothness", 0.1f);

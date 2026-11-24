@@ -145,13 +145,13 @@ AnimatorState:
   m_IKOnFeet: 0
   m_WriteDefaultValues: 1
   m_Mirror: 0
-  m_SpeedParameterActive: 0
+  m_SpeedParameterActive: 1
   m_MirrorParameterActive: 0
   m_CycleOffsetParameterActive: 0
   m_TimeParameterActive: 0
   m_Motion: {fileID: -3667675768739571939, guid: 5c6cee3ca3e2f594d95b915625f738a5, type: 3}
   m_Tag: 
-  m_SpeedParameter: 
+  m_SpeedParameter: LocoScale
   m_MirrorParameter: 
   m_CycleOffsetParameter: 
   m_TimeParameter: 
@@ -241,6 +241,12 @@ AnimatorController:
   - m_Name: Dead
     m_Type: 4
     m_DefaultFloat: 0
+    m_DefaultInt: 0
+    m_DefaultBool: 0
+    m_Controller: {fileID: 9100000}
+  - m_Name: LocoScale
+    m_Type: 1
+    m_DefaultFloat: 1
     m_DefaultInt: 0
     m_DefaultBool: 0
     m_Controller: {fileID: 9100000}
@@ -521,13 +527,13 @@ AnimatorState:
   m_IKOnFeet: 0
   m_WriteDefaultValues: 1
   m_Mirror: 0
-  m_SpeedParameterActive: 0
+  m_SpeedParameterActive: 1
   m_MirrorParameterActive: 0
   m_CycleOffsetParameterActive: 0
   m_TimeParameterActive: 0
   m_Motion: {fileID: -1139191427167748907, guid: 5c6cee3ca3e2f594d95b915625f738a5, type: 3}
   m_Tag: 
-  m_SpeedParameter: 
+  m_SpeedParameter: LocoScale
   m_MirrorParameter: 
   m_CycleOffsetParameter: 
   m_TimeParameter: 

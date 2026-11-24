@@ -142,6 +142,7 @@ namespace Emberdelve.EditorTools
         private WeaponData _maul;
         private EnemyData _servitor;
         private EnemyData _warden;
+        private EnemyData _bowman;
 
         /// <summary>A stand-in player: the game's humanoid hit volumes, a guard that can break, and a status holder.</summary>
         private sealed class FakePlayer : ICombatEntity, IHitShapeProvider, IGuardBreakDefender, IStatusTarget
@@ -318,6 +319,8 @@ namespace Emberdelve.EditorTools
             _servitor = AssetDatabase.LoadAssetAtPath<EnemyData>(EmberdelvePaths.Data + "/Enemy_HollowServitor.asset");
             _warden = AssetDatabase.LoadAssetAtPath<EnemyData>(EmberdelvePaths.Data + "/Enemy_AshenWarden.asset");
             _navGrid = AssetDatabase.LoadAssetAtPath<NavGridData>(EmberdelvePaths.Data + "/EmberdelveNavGrid.asset");
+            _bowman = AssetDatabase.LoadAssetAtPath<EnemyData>(EmberdelvePaths.Data + "/Enemy_HollowBowman.asset");
+            Check(_bowman != null && _bowman.IsArcher, "the Hollow Bowman asset exists and carries a ranged weapon");
             Check(_claw != null && _maul != null && _servitor != null && _warden != null, "the claw, maul and both enemy assets are available");
             if (_claw == null || _maul == null || _servitor == null || _warden == null) yield break;
 
@@ -347,7 +350,9 @@ namespace Emberdelve.EditorTools
                 DeathMidSwing(),
                 StunMidSwing(),
                 MaulIsBlockedNotBroken(),
-                ClawIsBlocked()
+                ClawIsBlocked(),
+                ArcherShot(),
+                ArcherBlindBehindWall()
             };
 
             for (int i = 0; i < flows.Length; i++)
@@ -530,6 +535,65 @@ namespace Emberdelve.EditorTools
             Check(_authority.AcceptedCount == acceptedBefore + 1 && _authority.RejectedCount == rejectedBefore,
                 $"{label}: one accepted hit, nothing refused ({_authority.AcceptedCount - acceptedBefore} / {_authority.RejectedCount - rejectedBefore})");
             Check(!enemy.LastAttackWhiffed, $"{label}: a landed swing is not a whiff");
+        }
+
+        // ------------------------------------------------------------------------------------------------
+        // The skeleton archer: a real draw, a real arrow through the projectile authority, a real hit.
+        // ------------------------------------------------------------------------------------------------
+
+        private IEnumerator ArcherShot()
+        {
+            if (_bowman == null) yield break;
+            const string label = "archer";
+            FakePlayer player = NewPlayer(new Vector3(0f, 0f, 9f));
+            EnemyAgent archer = null;
+            yield return Spawn(_bowman, Vector3.zero, 0f, false, e => archer = e);
+
+            yield return WaitFor(() => archer.IsWindingUp, Timeout);
+            Check(archer.IsWindingUp, $"{label}: the archer notices the player at 9 m and draws");
+            Check(player.Received.Count == 0 && archer.ArrowsLoosed == 0, $"{label}: nothing has been loosed while the bow is drawn");
+            Check(archer.AttackPresentation.Phase == 1, $"{label}: the draw is presented as the anticipation phase");
+            AttackTelegraphVisual visual = archer.GetComponentInChildren<AttackTelegraphVisual>(true);
+            yield return null;
+            Check(visual != null && visual.gameObject.activeSelf, $"{label}: the aim strip is lit during the draw");
+            if (visual != null)
+            {
+                Near(EnemyAgent.ArcherStripHalfAngle, visual.HalfAngleDegrees, 1e-3f, $"{label}: the warning is a narrow strip along the aim");
+                Check(visual.LastLength > 7f && visual.LastLength < 11f, $"{label}: the strip reaches the target ({visual.LastLength:F2} m)");
+            }
+
+            int acceptedBefore = _authority.AcceptedCount;
+            yield return WaitFor(() => archer.ArrowsLoosed >= 1 || !string.IsNullOrEmpty(archer.LastShotRejectReason), Timeout);
+            Check(archer.ArrowsLoosed == 1, $"{label}: the authority accepted exactly one arrow (refusal: '{archer.LastShotRejectReason}')");
+            Check(_authority.AcceptedCount > acceptedBefore, $"{label}: the launch went through the projectile authority");
+
+            yield return WaitFor(() => player.Received.Count >= 1, 3f);
+            Check(player.Received.Count == 1, $"{label}: the arrow flew and hit the player once ({player.Received.Count})");
+            if (player.Received.Count >= 1)
+            {
+                DamageInfo damage = player.Received[0];
+                Check(damage.Amount > 0f, $"{label}: the arrow did damage ({damage.Amount:F1})");
+                Check(damage.SourceKind == EntityKind.Enemy && damage.SourceCombatId == archer.CombatId, $"{label}: attributed to the archer");
+                Check(damage.Type == _bowman.attackWeapon.damageType, $"{label}: the hit carries the Bone Bow's damage type ({damage.Type})");
+            }
+            yield return WaitFor(() => archer.AttackPresentation.Phase == 0, 2f);
+            Check(archer.AttackPresentation.Phase == 0, $"{label}: release and recovery end back at rest");
+        }
+
+        private IEnumerator ArcherBlindBehindWall()
+        {
+            if (_bowman == null) yield break;
+            const string label = "archer behind wall";
+            // Out of earshot (hearing 9 m) and behind a wall too wide to walk around in the window: it must neither see nor shoot.
+            FakePlayer player = NewPlayer(new Vector3(0f, 0f, 11f));
+            AddWall(new Vector3(0f, 2f, 5f), new Vector3(40f, 4f, 0.4f));
+            EnemyAgent archer = null;
+            yield return Spawn(_bowman, Vector3.zero, 0f, false, e => archer = e);
+            float end = Time.time + 4f;
+            bool drew = false;
+            while (Time.time < end) { drew |= archer.IsWindingUp; yield return null; }
+            Check(!drew, $"{label}: no line of sight, no draw");
+            Check(archer.ArrowsLoosed == 0 && player.Received.Count == 0, $"{label}: no arrow and no damage through the wall");
         }
 
         private IEnumerator CinderWardenFight()

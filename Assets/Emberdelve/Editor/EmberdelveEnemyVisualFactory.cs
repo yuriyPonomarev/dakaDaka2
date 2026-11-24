@@ -55,6 +55,8 @@ namespace Emberdelve.EditorTools
             public bool Pauldrons;
             /// <summary>Also builds the derived vertical-overhead attack clip, controller state and sweep (the Servitor bodies).</summary>
             public bool Overhead;
+            /// <summary>The skeleton archer: no melee weapon; a procedural bow in the left hand (EnemyBowRig) and a generated draw-and-release clip as its Attack.</summary>
+            public bool Archer;
             // Humanoid clip names (without the "Rig|" / "Armature|" take prefix).
             public string Idle, Walk, Run, Attack, Hit, Death;
             public float WalkPlayback = 1f, RunPlayback = 1f;
@@ -65,7 +67,7 @@ namespace Emberdelve.EditorTools
             // Minion and Rogue share the Hollow Servitor's data, so they hold the same blade (same model, length and grip): the swept path
             // baked from the Minion (TryBakeSwing) is the path both of them show.
             new Variant { Name = "Minion", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyBlade", MainHandSource = "knights_sword", MainHandLength = 0.95f, Overhead = true,
-                Idle = "Sword_Idle", Walk = "Zombie_Walk_Fwd_Loop", Run = "Zombie_Walk_Fwd_Loop", RunPlayback = 1.7f, Attack = AttackClip, Hit = "Hit_Chest", Death = "Death01" },
+                Idle = "Sword_Idle", Walk = "Walk_Loop", Run = "Jog_Fwd_Loop", Attack = AttackClip, Hit = "Hit_Chest", Death = "Death01" },
             new Variant { Name = "Rogue", Body = FemaleBody, MeshName = "Undead_Mannequin_F", MainHand = "Weapon_RustyBlade", MainHandSource = "knights_sword", MainHandLength = 0.95f, Overhead = true,
                 Idle = "Sword_Idle", Walk = "Walk_Loop", Run = "Jog_Fwd_Loop", Attack = AttackClip, Hit = "Hit_Head", Death = "Death01" },
             new Variant { Name = "Warrior", Body = MaleBody, MeshName = "Undead_Mannequin_M", MainHand = "Weapon_RustyHammer", MainHandSource = "ornate_war_hammer", MainHandLength = 0.8f,
@@ -73,6 +75,9 @@ namespace Emberdelve.EditorTools
                 Idle = "Idle_Shield_Loop", Walk = "Walk_Formal_Loop", Run = "Jog_Fwd_Loop", Attack = AttackClip, Hit = "Hit_Chest", Death = "Death01" },
             new Variant { Name = "Mage", Body = MaleBody, MeshName = "Undead_Mannequin_M", GlowingEyes = true,
                 Idle = "Spell_Simple_Idle_Loop", Walk = "Walk_Formal_Loop", Run = "Jog_Fwd_Loop", Attack = "Spell_Simple_Shoot", Hit = "Hit_Chest", Death = "Death01" },
+            // The Hollow Bowman: the generated bow clip (EmberdelveEnemyArcherClip) is its Attack; it holds the procedural bow in the left hand.
+            new Variant { Name = EnemyData.ArcherVisual, Body = MaleBody, MeshName = "Undead_Mannequin_M", Archer = true,
+                Idle = "Idle_Loop", Walk = "Walk_Loop", Run = "Jog_Fwd_Loop", Hit = "Hit_Chest", Death = "Death01" },
         };
 
         /// <summary>
@@ -101,12 +106,7 @@ namespace Emberdelve.EditorTools
         /// Servitor) alternate Minion / Rogue by spawn index so a room does not look cloned. The Mage variant is built and
         /// available, but no enemy data maps to it yet (there is no caster enemy).
         /// </summary>
-        public static string VariantFor(EnemyData enemy, int spawnIndex)
-        {
-            if (enemy != null && enemy.IsCinderWarden) return EnemyData.CinderWardenVisual;
-            if (enemy != null && enemy.isElite) return "Warrior";
-            return (spawnIndex & 1) == 0 ? "Minion" : "Rogue";
-        }
+        public static string VariantFor(EnemyData enemy, int spawnIndex) => EnemyData.VisualVariantFor(enemy, spawnIndex);
 
         public static string PrefabPath(string variant) { return Folder + "/EnemyVisual_" + variant + ".prefab"; }
         public const string ShieldArmMaskPath = Folder + "/EnemyVisual_ShieldArm.mask";
@@ -165,6 +165,20 @@ namespace Emberdelve.EditorTools
             return ok;
         }
 
+        /// <summary>Rebuilds only the skeleton archer visual (controller with the generated bow clip, prefab, Resources copy).</summary>
+        internal static bool EnsureArcherVariant()
+        {
+            if (!EmberdelveQuaterniusImport.EnsureConfigured()) return false;
+            EmberdelveWeaponModels.EnsureAll(false);
+            EmberdelveUndeadMaterials.EnsureAll();
+            if (!EmberdelveSkeletonAssets.EnsureConfigured()) return false;
+            EmberdelveVisualSetup.EnsureFolder(Folder);
+            bool ok = true;
+            for (int i = 0; i < Variants.Length; i++) if (Variants[i].Archer) ok &= Build(Variants[i]);
+            AssetDatabase.SaveAssets();
+            return ok;
+        }
+
         private static bool AllPrefabsExist()
         {
             for (int i = 0; i < Variants.Length; i++)
@@ -203,6 +217,15 @@ namespace Emberdelve.EditorTools
                 if (!string.IsNullOrEmpty(variant.OffHand)) AttachOffHand(variant, fbx, mesh, bodyMaterial, avatar, animator);
                 if (variant.Pauldrons) AddPauldrons(animator, rust);
                 if (variant.GlowingEyes) AddEyesFromLivePose(fbx, mesh, bodyMaterial, avatar, animator, variant.Idle);
+                if (variant.Archer)
+                {
+                    // The bow is built at runtime under the left hand at the grip pose the archer clip was solved for (set by BuildController above).
+                    WeaponData boneBow = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_BoneBow.asset");
+                    if (boneBow == null) { Debug.LogWarning("[Emberdelve][EnemyVisual] Weapon_BoneBow missing; the archer is built without its bow (run Rebuild Skeleton Archer)."); }
+                    root.AddComponent<EnemyBowRig>().Configure(animator, boneBow,
+                        EmberdelveEnemyArcherClip.LastGripLocalPosition, EmberdelveEnemyArcherClip.LastGripLocalRotation,
+                        EmberdelveEnemyArcherClip.LastCarryLocalRotation);
+                }
 
                 // Built facing +Z (bind pose turned), shipped with identity yaw: the live pose faces +Z by itself.
                 model.transform.localRotation = Quaternion.identity;
@@ -219,6 +242,8 @@ namespace Emberdelve.EditorTools
                 serialized.FindProperty("bloodEffect").objectReferenceValue = blood;
                 serialized.ApplyModifiedPropertiesWithoutUndo();
 
+                // The walk/run strides of this body, so the drivers can match the loops' rate to the ground speed (no foot sliding).
+                EmberdelveLocomotionControllers.MeasureInto(root, out _);
                 PrefabUtility.SaveAsPrefabAsset(root, PrefabPath(variant.Name));
                 // The network proxies load the same visual from Resources (NetEnemyViews); keep that copy the same build.
                 PrefabUtility.SaveAsPrefabAsset(root, NetResourcePath(variant.Name));
@@ -658,7 +683,8 @@ namespace Emberdelve.EditorTools
             AnimatorState idle = AddState(machine, "Idle", Require(variant.Idle), new Vector3(300f, 0f, 0f));
             AnimatorState walk = AddState(machine, "Walk", Require(variant.Walk), new Vector3(300f, 70f, 0f));
             AnimatorState run = AddState(machine, "Run", Require(variant.Run), new Vector3(300f, 140f, 0f));
-            AnimatorState attack = AddState(machine, "Attack", AttackCopy(variant), new Vector3(560f, 0f, 0f));
+            AnimationClip attackClip = variant.Archer ? EmberdelveEnemyArcherClip.CreateAsset(variant) : AttackCopy(variant);
+            AnimatorState attack = AddState(machine, "Attack", attackClip, new Vector3(560f, 0f, 0f));
             AnimatorState hit = AddState(machine, "Hit", Require(variant.Hit), new Vector3(560f, 70f, 0f));
             AnimatorState death = AddState(machine, "Death", Require(variant.Death), new Vector3(560f, 140f, 0f));
             machine.defaultState = idle;
@@ -730,6 +756,8 @@ namespace Emberdelve.EditorTools
                 controller.layers = layers;
             }
 
+            // Walk/Run play at the rate of the measured ground speed (LocomotionGait), never a fixed multiplier.
+            EmberdelveLocomotionControllers.Ensure(controller);
             EditorUtility.SetDirty(controller);
             return controller;
         }

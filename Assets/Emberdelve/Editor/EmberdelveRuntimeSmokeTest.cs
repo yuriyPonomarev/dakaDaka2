@@ -378,7 +378,9 @@ namespace Emberdelve.EditorTools
 
                 // Select an actual clear lane before positioning the target. Logical walkability alone
                 // does not account for the modular level's authored pillars and closed doors.
-                bool combatLane = PlacePlayerInClearLane(5f, 0.5f, "combat opening", out _, out _);
+                // The lane must also clear the sword's side arc: a right-to-left slash starts about 0.9 m beside the eye, so a 1 m lane next to
+                // a wall stopped the first swing at sample 0 (WallStop) whenever content placement picked a narrow opening.
+                bool combatLane = PlacePlayerInClearLane(5f, 1.0f, "combat opening", out _, out _);
                 Check(combatLane, "a physically clear combat opening exists");
                 if (!combatLane) yield break;
 
@@ -6494,7 +6496,7 @@ namespace Emberdelve.EditorTools
 
                 for (int i = 0; i < all.Length; i++)
                 {
-                    if (all[i] == null || all[i].IsDead) continue;
+                    if (all[i] == null || all[i].IsDead || all[i].IsArcher) continue;   // the melee/guard fixtures need a swordsman
 
                     bool excluded = false;
                     for (int s = 0; s < skip.Length; s++)
@@ -6529,7 +6531,7 @@ namespace Emberdelve.EditorTools
 
                 for (int i = 0; i < all.Length; i++)
                 {
-                    if (all[i] == null || all[i].IsDead || all[i].Data == null || all[i].Data.attackWeapon == null) continue;
+                    if (all[i] == null || all[i].IsDead || all[i].IsArcher || all[i].Data == null || all[i].Data.attackWeapon == null) continue;
                     if (all[i].Data.attackWeapon.impactPower > resist) continue;
 
                     float distance = Vector3.Distance(all[i].transform.position, reference);
@@ -6549,7 +6551,7 @@ namespace Emberdelve.EditorTools
 
                 for (int i = 0; i < all.Length; i++)
                 {
-                    if (all[i] == null || all[i].IsDead) continue;
+                    if (all[i] == null || all[i].IsDead || all[i].IsArcher) continue;   // the melee/guard fixtures need a swordsman
                     float distance = Vector3.Distance(all[i].transform.position, reference);
                     if (distance < bestDistance)
                     {

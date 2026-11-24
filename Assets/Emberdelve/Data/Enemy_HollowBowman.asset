@@ -1,0 +1,46 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b3fa64b890e112d408f2abdcfe0fdf26, type: 3}
+  m_Name: Enemy_HollowBowman
+  m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.EnemyData
+  enemyId: hollow_bowman
+  displayName: Hollow Bowman
+  isElite: 0
+  maxHealth: 55
+  attackWeapon: {fileID: 11400000, guid: 943a88c0d41cd87409889a283d599e30, type: 2}
+  attackRange: 14
+  attackWindup: 1.1
+  attackCooldown: 2.6
+  attackTelegraphHeight: 0
+  attackTelegraphCone: 120
+  telegraphColor: {r: 1, g: 0.32, b: 0.18, a: 1}
+  rangedMinDistance: 6
+  rangedMaxDistance: 14
+  rangedFleeDistance: 3.5
+  patrolSpeed: 1
+  chaseSpeed: 2.4
+  patrolRadius: 5
+  turnRate: 420
+  sightRange: 22
+  sightCone: 140
+  hearingRange: 9
+  memoryDuration: 6
+  investigateTime: 3.5
+  dropTable: {fileID: 11400000, guid: 57151cd0d99f38041b9cee63055e54bf, type: 2}
+  lootTable:
+  - {fileID: 11400000, guid: a26d2da41162d874ab729a17979af148, type: 2}
+  - {fileID: 11400000, guid: c6fda9df47fce4e4da019554ee948f03, type: 2}
+  - {fileID: 11400000, guid: d8388f34120eab247b8c3af01f264b41, type: 2}
+  lootRolls: 2
+  lootDropChance: 0.8
+  bodyMaterial: {fileID: 2100000, guid: a7da9241dac119741abadf84b220bbfa, type: 2}
+  eliteTint: {r: 1, g: 0.45, b: 0.35, a: 1}

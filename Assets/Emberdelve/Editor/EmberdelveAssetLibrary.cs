@@ -114,6 +114,7 @@ namespace Emberdelve.EditorTools
             ApplyEnemySwings();
             ApplyEnemyDropTables();
             BuildLayout();
+            EnsureArcherData();
             ApplyChestSpawns();
             BuildNavGrid();
             BuildConfig();
@@ -2124,6 +2125,127 @@ namespace Emberdelve.EditorTools
             Debug.Log($"[Emberdelve][EnemySwing] {patternId}: baked from {variant} overhead clip, weapon {length:F2} m, farthest tip {reach:F2} m, " +
                 $"effective reach {p.EffectiveReach(weapon):F2} m, active {activeSeconds:F2} s:{line}");
             return p;
+        }
+
+        // ------------------------------------------------------------------ the skeleton archer (Hollow Bowman)
+
+        public static WeaponData BoneBow;
+        public static EnemyData Bowman;
+
+        /// <summary>Raid share of the archer: this many Hollow Bowman spawn records sit next to the Servitors in the authored layout.</summary>
+        public const int BowmanSpawnCount = 2;
+
+        /// <summary>
+        /// The Hollow Bowman: a ranged undead (enemy-only Bone Bow, a real server-simulated arrow through the projectile authority), its loot
+        /// table and its spawn records in the authored layout. Code-authoritative and idempotent like the rest of the library, and it reads
+        /// its inputs from disk (the player bow's materials, the Servitor's loot items), so the narrow rebuild works without BuildAll.
+        /// Numbers are an original design: Dark and Darker's skeleton archer was used for the behaviour (ranged only, draw then release,
+        /// distance-based tactics); its ranges, timings and damage were not decodable from the local reference.
+        /// </summary>
+        internal static void EnsureArcherData()
+        {
+            WeaponData playerBow = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_HollowBow.asset");
+            EnemyData servitor = AssetDatabase.LoadAssetAtPath<EnemyData>(EmberdelvePaths.Data + "/Enemy_HollowServitor.asset");
+            DungeonLayoutData layout = AssetDatabase.LoadAssetAtPath<DungeonLayoutData>(EmberdelvePaths.Data + "/DungeonLayout_AshenHalls.asset");
+            if (playerBow == null || servitor == null || layout == null)
+            { Debug.LogError("[Emberdelve][Bowman] Weapon_HollowBow / Enemy_HollowServitor / DungeonLayout_AshenHalls missing; run the full build once."); return; }
+
+            BoneBow = LoadOrCreate<WeaponData>(EmberdelvePaths.Data + "/Weapon_BoneBow.asset", w => { });
+            BoneBow.weaponId = "bone_bow";
+            BoneBow.displayName = "Bone Bow";
+            BoneBow.kind = WeaponKind.Ranged;
+            BoneBow.baseDamage = 16f;
+            BoneBow.damageType = DamageType.Pierce;
+            BoneBow.windupTime = 0.05f;
+            BoneBow.activeWindow = 0.08f;
+            BoneBow.recoveryTime = 0.2f;
+            BoneBow.cooldown = 2f;            // authority floor 0.8 x 2 = 1.6 s; the brain's own 2.6 s cooldown is longer
+            BoneBow.reach = 1.2f;
+            BoneBow.rangedRange = 32f;
+            BoneBow.projectileSpeed = 30f;
+            BoneBow.projectileRadius = 0.05f;
+            BoneBow.projectileLength = 0.8f;
+            BoneBow.projectileGravity = 9.81f;
+            BoneBow.projectileMaxFlightTime = 2f;
+            BoneBow.drawTime = 1f;
+            BoneBow.minChargeToFire = 0.2f;
+            BoneBow.minChargeDamageScale = 1f;
+            BoneBow.magazineSize = 0;
+            BoneBow.falloffStartRange = 32f;
+            BoneBow.falloffEndRange = 32f;
+            BoneBow.falloffMinScale = 1f;
+            BoneBow.shaftMaterial = playerBow.shaftMaterial;
+            BoneBow.edgeMaterial = playerBow.edgeMaterial;
+            BoneBow.gripMaterial = playerBow.gripMaterial;
+            EditorUtility.SetDirty(BoneBow);
+
+            Bowman = LoadOrCreate<EnemyData>(EmberdelvePaths.Data + "/Enemy_HollowBowman.asset", e => { });
+            Bowman.enemyId = "hollow_bowman";
+            Bowman.displayName = "Hollow Bowman";
+            Bowman.isElite = false;
+            Bowman.maxHealth = 55;
+            Bowman.attackWeapon = BoneBow;
+            Bowman.attackRange = 14f;
+            Bowman.attackWindup = 1.1f;       // the draw: the visible telegraph
+            Bowman.attackCooldown = 2.6f;
+            Bowman.attackTelegraphHeight = 0f;
+            Bowman.patrolSpeed = 1f;
+            Bowman.chaseSpeed = 2.4f;
+            Bowman.patrolRadius = 5f;
+            Bowman.turnRate = 420f;
+            Bowman.sightRange = 22f;
+            Bowman.sightCone = 140f;
+            Bowman.hearingRange = 9f;
+            Bowman.memoryDuration = 6f;
+            Bowman.investigateTime = 3.5f;
+            Bowman.rangedMinDistance = 6f;
+            Bowman.rangedMaxDistance = 14f;
+            Bowman.rangedFleeDistance = 3.5f;
+            Bowman.lootTable = servitor.lootTable;
+            Bowman.lootRolls = 2;
+            Bowman.lootDropChance = 0.8f;
+            Bowman.bodyMaterial = servitor.bodyMaterial;
+            Bowman.eliteTint = servitor.eliteTint;
+            Bowman.telegraphColor = servitor.telegraphColor;
+            EditorUtility.SetDirty(Bowman);
+
+            EnsureEnemyDrops(Bowman, "Loot_Enemy_HollowBowman", t =>
+            {
+                t.tableId = "enemy_hollow_bowman";
+                t.maxRolls = 2;
+                t.guaranteeFirstEntry = false;
+                t.nothingWeight = 6;
+                var entries = new System.Collections.Generic.List<LootEntry>();
+                if (servitor.lootTable != null)
+                    foreach (ItemData item in servitor.lootTable)
+                        if (item != null) entries.Add(new LootEntry { item = item, minAmount = 1, maxAmount = 1, weight = 8, maxCopies = 2 });
+                t.entries = entries.ToArray();
+            });
+
+            // Spawn records: next to the first Servitor records (the modular assembler relocates every record into a combat room).
+            int existing = 0;
+            foreach (EnemySpawnSpec spec in layout.enemySpawns) if (spec != null && spec.enemy == Bowman) existing++;
+            if (existing < BowmanSpawnCount)
+            {
+                var servitorCells = new System.Collections.Generic.List<Vector2Int>();
+                foreach (EnemySpawnSpec spec in layout.enemySpawns) if (spec != null && spec.enemy == servitor) servitorCells.Add(spec.cell);
+                for (int i = existing; i < BowmanSpawnCount; i++)
+                {
+                    Vector2Int cell = servitorCells.Count > 0 ? servitorCells[(i * 2 + 1) % servitorCells.Count] : new Vector2Int(2, 2);
+                    layout.enemySpawns.Add(new EnemySpawnSpec { cell = cell, enemy = Bowman });
+                }
+                EditorUtility.SetDirty(layout);
+            }
+            AssetDatabase.SaveAssets();
+        }
+
+        [MenuItem("Emberdelve/Visual/Rebuild Skeleton Archer")]
+        public static void MenuRebuildBowman()
+        {
+            EnsureArcherData();
+            bool visuals = EmberdelveEnemyVisualFactory.EnsureArcherVariant();
+            AssetDatabase.SaveAssets();
+            Debug.Log("[Emberdelve][Bowman] skeleton archer rebuilt: data " + (Bowman != null) + ", visual " + visuals);
         }
 
         [MenuItem("Emberdelve/Visual/Rebuild Servitor Overhead Attack")]

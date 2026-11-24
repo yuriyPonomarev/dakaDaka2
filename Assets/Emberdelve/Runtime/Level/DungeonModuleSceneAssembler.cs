@@ -1070,6 +1070,30 @@ namespace Emberdelve.Level
                 if (_initialAiSuppressed) enemies[i].gameObject.SetActive(false);
             }
 
+            // Layout records past the scene's authored monsters (e.g. the skeleton archers added after the scene was built) are created here on
+            // the simulating process, exactly as later floors create theirs (FloorContentSpawner): floor 1 then has the layout's whole population,
+            // and the content-ready count (records == monsters) holds. Clients only show proxies, so they create nothing.
+            // Only a scene that authors its population is completed this way; a scene with no authored monsters (network proofs, inspection
+            // shells) stays empty. The new monsters share the authored root, so a deactivated root (--ember-net-no-enemies) keeps them inert.
+            if (!NetRole.IsClientOnly && !NetRole.EnemiesDisabled && director != null && enemies.Length > 0 && enemies[0].transform.parent != null
+                && _runtimeLayout.enemySpawns != null && _runtimeLayout.enemySpawns.Count > enemies.Length)
+            {
+                var all = new List<EnemyAgent>(enemies);
+                Transform parent = enemies[0].transform.parent;
+                for (int i = enemies.Length; i < _runtimeLayout.enemySpawns.Count; i++)
+                {
+                    EnemySpawnSpec spec = _runtimeLayout.enemySpawns[i];
+                    if (spec == null || spec.enemy == null) { reason = "layout monster record " + i + " has no definition"; return false; }
+                    GameObject visual = Resources.Load<GameObject>("Emberdelve/NetEnemyVisuals/EnemyVisual_" + Emberdelve.Data.EnemyData.VisualVariantFor(spec.enemy, i));
+                    EnemyAgent agent = EnemyAgent.CreateForFloor(spec.enemy, _runtimeNav, director.Config, director, parent,
+                        _runtimeLayout.CellCenterWorld(spec.cell), visual, "Enemy_" + spec.enemy.displayName + "_" + i);
+                    if (agent == null) { reason = "could not create layout monster " + i + " (" + spec.enemy.displayName + ")"; return false; }
+                    if (_initialAiSuppressed) agent.gameObject.SetActive(false);
+                    all.Add(agent);
+                }
+                enemies = all.ToArray();
+            }
+
             for (int i = 0; i < loot.Length; i++)
                 loot[i].PlaceAt(_runtimeLayout.CellCenterWorld(_runtimeLayout.lootSpawns[i].cell) + Vector3.up * 0.45f);
 

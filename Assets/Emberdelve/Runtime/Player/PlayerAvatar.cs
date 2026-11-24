@@ -23,6 +23,11 @@ namespace Emberdelve.Player
         private readonly string[] _armorIds = new string[6];
         private bool _hasArmorIds;
         private bool _remoteGuard,_remoteSwing;
+        private LocomotionStrides _strides;
+        private bool _hasLocoScale;
+        private Vector3 _velocity;
+        private float _bodyTurn;
+        private static readonly int LocoScaleHash=Animator.StringToHash(LocomotionGait.ScaleParameter);
         public void PresentArmor(string head, string chest, string legs, string hands, string feet, string back)
         {
             _hasArmorIds=true;
@@ -52,6 +57,9 @@ namespace Emberdelve.Player
             _model.transform.localPosition=Vector3.zero; _model.transform.localRotation=Quaternion.identity;
             _animator=_model.GetComponentInChildren<Animator>();
             _animation=_model.GetComponentInChildren<Animation>();
+            _strides=_model.GetComponent<LocomotionStrides>();
+            _hasLocoScale=false;
+            if(_animator!=null) foreach(var p in _animator.parameters) if(p.nameHash==LocoScaleHash && p.type==AnimatorControllerParameterType.Float) _hasLocoScale=true;
             _armor=_model.GetComponent<EquippedArmorView>() ?? _model.AddComponent<EquippedArmorView>(); _armor.Bind(_rig.Equipment);
             if(_hasArmorIds) _armor.BindVisualIds(_armorIds[0],_armorIds[1],_armorIds[2],_armorIds[3],_armorIds[4],_armorIds[5]);
             else _armor.Refresh();
@@ -70,14 +78,29 @@ namespace Emberdelve.Player
                 PresentBotCombat();
             foreach(var renderer in _renderers) if(renderer!=null && renderer.enabled!=visible) renderer.enabled=visible;
             Vector3 delta=transform.position-_lastPosition; _lastPosition=transform.position; delta.y=0;
-            float speed=Time.deltaTime>0 ? delta.magnitude/Time.deltaTime : 0;
-            string next=_rig.IsDead ? "Death" : (_remoteGuard || _rig.IsGuarding) ? "Block" : _remoteSwing ? "Idle" : speed>3.8f ? "Run" : speed>.15f ? "Walk" : "Idle";
+            float dt=Time.deltaTime;
+            if(dt>0) _velocity=Vector3.Lerp(_velocity,delta/dt,1f-Mathf.Exp(-dt/.08f));
+            float speed=_velocity.magnitude;
+            bool fighting=_remoteGuard || _rig.IsGuarding || _remoteSwing;
+            // Speed-matched gait (LocomotionGait): run from 1.9 m/s instead of walking a 1 m/s loop at full player speed, the loop's rate follows
+            // the ground speed (backward for a retreat), and the body turns toward a sideways move unless it is guarding or swinging.
+            string next=_rig.IsDead ? "Death" : (_remoteGuard || _rig.IsGuarding) ? "Block" : _remoteSwing ? "Idle"
+                : speed>LocomotionGait.RunFrom ? "Run" : speed>LocomotionGait.StandBelow ? "Walk" : "Idle";
             if(next!=_state)
             {
                 _state=next;
                 if(_animator!=null) _animator.CrossFadeInFixedTime(next,.15f);
                 else if(_animation!=null) _animation.CrossFade(next,.15f);
             }
+            bool moving=_state=="Walk" || _state=="Run";
+            LocomotionGait.Resolve(_velocity,transform.forward,LocomotionStrides.StrideOf(_model.transform,_strides,_state=="Run"),1f,out float rate,out float turn);
+            if(_animator!=null)
+            {
+                if(_hasLocoScale){ _animator.SetFloat(LocoScaleHash,moving ? rate : 1f); _animator.speed=1f; }
+                else _animator.speed=moving ? Mathf.Abs(rate) : 1f;   // older controllers: rate only, no reverse
+            }
+            _bodyTurn=Mathf.Lerp(_bodyTurn,moving && !fighting && !_rig.IsDead ? turn : 0f,1f-Mathf.Exp(-dt/.15f));
+            _model.transform.localRotation=Quaternion.Euler(0f,_bodyTurn,0f);
         }
 
         private void PresentBotCombat()

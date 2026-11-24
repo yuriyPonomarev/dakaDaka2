@@ -302,7 +302,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1380759795876047190}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.19346584, y: 0.37716162, z: -0.070691735, w: 0.9029522}
+  m_LocalRotation: {x: -0.19346586, y: 0.37716165, z: -0.07069174, w: 0.90295225}
   m_LocalPosition: {x: 0.051812723, y: 0.09145271, z: 0.038344532}
   m_LocalScale: {x: 0.02000002, y: 0.020000027, z: 0.020000007}
   m_ConstrainProportionsScale: 0
@@ -389,7 +389,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1449178325440274373}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.087294124, y: 0.014322462, z: 0.035286788, w: 0.9954544}
+  m_LocalRotation: {x: 0.08729414, y: 0.014322462, z: 0.035286795, w: 0.9954544}
   m_LocalPosition: {x: -0.00031279385, y: 0.02766266, z: 0.0026725738}
   m_LocalScale: {x: 0.9999996, y: 0.9999999, z: 1.0000001}
   m_ConstrainProportionsScale: 0
@@ -5665,7 +5665,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 6641413341557759646}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.19346584, y: 0.37716162, z: -0.070691735, w: 0.9029522}
+  m_LocalRotation: {x: -0.19346586, y: 0.37716165, z: -0.07069174, w: 0.90295225}
   m_LocalPosition: {x: 0.096965015, y: 0.07394237, z: -0.0034964615}
   m_LocalScale: {x: 0.02000002, y: 0.020000027, z: 0.020000007}
   m_ConstrainProportionsScale: 0
@@ -5738,6 +5738,7 @@ GameObject:
   m_Component:
   - component: {fileID: 2298921205209360685}
   - component: {fileID: 414190252948180925}
+  - component: {fileID: 6085022312731395293}
   m_Layer: 0
   m_Name: EnemyVisual_Mage
   m_TagString: Untagged
@@ -5777,7 +5778,20 @@ MonoBehaviour:
   animator: {fileID: 9060367676604540280}
   bloodEffect: {fileID: 7960874992734063712}
   speedSmoothing: 0.08
-  swingSeconds: 0.5
+--- !u!114 &6085022312731395293
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6914775155797482880}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a6f3654e90afabc40a281f682b422a86, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.AI.LocomotionStrides
+  walk: 0.78
+  run: 4.15
 --- !u!1 &7666834608303947038
 GameObject:
   m_ObjectHideFlags: 0
@@ -6025,7 +6039,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 9147994728222089872}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.15621859, y: 0.06215193, z: -0.0077298535, w: 0.9857348}
+  m_LocalRotation: {x: -0.1562186, y: 0.06215193, z: -0.007729854, w: 0.9857348}
   m_LocalPosition: {x: -0.000000011920928, y: 0.14778942, z: 0.00000062532723}
   m_LocalScale: {x: 0.99999994, y: 0.9999999, z: 0.9999998}
   m_ConstrainProportionsScale: 0

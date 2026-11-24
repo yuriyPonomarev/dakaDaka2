@@ -278,7 +278,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2161635841829111369}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.087294124, y: 0.014322462, z: 0.035286788, w: 0.9954544}
+  m_LocalRotation: {x: 0.08729414, y: 0.014322462, z: 0.035286795, w: 0.9954544}
   m_LocalPosition: {x: -0.00031279385, y: 0.02766266, z: 0.0026725738}
   m_LocalScale: {x: 0.9999996, y: 0.9999999, z: 1.0000001}
   m_ConstrainProportionsScale: 0
@@ -5414,6 +5414,7 @@ GameObject:
   m_Component:
   - component: {fileID: 5047189301581658749}
   - component: {fileID: 6584541949519838481}
+  - component: {fileID: 4920589553251283342}
   m_Layer: 0
   m_Name: EnemyVisual_Rogue
   m_TagString: Untagged
@@ -5453,6 +5454,20 @@ MonoBehaviour:
   animator: {fileID: 1562871835383876633}
   bloodEffect: {fileID: 6233092374544095562}
   speedSmoothing: 0.08
+--- !u!114 &4920589553251283342
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5103958384639467286}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a6f3654e90afabc40a281f682b422a86, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.AI.LocomotionStrides
+  walk: 0.78
+  run: 4.15
 --- !u!1 &5886378831020396624
 GameObject:
   m_ObjectHideFlags: 0
@@ -5604,7 +5619,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 6453126438174153797}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.5397253, y: 0.71599394, z: -0.19933559, w: 0.39536637}
+  m_LocalRotation: {x: -0.5397253, y: 0.715994, z: -0.19933559, w: 0.3953664}
   m_LocalPosition: {x: -0.008943099, y: 0.07898359, z: 0.004391486}
   m_LocalScale: {x: 0.9970101, y: 0.9970091, z: 0.99701095}
   m_ConstrainProportionsScale: 0
@@ -5822,7 +5837,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7350713957650919693}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.15621859, y: 0.06215193, z: -0.0077298535, w: 0.9857348}
+  m_LocalRotation: {x: -0.1562186, y: 0.06215193, z: -0.007729854, w: 0.9857348}
   m_LocalPosition: {x: -0.000000011920928, y: 0.14778942, z: 0.00000062532723}
   m_LocalScale: {x: 0.99999994, y: 0.9999999, z: 0.9999998}
   m_ConstrainProportionsScale: 0

@@ -68,8 +68,8 @@ namespace Emberdelve.Net
         public static void OnShot(NetPlayerRig carrier, in CombatShotWire shot)
         {
             Shots++;
-            if (carrier != null && carrier.Rig != null)
-                Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldSound.Bow, carrier.Rig.AimOrigin, .8f);
+            // At the launch point: the carrier is the shooter for a player's arrow, but only the transport for an enemy archer's.
+            Emberdelve.Feedback.WorldAudio.Play(Emberdelve.Feedback.WorldSound.Bow, new Vector3(shot.OriginX, shot.OriginY, shot.OriginZ), .8f);
             Debug.Log(NetTuning.LogPrefix + "[client] server-shot id=" + IdOf(carrier) + " serial=" + shot.Serial + " weapon=" + Dash(shot.WeaponId) +
                       " charge=" + F(shot.Charge) + " speed=" + F(shot.Speed) + " gravity=" + F(shot.Gravity));
 

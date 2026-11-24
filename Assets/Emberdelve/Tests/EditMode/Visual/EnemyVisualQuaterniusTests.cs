@@ -126,8 +126,16 @@ namespace Emberdelve.Tests.Visual
         public void Variant_Clips_AllResolve_AndLocomotionClipsLoop(string name)
         {
             EmberdelveEnemyVisualFactory.Variant v = EmberdelveEnemyVisualFactory.Find(name);
-            string[] clipNames = { v.Idle, v.Walk, v.Run, v.Attack, v.Hit, v.Death };
+            // The archer's attack is the generated bow clip (EmberdelveEnemyArcherClip), not a library take.
+            string[] clipNames = v.Archer ? new[] { v.Idle, v.Walk, v.Run, v.Hit, v.Death } : new[] { v.Idle, v.Walk, v.Run, v.Attack, v.Hit, v.Death };
             for (int i = 0; i < clipNames.Length; i++) Assert.IsNotNull(EmberdelveEnemyVisualFactory.FindClip(clipNames[i]), name + ": clip '" + clipNames[i] + "' exists in the Quaternius libraries");
+            if (v.Archer)
+            {
+                AnimationClip bow = AssetDatabase.LoadAssetAtPath<AnimationClip>(EmberdelveEnemyVisualFactory.AttackClipPath(name));
+                Assert.IsNotNull(bow, "the archer's generated bow clip exists");
+                Assert.IsTrue(bow.humanMotion, "the bow clip is a Humanoid clip");
+                Assert.IsFalse(bow.isLooping, "the shot plays once");
+            }
 
             Assert.IsTrue(EmberdelveEnemyVisualFactory.FindClip(v.Idle).isLooping, "idle loops");
             Assert.IsTrue(EmberdelveEnemyVisualFactory.FindClip(v.Walk).isLooping, "walk loops");
@@ -161,7 +169,8 @@ namespace Emberdelve.Tests.Visual
             Dictionary<string, AnimatorControllerParameterType> parameters = new Dictionary<string, AnimatorControllerParameterType>();
             for (int i = 0; i < controller.parameters.Length; i++) parameters[controller.parameters[i].name] = controller.parameters[i].type;
 
-            Assert.AreEqual(5, parameters.Count);
+            Assert.AreEqual(6, parameters.Count);
+            Assert.AreEqual(AnimatorControllerParameterType.Float, parameters[LocomotionGait.ScaleParameter], "speed-matched locomotion rate");
             Assert.AreEqual(AnimatorControllerParameterType.Float, parameters[EnemyVisualDriver.SpeedParameter]);
             Assert.AreEqual(AnimatorControllerParameterType.Float, parameters[EnemyVisualDriver.AttackSpeedParameter]);
             Assert.AreEqual(AnimatorControllerParameterType.Trigger, parameters[EnemyVisualDriver.AttackTrigger]);
@@ -189,6 +198,16 @@ namespace Emberdelve.Tests.Visual
             }
 
             Assert.AreEqual("Idle", machine.defaultState.name);
+            foreach (string loco in new[] { "Walk", "Run" })
+            {
+                Assert.IsTrue(states[loco].speedParameterActive && states[loco].speedParameter == LocomotionGait.ScaleParameter,
+                    loco + " plays at the rate of the measured ground speed");
+                Assert.AreEqual(1f, states[loco].speed, 1e-5f, loco + " has no fixed playback multiplier");
+            }
+            LocomotionStrides strides = AssetDatabase.LoadAssetAtPath<GameObject>(EmberdelveEnemyVisualFactory.PrefabPath(name)).GetComponent<LocomotionStrides>();
+            Assert.IsNotNull(strides, "the body carries its measured strides");
+            Assert.That(strides.walk, Is.InRange(0.6f, 1.6f), "walk stride");
+            Assert.That(strides.run, Is.InRange(1.6f, 3.5f), "run stride");
             Assert.IsTrue(states["Attack"].speedParameterActive);
             Assert.AreEqual(EnemyVisualDriver.AttackSpeedParameter, states["Attack"].speedParameter, "the driver matches the attack clip to the brain's windup + swing");
             Assert.GreaterOrEqual(machine.anyStateTransitions.Length, 3, "Attack / Hit / Death from any state");

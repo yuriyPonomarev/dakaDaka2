@@ -44,7 +44,18 @@ namespace Emberdelve.Tests.NetInventory
             Assert.That(state.IsDead, Is.False);
         }
 
-        [TestCase(5)]
+        [Test]
+        public void ProxyLoadsTheArcherVisualForTheArcherKind()
+        {
+            GameObject archer = NetEnemyViews.LoadVisual(EnemyPresentationWire.ArcherKind);
+            Assert.That(archer, Is.Not.Null, "the archer visual is in Resources");
+            Assert.That(archer.name, Does.EndWith("_Archer"), "the archer kind is not clamped to another body");
+            Assert.That(archer.GetComponent<Emberdelve.AI.EnemyBowRig>(), Is.Not.Null, "the proxy carries the bow rig");
+            Assert.That(NetEnemyViews.LoadVisual(EnemyPresentationWire.CinderWardenKind).name, Does.EndWith("_CinderWarden"));
+            Assert.That(NetEnemyViews.LoadVisual(200).name, Does.EndWith("_Minion"), "an unknown kind falls back to the Minion");
+        }
+
+        [TestCase(6)]
         [TestCase(255)]
         public void RejectsUnsupportedVisualKinds(byte kind)
         {
@@ -56,7 +67,8 @@ namespace Emberdelve.Tests.NetInventory
         [Test]
         public void AcceptsAllNamedVisualKinds()
         {
-            for (byte kind = 0; kind <= EnemyPresentationWire.CinderWardenKind; kind++)
+            Assert.That(EnemyPresentationWire.NameOfVisual(EnemyPresentationWire.ArcherKind), Is.EqualTo("Archer"));
+            for (byte kind = 0; kind <= EnemyPresentationWire.MaxVisualKind; kind++)
             {
                 var state = Valid();
                 state.VisualKind = kind;
@@ -83,6 +95,7 @@ namespace Emberdelve.Tests.NetInventory
         [TestCase("Rogue")]
         [TestCase("Warrior")]
         [TestCase("Mage")]
+        [TestCase("Archer")]
         public void ResourcesContainEachBoundSkeletonController(string variant)
         {
             GameObject prefab = Resources.Load<GameObject>("Emberdelve/NetEnemyVisuals/EnemyVisual_" + variant);
@@ -202,7 +215,7 @@ namespace Emberdelve.Tests.NetInventory
             var forged = Valid();
             forged.AttackVariant = (byte)(EnemyPresentationWire.MaxAttackVariant + 1);
             Assert.That(forged.IsValid, Is.False, "an attack variant no client animates is refused");
-            Assert.That(EnemyPresentationWire.CurrentVersion, Is.EqualTo((byte)5), "the attack variant is a wire v5 field");
+            Assert.That(EnemyPresentationWire.CurrentVersion, Is.GreaterThanOrEqualTo((byte)5), "the attack variant is a wire field since v5");
         }
 
         [Test]

@@ -126,6 +126,10 @@ MonoBehaviour:
     enemy: {fileID: 11400000, guid: 6153d3b55e0d07f4784ceb0c7a92fd61, type: 2}
   - cell: {x: 19, y: 17}
     enemy: {fileID: 11400000, guid: 2ecbc00124e2f1947972ef2bea0e2ade, type: 2}
+  - cell: {x: 13, y: 4}
+    enemy: {fileID: 11400000, guid: 289eb24c5d86a96429c04c6b30b3868a, type: 2}
+  - cell: {x: 6, y: 18}
+    enemy: {fileID: 11400000, guid: 289eb24c5d86a96429c04c6b30b3868a, type: 2}
   torches:
   - cell: {x: 3, y: 2}
     height: 2.5

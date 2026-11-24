@@ -30,8 +30,7 @@ namespace Emberdelve.Level
                 {
                     var spec = layout.enemySpawns[i];
                     if (spec == null || spec.enemy == null) { reason = "Missing floor monster definition"; return null; }
-                    string variant = spec.enemy.IsCinderWarden ? EnemyData.CinderWardenVisual :
-                        spec.enemy.isElite ? "Warrior" : (i & 1) == 0 ? "Minion" : "Rogue";
+                    string variant = EnemyData.VisualVariantFor(spec.enemy, i);
                     var prefab = Resources.Load<GameObject>("Emberdelve/NetEnemyVisuals/EnemyVisual_" + variant);
                     if (prefab == null) { reason = "Missing authored monster visual " + variant; return null; }
                     visuals.Add(prefab);
