@@ -16,14 +16,16 @@ EditMode via MCP: EnemyAttackVariantTests 6/6, NetEnemyPresentationWireTests 24/
 
 Motion review: baked-mesh frame strips (front/side) of the Minion clip; body yaw within 1.9 deg of idle, strike sagittal in front. Overhead farthest tip 1.44 m vs diagonal 1.66 m (same attack range). Not yet done: native in-game recording / user acceptance of the motion and of the shorter overhead reach.
 
-Only slice files are committed; inherited material/model/Oasis/settings drift and ~30 `.mat` files rewritten by an earlier library rebuild remain uncommitted. No push. Bots remain disabled in new raids until explicitly restored.
+Follow-ups: the player sword combo tuning from 1e1a44f34/1b0234139 is canonical; `EmberdelveAssetLibrary` now authors it and SweptMelee/CombatFlow/ActionSpeed assert it ([SWORD_DATA_CANONICAL_20261124](Tasks/SWORD_DATA_CANONICAL_20261124.md); mirror runs 20261124-183929-950 and 184927-727 all green except the smoke HUD baseline). Raid AI population restored (`EmberdelveGameConfig.populateRaidWithAi` = true, user request 24 Nov).
+
+Inherited material/model/Oasis/settings drift and ~30 `.mat` files rewritten by a library rebuild remain uncommitted. No push.
 
 ## Preserved baseline and limitations
 
-Lighting 55c5379ed: [LAYOUT_LIGHTING_20261122](Tasks/LAYOUT_LIGHTING_20261122.md). Furnishing 6f00729f8, layouts b59f72dc5, integration 19519855b. Committed player sword data (Weapon_AshenShortSword, Pattern_SwordSlash*) differs from what `EmberdelveAssetLibrary.BuildAll` authors; user decision pending on which values are canonical.
+Lighting 55c5379ed: [LAYOUT_LIGHTING_20261122](Tasks/LAYOUT_LIGHTING_20261122.md). Furnishing 6f00729f8, layouts b59f72dc5, integration 19519855b. `EmberdelveAssetLibrary.BuildAll` authors the committed weapon/pattern data (byte-identical apart from serialized defaults); change tuning in the library and regenerate+commit Data together. Remaining smoke baseline: HUD names both passives, skill slot cooldown.
 
 ## Next three actions
 
-1. User reviews the overhead attack in a raid (enemies must be enabled for the review) and the shorter overhead reach.
-2. Decide the canonical player sword timing data (commit BuildAll values or keep committed ones and fix the gate expectations).
-3. Resume authorized unfinished gameplay work from ROADMAP; restore raid AI only on explicit request.
+1. Skeleton archer enemy (user request 24 Nov): ranged undead using the projectile authority, referenced against DaD SkeletonArcher.
+2. User reviews the overhead attack in a raid (AI now enabled) and the shorter overhead reach.
+3. Resume authorized unfinished gameplay work from ROADMAP.
