@@ -116,7 +116,7 @@ namespace Emberdelve.EditorTools
                 "saved class/weapon/item fixtures exist");
             if (_config == null || _warrior == null || _archer == null || _bow == null || _crossbow == null || _boots == null) yield break;
             string before = SharedAssetText();
-            Close(_bow.reloadTime, 1.9f, "saved bow reload metadata"); Close(_crossbow.reloadTime, 2.2f, "saved crossbow reload metadata");
+            Close(_bow.reloadTime, 2.5f, "saved bow reload metadata"); Close(_crossbow.reloadTime, 2.673f, "saved crossbow reload metadata");
             GameObject host = new GameObject("D4b2_Authority"); _cleanup.Add(host); _authority = host.AddComponent<LocalCombatAuthority>();
             var wiring = new SerializedObject(_authority); wiring.FindProperty("config").objectReferenceValue = _config; wiring.ApplyModifiedPropertiesWithoutUndo();
             _authority.SetClock(() => _clock); _authority.AutoStepSwings = false; _authority.AdvanceKitsTo(0);
@@ -170,7 +170,7 @@ namespace Emberdelve.EditorTools
             Check(!_authority.TryStartReload(forged, rig.CombatId, out string forgedReason) && forgedReason.Contains("sender"), "forged sender reload refused");
             KitView unchanged = View(rig);
             Check(!unchanged.Reloading && unchanged.Magazine == empty.Magazine && unchanged.Reserve == empty.Reserve, "forged start changes no ammo or timer");
-            KitView accepted = StartReload(rig, archer ? 1.6964285714f : 2.2f, "bare class reload");
+            KitView accepted = StartReload(rig, archer ? _bow.reloadTime / 1.12f : _crossbow.reloadTime, "bare class reload");
             Check(!_authority.TryStartReload(rig.CombatSender, rig.CombatId, out _), "repeat start rejected");
             Close(View(rig).ReloadDuration, accepted.ReloadDuration, "repeat start cannot restart or retime");
             Check(rig.Inventory.TryAdd(_boots, 1) && rig.Equipment.TryEquipItem(_boots, out _), "actual boots equipped during reload");
@@ -185,7 +185,7 @@ namespace Emberdelve.EditorTools
             Check(again.Magazine == done.Magazine && again.Reserve == done.Reserve, "later ticks cannot transfer twice");
             Close(ranged.ReloadProgress, 0, "idle progress reset");
             Check(EmberdelveKitFixtures.ConsumeAmmo(ranged, 1), "spend one round for boots reload"); ResetClock();
-            KitView bootsReload = StartReload(rig, archer ? 1.6764705882f : 2.1568627451f, "next reload uses latest boots rate");
+            KitView bootsReload = StartReload(rig, archer ? _bow.reloadTime * 15f / 17f : _crossbow.reloadTime / 1.02f, "next reload uses latest boots rate");
             Check(rig.Equipment.TryUnequip(EquipmentSlot.Feet, out _), "remove boots while reload runs");
             Close(View(rig).ReloadDuration, bootsReload.ReloadDuration, "removal cannot slow an accepted reload");
             At(bootsReload.ReloadDuration - .001f);
@@ -199,7 +199,7 @@ namespace Emberdelve.EditorTools
             Check(archer || final.Magazine == 1 && final.Reserve == empty.Reserve - 2,
                 "two crossbow reload cycles conserve exactly two reserve bolts");
             Check(rig.CurrentHealth == hp && rig.Mana.CurrentMana == mana, "reload and gear never heal or refill mana");
-            Close(weapon.drawTime, archer ? .85f : .3f, "authored draw timing remains unchanged");
+            Close(weapon.drawTime, archer ? 1.5f : .3f, "authored draw timing remains unchanged");
         }
         private void SetRate(PlayerRig rig, float factor, bool cloneProfile = false)
         {
@@ -212,22 +212,22 @@ namespace Emberdelve.EditorTools
             PlayerRig rig = Rig(_archer, _bow, 50); RangedCombat ranged = rig.GetComponent<RangedCombat>();
             Check(EmberdelveKitFixtures.ConsumeAmmo(ranged, 1), "consume one round for slow reload"); ResetClock(); SetRate(rig, .5f, true);
             float hp = rig.CurrentHealth, mana = rig.Mana.CurrentMana;
-            KitView slow = StartReload(rig, 3.8f, "slow reload accepted"); At(1.9f);
-            SetRate(rig, 2f); Close(View(rig).ReloadDuration, 3.8f, "fast regear/revision cannot retime slow reload");
+            KitView slow = StartReload(rig, _bow.reloadTime * 2f, "slow reload accepted"); At(_bow.reloadTime);
+            SetRate(rig, 2f); Close(View(rig).ReloadDuration, _bow.reloadTime * 2f, "fast regear/revision cannot retime slow reload");
             Close(ranged.ReloadProgress, .5f, "slow reload progress retains old denominator"); At(slow.ReloadDuration);
             KitView finishedSlow = View(rig); Check(!finishedSlow.Reloading, "slow reload completes at accepted boundary");
             Check(EmberdelveKitFixtures.ConsumeAmmo(ranged, 1), "consume one round for fast reload"); ResetClock();
-            KitView fast = StartReload(rig, .95f, "next reload receives fast rate"); At(.475f);
-            SetRate(rig, .5f); Close(View(rig).ReloadDuration, .95f, "slow regear/revision cannot stretch fast reload");
+            KitView fast = StartReload(rig, _bow.reloadTime * .5f, "next reload receives fast rate"); At(_bow.reloadTime * .25f);
+            SetRate(rig, .5f); Close(View(rig).ReloadDuration, _bow.reloadTime * .5f, "slow regear/revision cannot stretch fast reload");
             Close(ranged.ReloadProgress, .5f, "fast reload progress retains old denominator"); At(fast.ReloadDuration);
             KitView finishedFast = View(rig); Check(!finishedFast.Reloading && finishedFast.Reserve == finishedSlow.Reserve - 1,
                 "fast reload transfers only its single missing round");
             Check(EmberdelveKitFixtures.ConsumeAmmo(ranged, 1), "consume one round for cancellation"); ResetClock();
-            KitView cancelledStart = StartReload(rig, 3.8f, "new slow reload receives latest factor"); At(.2f);
+            KitView cancelledStart = StartReload(rig, _bow.reloadTime * 2f, "new slow reload receives latest factor"); At(.2f);
             Check(!rig.Loadout.SwitchToSlot(1), "ordinary weapon swap stays locked during reload");
             Check(rig.Loadout.ForceSwitchToSlot(1), "existing forced weapon-change path cancels reload");
             Check(!View(rig).Reloading && !ranged.IsReloading, "authority/view both cancel on hand change");
-            Check(rig.Loadout.ForceSwitchToSlot(0), "return to original ranged pool"); At(5f);
+            Check(rig.Loadout.ForceSwitchToSlot(0), "return to original ranged pool"); At(_bow.reloadTime * 2f + 1.2f);
             KitView cancelled = View(rig);
             Check(!cancelled.Reloading && cancelled.Magazine == cancelledStart.Magazine && cancelled.Reserve == cancelledStart.Reserve,
                 "cancelled timer never creates or transfers rounds after weapon returns");
@@ -253,7 +253,7 @@ namespace Emberdelve.EditorTools
             KitView started = View(rig);
             Check(started.Reloading && ranged.IsReloading && _authority.LastCommandSender == rig.CombatSender,
                 "ordinary R key requests sender-bound reload through live RangedCombat");
-            Close(started.ReloadDuration, 1.6764705882f, "ordinary R key receives saved bow/DEX17 duration");
+            Close(started.ReloadDuration, _bow.reloadTime * 15f / 17f, "ordinary R key receives saved bow/DEX17 duration");
             Close(ranged.ReloadProgress, 0, "render frames do not advance frozen authority reload clock");
             At(started.ReloadDuration); KitView done = View(rig);
             Check(!done.Reloading && done.Magazine == before.Magazine + 1 && done.Reserve == before.Reserve - 1,

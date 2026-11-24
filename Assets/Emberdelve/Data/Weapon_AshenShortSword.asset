@@ -18,10 +18,10 @@ MonoBehaviour:
   baseDamage: 26
   damageType: 0
   finesse: 0
-  windupTime: 0.24
-  activeWindow: 0.3
-  recoveryTime: 0.3
-  cooldown: 0.92
+  windupTime: 0.399
+  activeWindow: 0.204
+  recoveryTime: 0.234
+  cooldown: 0.73
   reach: 2.3
   arcAngle: 120
   hitSphereRadius: 0.6
@@ -33,18 +33,24 @@ MonoBehaviour:
   comboSteps:
   - patternIndex: 0
     damageMultiplier: 1
-    windupScale: 1
-    recoveryScale: 0.5
+    windupScale: 1.2857144
+    recoveryScale: 0.42735043
+    activeScale: 0.5882353
+    comboWindow: 0.357
   - patternIndex: 1
     damageMultiplier: 1.05
-    windupScale: 0.6
-    recoveryScale: 0.5
+    windupScale: 1.25
+    recoveryScale: 0.53191495
+    activeScale: 0.84713376
+    comboWindow: 0.492
   - patternIndex: 2
     damageMultiplier: 1.1
-    windupScale: 0.6
+    windupScale: 1
     recoveryScale: 1
-  comboWindow: 0.7
-  comboFinisherRecovery: 0.35
+    activeScale: 1
+    comboWindow: 0
+  comboWindow: 0.36
+  comboFinisherRecovery: 0
   impactZones:
   - from: 0
     multiplier: 0.7
@@ -57,10 +63,16 @@ MonoBehaviour:
   heldMoveSpeedPenalty: 10
   impactPower: 10
   impactResist: 15
+  rangedGuardShape: 0
+  impactGuard: 0
+  impactGuardDuration: 0.35
+  impactGuardResistance: 10
+  impactGuardRearmDelay: 0.65
   canRiposte: 1
   riposteWithOffhandShield: 0
   riposteWindow: 1
   riposteDamageMultiplier: 1.5
+  parryBladeRegion: {x: 0, y: 1}
   riposteSwingPatterns: 0300000001000000
   riposteStrikeGap: 0.1
   twoHanded: 0
@@ -76,6 +88,7 @@ MonoBehaviour:
   minChargeDamageScale: 0.45
   magazineSize: 7
   reloadTime: 1.7
+  reloadWhileHeld: 0
   falloffStartRange: 16
   falloffEndRange: 42
   falloffMinScale: 0.45

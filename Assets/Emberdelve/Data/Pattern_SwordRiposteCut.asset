@@ -14,14 +14,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.SwingPatternData
   patternId: sword_riposte_cut
   kind: 2
-  windupTime: 0.36
-  activeTime: 0.3
-  recoveryTime: 0.36
-  wallRecoilTime: 0.35
+  windupTime: 0.431
+  activeTime: 0.205
+  recoveryTime: 0.299
+  wallRecoilTime: 0.7
   damageMultiplier: 1
   impactPowerScale: 1.2
   windupMoveMultiplier: 0.85
-  activeMoveMultiplier: 0.7
+  activeMoveMultiplier: 0.85
   recoveryMoveMultiplier: 0.85
   maxTargets: 3
   reachScale: 0.79

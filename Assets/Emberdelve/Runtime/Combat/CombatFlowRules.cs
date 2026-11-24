@@ -49,6 +49,28 @@ namespace Emberdelve.Combat
             return Emberdelve.BladeDefense.BladeGuardRules.IsGuardBroken(impactPower, impactResist);
         }
 
+        /// <summary>
+        /// Seconds of block reaction a blocked hit puts on the defender: weak, mid or heavy by impact power against the
+        /// defender's impact resist. A hit without impact power, or a defender without a resist value, reacts weakly.
+        /// </summary>
+        public static float BlockReactionSeconds(float impactPower, float impactResist, CombatFlowTuning tuning)
+        {
+            if (tuning == null) return 0f;
+            float weak = Mathf.Max(0f, tuning.blockReactionWeakSeconds);
+            if (float.IsNaN(impactPower) || float.IsNaN(impactResist) || impactPower <= 0f || impactResist <= 0f) return weak;
+            float ratio = impactPower / impactResist;
+            if (ratio >= tuning.blockReactionHeavyRatio) return Mathf.Max(0f, tuning.blockReactionHeavySeconds);
+            if (ratio >= tuning.blockReactionMidRatio) return Mathf.Max(0f, tuning.blockReactionMidSeconds);
+            return weak;
+        }
+
+        /// <summary>True when a guard held since <paramref name="heldSince"/> intercepts at <paramref name="now"/> (same clock).</summary>
+        public static bool IsGuardReady(float heldSince, float now, float readySeconds)
+        {
+            if (float.IsNaN(heldSince) || float.IsNaN(now)) return false;
+            return now - heldSince >= Mathf.Max(0f, readySeconds) - 1e-4f;
+        }
+
         /// <summary>Move-speed factor of held gear: 1 - (main-hand penalty + a contributing off-hand shield's) / 300, floored.</summary>
         public static float HeldFactor(WeaponData mainHand, WeaponData offHand, bool offHandContributes)
         {

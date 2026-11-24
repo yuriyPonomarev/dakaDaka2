@@ -585,6 +585,14 @@ namespace Emberdelve.EditorTools
             Duel busy = NewDuel(_sword, _sword, true);
             BlockedHit(busy);
             busy.B.Guard = false;
+            // Reference port: the block put a reaction on the defender, during which an ordinary attack is refused; the parried
+            // attacker is deflected for longer than its own recoil.
+            Check(_authority.BlockReactionRemaining(busy.B.CombatId) > 0f, "block reaction: the defender that blocked is reacting");
+            Check(!Swing(busy.B, 0, out _), "block reaction: an ordinary attack is refused while it lasts");
+            // These duel fighters are abstract (no physical blade), so the block is not a confirmed parry and does not deflect
+            // the attacker; the deflect itself is proven with a real player blade in the ProjectileBlock gate.
+            Check(_authority.DeflectedRemaining(busy.A.CombatId) <= 0f, "deflected: a block without a confirmed parry does not deflect the attacker");
+            Advance(_authority.BlockReactionRemaining(busy.B.CombatId) + 0.01f);
             Check(Swing(busy.B, 0, out _), "the defender starts a swing of its own");
             Check(!BeginRiposte(busy, out _, out _) && _authority.LastRiposteVerdict == RiposteVerdict.Busy, "a swing in progress locks the riposte (Busy)");
 

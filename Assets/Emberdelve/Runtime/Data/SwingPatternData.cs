@@ -147,8 +147,8 @@ namespace Emberdelve.Data
         public SwingTiming Timing => new SwingTiming(windupTime, activeTime, recoveryTime, wallRecoilTime);
 
         /// <summary>Timing after a chain step's scales and the finisher's extra recovery (seconds added to the recovery).</summary>
-        public SwingTiming TimingFor(float windupScale, float recoveryScale, float extraRecovery = 0f) =>
-            new SwingTiming(windupTime * Mathf.Max(0.05f, windupScale), activeTime,
+        public SwingTiming TimingFor(float windupScale, float recoveryScale, float extraRecovery = 0f, float activeScale = 1f) =>
+            new SwingTiming(windupTime * Mathf.Max(0.05f, windupScale), activeTime * Mathf.Max(0.05f, activeScale),
                 recoveryTime * Mathf.Max(0.05f, recoveryScale) + Mathf.Max(0f, extraRecovery), wallRecoilTime);
 
         public float ActiveStart => windupTime;

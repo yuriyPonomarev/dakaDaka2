@@ -205,6 +205,7 @@ namespace Emberdelve.EditorTools
                     _authority = authorityObject.AddComponent<LocalCombatAuthority>();
                     typeof(LocalCombatAuthority).GetField("config", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(_authority, config);
                     _authority.SetClock(() => _clock);
+            _authority.GuardReadyDelayEnabled = false;   // geometry gate: guards are raised and struck in the same instant (the delay is proven in CombatFlow)
                     _authority.SimulateBallistics = false; // D2: this gate's literals assert straight-line geometry and the legacy range falloff; the ballistic sim has its own gate (EmberdelveProjectileSimGate).
 
                     WeaponData slowDiagnosticBow = Instantiate(_bow);
@@ -333,6 +334,7 @@ namespace Emberdelve.EditorTools
             _authority = authorityObject.AddComponent<LocalCombatAuthority>();
             typeof(LocalCombatAuthority).GetField("config", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(_authority, config);
             _authority.SetClock(() => _clock);
+            _authority.GuardReadyDelayEnabled = false;   // geometry gate: guards are raised and struck in the same instant (the delay is proven in CombatFlow)
             _authority.SimulateBallistics = false; // D2: this gate's literals assert straight-line geometry and the legacy range falloff; the ballistic sim has its own gate (EmberdelveProjectileSimGate).
 
             AimlessShooter forgedOrigin = new AimlessShooter
@@ -828,12 +830,18 @@ namespace Emberdelve.EditorTools
                         contactCues++;
                         parryCue = parried;
                     }
+                    int deflectsBefore = _authority.DeflectsApplied, reactionsBefore = _authority.BlockReactionsApplied;
                     GameEvents.GuardContact += OnGuardContact;
                     try { _authority.StepSwings(); }
                     finally { GameEvents.GuardContact -= OnGuardContact; }
                     _authority.TryGetMeleeSwingStatus(id, out attack);
                     Check(attack.GuardStopped && attack.Hits.Count == 1 && attack.Hits[0].Blocked,
                         "real-player region " + bladeFraction + " physical blade stops the attack");
+                    // Reference port: the blocked hit puts a reaction on the defender, and only a confirmed parry deflects the attacker.
+                    Check(_authority.BlockReactionsApplied == reactionsBefore + 1 && _authority.BlockReactionRemaining(_defender.CombatId) > 0f,
+                        "real-player region " + bladeFraction + " the defender that blocked is in a block reaction");
+                    Check((_authority.DeflectsApplied == deflectsBefore + 1) == expectedBonus && _authority.DeflectsApplied - deflectsBefore <= 1,
+                        "real-player region " + bladeFraction + " deflects the attacker exactly when the parry is confirmed");
                     Check(contactCues == 1 && parryCue == expectedBonus,
                         "real-player region " + bladeFraction + " publishes the matching defense cue once");
                     Check(_authority.Riposte.HasLiveParry(_defender.CombatId) == expectedBonus

@@ -16,6 +16,7 @@ namespace Emberdelve.Data
         public const float DefaultGuardBreakReductionScale = 0.30f;
         public const float DefaultGuardStaggerSeconds = 0.80f;
         public const float DefaultGuardStaggerMoveMultiplier = 0.60f;
+        public const float DefaultGuardReadySeconds = 0.15f;
 
         /// <summary>D1c2: the review's example anti-cheat ceiling, degrees per second of yaw and of pitch.</summary>
         public const float DefaultSwingTurnCeilingDegPerSec = 720f;
@@ -26,6 +27,28 @@ namespace Emberdelve.Data
         [Range(0f, 3f)] public float guardStaggerSeconds = DefaultGuardStaggerSeconds;
         [Tooltip("Move-speed multiplier while the guard stagger lasts.")]
         [Range(0.1f, 1f)] public float guardStaggerMoveMultiplier = DefaultGuardStaggerMoveMultiplier;
+
+        [Header("Guard timing and reactions (reference port, Docs/Tasks/DARKER_COMBAT_PORT_20261124.md)")]
+        [Tooltip("A raised guard starts to intercept this long after the press (reference Event.Item.ImpactGuard.Ready, 0.150 s). 0 = immediately.")]
+        [Range(0f, 1f)] public float guardReadySeconds = DefaultGuardReadySeconds;
+        [Tooltip("Block reaction of the DEFENDER after a blocked weak hit: it cannot begin an ordinary attack for this long (a riposte is still allowed).")]
+        [Range(0f, 3f)] public float blockReactionWeakSeconds = 0.45f;
+        [Tooltip("Block reaction after a mid hit (reference: 1.0 s clip at x1.11).")]
+        [Range(0f, 3f)] public float blockReactionMidSeconds = 0.90f;
+        [Tooltip("Block reaction after a heavy hit (reference: 1.5 s clip at x1.15).")]
+        [Range(0f, 3f)] public float blockReactionHeavySeconds = 1.30f;
+        [Tooltip("A blocked hit is MID when impact power / impact resist reaches this. Our own threshold: the reference rule is native code.")]
+        [Range(0f, 3f)] public float blockReactionMidRatio = 0.75f;
+        [Tooltip("A blocked hit is HEAVY when impact power / impact resist reaches this. Our own threshold.")]
+        [Range(0f, 3f)] public float blockReactionHeavyRatio = 1f;
+        [Tooltip("Move-speed multiplier of the defender during a block reaction (reference x0.97).")]
+        [Range(0.1f, 1f)] public float blockReactionMoveMultiplier = 0.97f;
+        [Tooltip("An attacker whose hit was PARRIED cannot begin an attack for this long (reference Deflected montage of one-handed weapons).")]
+        [Range(0f, 3f)] public float deflectedSeconds = 1.267f;
+        [Tooltip("The same for a two-handed weapon (reference longsword / zweihander).")]
+        [Range(0f, 3f)] public float deflectedTwoHandedSeconds = 1.133f;
+        [Tooltip("Move-speed multiplier of a parried attacker (reference 'stucked' modifier x0.6).")]
+        [Range(0.1f, 1f)] public float deflectedMoveMultiplier = 0.6f;
 
         [Tooltip("D1c2 anti-cheat ceiling: while a swing runs (windup, active, recovery) the aim pose the authority sweeps follows the reported pose at no more than this many degrees per second, yaw and pitch each. Excess is discarded, not banked. Convention: 0 (an asset saved before D1c2) = the default 720; a NEGATIVE value = unlimited (test seam / mutation checks); a positive value is used as is.")]
         public float swingTurnCeilingDegPerSec = DefaultSwingTurnCeilingDegPerSec;

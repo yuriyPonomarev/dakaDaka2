@@ -291,6 +291,12 @@ namespace Emberdelve.EditorTools
         private static int ChainPattern(WeaponData weapon, int step) =>
             weapon.HasComboChain && step >= 0 && step < weapon.comboSteps.Length ? weapon.comboSteps[step].patternIndex : 0;
 
+        // Real-time marks of the sword's first chain step, derived from its data: a press just inside the recovery, and a moment
+        // shortly after the whole swing (well inside the 0.5 s press buffer).
+        private SwingTiming FirstStepTiming => _sword.ComboTiming(0, _sword.swingPatterns[_sword.comboSteps[0].patternIndex]);
+        private float RecoveryPressAt => FirstStepTiming.ActiveEnd + 0.25f * FirstStepTiming.Recovery;
+        private float AfterFirstSwing => FirstStepTiming.Total + 0.22f;
+
         private bool Begin(Scenario s, int step, out int id, out string reason) =>
             _authority.TryBeginMeleeSwingAsOwner(Intent(s.Who, step, ChainPattern(s.Who.Weapon, step)), out id, out reason);
 
@@ -452,6 +458,7 @@ namespace Emberdelve.EditorTools
             _authority.SetClock(() => _clock);
             _authority.AutoStepSwings = false;
             _authority.ImpactZonesEnabled = false;      // each section says when it turns the zones on
+            _authority.GuardReadyDelayEnabled = false;  // sections raise a guard and strike in the same instant; BladeDefenseOnRig proves the delay
 
             // ---- sword chain data: slash, slash, overhead at 1.00 / 1.05 / 1.10
             Check(_sword.HasComboChain && _sword.comboSteps.Length == 3, "the sword has a three-step combo chain");
@@ -460,20 +467,24 @@ namespace Emberdelve.EditorTools
             Near(1.00f, _sword.comboSteps[0].damageMultiplier, 1e-6f, "sword step 1 multiplier 1.00");
             Near(1.05f, _sword.comboSteps[1].damageMultiplier, 1e-6f, "sword step 2 multiplier 1.05");
             Near(1.10f, _sword.comboSteps[2].damageMultiplier, 1e-6f, "sword step 3 multiplier 1.10");
-            Near(0.70f, _sword.comboWindow, 1e-6f, "sword combo window 0.70 s after the recovery begins");
-            Near(0.35f, _sword.comboFinisherRecovery, 1e-6f, "sword finisher recovery +0.35 s");
+            // Reference short sword (Docs/Tasks/DARKER_COMBAT_PORT_20261124.md): the window is ComboWindow.Close - Collision.Off of step 1;
+            // the last step's pattern already holds its full recovery, so there is no extra finisher recovery.
+            Near(0.36f, _sword.comboWindow, 1e-6f, "sword combo window 0.36 s after the recovery begins");
+            Near(0f, _sword.comboFinisherRecovery, 1e-6f, "sword finisher recovery is part of the last pattern");
             Check(_sword.swingPatterns[0].kind == SwingKind.HorizontalRightToLeft && _sword.swingPatterns[1].kind == SwingKind.HorizontalLeftToRight
                   && _sword.swingPatterns[2].kind == SwingKind.Overhead, "the chain's patterns are the slash R->L, the back slash L->R and the overhead (Dark and Darker order)");
             foreach (SwingPatternData p in _sword.swingPatterns)
             {
                 Near(1f, p.damageMultiplier, 1e-6f, p.patternId + ": the pattern shape is x1 (the multiplier is the chain's)");
-                Near(0.85f, p.windupMoveMultiplier, 1e-6f, p.patternId + ": windup move x0.85");
-                Near(0.70f, p.activeMoveMultiplier, 1e-6f, p.patternId + ": hit-phase move x0.70");
-                Near(0.85f, p.recoveryMoveMultiplier, 1e-6f, p.patternId + ": recovery move x0.85");
+                // The reference slows an attacker to one "prepare" factor around the hit window and a lower (or equal) one inside it.
+                Near(p.windupMoveMultiplier, p.recoveryMoveMultiplier, 1e-6f, p.patternId + ": windup and recovery share the prepare factor");
+                Check(p.activeMoveMultiplier <= p.windupMoveMultiplier + 1e-6f, p.patternId + ": the hit phase is never faster than the prepare phase");
+                Check(p.activeMoveMultiplier >= 0.5f && p.windupMoveMultiplier <= 1f, p.patternId + ": move factors stay inside 0.5..1");
             }
 
-            Check(_rapier.HasComboChain && _rapier.comboSteps.Length == 3 && _rapier.comboSteps[0].patternIndex == 0 && _rapier.comboSteps[1].patternIndex == 0
-                  && _rapier.comboSteps[2].patternIndex == 0, "the rapier chain is three thrusts");
+            Check(_rapier.HasComboChain && _rapier.comboSteps.Length == 4 && _rapier.comboSteps[0].patternIndex == 0 && _rapier.comboSteps[1].patternIndex == 0
+                  && _rapier.comboSteps[2].patternIndex == 0 && _rapier.comboSteps[3].patternIndex == 0, "the rapier chain is four thrusts (reference rapier)");
+            Near(1.15f, _rapier.comboSteps[3].damageMultiplier, 1e-6f, "rapier step 4 multiplier 1.15");
             Near(1.00f, _rapier.comboSteps[0].damageMultiplier, 1e-6f, "rapier step 1 multiplier 1.00");
             Near(1.05f, _rapier.comboSteps[1].damageMultiplier, 1e-6f, "rapier step 2 multiplier 1.05");
             Near(1.10f, _rapier.comboSteps[2].damageMultiplier, 1e-6f, "rapier step 3 multiplier 1.10");
@@ -492,7 +503,7 @@ namespace Emberdelve.EditorTools
             Near(0.75f, _maul.hitSlowMultiplier, 1e-6f, "maul hit slow x0.75");
             Near(1.5f, _maul.hitSlowDuration, 1e-6f, "maul hit slow 1.5 s");
             Near(10f, _sword.heldMoveSpeedPenalty, 1e-6f, "sword held penalty 10 points");
-            Near(5f, _rapier.heldMoveSpeedPenalty, 1e-6f, "rapier held penalty 5 points");
+            Near(17f, _rapier.heldMoveSpeedPenalty, 1e-6f, "rapier held penalty 17 points (reference rapier)");
             Near(8f, _shield.heldMoveSpeedPenalty, 1e-6f, "shield held penalty 8 points");
             // B1: ranged weapons use the same rule (1 - points / 300); authored in EmberdelveAssetLibrary.ApplyCombatFlow
             Near(4f, _bow.heldMoveSpeedPenalty, 1e-6f, "B1: bow held penalty 4 points (light)");
@@ -587,9 +598,9 @@ namespace Emberdelve.EditorTools
                 Check(Begin(s, 2, out int thirdId, out _), "timing: step 3 accepted");
                 _authority.TryGetMeleeSwingStatus(thirdId, out MeleeSwingStatus third);
                 SwingPatternData p0 = _sword.swingPatterns[0], p1 = _sword.swingPatterns[1], p2 = _sword.swingPatterns[2];
-                Near(p0.windupTime, a.Timing.Windup, 1e-5f, "step 1 uses the pattern's own windup");
+                Near(p0.windupTime * _sword.comboSteps[0].windupScale, a.Timing.Windup, 1e-5f, "step 1 winds up at its authored scale of the shared pattern");
                 ComboStep c1 = _sword.comboSteps[1], c2 = _sword.comboSteps[2];
-                Check(c1.windupScale < 1f, $"step 2 winds up quicker than its pattern (x{c1.windupScale:F2})");
+                Check(c1.windupScale > 0f, $"step 2 has an authored windup scale (x{c1.windupScale:F2})");
                 Near(p1.windupTime * c1.windupScale, b.Timing.Windup, 1e-5f, $"step 2 winds up at its authored x{c1.windupScale:F2}");
                 Near(p1.recoveryTime * c1.recoveryScale, b.Timing.Recovery, 1e-5f, $"step 2 recovery is the pattern's at its authored x{c1.recoveryScale:F2}");
                 Near(p2.recoveryTime * c2.recoveryScale + _sword.comboFinisherRecovery, third.Timing.Recovery, 1e-5f, "step 3 (the finisher) recovers comboFinisherRecovery longer");
@@ -911,7 +922,7 @@ namespace Emberdelve.EditorTools
                 Check(st.WallStopped, $"wall: the swing was stopped by the wall ({st.EndReason})");
                 float stopTime = st.Timing.Windup + st.Timing.Active * st.WallContactSample / Mathf.Max(1, st.SampleCount);
                 float recoilEnd = t0 + stopTime + st.Timing.WallRecoil;
-                float windowEnd = recoilEnd + _sword.comboWindow;
+                float windowEnd = recoilEnd + _sword.ComboWindowAfter(1);   // the stopped swing was chain step 2 (index 1): its own window applies
                 _clock = windowEnd - 0.02f;
                 Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out e) && e == 2, "wall: the combo survived the wall stop; 20 ms before the window (measured from the recoil end) closes step 3 is still expected");
                 _clock = windowEnd + 0.05f;
@@ -1036,10 +1047,10 @@ namespace Emberdelve.EditorTools
         private void RapierChain()
         {
             ZonesOff();
-            float[] steps = { 1.00f, 1.05f, 1.10f };
+            float[] steps = { 1.00f, 1.05f, 1.10f, 1.15f };
             Scenario s = NewScenario(_rapier);
             AddBody(s, new Vector3(0f, 1.6f, 1.8f), 0.33f);
-            for (int step = 0; step < 3; step++)
+            for (int step = 0; step < steps.Length; step++)
             {
                 MeleeSwingStatus st = SwingStep(s, step, out bool ok, out string why);
                 Check(ok && st.Hits.Count == 1, $"rapier step {step + 1} accepted and hits ({why})");
@@ -1159,6 +1170,9 @@ namespace Emberdelve.EditorTools
                 tipSword.reach = 1.0f;
                 tipSword.hitSphereRadius = 0.5f;
                 tipSword.comboSteps = new[] { new ComboStep(0, 1.00f), new ComboStep(1, 1.05f), new ComboStep(2, 1.10f) };
+                // The authored weapons keep cooldown = the first step's length, so the repeat floor never outlasts the combo window.
+                // This fixture swaps in a 0.3 s test pattern, so it follows the same rule for that pattern.
+                tipSword.cooldown = straight.TotalTime;
                 Scenario s = NewScenario(tipSword);
                 Dummy d = AddBody(s, new Vector3(0.15f, 1.8f, 0.30f + 0.9f * bladeLength), 0.1f);
                 MeleeSwingStatus last = default;
@@ -1397,26 +1411,29 @@ namespace Emberdelve.EditorTools
             SwingTiming stepOne = _sword.ComboTiming(0, slash);
             float w = stepOne.Windup, a = stepOne.Active, r = stepOne.Recovery;
 
+            float prepare = slash.windupMoveMultiplier, hit = slash.activeMoveMultiplier, recover = slash.recoveryMoveMultiplier;
             _clock = t0 + w * 0.5f;
-            Near(idleWalk * 0.85f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "windup: walk x0.85");
-            Near(idleSprint * 0.85f, _rig.Movement.ResolveGroundSpeed(true, false), 1e-4f, "windup: sprint x0.85 too");
+            Near(idleWalk * prepare, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, $"windup: walk x{prepare:F3}");
+            Near(idleSprint * prepare, _rig.Movement.ResolveGroundSpeed(true, false), 1e-4f, $"windup: sprint x{prepare:F3} too");
             _clock = t0 + w + a * 0.5f;
-            Near(idleWalk * 0.70f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "hit phase: walk x0.70");
-            Near(idleSprint * 0.70f, _rig.Movement.ResolveGroundSpeed(true, false), 1e-4f, "hit phase: sprint x0.70");
+            Near(idleWalk * hit, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, $"hit phase: walk x{hit:F3}");
+            Near(idleSprint * hit, _rig.Movement.ResolveGroundSpeed(true, false), 1e-4f, $"hit phase: sprint x{hit:F3}");
             _clock = t0 + w + a + r * 0.5f;
-            Near(idleWalk * 0.85f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "recovery: walk x0.85");
+            Near(idleWalk * recover, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, $"recovery: walk x{recover:F3}");
             _clock = t0 + w + a + r + 0.02f;
             _authority.StepSwings();
             Near(idleWalk, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "after the swing: walk back to the held-weapon speed");
 
-            // chain step 2 winds up quicker (its windupScale), so 0.22 s in it is already the hit phase (x0.70); step 1 would still be winding up
+            // chain step 2 has its own phase boundaries (its step scales): the slowdown follows THAT step's windup and hit window
             float t1 = _clock;
             MeleeSwingIntent second = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 1, 1, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
             Check(_authority.TryBeginMeleeSwingAsOwner(second, out int secondId, out why), $"move phases: step 2 accepted ({why})");
-            _clock = t1 + 0.22f;
-            float step2Windup = _sword.swingPatterns[1].windupTime * _sword.comboSteps[1].windupScale;
-            Check(0.22f > step2Windup && 0.22f < slash.windupTime, $"move phases: 0.22 s is inside step 1's windup ({slash.windupTime:F2} s) but past step 2's ({step2Windup:F2} s)");
-            Near(idleWalk * 0.70f, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "step 2: the shorter windup also moves the hit-phase slowdown earlier");
+            SwingPatternData backSlash = _sword.swingPatterns[1];
+            SwingTiming stepTwo = _sword.ComboTiming(1, backSlash);
+            _clock = t1 + stepTwo.Windup * 0.5f;
+            Near(idleWalk * backSlash.windupMoveMultiplier, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "step 2: its own windup is still the prepare slowdown");
+            _clock = t1 + stepTwo.Windup + stepTwo.Active * 0.5f;
+            Near(idleWalk * backSlash.activeMoveMultiplier, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "step 2: the hit-phase slowdown sits inside its own hit window");
             _clock = t1 + 2f;
             _authority.StepSwings();
             Near(idleWalk, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "step 2 over: speed restored");
@@ -1735,8 +1752,25 @@ namespace Emberdelve.EditorTools
             _clock += 3f;
             _authority.StepSwings();
             _rig.Health.Heal(1000f);
+
+            // Reference port: a guard intercepts only after its ready time (0.15 s), measured on the authority clock from the press.
+            _rig.SetGuardHeld(false);
+            _authority.GuardReadyDelayEnabled = true;
             _rig.SetGuardHeld(true);
             Check(_rig.IsGuarding, "U3C rig: the guard is up");
+            Near(0.15f, _authority.GuardReadySeconds, 1e-6f, "guard ready: the authored ready time is the reference 0.15 s");
+            Check(!_rig.IsGuardReady, "guard ready: a guard pressed this instant does not intercept yet");
+            bool early = _rig.TryResolveGuard(U3cHit(_rig.transform.position + _rig.transform.forward * 2f, -_rig.transform.forward, 1f, BladeHeight.Mid),
+                new CombatFlowTuning(), out _);
+            Check(!early, "guard ready: a frontal hit in the first instant of the raise is not blocked");
+            _clock += _authority.GuardReadySeconds - 0.01f;
+            Check(!_rig.IsGuardReady, "guard ready: 10 ms before the ready time it still does not intercept");
+            _clock += 0.02f;
+            Check(_rig.IsGuardReady, "guard ready: after the ready time the held guard intercepts");
+            _rig.SetGuardHeld(false);
+            _rig.SetGuardHeld(true);
+            Check(!_rig.IsGuardReady, "guard ready: releasing and pressing again restarts the ready time");
+            _authority.GuardReadyDelayEnabled = false;   // the rest of the gate raises and strikes in the same instant
 
             DefenseProfile kit = _rig.Defense;
             float impact = kit.ImpactResist * 0.5f;            // below the resist: never a guard break in this section
@@ -2241,7 +2275,7 @@ namespace Emberdelve.EditorTools
                 Check(melee.TryBeginSwing(), "buffer: a swing begins through the client");
                 float s0 = Time.realtimeSinceStartup;
                 int first = melee.LastSwingId;
-                while (Time.realtimeSinceStartup - s0 < 0.62f) yield return null;
+                while (Time.realtimeSinceStartup - s0 < RecoveryPressAt) yield return null;
                 _rig.Input.PrimaryPressedOverride = true;
                 yield return null;
                 _rig.Input.PrimaryPressedOverride = null;
@@ -2252,7 +2286,7 @@ namespace Emberdelve.EditorTools
                 _rig.Input.SwapPressedOverride = null;
                 Check(_rig.ActiveWeapon == _sword, "buffer: the swap key during the swing is refused");
                 Check(melee.BufferedPressRemaining > 0f, "buffer: the refusal did not touch the buffered press");
-                while (Time.realtimeSinceStartup - s0 < 0.97f) yield return null;   // the client's own swing is over, the press is still inside its 0.5 s
+                while (Time.realtimeSinceStartup - s0 < AfterFirstSwing) yield return null;   // the client's own swing is over, the press is still inside its 0.5 s
                 _clock += 5f;
                 yield return new WaitForSeconds(0.08f);
                 Check(melee.LastSwingId != first && _rig.ActiveWeapon == _sword, "buffer: the buffered press became the next SWORD swing; the refused swap was not queued");
@@ -2265,7 +2299,7 @@ namespace Emberdelve.EditorTools
                 _authority.StepSwings();
                 Check(melee.TryBeginSwing(), "buffer 2: a swing begins");
                 s0 = Time.realtimeSinceStartup;
-                while (Time.realtimeSinceStartup - s0 < 0.62f) yield return null;
+                while (Time.realtimeSinceStartup - s0 < RecoveryPressAt) yield return null;
                 _rig.Input.PrimaryPressedOverride = true;
                 yield return null;
                 _rig.Input.PrimaryPressedOverride = null;
@@ -2351,12 +2385,12 @@ namespace Emberdelve.EditorTools
                 Check(melee.TryBeginSwing(), "follow-ups: a swing begins through the client");
                 float s0 = Time.realtimeSinceStartup;
                 int firstSwing = melee.LastSwingId;
-                while (Time.realtimeSinceStartup - s0 < 0.62f) yield return null;
+                while (Time.realtimeSinceStartup - s0 < RecoveryPressAt) yield return null;
                 _rig.Input.PrimaryPressedOverride = true;          // during the client's recovery: buffered
                 yield return null;
                 _rig.Input.PrimaryPressedOverride = null;
                 Check(melee.BufferedPressRemaining > 0.3f, $"follow-ups: the press during the recovery is buffered ({melee.BufferedPressRemaining:F2} s)");
-                while (Time.realtimeSinceStartup - s0 < 0.97f) yield return null;
+                while (Time.realtimeSinceStartup - s0 < AfterFirstSwing) yield return null;
                 Check(melee.LastSwingId == firstSwing, "follow-ups: the authority (frozen clock) has refused the buffered begin so far");
                 Check(melee.BufferedPressRemaining > 0f, $"follow-ups: the refusal did not spend the buffered press ({melee.BufferedPressRemaining:F2} s left)");
                 _clock += 5f;                                       // the authority clock catches up inside the buffer window

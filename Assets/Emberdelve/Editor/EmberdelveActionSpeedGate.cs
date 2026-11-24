@@ -283,13 +283,14 @@ namespace Emberdelve.EditorTools
             rig.AttributeStats.Initialize(rig.Class);
             Close(rig.EffectiveStats.ActionSpeedFactor, 2f, "versioned reinitialize refreshes action capture");
             Close(slowCapture.ActionSpeedFactor, .5f, "old effective capture remains slow");
-            _clock = 1.2f; _authority.StepSwings();
+            _clock = slow.Timing.ActiveEnd + .001f; _authority.StepSwings();
             _authority.TryGetMeleeSwingStatus(slow.SwingId, out MeleeSwingStatus stillSlow);
-            Close(stillSlow.Timing.Active, .6f, "fast regear does not retime old active duration");
+            Close(stillSlow.Timing.Active, slow.Timing.Active, "fast regear does not retime old active duration");
             Check(target.Received.Count == 1 && stillSlow.Hits.Count == 1, "slow swing applies one real geometry contact");
             if (target.Received.Count > 0) Close(target.Received[0].Amount, 34.944f, "slow body damage unchanged");
-            if (stillSlow.Hits.Count > 0) Check(stillSlow.Hits[0].Sample == Mathf.CeilToInt(stillSlow.SampleCount / 15f),
-                "slow contact window retains authored normalized1/15 active phase");
+            // The contact sits at the same normalized point of the active path whatever the action rate (checked against the fast swing below).
+            float slowContact = stillSlow.Hits.Count > 0 ? stillSlow.Hits[0].Sample / (float)Mathf.Max(1, stillSlow.SampleCount) : -1f;
+            Check(slowContact > 0f && slowContact < .25f, $"slow contact window sits early in the active phase ({slowContact:F3})");
             _clock = slow.RepeatInterval - .001f;
             MeleeSwingIntent early = Intent(rig);
             Check(!_authority.TryBeginMeleeSwing(rig.CombatSender, in early, out _, out _), "fast regear cannot bypass the prior slow floor");
@@ -301,9 +302,10 @@ namespace Emberdelve.EditorTools
             SetRate(rig, .5f);
             _clock += fast.Timing.ActiveEnd + .001f; _authority.StepSwings();
             _authority.TryGetMeleeSwingStatus(fast.SwingId, out MeleeSwingStatus stillFast);
-            Close(stillFast.Timing.Active, .15f, "slow regear does not stretch old active duration");
-            if (stillFast.Hits.Count > 0) Check(stillFast.Hits[0].Sample == Mathf.CeilToInt(stillFast.SampleCount / 15f),
-                "fast contact window retains authored normalized1/15 active phase");
+            Close(stillFast.Timing.Active, fast.Timing.Active, "slow regear does not stretch old active duration");
+            float fastContact = stillFast.Hits.Count > 0 ? stillFast.Hits[0].Sample / (float)Mathf.Max(1, stillFast.SampleCount) : -1f;
+            Check(fastContact > 0f && Mathf.Abs(fastContact - slowContact) <= 1f / Mathf.Max(1, stillSlow.SampleCount) + 1f / Mathf.Max(1, stillFast.SampleCount),
+                $"fast contact window retains the slow swing's normalized active phase ({fastContact:F3} vs {slowContact:F3})");
             Check(target.Received.Count == 1, "fast swing keeps single-hit geometry");
             if (target.Received.Count > 0) Close(target.Received[0].Amount, 34.944f, "fast body damage unchanged");
             _clock = slow.RepeatInterval + fast.RepeatInterval + .001f;

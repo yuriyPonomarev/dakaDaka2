@@ -301,7 +301,8 @@ namespace Emberdelve.UI
                 && GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) && authority is IComboStateSource source
                 && source.TryGetComboState(rig.CombatId, out int step, out int total, out float remaining))
             {
-                float fraction = remaining <= 0f ? 0f : Mathf.Clamp01(remaining / Mathf.Max(0.05f, weapon.comboWindow));
+                // "step" is the NEXT step of the chain, so the open window belongs to the step before it
+                float fraction = remaining <= 0f ? 0f : Mathf.Clamp01(remaining / weapon.ComboWindowAfter(step - 1));
                 ApplyComboPips(step, total, fraction);
                 return;
             }

@@ -232,10 +232,10 @@ namespace Emberdelve.EditorTools
         {
             PlayerRig rig = Rig(source, weapon); RangedCombat ranged = rig.GetComponent<RangedCombat>();
             IEnumerator press = Press(rig); while (press.MoveNext()) yield return press.Current;
-            Close(ranged.ActiveDrawDuration, archer ? .7589285714f : .3f, "saved class local draw duration");
-            Close(ranged.ActiveAuthoredDrawTime, archer ? .85f : .3f, "saved authored draw time captured");
+            Close(ranged.ActiveDrawDuration, archer ? weapon.drawTime / 1.12f : .3f, "saved class local draw duration");
+            Close(ranged.ActiveAuthoredDrawTime, archer ? 1.5f : .3f, "saved authored draw time captured");
             float hp = rig.CurrentHealth, mana = rig.Mana.CurrentMana; int magazine = ranged.Magazine, reserve = ranged.Reserve, shots = _shots, acceptedBefore = _authority.AcceptedCount;
-            IEnumerator hold = HoldFractions(rig, archer ? .7589285714f : .3f, !archer); while (hold.MoveNext()) yield return hold.Current;
+            IEnumerator hold = HoldFractions(rig, archer ? weapon.drawTime / 1.12f : .3f, !archer); while (hold.MoveNext()) yield return hold.Current;
             IEnumerator release = Release(); while (release.MoveNext()) yield return release.Current;
             Check(_shots == shots + 1 && _authority.AcceptedCount == acceptedBefore + 1 && ranged.Magazine == magazine - 1 && ranged.Reserve == reserve, "valid saturated release is accepted and launches/spends exactly once");
             Close(_lastShot.Charge, 1, "ordinary intent carries old saturated charge only"); Cleared(rig, "valid release");
@@ -273,7 +273,7 @@ namespace Emberdelve.EditorTools
             }
             Check(rig.Inventory.TryAdd(_boots, 1) && rig.Equipment.TryEquipItem(_boots, out _), "actual boots equipped");
             press = Press(rig); while (press.MoveNext()) yield return press.Current;
-            Close(ranged.ActiveDrawDuration, archer ? .75f : .2941176471f, "next press uses actual DEX17/11 rate");
+            Close(ranged.ActiveDrawDuration, archer ? weapon.drawTime * 15f / 17f : .2941176471f, "next press uses actual DEX17/11 rate");
             ranged.CancelDraw(); Cleared(rig, "explicit cancel");
             release = Release(); while (release.MoveNext()) yield return release.Current;
             Check(_shots == shots + 1, "cancelled release launches nothing");
@@ -294,15 +294,15 @@ namespace Emberdelve.EditorTools
         {
             PlayerRig rig = Rig(_archer, _bow); RangedCombat ranged = rig.GetComponent<RangedCombat>(); Rate(rig, .5f, true);
             IEnumerator press = Press(rig); while (press.MoveNext()) yield return press.Current;
-            Close(ranged.ActiveDrawDuration, 1.7f, "slow local press capture"); Rate(rig, 2f);
-            Close(ranged.ActiveDrawDuration, 1.7f, "fast regear cannot retime an existing slow draw");
+            Close(ranged.ActiveDrawDuration, _bow.drawTime * 2f, "slow local press capture"); Rate(rig, 2f);
+            Close(ranged.ActiveDrawDuration, _bow.drawTime * 2f, "fast regear cannot retime an existing slow draw");
             yield return null;
             Check(ranged.Charge > 0 && ranged.Charge < 1, "active capture keeps accumulating rather than restarting");
             ranged.CancelDraw(); Cleared(rig, "slow cancellation");
             IEnumerator release = Release(); while (release.MoveNext()) yield return release.Current;
             press = Press(rig); while (press.MoveNext()) yield return press.Current;
-            Close(ranged.ActiveDrawDuration, .425f, "next press captures fast action rate"); Close(ranged.Charge, 0, "repress starts at zero");
-            Rate(rig, .5f); Close(ranged.ActiveDrawDuration, .425f, "slow regear cannot stretch active fast draw");
+            Close(ranged.ActiveDrawDuration, _bow.drawTime * .5f, "next press captures fast action rate"); Close(ranged.Charge, 0, "repress starts at zero");
+            Rate(rig, .5f); Close(ranged.ActiveDrawDuration, _bow.drawTime * .5f, "slow regear cannot stretch active fast draw");
             ranged.CancelDraw(); release = Release(); while (release.MoveNext()) yield return release.Current;
             // A very slow profile makes a real next-frame release unambiguously earlier than the saved .2 threshold.
             Rate(rig, .1f); int shots = _shots, magazine = ranged.Magazine, reserve = ranged.Reserve;

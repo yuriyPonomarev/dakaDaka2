@@ -21,7 +21,7 @@ MonoBehaviour:
   windupTime: 0.05
   activeWindow: 0.08
   recoveryTime: 0.2
-  cooldown: 1.1
+  cooldown: 0.8
   reach: 1.2
   arcAngle: 60
   hitSphereRadius: 0.2
@@ -44,6 +44,7 @@ MonoBehaviour:
   riposteWithOffhandShield: 0
   riposteWindow: 1
   riposteDamageMultiplier: 1.5
+  parryBladeRegion: {x: 0, y: 1}
   riposteSwingPatterns: 
   riposteStrikeGap: 0.1
   twoHanded: 1
@@ -58,7 +59,7 @@ MonoBehaviour:
   minChargeToFire: 0.12
   minChargeDamageScale: 0.55
   magazineSize: 1
-  reloadTime: 2.2
+  reloadTime: 2.673
   reloadWhileHeld: 0
   falloffStartRange: 12
   falloffEndRange: 34

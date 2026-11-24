@@ -440,8 +440,10 @@ namespace Emberdelve.EditorTools
                 {
                     Check(p.Validate(out string problem), $"{p.patternId}: pattern data validates ({problem})");
                     // D1a left a move-speed hook at 1; D1b consumes it as three phase multipliers (windup / hit / recovery).
-                    Check(Mathf.Approximately(p.windupMoveMultiplier, 0.85f) && Mathf.Approximately(p.activeMoveMultiplier, 0.70f) && Mathf.Approximately(p.recoveryMoveMultiplier, 0.85f),
-                        $"{p.patternId}: the D1b phase move multipliers are authored (0.85 / 0.70 / 0.85)");
+                    // Reference port: one "prepare" factor around the hit window and a lower (or equal) one inside it (the numbers are per weapon family).
+                    Check(Mathf.Approximately(p.windupMoveMultiplier, p.recoveryMoveMultiplier) && p.activeMoveMultiplier <= p.windupMoveMultiplier + 1e-6f
+                          && p.activeMoveMultiplier >= 0.5f && p.windupMoveMultiplier <= 1f,
+                        $"{p.patternId}: the phase move multipliers are authored (prepare {p.windupMoveMultiplier:F3} / hit {p.activeMoveMultiplier:F3} / prepare {p.recoveryMoveMultiplier:F3})");
                     Check(Mathf.Approximately(p.damageMultiplier, 1f), $"{p.patternId}: the pattern shape is damage x1 (the per-step multiplier lives in the weapon chain)");
                     Check(p.windupTime > 0f && p.activeTime > 0f && p.recoveryTime > 0f, $"{p.patternId}: windup, active and recovery durations are authored");
                     Check(SwingGeometry.SampleCount(p, w) == SwingGeometry.SampleCount(p, w) && SwingGeometry.SampleCount(p, w) >= SwingGeometry.MinSamples,
@@ -470,7 +472,7 @@ namespace Emberdelve.EditorTools
             // ---- reach numbers (effective reach from the eye)
             Near(2.291f, _sword.swingPatterns[0].EffectiveReach(_sword), 1e-3f, "sword effective reach is about 2.3 m at the eye (H1 retune)");
             Near(1.2f, _sword.swingPatterns[0].BladeLength(_sword), 0.01f, "sword damage segment is about 1.2 m");
-            Near(0.30f, _sword.swingPatterns[0].activeTime, 1e-4f, "sword slash active phase is 0.30 s");
+            Near(0.204f, _sword.swingPatterns[0].activeTime, 1e-4f, "sword slash active phase is the reference arming sword hit window, 0.204 s");
             Near(2.331f, _rapier.swingPatterns[0].EffectiveReach(_rapier), 1e-3f, "rapier thrust reach is about 2.3 m");
             Near(_sword.swingPatterns[0].EffectiveReach(_sword), _sword.swingPatterns[0].BladeLength(_sword) + _sword.swingPatterns[0].sweepRadius + _sword.swingPatterns[0].reachInset, 1e-4f,
                 "sword blade length + sweep radius + inset = effective reach");
@@ -816,8 +818,12 @@ namespace Emberdelve.EditorTools
                 Check(_authority.ActiveSwingCount == 0, "the stopped swing is no longer running");
 
                 // the stop cost the swinger the rest of the sweep, and the cooldown still applies
-                Check(!Begin(s, SlashBack, out _, out string reason) && reason.Contains("cooldown"), "after a wall stop the weapon cooldown still applies (" + reason + ")");
-                Cooldown(2f);
+                // Either the weapon cooldown still holds, or the wall recoil itself outlasted the repeat floor (reference: a wall hit costs more time than a clean swing).
+                float wallStopFloor = Mathf.Max(0.8f * _sword.cooldown, _sword.swingPatterns[Slash].Timing.Total);
+                bool refusedAfterWall = !Begin(s, SlashBack, out _, out string reason);
+                Check(refusedAfterWall ? reason.Contains("cooldown") : st.Timing.Windup + st.Timing.WallRecoil >= wallStopFloor - 1e-4f,
+                    "after a wall stop the next swing is never earlier than the repeat floor (" + reason + ")");
+                Cooldown(2f); _authority.StepSwings();
                 s.Dispose();
             }
 
@@ -1111,7 +1117,8 @@ namespace Emberdelve.EditorTools
                         Check(hit, $"{p.patternId}: a probe on the blade at u={u:F2} is struck");
                         if (hit)
                         {
-                            float first = HitOn(st, d).FirstSample / (float)samples;
+                            // normalized by the swing's own sample count: a chain step may shorten the active window of a shared pattern
+                            float first = HitOn(st, d).FirstSample / (float)Mathf.Max(1, st.SampleCount);
                             bool consistent = p.kind == SwingKind.Thrust
                                 ? first >= 0f && first <= 1f
                                 : first >= u - 0.13f && first <= u + 0.01f;
@@ -1588,7 +1595,8 @@ namespace Emberdelve.EditorTools
                 Dummy left = AddBody(s, new Vector3(-0.8f, 1.5f, 1.0f), 0.3f);      // touched at the very start of the sweep
                 Dummy right = AddBody(s, new Vector3(0.8f, 1.5f, 1.0f), 0.3f);      // touched late in the sweep
                 Check(Begin(s, Slash, out int id, out string reason), "swap test 2: begin (" + reason + ")");
-                _clock += 0.35f; _authority.StepSwings();                          // 0.11 s into the 0.30 s active phase
+                SwingTiming swapTiming = _sword.swingPatterns[Slash].Timing;
+                _clock += swapTiming.Windup + swapTiming.Active * 0.37f; _authority.StepSwings();   // a good third into the active phase
                 Check(left.Received.Count == 1, "the target touched before the swap has been hit");
                 s.Who.Weapon = _crossbow;
                 for (int i = 0; i < 200; i++) { _clock += 0.01f; _authority.StepSwings(); }
@@ -1611,11 +1619,14 @@ namespace Emberdelve.EditorTools
             {
                 Scenario s = NewScenario(_rapier);
                 Check(Begin(s, 0, out int id, out string reason), "rapier cooldown test: begin (" + reason + ")");
-                _clock += 0.52f; _authority.StepSwings();     // the 0.50 s thrust is over; 0.8 x 0.68 s = 0.544 s has not passed
+                // The floor is the larger of 0.8 x cooldown and the swing's own length (data-derived: the reference has no separate cooldown).
+                SwingTiming thrustTiming = _rapier.ComboTiming(0, _rapier.swingPatterns[0]);
+                float rapierFloor = Mathf.Max(0.8f * _rapier.cooldown, thrustTiming.Total);
+                _clock += rapierFloor - 0.03f; _authority.StepSwings();
+                Check(!Begin(s, 0, out _, out reason), $"{rapierFloor - 0.03f:F2} s after the begin the next thrust is still refused (" + reason + ")");
+                _clock += 0.05f; _authority.StepSwings();
                 Check(_authority.ActiveSwingCount == 0, "the thrust is over");
-                Check(!Begin(s, 0, out _, out reason) && reason.Contains("cooldown"), "0.52 s after the begin the weapon cooldown still holds (" + reason + ")");
-                _clock += 0.04f; _authority.StepSwings();     // 0.56 s
-                Check(Begin(s, 0, out _, out reason), "0.56 s after the begin the cooldown has expired (" + reason + ")");
+                Check(Begin(s, 0, out _, out reason), $"{rapierFloor + 0.02f:F2} s after the begin the floor has passed (" + reason + ")");
                 _clock += 2f; _authority.StepSwings();
                 s.Dispose();
 
@@ -1624,17 +1635,28 @@ namespace Emberdelve.EditorTools
                 AddBody(w, new Vector3(0f, 1.5f, 2.0f), 0.3f);
                 AddWall(w, new Vector3(0f, 1.8f, 1.65f), new Vector3(4f, 4f, 0.3f));
                 Check(Begin(w, Slash, out id, out reason), "floor test: begin (" + reason + ")");
-                _clock += 0.70f; _authority.StepSwings();
+                // A wall-stopped swing is certainly over once the whole active phase plus the wall recoil has passed.
+                SwingTiming wallTiming = _sword.swingPatterns[Slash].Timing;
+                float wallProbe = wallTiming.ActiveEnd + wallTiming.WallRecoil + 0.02f;
+                _clock += wallProbe; _authority.StepSwings();
                 _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus st);
-                Check(st.WallStopped && st.Finished, $"the swing was stopped by the wall and is over at 0.70 s ({st.EndReason})");
-                Check(!Begin(w, SlashBack, out _, out reason) && reason.Contains("cooldown"), "0.70 s: refused (cooldown, " + reason + ")");
+                Check(st.WallStopped && st.Finished, $"the swing was stopped by the wall and is over at {wallProbe:F2} s ({st.EndReason})");
                 // The floor after a wall stop is the full swing length of the pattern (derived from the data), never less than 0.8 x the weapon cooldown.
-                float wallFloor = Mathf.Max(0.8f * _sword.cooldown, _sword.swingPatterns[Slash].Timing.Total);
-                Check(wallFloor > 0.70f + 0.02f, $"the wall test is meaningful: the repeat floor {wallFloor:F2} s is later than the 0.70 s probe");
-                _clock += (wallFloor - 0.04f) - 0.70f; _authority.StepSwings();     // just before the floor
-                Check(!Begin(w, SlashBack, out _, out reason) && reason.Contains("cooldown"), $"{wallFloor - 0.04f:F2} s: still refused, the pattern's {wallFloor:F2} s is the floor after a wall stop ({reason})");
-                _clock += 0.06f; _authority.StepSwings();     // just after the floor
-                Check(Begin(w, SlashBack, out _, out reason), $"{wallFloor + 0.02f:F2} s: accepted ({reason})");
+                float wallFloor = Mathf.Max(0.8f * _sword.cooldown, wallTiming.Total);
+                if (wallFloor > wallProbe + 0.06f)
+                {
+                    Check(!Begin(w, SlashBack, out _, out reason) && reason.Contains("cooldown"), $"{wallProbe:F2} s: refused (cooldown, " + reason + ")");
+                    _clock += (wallFloor - 0.04f) - wallProbe; _authority.StepSwings();     // just before the floor
+                    Check(!Begin(w, SlashBack, out _, out reason) && reason.Contains("cooldown"), $"{wallFloor - 0.04f:F2} s: still refused, the pattern's {wallFloor:F2} s is the floor after a wall stop ({reason})");
+                    _clock += 0.06f; _authority.StepSwings();     // just after the floor
+                    Check(Begin(w, SlashBack, out _, out reason), $"{wallFloor + 0.02f:F2} s: accepted ({reason})");
+                }
+                else
+                {
+                    // Reference data: the wall recoil (0.70 s) outlasts the repeat floor, so the stop never lets the next swing start early.
+                    Check(wallTiming.Windup + wallTiming.WallRecoil >= wallFloor - 1e-4f, $"the earliest wall stop plus its recoil ({wallTiming.Windup + wallTiming.WallRecoil:F2} s) is not before the repeat floor ({wallFloor:F2} s)");
+                    Check(Begin(w, SlashBack, out _, out reason), $"{wallProbe:F2} s: accepted once the recoil has ended ({reason})");
+                }
                 _clock += 2f; _authority.StepSwings();
                 w.Dispose();
             }
@@ -1722,7 +1744,9 @@ namespace Emberdelve.EditorTools
             // D1b: this used to wait 0.6 s and expect the alternating slash from ChoosePatternIndex (and the overhead for a
             // sprinting press). The pattern order is now the weapon's combo chain, owned by the authority: a second press
             // INSIDE the combo window continues it at step 1 (the left-to-right back slash; the chain opens right-to-left). The sprint-overhead placeholder is gone.
-            yield return new WaitForSeconds(0.1f);
+            // The reference window after the first step is short (0.357 s from the end of the hit phase, 0.1 s of it is the recovery),
+            // and 0.15 s of it has just been spent above, so the follow-up press comes on the next frame instead of after another pause.
+            yield return null;
             Check(_authority.TryGetExpectedComboStep(rig.CombatId, out int expectedStep) && expectedStep == 1, "the authority expects combo step 1 next");
             Check(melee.TryBeginSwing() && melee.ComboStep == 1 && melee.ActivePattern.kind == SwingKind.HorizontalLeftToRight, "the next press is combo step 1, the left-to-right back slash");
             guard = 0f;

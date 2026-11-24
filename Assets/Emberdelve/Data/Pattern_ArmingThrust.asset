@@ -14,15 +14,15 @@ MonoBehaviour:
   m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.SwingPatternData
   patternId: arming_thrust
   kind: 3
-  windupTime: 0.22
-  activeTime: 0.14
-  recoveryTime: 0.3
-  wallRecoilTime: 0.35
+  windupTime: 0.6
+  activeTime: 0.154
+  recoveryTime: 0.913
+  wallRecoilTime: 0.7
   damageMultiplier: 1
   impactPowerScale: 1
-  windupMoveMultiplier: 0.85
-  activeMoveMultiplier: 0.7
-  recoveryMoveMultiplier: 0.85
+  windupMoveMultiplier: 0.875
+  activeMoveMultiplier: 0.75
+  recoveryMoveMultiplier: 0.875
   maxTargets: 2
   reachScale: 0.75
   reachInset: 1.08

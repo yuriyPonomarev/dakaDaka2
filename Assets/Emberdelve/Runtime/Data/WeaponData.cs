@@ -28,13 +28,20 @@ namespace Emberdelve.Data
         [Range(0.2f, 2f)] public float windupScale;
         [Tooltip("Scales the pattern's recovery for this step.")]
         [Range(0.2f, 2f)] public float recoveryScale;
+        [Tooltip("Scales the pattern's active (hit) window for this step. 0 = as authored (assets saved before this field existed).")]
+        [Range(0f, 2f)] public float activeScale;
+        [Tooltip("Seconds after THIS step's recovery begins within which the next press continues the chain. 0 = the weapon's Combo Window.")]
+        [Range(0f, 3f)] public float comboWindow;
 
-        public ComboStep(int patternIndex, float damageMultiplier, float windupScale = 1f, float recoveryScale = 1f)
+        public ComboStep(int patternIndex, float damageMultiplier, float windupScale = 1f, float recoveryScale = 1f, float activeScale = 1f,
+            float comboWindow = 0f)
         {
             this.patternIndex = patternIndex;
             this.damageMultiplier = damageMultiplier;
             this.windupScale = windupScale;
             this.recoveryScale = recoveryScale;
+            this.activeScale = activeScale;
+            this.comboWindow = comboWindow;
         }
     }
 
@@ -290,6 +297,17 @@ namespace Emberdelve.Data
             return true;
         }
 
+        /// <summary>
+        /// Seconds after the recovery of chain step <paramref name="step"/> begins within which the next press continues the chain:
+        /// the step's own window when authored, otherwise the weapon's. Never below 0.05 s.
+        /// </summary>
+        public float ComboWindowAfter(int step)
+        {
+            float window = comboWindow;
+            if (HasComboChain && step >= 0 && step < comboSteps.Length && comboSteps[step].comboWindow > 0f) window = comboSteps[step].comboWindow;
+            return Mathf.Max(0.05f, window);
+        }
+
         /// <summary>Timing of combo step <paramref name="step"/>: the pattern's, scaled by the step, plus the finisher's extra recovery on the last step.</summary>
         public SwingTiming ComboTiming(int step, SwingPatternData pattern)
         {
@@ -298,7 +316,8 @@ namespace Emberdelve.Data
 
             ComboStep data = comboSteps[step];
             float extra = step == comboSteps.Length - 1 ? comboFinisherRecovery : 0f;
-            return pattern.TimingFor(data.windupScale <= 0f ? 1f : data.windupScale, data.recoveryScale <= 0f ? 1f : data.recoveryScale, extra);
+            return pattern.TimingFor(data.windupScale <= 0f ? 1f : data.windupScale, data.recoveryScale <= 0f ? 1f : data.recoveryScale, extra,
+                data.activeScale <= 0f ? 1f : data.activeScale);
         }
 
         /// <summary>

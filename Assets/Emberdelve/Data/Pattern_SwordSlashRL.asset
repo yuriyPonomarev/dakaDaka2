@@ -14,15 +14,15 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.SwingPatternData
   patternId: sword_slash_rl
   kind: 1
-  windupTime: 0.28
-  activeTime: 0.3
-  recoveryTime: 0.34
-  wallRecoilTime: 0.35
+  windupTime: 0.399
+  activeTime: 0.204
+  recoveryTime: 0.234
+  wallRecoilTime: 0.7
   damageMultiplier: 1
   impactPowerScale: 1
-  windupMoveMultiplier: 0.85
-  activeMoveMultiplier: 0.7
-  recoveryMoveMultiplier: 0.85
+  windupMoveMultiplier: 0.875
+  activeMoveMultiplier: 0.75
+  recoveryMoveMultiplier: 0.875
   maxTargets: 4
   reachScale: 0.79
   reachInset: 0.94

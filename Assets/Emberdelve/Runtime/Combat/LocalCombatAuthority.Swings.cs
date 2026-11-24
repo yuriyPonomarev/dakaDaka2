@@ -121,6 +121,9 @@ namespace Emberdelve.Combat
         private readonly Dictionary<int, ChainState> _chains = new Dictionary<int, ChainState>();
         private readonly List<int> _chainBuffer = new List<int>(4);
         private readonly Dictionary<int, float> _guardBrokenUntil = new Dictionary<int, float>();
+        // Reference port: a defender's block reaction and a parried attacker's "deflected" state, both as "until" stamps on this clock.
+        private readonly Dictionary<int, float> _blockReactionUntil = new Dictionary<int, float>();
+        private readonly Dictionary<int, float> _deflectedUntil = new Dictionary<int, float>();
         private static CombatFlowTuning _defaultFlow;
 
         private readonly Dictionary<int, SwingRecord> _swingsById = new Dictionary<int, SwingRecord>();
@@ -158,6 +161,12 @@ namespace Emberdelve.Combat
         /// whose targets sit at arbitrary distances along the blade; the zones themselves are pinned by the D1b gate.
         /// </summary>
         internal bool ImpactZonesEnabled = true;
+
+        /// <summary>
+        /// Gate seam: geometry fixtures raise a guard and strike in the same instant. They turn the ready delay off and say so;
+        /// the delay itself is proven where it is switched back on. Always true in the game.
+        /// </summary>
+        internal bool GuardReadyDelayEnabled = true;
 
         /// <summary>Guard breaks the authority has applied (a defender's guard was engaged and its impact resist reached).</summary>
         public int GuardBreaksApplied { get; private set; }
@@ -297,6 +306,10 @@ namespace Emberdelve.Combat
             // for up to one tick after the swing really ended).
             if (_swingByInstigator.TryGetValue(intent.InstigatorCombatId, out SwingRecord running)) StepSwing(running, Now);
             if (_swingByInstigator.ContainsKey(intent.InstigatorCombatId)) return RejectSwing(intent, "a swing is already in progress", out reason);
+            // Reference port: a parried attacker is out of action for its "deflected" time; a defender that has just blocked may answer
+            // with its riposte only, not with an ordinary attack, until its block reaction ends.
+            if (DeflectedRemaining(intent.InstigatorCombatId) > 0f) return RejectSwing(intent, "deflected by a parry", out reason);
+            if (!riposte && BlockReactionRemaining(intent.InstigatorCombatId) > 0f) return RejectSwing(intent, "block reaction in progress", out reason);
 
             float now = Now;
             float cooldown = Mathf.Max(0.1f, weapon.cooldown);
@@ -345,7 +358,7 @@ namespace Emberdelve.Combat
                         Instigator = instigator,
                         WeaponEpoch = WeaponEpochOf(instigator),
                         NextStep = intent.ComboStep + 1,
-                        WindowEnd = now + timing.ActiveEnd + Mathf.Max(0.05f, weapon.comboWindow)
+                        WindowEnd = now + timing.ActiveEnd + weapon.ComboWindowAfter(intent.ComboStep)
                     };
                 }
             }
@@ -526,6 +539,8 @@ namespace Emberdelve.Combat
             }
 
             if (IsGuardStaggered(combatId)) factor *= Mathf.Clamp(FlowTuning.guardStaggerMoveMultiplier, 0.1f, 1f);
+            if (BlockReactionRemaining(combatId) > 0f) factor *= Mathf.Clamp(FlowTuning.blockReactionMoveMultiplier, 0.1f, 1f);
+            if (DeflectedRemaining(combatId) > 0f) factor *= Mathf.Clamp(FlowTuning.deflectedMoveMultiplier, 0.1f, 1f);
             return factor;
         }
 
@@ -547,6 +562,21 @@ namespace Emberdelve.Combat
 
         public float GuardStaggerRemaining(int combatId) =>
             _guardBrokenUntil.TryGetValue(combatId, out float until) ? Mathf.Max(0f, until - Now) : 0f;
+
+        /// <summary>Seconds a raised guard needs before it intercepts (tuning; 0 = immediately).</summary>
+        public float GuardReadySeconds => GuardReadyDelayEnabled ? Mathf.Max(0f, FlowTuning.guardReadySeconds) : 0f;
+
+        /// <summary>Seconds left of the entity's block reaction: it blocked a hit and cannot begin an ordinary attack yet (0 when none).</summary>
+        public float BlockReactionRemaining(int combatId) =>
+            _blockReactionUntil.TryGetValue(combatId, out float until) ? Mathf.Max(0f, until - Now) : 0f;
+
+        /// <summary>Seconds left of the entity's deflected state: its hit was parried and it cannot begin an attack yet (0 when none).</summary>
+        public float DeflectedRemaining(int combatId) =>
+            _deflectedUntil.TryGetValue(combatId, out float until) ? Mathf.Max(0f, until - Now) : 0f;
+
+        /// <summary>Block reactions and deflected states applied (observability for gates and tests).</summary>
+        public int BlockReactionsApplied { get; private set; }
+        public int DeflectsApplied { get; private set; }
 
         /// <summary>The swing currently running for an instigator, or 0.</summary>
         public int ActiveSwingIdFor(int instigatorCombatId) =>
@@ -620,15 +650,22 @@ namespace Emberdelve.Combat
             PruneUnregistered(_chains);
             _riposte.Prune(RegisteredId);
 
-            if (_guardBrokenUntil.Count == 0) return;
+            PruneExpired(_guardBrokenUntil);
+            PruneExpired(_blockReactionUntil);
+            PruneExpired(_deflectedUntil);
+        }
+
+        private void PruneExpired(Dictionary<int, float> untilById)
+        {
+            if (untilById.Count == 0) return;
             float now = Now;
             _pruneBuffer.Clear();
-            foreach (KeyValuePair<int, float> pair in _guardBrokenUntil)
+            foreach (KeyValuePair<int, float> pair in untilById)
             {
                 if (pair.Value <= now || !CombatRegistry.TryGet(pair.Key, out ICombatEntity e) || e.IsDead) _pruneBuffer.Add(pair.Key);
             }
 
-            for (int i = 0; i < _pruneBuffer.Count; i++) _guardBrokenUntil.Remove(_pruneBuffer[i]);
+            for (int i = 0; i < _pruneBuffer.Count; i++) untilById.Remove(_pruneBuffer[i]);
         }
 
         private void PruneUnregistered<T>(Dictionary<int, T> map)
@@ -983,7 +1020,7 @@ namespace Emberdelve.Combat
                 // A wall stop only cuts the swing short with a recoil: the combo survives, and its window restarts when the recoil ends.
                 if (_chains.TryGetValue(rec.InstigatorId, out ChainState kept) && kept.Weapon == rec.Weapon)
                 {
-                    kept.WindowEnd = rec.StartTime + sampleTime + rec.Timing.WallRecoil + Mathf.Max(0.05f, rec.Weapon.comboWindow);
+                    kept.WindowEnd = rec.StartTime + sampleTime + rec.Timing.WallRecoil + rec.Weapon.ComboWindowAfter(rec.ComboStep);
                 }
                 rec.WallSample = sample;
                 rec.WallPoint = wallPoint;
@@ -1074,6 +1111,15 @@ namespace Emberdelve.Combat
             rec.Hit.Add(target.CombatId);
             target.ApplyDamage(damage);
             bool parried = NoteMeleeResult(rec.InstigatorId, target, damage);
+            if (parried)
+            {
+                float deflected = rec.Weapon != null && rec.Weapon.twoHanded ? FlowTuning.deflectedTwoHandedSeconds : FlowTuning.deflectedSeconds;
+                if (deflected > 0f)
+                {
+                    _deflectedUntil[rec.InstigatorId] = Now + deflected;
+                    DeflectsApplied++;
+                }
+            }
             AcceptedCount++;
             rec.Hits.Add(new MeleeSwingHit(target.CombatId, contact.Location, damage.Amount, damage.Blocked, sample, contact.FirstSample,
                 contact.Point, contact.T, zone, damage.GuardBroken));
@@ -1125,6 +1171,18 @@ namespace Emberdelve.Combat
             {
                 _guardBrokenUntil[target.CombatId] = Now + Mathf.Max(0f, FlowTuning.guardStaggerSeconds);
                 GuardBreaksApplied++;
+            }
+            else if (damage.Blocked)
+            {
+                // The defender reacts to the blocked hit for a time set by how hard it was (weak / mid / heavy). A later, weaker
+                // block never shortens a reaction that is already running.
+                float resist = target is Emberdelve.Player.PlayerRig defender ? defender.Defense.ImpactResist : 0f;
+                float until = Now + CombatFlowRules.BlockReactionSeconds(damage.ImpactPower, resist, FlowTuning);
+                if (until > Now && (!_blockReactionUntil.TryGetValue(target.CombatId, out float running) || until > running))
+                {
+                    _blockReactionUntil[target.CombatId] = until;
+                    BlockReactionsApplied++;
+                }
             }
 
             StatusSpec slow = weapon != null ? weapon.HitSlowSpec : StatusSpec.None;

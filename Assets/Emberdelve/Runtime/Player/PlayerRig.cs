@@ -988,7 +988,9 @@ namespace Emberdelve.Player
         public void SetGuardHeld(bool held)
         {
             RefreshImpactGuard(); // Observe a swapped kit before consuming this input edge.
+            bool wasHeld = _guardHeld;
             _guardHeld = held && !IsInFloorTransit;
+            if (_guardHeld && !wasHeld) _guardHeldSince = AuthorityClock();
             RefreshImpactGuard();
             SyncGuardVisual();
         }
@@ -1221,8 +1223,24 @@ namespace Emberdelve.Player
 
         // D1c5: the guard flag does not reduce incoming damage while this rig's own swing runs on the authority (the
         // authority also refuses a swing begin while the flag is up, so the two states never legitimately overlap).
+        // Reference port: the guard intercepts only once it has been held for the tuning's ready time (0.15 s). The raise itself
+        // (visual, move slowdown, "is guarding" for refusing own attacks) starts with the press; see IsGuarding.
         private bool IsGuardingWithDefense(DefenseProfile defense) =>
-            !IsHoldingUtility && _guardHeld && defense.CanBlock && !IsDead && !IsGuardStaggered && !OwnSwingRunning;
+            !IsHoldingUtility && _guardHeld && defense.CanBlock && !IsDead && !IsGuardStaggered && !OwnSwingRunning && IsGuardReady;
+
+        private float _guardHeldSince = float.NegativeInfinity;
+
+        /// <summary>True when the held guard has been up long enough to intercept (authority clock).</summary>
+        public bool IsGuardReady
+        {
+            get
+            {
+                if (!_guardHeld) return false;
+                float ready = GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority) && authority is LocalCombatAuthority local
+                    ? local.GuardReadySeconds : CombatFlowTuning.DefaultGuardReadySeconds;
+                return CombatFlowRules.IsGuardReady(_guardHeldSince, AuthorityClock(), ready);
+            }
+        }
 
         private bool OwnSwingRunning =>
             GameServices.TryGet<ICombatAuthority>(out ICombatAuthority authority)

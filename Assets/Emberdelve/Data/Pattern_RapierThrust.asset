@@ -14,15 +14,15 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.SwingPatternData
   patternId: rapier_thrust
   kind: 3
-  windupTime: 0.16
-  activeTime: 0.12
-  recoveryTime: 0.22
-  wallRecoilTime: 0.35
+  windupTime: 0.433
+  activeTime: 0.069
+  recoveryTime: 0.18
+  wallRecoilTime: 0.7
   damageMultiplier: 1
   impactPowerScale: 1
-  windupMoveMultiplier: 0.85
-  activeMoveMultiplier: 0.7
-  recoveryMoveMultiplier: 0.85
+  windupMoveMultiplier: 0.875
+  activeMoveMultiplier: 0.75
+  recoveryMoveMultiplier: 0.875
   maxTargets: 2
   reachScale: 0.74
   reachInset: 1.08

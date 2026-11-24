@@ -99,6 +99,8 @@ namespace Emberdelve.EditorTools
             ApplyCombatFlow();
             ApplySwordFamily();
             ApplyProjectileBallistics();
+            // Last word on player weapon timing: the decoded Dark and Darker reference (Docs/Tasks/DARKER_COMBAT_PORT_20261124.md).
+            EmberdelveDarkerCombat.Apply();
             ApplySkillKit();
             ApplyAttributeDefinitions();
             ApplyAttributeVitalBases();
