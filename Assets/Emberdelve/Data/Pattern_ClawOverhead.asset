@@ -28,7 +28,7 @@ MonoBehaviour:
   reachInset: 0.7220006
   sweepRadius: 0.16
   contactWindow: 0.02
-  trailMaterial: {fileID: 0}
+  trailMaterial: {fileID: 2100000, guid: f7920b32ca5c58345afaa7b757cc9827, type: 2}
   restBase: {x: 0.5283891, y: -0.120361686, z: -0.48773834}
   restYaw: 26.873802
   restPitch: 51.369476

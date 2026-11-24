@@ -35,18 +35,18 @@ MonoBehaviour:
   - patternIndex: 0
     damageMultiplier: 1
     windupScale: 1
-    recoveryScale: 0.5
+    recoveryScale: 1
   - patternIndex: 1
     damageMultiplier: 1.05
-    windupScale: 0.6
-    recoveryScale: 0.5
+    windupScale: 0.85
+    recoveryScale: 1
   - patternIndex: 3
     damageMultiplier: 1.1
-    windupScale: 0.6
-    recoveryScale: 0.5
+    windupScale: 0.9
+    recoveryScale: 0.9
   - patternIndex: 2
     damageMultiplier: 1.15
-    windupScale: 0.6
+    windupScale: 1
     recoveryScale: 1
   comboWindow: 0.7
   comboFinisherRecovery: 0.38
@@ -62,10 +62,16 @@ MonoBehaviour:
   heldMoveSpeedPenalty: 11
   impactPower: 11
   impactResist: 16
+  rangedGuardShape: 0
+  impactGuard: 0
+  impactGuardDuration: 0.35
+  impactGuardResistance: 10
+  impactGuardRearmDelay: 0.65
   canRiposte: 1
   riposteWithOffhandShield: 0
   riposteWindow: 1
   riposteDamageMultiplier: 1.5
+  parryBladeRegion: {x: 0, y: 1}
   riposteSwingPatterns: 0400000001000000
   riposteStrikeGap: 0.1
   twoHanded: 0
@@ -81,6 +87,7 @@ MonoBehaviour:
   minChargeDamageScale: 0.45
   magazineSize: 7
   reloadTime: 1.7
+  reloadWhileHeld: 0
   falloffStartRange: 16
   falloffEndRange: 42
   falloffMinScale: 0.45
