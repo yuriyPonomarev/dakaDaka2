@@ -646,6 +646,8 @@ namespace Emberdelve.Player
             _hasPresentedPose = true;
             SwingPatternData shownPattern = null; SwingTiming shownTiming = default; float shownTime = 0f;
             bool shown = _visual != null && _mainData != null && !_mainData.IsRanged && _visual.TryGetSwing(out shownPattern, out shownTiming, out shownTime);
+            ReadyPoseFor(_mainData, _camera, out Vector3 readyHandNow, out Quaternion readyRotationNow);
+            _cut.SetReady(readyHandNow, readyRotationNow);
             _swingView = _cut.Step(shown, shownPattern, shownTiming, shownTime, _mainData != null && _mainData.twoHanded, dt);
             Pose(frame, _camera, localBase, localRotation, _guardBlend, bob + _joltRight, bob + _joltLeft);
             UpdateViewTrail();
@@ -672,6 +674,18 @@ namespace Emberdelve.Player
         private SwingView _swingView;
         private CutBlend _cut;
 
+        /// <summary>The torch's own ready framing (aim frame): its long burning head needs it lower and further out than a sword.</summary>
+        public static readonly Vector3 TorchReadyHand = new Vector3(.30f, -.40f, .60f);
+        public static readonly Quaternion TorchReadyRotation = Quaternion.Euler(-56f, 20f, 0f);
+        public static bool IsTorch(WeaponData weapon) => weapon != null && weapon.weaponId == HandheldTorchVisual.WeaponId;
+
+        /// <summary>Where the weapon hand waits between swings for this weapon (aim frame).</summary>
+        public static void ReadyPoseFor(WeaponData weapon, Camera camera, out Vector3 hand, out Quaternion rotation)
+        {
+            if (IsTorch(weapon)) { hand = ClampToView(camera, TorchReadyHand); rotation = TorchReadyRotation; }
+            else { hand = SwordReadyHand; rotation = SwordReadyRotation; }
+        }
+
         /// <summary>
         /// Carries the shown pose from one swing into the next. A swing starts from wherever the hand is shown at that moment
         /// (the ready pose for the first one, the end of the previous strike inside a combo), and the hand goes back to the
@@ -686,7 +700,13 @@ namespace Emberdelve.Player
             public static readonly Vector3 ChainDetour = new Vector3(0.30f, -0.42f, -0.04f);
             /// <summary>The blade on that way: point down and back towards the player, out of the picture wherever the hand is.</summary>
             public static readonly Quaternion Stowed = Quaternion.LookRotation(new Vector3(0.3f, -0.5f, -0.8f).normalized);
-            private bool _has, _swinging, _chained;
+            private bool _has, _swinging, _chained, _ownReady;
+            private Vector3 _readyHand;
+            private Quaternion _readyRotation;
+            private Vector3 ReadyHand => _ownReady ? _readyHand : SwordReadyHand;
+            private Quaternion ReadyRotation => _ownReady ? _readyRotation : SwordReadyRotation;
+            /// <summary>The ready pose swings start from and return to (the sword's unless a weapon has its own, like the torch).</summary>
+            public void SetReady(Vector3 hand, Quaternion rotation) { _ownReady = true; _readyHand = hand; _readyRotation = rotation; }
             private SwingPatternData _pattern;
             private float _lastTime, _in, _out;
             private Vector3 _fromHand, _hand, _lastHand;
@@ -700,8 +720,8 @@ namespace Emberdelve.Player
                 {
                     if (begins)
                     {
-                        _fromHand = _has ? _hand : SwordReadyHand;
-                        _fromRotation = _has ? _rotation : SwordReadyRotation;
+                        _fromHand = _has ? _hand : ReadyHand;
+                        _fromRotation = _has ? _rotation : ReadyRotation;
                         _in = 0f;
                     }
                     _swinging = true; _pattern = pattern; _lastTime = time; _out = 0f; _has = true;
@@ -722,8 +742,8 @@ namespace Emberdelve.Player
                 _out += dt;
                 float back = Mathf.SmoothStep(0f, 1f, (_out - ReturnDelay) / Return);
                 if (back >= 1f) { _has = false; return default; }
-                _hand = Vector3.Lerp(_lastHand, SwordReadyHand, back);
-                _rotation = Quaternion.Slerp(_lastRotation, SwordReadyRotation, back);
+                _hand = Vector3.Lerp(_lastHand, ReadyHand, back);
+                _rotation = Quaternion.Slerp(_lastRotation, ReadyRotation, back);
                 return new SwingView { Valid = true, Hand = _hand, Rotation = _rotation, Weight = 1f - back };
             }
         }
@@ -833,13 +853,22 @@ namespace Emberdelve.Player
             }
             // A long burning head needs its own ready framing: the sword's leftward yaw
             // sends it through the top edge. Keep this cosmetic offset out of swing/guard poses.
-            if (_mainData != null && _mainData.weaponId == HandheldTorchVisual.WeaponId &&
-                (_visual == null || !_visual.IsSwinging))
+            // A swing of the torch, and the way back from it, is the same shown motion as a sword's (SwingMotion through
+            // CutBlend). It used to follow the pattern's hand and snap to this ready pose whenever no swing was running, so the
+            // idle torch flashed between two attacks in a row and the wrist was turned by the pattern's rotation (user, 25 Nov 2026).
+            if (IsTorch(_mainData))
             {
                 float ready = 1f - Mathf.SmoothStep(0f, 1f, guardBlend);
-                handLocal = Vector3.Lerp(handLocal,
-                    ClampToView(camera, new Vector3(.30f, -.40f, .60f) + offsetRight), ready);
-                localRotation = Quaternion.Slerp(localRotation, Quaternion.Euler(-56f, 20f, 0f), ready);
+                if (view.Valid)
+                {
+                    handLocal = Vector3.Lerp(handLocal, view.Hand + offsetRight, ready);
+                    localRotation = Quaternion.Slerp(localRotation, view.Rotation, ready);
+                }
+                else
+                {
+                    handLocal = Vector3.Lerp(handLocal, ClampToView(camera, TorchReadyHand + offsetRight), ready);
+                    localRotation = Quaternion.Slerp(localRotation, TorchReadyRotation, ready);
+                }
             }
             if (_utilityItem != null)
             {

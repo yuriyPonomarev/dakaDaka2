@@ -532,3 +532,21 @@ No regression test was added for the corpse (it needs a stepped physics scene); 
 Not done: no reload animation on bodies (bots); no visible quiver in first person (it is below the picture).
 
 Evidence: mirror run `Logs/runs/20261125-162055-062`: ProjectileBlock 204/0, ProjectileSim 109/0, DrawSpeed 253/0, ReloadSpeed 171/0, CombatFlow 615/0, SweptMelee 1066/0, EnemySweep 210/0, Visual 216/0, Hands 92/0, NetCombat 396/0, NetMovement 198/0; EditMode 1680, the same 12 known unrelated failures by name. Earlier run 20261125-161506-535 also had Riposte 147/0 and BladeDefense 605/0. No motion proof and no in-game check of any of the four items.
+
+### Pass 6b: the torch swings like the swords (user, 25 Nov)
+
+User: "the torch attack has the same problem the swords had, the idle state shows for a frame between continuous attacks, and it is
+twisted wrongly during the attack".
+Cause: the torch (a held utility that fights as `Weapon_PitchTorch`) was left on the old path in `FirstPersonArmsDriver.Pose`: the
+hand followed the pattern's own base and rotation, and its ready framing was applied at full weight whenever
+`WeaponVisualRig.IsSwinging` was false, which it is for a frame between two attacks in a row.
+Fix: the torch goes through the same `CutBlend` / `SwingMotion` as the swords. `CutBlend.SetReady` gives the blender the ready pose
+of the weapon in hand (`ReadyPoseFor`: `TorchReadyHand` / `TorchReadyRotation`), so a torch swing starts from and returns to the
+torch's own framing. Its pattern is a downward chop, so the shown motion is the downward cut.
+`EmberdelveComboReview` renders the torch: a weapon without a chain is swung three times in a row (`sheet-torch.png`).
+Still: `Logs/review/combo/chain-torch-30hz.png` (three attacks at 1/30 s: nothing is shown between them, then the return to ready).
+Known: during the strike the burning head is above the picture until the last frames (the torch stands upright behind the fist).
+Bodies (bots, other players) still carry the torch on the old path (`RemoteWeaponPresentation`, torch excluded from `PoseMelee`).
+No motion proof.
+
+Evidence: mirror run `Logs/runs/20261125-164638-103`: Visual 216/0, Hands 92/0, CombatFlow 615/0, SweptMelee 1066/0; EditMode 1680, the same 12 known unrelated failures by name.

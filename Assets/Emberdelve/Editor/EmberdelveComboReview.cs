@@ -28,6 +28,7 @@ namespace Emberdelve.EditorTools
             Render("arming_sword", null, "sheet-arming");
             Render("ember_rapier", null, "sheet-rapier");
             Render("two_handed_sword", null, "sheet-two");
+            Render("pitch_torch", null, "sheet-torch");
         }
 
         private static void Render(string swordId, string shieldId, string sheet)
@@ -48,17 +49,27 @@ namespace Emberdelve.EditorTools
             GameConfig config = AssetDatabase.LoadAssetAtPath<GameConfig>("Assets/Emberdelve/Data/EmberdelveGameConfig.asset");
             if (config != null) fov = config.fieldOfView;
             var cut = new FirstPersonArmsDriver.CutBlend();
+            FirstPersonArmsDriver.ReadyPoseFor(sword, null, out Vector3 readyHand, out Quaternion readyRotation);
+            cut.SetReady(readyHand, readyRotation);
             int n = 0, tick = 0;
             float shieldLower = 0f, swingWeight = 0f;
-            for (int step = 0; step <= sword.comboSteps.Length; step++)
+            // A weapon without a chain (the torch) is swung three times in a row: its attack repeats as soon as the last one ends.
+            bool chain = sword.comboSteps.Length > 0;
+            int steps = chain ? sword.comboSteps.Length : 3;
+            for (int step = 0; step <= steps; step++)
             {
-                bool tail = step == sword.comboSteps.Length;
+                bool tail = step == steps;
                 SwingPatternData pattern = null; SwingTiming timing = default;
-                if (!tail)
+                if (!tail && chain)
                 {
                     ComboStep cs = sword.comboSteps[step];
                     pattern = sword.swingPatterns[cs.patternIndex];
                     timing = pattern.TimingFor(cs.windupScale, cs.recoveryScale, step == sword.comboSteps.Length - 1 ? sword.comboFinisherRecovery : 0f, cs.activeScale);
+                }
+                else if (!tail)
+                {
+                    pattern = sword.swingPatterns[0];
+                    timing = pattern.Timing;
                 }
                 float length = tail ? 0.5f : timing.Total;
                 for (float t = 0f; t < length; t += dt, tick++)
