@@ -16,6 +16,27 @@ namespace Emberdelve.Player
         public const float FirstPersonDrawSide = 0f, FirstPersonDrawDepth = .30f;
         float _drawSide = .15f, _drawDepth = .22f;
         public Vector3 Nock => new Vector3(.024f + _drawSide * Draw, .015f, -.16f - _drawDepth * Draw);
+        /// <summary>
+        /// Fractions of the draw by which the string hand has taken an arrow from the quiver and has set it on the string; the
+        /// string is pulled over the rest. Timing after the reference recurve's 1.5 s draw section: its ammunition count drops
+        /// at 0.11 s (the arrow is taken) and its second sound cue is at 0.38 s. The motion itself is ours.
+        /// </summary>
+        public const float ArrowTakenAt = .07f, ArrowNockedAt = .25f;
+        /// <summary>How far the string is pulled at a draw progress (the first part of the draw is the nocking).</summary>
+        public static float StringDraw(float progress) => Mathf.InverseLerp(ArrowNockedAt, 1f, Mathf.Clamp01(progress));
+        Transform _bundle;
+        /// <summary>Rotation (world) of an arrow lying on the string as drawn now.</summary>
+        public Quaternion ArrowOnStringRotation => transform.rotation * Quaternion.LookRotation(new Vector3(.024f, .015f, .14f) - Nock, Vector3.up);
+        /// <summary>The arrow in the string hand on its way to the string: its nock end and its direction (world).</summary>
+        public void PlaceArrow(Vector3 nockEnd, Quaternion rotation) { _arrow.SetPositionAndRotation(nockEnd, rotation); _arrow.gameObject.SetActive(true); }
+        public void ShowArrow(bool visible) { if (_arrow.gameObject.activeSelf != visible) _arrow.gameObject.SetActive(visible); }
+        /// <summary>A handful of arrows carried in the string hand (a reload): nock ends and direction (world).</summary>
+        public void PlaceBundle(Vector3 nockEnds, Quaternion rotation, bool visible)
+        {
+            if (_bundle == null) return;
+            if (visible) _bundle.SetPositionAndRotation(nockEnds, rotation);
+            if (_bundle.gameObject.activeSelf != visible) _bundle.gameObject.SetActive(visible);
+        }
         public void SetDrawShape(float side, float depth) { _drawSide = side; _drawDepth = depth; SetDraw(Draw); }
         public static BowPresentation Build(Transform parent, WeaponData weapon)
         {
@@ -50,7 +71,18 @@ namespace Emberdelve.Player
             Part(bow._arrow, "SteelTip", new Vector3(0, 0, .66f), new Vector3(.018f, .012f, .055f), weapon.edgeMaterial);
             Part(bow._arrow, "Feather", new Vector3(0, 0, .055f), new Vector3(.038f, .003f, .075f), weapon.gripMaterial);
             Part(bow._arrow, "FeatherCross", new Vector3(0, 0, .055f), new Vector3(.003f, .038f, .075f), weapon.gripMaterial);
+            bow._bundle = new GameObject("ArrowBundle").transform; bow._bundle.SetParent(root.transform, false);
+            for (int i = 0; i < 4; i++)
+            {
+                var one = new GameObject("Arrow" + i).transform; one.SetParent(bow._bundle, false);
+                one.localPosition = new Vector3((i - 1.5f) * .013f, (i % 2) * .009f, 0f);
+                one.localRotation = Quaternion.Euler((i - 1.5f) * 1.5f, (i - 1.5f) * 2.5f, 0f);
+                Part(one, "Shaft", new Vector3(0, 0, .32f), new Vector3(.009f, .009f, .64f), weapon.shaftMaterial);
+                Part(one, "SteelTip", new Vector3(0, 0, .66f), new Vector3(.018f, .012f, .055f), weapon.edgeMaterial);
+                Part(one, "Feather", new Vector3(0, 0, .055f), new Vector3(.038f, .003f, .075f), weapon.gripMaterial);
+            }
             foreach (var t in root.GetComponentsInChildren<Transform>()) t.gameObject.layer = parent.gameObject.layer;
+            bow._bundle.gameObject.SetActive(false);
             bow.SetDraw(0); return bow;
         }
         static Transform Part(Transform root, string name, Vector3 position, Vector3 size, Material material)

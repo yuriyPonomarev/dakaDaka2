@@ -118,9 +118,20 @@ namespace Emberdelve.Player
             _model.transform.localRotation=Quaternion.Euler(0f,_bodyTurn,0f);
         }
 
+        private RangedCombat _ranged;
+
         private void PresentBotCombat()
         {
             var weapon = _rig.ActiveWeapon;
+            // The draw of a locally simulated body (a rival bot) comes straight from its ranged state; remote players get it
+            // from the network pose. Without this a bot's bow never moved (user report, 25 Nov 2026).
+            if (_ranged == null) _ranged = _rig.GetComponent<RangedCombat>();
+            if (_weapons != null)
+            {
+                bool ranged = weapon != null && weapon.IsRanged && _ranged != null && !_rig.IsDead;
+                _weapons.PresentCrossbowLoaded(weapon != null ? weapon.weaponId : "", ranged && _ranged.Magazine > 0);
+                _weapons.PresentDraw(weapon != null ? weapon.weaponId : "", ranged && _ranged.IsDrawing, ranged ? Mathf.Clamp01(_ranged.Charge) : 0f);
+            }
             var offhand = _rig.OffhandWeapon;
             string main = weapon != null ? weapon.weaponId : "";
             string off = !_rig.IsHoldingUtility && offhand != null && (weapon == null || !weapon.twoHanded)

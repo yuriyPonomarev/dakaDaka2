@@ -167,6 +167,8 @@ namespace Emberdelve.Player
                 && !DungeonModuleSceneAssembler.IsPositionOnRetiredFloor(transform.position);
             UpdateBotSwing(visible && !_rig.IsInFloorTransit);
             Visibility(_mainRenderers,visible); Visibility(_offRenderers,visible);
+            // The quiver belongs to a carried bow; PoseBow shows and places it.
+            if(_quiver!=null && _quiver.activeSelf && !(visible && _main!=null && _main.CanBowGuard)) _quiver.SetActive(false);
             // The owner's remote model must not leave a second point light/flame running.
             if (_mainObject != null && _main != null && _main.weaponId == HandheldTorchVisual.WeaponId)
                 _mainObject.SetActive(visible);
@@ -265,7 +267,8 @@ namespace Emberdelve.Player
                 {
                     BowGuardPose.ApplyModel(t,_frame.Eye,_frame.Rotation);
                     var bow=t.GetComponentInChildren<BowPresentation>();
-                    if(bow!=null) bow.SetDraw(0f);
+                    if(bow!=null) { bow.SetDraw(0f); bow.ShowArrow(false); }
+                    PlaceQuiver();
                     HoldPoint(_leftShoulder,_leftElbow,_left,t.TransformPoint(BowGuardPose.LeftGrip),LeftElbowHint,1f);
                     HoldPoint(_rightShoulder,_rightElbow,_right,t.TransformPoint(BowGuardPose.RightGrip),RightElbowHint,1f);
                 }
@@ -352,14 +355,51 @@ namespace Emberdelve.Player
         public const float BodyDrawSide=0f, BodyDrawDepth=.34f;
         /// <summary>Raising and lowering the bow (1/s), and how far behind a held point the wrist stays (m).</summary>
         public const float BowRaiseRate=5f, PalmBehind=.07f;
-        private float _bowRaise;
+        /// <summary>How long the bow stays raised after a shot (seconds).</summary>
+        public const float BowFollowThrough=.45f;
+        private float _bowRaise,_lastDrawAt=float.NegativeInfinity;
+        private Vector3 _releasePoint;
+        // A quiver on the right hip of whoever carries a bow (body space), and where its mouth is (quiver space).
+        public static readonly Vector3 QuiverPosition=new Vector3(.21f,.90f,-.03f), QuiverEuler=new Vector3(-16f,0f,-7f), QuiverMouth=new Vector3(0f,.20f,0f);
+        private GameObject _quiver;
+
+        private void PlaceQuiver()
+        {
+            if(_quiver==null)
+            {
+                _quiver=new GameObject("HipQuiver");
+                _quiver.transform.SetParent(transform,false);
+                QuiverPart("Case",new Vector3(0f,0f,0f),new Vector3(.075f,.36f,.075f),_main.gripMaterial);
+                QuiverPart("Rim",new Vector3(0f,.175f,0f),new Vector3(.085f,.02f,.085f),_main.shaftMaterial);
+                for(int i=0;i<4;i++)
+                {
+                    Vector3 at=new Vector3((i%2-.5f)*.03f,.24f,(i/2-.5f)*.03f);
+                    QuiverPart("Shaft"+i,at,new Vector3(.008f,.12f,.008f),_main.shaftMaterial);
+                    QuiverPart("Feather"+i,at+Vector3.up*.03f,new Vector3(.03f,.06f,.003f),_main.gripMaterial);
+                }
+            }
+            if(!_quiver.activeSelf) _quiver.SetActive(true);
+            _quiver.transform.SetPositionAndRotation(_body.TransformPoint(QuiverPosition),_body.rotation*Quaternion.Euler(QuiverEuler));
+        }
+
+        private void QuiverPart(string name,Vector3 position,Vector3 size,Material material)
+        {
+            var part=GameObject.CreatePrimitive(PrimitiveType.Cube); part.name=name;
+            var collider=part.GetComponent<Collider>(); collider.enabled=false; Discard(collider);
+            part.transform.SetParent(_quiver.transform,false); part.transform.localPosition=position; part.transform.localScale=size;
+            part.layer=gameObject.layer;
+            if(material!=null) part.GetComponent<Renderer>().sharedMaterial=material;
+        }
         private static readonly Vector3 BowArmHint=new Vector3(-.5f,-1f,-.15f), DrawArmHint=new Vector3(1f,.1f,-.35f);
 
         private void PoseBow(Transform t)
         {
             var ranged=_rig!=null ? _rig.GetComponent<RangedCombat>() : null;
             bool draw=_drawing && (ranged==null || !ranged.IsReloading);
-            _bowRaise=Application.isPlaying ? Mathf.MoveTowards(_bowRaise,draw ? 1f : 0f,Time.deltaTime*BowRaiseRate) : (draw ? 1f : 0f);
+            // After the release the bow arm stays up for a moment (the string has snapped forward, the arrow is on its way).
+            if(draw) _lastDrawAt=Time.time;
+            bool up=draw || (Application.isPlaying && Time.time-_lastDrawAt<BowFollowThrough);
+            _bowRaise=Application.isPlaying ? Mathf.MoveTowards(_bowRaise,up ? 1f : 0f,Time.deltaTime*BowRaiseRate) : (draw ? 1f : 0f);
             float raised=Mathf.SmoothStep(0f,1f,_bowRaise);
             t.localScale=Vector3.one;
             Quaternion rotation=_frame.Rotation*Quaternion.Slerp(Quaternion.Euler(BowCarryEuler),Quaternion.Euler(BowAimEuler),raised);
@@ -369,9 +409,35 @@ namespace Emberdelve.Player
             if(bow==null) return;
             t.position+=grip-bow.transform.position;   // the bow hand holds the grip of the bow, wherever the root of the model is
             bow.SetDrawShape(BodyDrawSide,BodyDrawDepth);
-            bow.SetDraw(draw ? _drawProgress*raised : 0f);
+            float progress=draw ? _drawProgress : 0f;
+            bow.SetDraw(BowPresentation.StringDraw(progress)*raised);
+            Vector3 animatedHand=_right!=null ? _right.position : grip;
             HoldPoint(_leftShoulder,_leftElbow,_left,grip,BowArmHint,1f);
-            HoldPoint(_rightShoulder,_rightElbow,_right,bow.transform.TransformPoint(bow.Nock),DrawArmHint,raised);
+            PlaceQuiver();
+            if(draw && progress<BowPresentation.ArrowNockedAt)
+            {
+                // The draw begins at the quiver: down for an arrow, up with it to the string.
+                Vector3 mouth=_quiver.transform.TransformPoint(QuiverMouth), string0=bow.transform.TransformPoint(bow.Nock), target;
+                if(progress<BowPresentation.ArrowTakenAt)
+                {
+                    target=Vector3.Lerp(animatedHand,mouth,Mathf.SmoothStep(0f,1f,progress/BowPresentation.ArrowTakenAt));
+                    bow.ShowArrow(false);
+                }
+                else
+                {
+                    float k=Mathf.SmoothStep(0f,1f,(progress-BowPresentation.ArrowTakenAt)/(BowPresentation.ArrowNockedAt-BowPresentation.ArrowTakenAt));
+                    target=Vector3.Lerp(mouth,string0,k)+_body.right*(.10f*Mathf.Sin(Mathf.PI*k));
+                    bow.PlaceArrow(target,Quaternion.Slerp(_quiver.transform.rotation*Quaternion.LookRotation(Vector3.down,Vector3.forward),bow.ArrowOnStringRotation,k*k));
+                }
+                _releasePoint=_body.InverseTransformPoint(target);
+                HoldPoint(_rightShoulder,_rightElbow,_right,target,progress<BowPresentation.ArrowTakenAt ? RightElbowHint : DrawArmHint,1f);
+                return;
+            }
+            bow.ShowArrow(draw);
+            // The string hand lets go with the shot: it stays where the string was released while the bow is still up.
+            Vector3 nock=bow.transform.TransformPoint(bow.Nock);
+            if(draw) _releasePoint=_body.InverseTransformPoint(nock);
+            HoldPoint(_rightShoulder,_rightElbow,_right,draw ? nock : _body.TransformPoint(_releasePoint),DrawArmHint,raised);
         }
 
         // The hand (not the wrist) on a point: the wrist stays a palm behind it, the bones keep their lengths.
@@ -726,6 +792,6 @@ namespace Emberdelve.Player
             // Keep the grip on the actual hit segment; the replacement model can improve reach proportions.
             wrist.position=target;
         }
-        private void OnDestroy() { if(_mainObject!=null) Destroy(_mainObject); if(_offObject!=null) Destroy(_offObject); if(_utilityObject!=null) Destroy(_utilityObject); }
+        private void OnDestroy() { if(_quiver!=null) Discard(_quiver); if(_mainObject!=null) Destroy(_mainObject); if(_offObject!=null) Destroy(_offObject); if(_utilityObject!=null) Destroy(_utilityObject); }
     }
 }

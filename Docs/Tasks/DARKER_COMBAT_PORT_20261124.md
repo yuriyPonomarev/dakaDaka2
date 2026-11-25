@@ -486,3 +486,49 @@ Still: `Logs/review/combo/chain-two-thrust-30hz.png`. User accepted the motion o
 two-handed thrust and the camera-space ribbon were not seen in motion by anyone yet.
 Left out of the commit: `Art/Materials/*.mat` drift, `ProjectSettings/TimeManager.asset` and
 `Assets/Scenes/Oasis/Art/Environment/Textures/Cliff_Ramp.asset` (not this work).
+
+## Pass 6: corpses, bot archers, arrows against a guard, nocking and reload (user, 25 Nov)
+
+User: "bots' corpses cannot be walked through; bots have no bow draw or shot animation; arrows are not parried; the first-person bow
+looks good now, add taking the arrow from a quiver (on the right hip) and a reload animation (look at how the reference does it)".
+
+Reference facts used (decoded montages, `Item/Weapon/RecurveBow/Animations`):
+- `AM_RecurveBow_Stand_Attack`: sections Default 0 / AimHold 1.5 / End 3.1 s; sound cues at 0.010, 0.382, 0.740, 1.414 s.
+- `AM_WP_RecurveBow_Stand_Attack_Start` (the weapon's own montage): `DCPreReduceAmmoCountOnSourceObject` at 0.109 s. INFERENCE: the
+  weapon mesh shows its ammunition and one arrow leaves it at 0.11 s, i.e. the spare arrows are kept at the bow, not in a quiver.
+- `AM_RecurveBow_Reload`: 2.967 s, sound cues at 0.022 and 1.081 s, the reload event at 2.5 s.
+Bone curves are not decoded; the motion below is ours on these timings.
+
+1. Corpses. Cause: a dead `PlayerRig` (a rival bot is one) kept its `CharacterController` enabled. Monsters already switch their
+   colliders off. `PlayerMovement.BeginCorpse` lets the body fall to the floor (at most 3 s) and then disables the controller;
+   `EndCorpse` restores it when the rig is set up again (`PlayerRig` before `health.Configure`). Not applied on a pure client
+   (remote bodies have no live controller there).
+2. Bot archers. Cause: `PlayerAvatar.PresentBotCombat` never passed the draw to `RemoteWeaponPresentation` (remote players get it
+   from the network pose), so a bot's bow never moved. It now presents `RangedCombat.IsDrawing / Charge`. The bow stays raised for
+   0.45 s after the release (`BowFollowThrough`) with the string hand where it let go.
+3. Arrows against a blade guard. Finding: blocking a projectile existed, but the blade box is 5.5 cm wide and, from the front, lies
+   beside the body's middle line (hilt 0.22 m right of the eyes, tip 0.5 m below them), so a shot at a guarding swordsman
+   passed it; the gate even pinned "a torso-line arrow misses the narrow blade". OUR OWN tuning now:
+   `GuardBladePose.ProjectileCatchRadius` 0.24 m: a raised blade deflects a projectile passing that close (face and chest from
+   the front; legs, flanks, back stay open). Melee keeps the exact box; a shot straight into the hand on the grip is still an
+   arm hit. `ProjectileBlock` gate: the frontal torso arrow is now expected to be deflected, the "misses the blade" cases come
+   from the open side (60 degrees). Shields were already wide and are unchanged. NOT VERIFIED which weapon the user tested with.
+4. First-person bow.
+   - Nocking is the first quarter of the draw (`BowPresentation.ArrowTakenAt` 0.07 = 0.11 s, `ArrowNockedAt` 0.25 = 0.38 s of the
+     1.5 s draw): the string hand goes down to the quiver on the right hip (outside the picture), brings an arrow up by its nock
+     end and sets it on the string; the string moves over the rest (`StringDraw`). The authority's charge is unchanged: only the
+     shown string starts later. After the release the hand eases back from where it let go.
+   - Reload (`PoseBow(.., reload)`): the bow is lowered and canted; the hand goes to the pack behind the right shoulder (0.30),
+     returns with a handful of arrows at the 1.08 s cue (0.43), carries them through the picture down into the hip quiver (0.78),
+     comes back (0.90-1). With the quiver on the hip (user decision) a reload refills that quiver; the reference keeps its spare
+     arrows at the bow (inference above), so this part is our choice.
+   - Bodies: the same nocking from a quiver built on the right hip of whoever carries a bow (`PlaceQuiver`).
+   - `DrawSpeed` gate follows `StringDraw`.
+
+Review tools: `EmberdelveBowReview` (draw 0.03-1.0 and reload 0.08-0.95, game field of view, `RenderBatch`), `EmberdelveAvatarReview`
+(`RenderBatch`, bot draw at 0.06 / 0.16 / 0.5 / 1). Stills: `Logs/review/bow/nock-and-draw.png`, `Logs/review/bow/reload.png`,
+`Logs/review/avatar/bot-bow-draw.png`. The working Editor was in Play mode, so everything was compiled and rendered on the mirror.
+No regression test was added for the corpse (it needs a stepped physics scene); it is unverified until seen in play.
+Not done: no reload animation on bodies (bots); no visible quiver in first person (it is below the picture).
+
+Evidence: mirror run `Logs/runs/20261125-162055-062`: ProjectileBlock 204/0, ProjectileSim 109/0, DrawSpeed 253/0, ReloadSpeed 171/0, CombatFlow 615/0, SweptMelee 1066/0, EnemySweep 210/0, Visual 216/0, Hands 92/0, NetCombat 396/0, NetMovement 198/0; EditMode 1680, the same 12 known unrelated failures by name. Earlier run 20261125-161506-535 also had Riposte 147/0 and BladeDefense 605/0. No motion proof and no in-game check of any of the four items.

@@ -669,6 +669,7 @@ namespace Emberdelve.Player
 
             VitalLimits limits = ResolveVitalLimits();
 
+            if (movement != null) movement.EndCorpse();
             if (health != null) health.Configure(limits.MaxHealth, limits.HealthRegenPerSecond, limits.HealthRegenDelay);
             if (mana != null) mana.Configure(limits.MaxMana, limits.ManaRegen, limits.ManaRegenDelay);
         }
@@ -710,6 +711,8 @@ namespace Emberdelve.Player
             GetComponent<RangedCombat>()?.CancelDraw();
             if (skills != null) skills.HandleDeath();
             if (movement != null) movement.CancelDash();
+            // On a client the bodies of others have no live capsule and the own body cannot block its owner.
+            if (movement != null && !NetRole.IsClientOnly) movement.BeginCorpse();
             if (status != null) status.ClearStatuses();
             SetGuardHeld(false);
         }
@@ -1042,7 +1045,8 @@ namespace Emberdelve.Player
             return true;
         }
 
-        public bool TrySweepGuard(Vector3 start, Vector3 end, float radius, out float distance, out bool shieldContact, out bool weaponContact)
+        public bool TrySweepGuard(Vector3 start, Vector3 end, float radius, out float distance, out bool shieldContact, out bool weaponContact,
+            bool projectile = false)
         {
             distance = 0f;
             shieldContact = false;
@@ -1062,7 +1066,15 @@ namespace Emberdelve.Player
                 weaponContact = bow.TrySweep(start, end, radius, out distance);
                 return weaponContact;
             }
-            return TryGetGuardBlade(out GuardBladeBox blade) && blade.TrySweep(start, end, radius, out distance);
+            if (!TryGetGuardBlade(out GuardBladeBox blade)) return false;
+            if (blade.TrySweep(start, end, radius, out distance)) return true;   // the metal itself
+            if (!projectile || !blade.TrySweep(start, end, radius + GuardBladePose.ProjectileCatchRadius, out distance)) return false;
+            // Deflected in passing, unless it is going straight into the hand on the grip: that is flesh, not metal. The flight
+            // is stepped, so the line is looked along beyond this step's end.
+            Vector3 along = end - start;
+            Vector3 ahead = start + along.normalized * Mathf.Max(along.magnitude, 1.5f);
+            return !(TryGetGuardGripHitShape(out HitShape grip)
+                && SwingGeometry.SegmentDistance(start, ahead, grip.A, grip.B, out _) <= grip.Radius + Mathf.Max(0f, radius));
         }
 
         public bool TryGetBowGuard(out BowGuardShape shape)

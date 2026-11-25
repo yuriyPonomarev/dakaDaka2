@@ -726,7 +726,7 @@ namespace Emberdelve.Combat
             for (int i = 0; i < entities.Count; i++)
             {
                 if (!(entities[i] is PlayerRig defender) || IsInactiveCombatEntity(defender) || defender.CombatId == flight.InstigatorId || defender.IsDead) continue;
-                if (defender.TrySweepGuard(start, end, flight.Radius, out float bladeDistance, out bool hitShield, out bool hitWeapon) && bladeDistance <= distance)
+                if (defender.TrySweepGuard(start, end, flight.Radius, out float bladeDistance, out bool hitShield, out bool hitWeapon, true) && bladeDistance <= distance)
                 {
                     target = defender;
                     distance = bladeDistance;

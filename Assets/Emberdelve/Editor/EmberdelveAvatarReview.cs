@@ -18,6 +18,14 @@ namespace Emberdelve.EditorTools
         private const int Cell = 420;
         private const float EyeHeight = 1.62f;
 
+        /// <summary>Batch entry for the test mirror (a batch Editor starts in an unsaved scene).</summary>
+        public static void RenderBatch()
+        {
+            if (EditorBuildSettings.scenes.Length > 0)
+                UnityEditor.SceneManagement.EditorSceneManager.OpenScene(EditorBuildSettings.scenes[0].path, UnityEditor.SceneManagement.OpenSceneMode.Single);
+            Render();
+        }
+
         [MenuItem("Emberdelve/Debug/Render Avatar Review (Edit Mode)")]
         public static void Render()
         {
@@ -99,7 +107,7 @@ namespace Emberdelve.EditorTools
                     string v = (body == archer ? "a" : "w") + (side ? "-side" : "");
                     files.Add(Shot(Folder + "/bow-carry-" + v + ".png", body, "Idle", 0.3f, side, p =>
                         p.Present("hollow_bow", "", "", false, false, 0f, default, Frame(), bot: true)));
-                    foreach (float draw in new[] { 0.05f, 0.5f, 1f })
+                    foreach (float draw in new[] { 0.06f, 0.16f, 0.5f, 1f })
                     {
                         float d = draw;
                         files.Add(Shot(Folder + "/bow-" + d.ToString("0.00") + "-" + v + ".png", body, "Idle", 0.3f, side, p =>
@@ -113,7 +121,7 @@ namespace Emberdelve.EditorTools
                     files.Add(Shot(Folder + "/xbow-guard-" + v + ".png", body, "Idle", 0.3f, side, p =>
                         p.Present("ember_crossbow", "", "", true, false, 0f, default, Frame(), bot: true)));
                 }
-            EmberdelveViewmodelPreview.Sheet(Folder + "/sheet-ranged.png", files, 6, Cell, Cell);
+            EmberdelveViewmodelPreview.Sheet(Folder + "/sheet-ranged.png", files, 7, Cell, Cell);
         }
 
         private static void Still(string name, GameObject warrior, GameObject archer)

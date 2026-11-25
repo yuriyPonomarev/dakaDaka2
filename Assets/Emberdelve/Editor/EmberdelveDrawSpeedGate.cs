@@ -201,11 +201,17 @@ namespace Emberdelve.EditorTools
                 if (upper == null || lower == null || nocked == null) return;
                 float progress = rig.GetComponent<RangedCombat>().Charge;
                 Close(visual.DrawProgress, progress, "viewmodel consumes captured draw progress");
-                Close(bow.Draw, progress, "limbs consume captured draw progress");
-                Close(nocked.localPosition.x, .024f + BowPresentation.FirstPersonDrawSide * progress, "nock lateral draw");
-                Close(nocked.localPosition.z, -.16f - BowPresentation.FirstPersonDrawDepth * progress, "arrow consumes captured draw progress");
-                float tipZ = -.055f - .085f * progress;
-                float middleZ = (tipZ + (-.16f - BowPresentation.FirstPersonDrawDepth * progress)) * .5f;
+                // The first part of the draw takes the arrow from the quiver and sets it on the string; the string is pulled
+                // over the rest (BowPresentation.StringDraw).
+                float pulled = BowPresentation.StringDraw(progress);
+                Close(bow.Draw, pulled, "limbs consume captured draw progress");
+                if (progress >= BowPresentation.ArrowNockedAt)
+                {
+                    Close(nocked.localPosition.x, .024f + BowPresentation.FirstPersonDrawSide * pulled, "nock lateral draw");
+                    Close(nocked.localPosition.z, -.16f - BowPresentation.FirstPersonDrawDepth * pulled, "arrow consumes captured draw progress");
+                }
+                float tipZ = -.055f - .085f * pulled;
+                float middleZ = (tipZ + (-.16f - BowPresentation.FirstPersonDrawDepth * pulled)) * .5f;
                 Close(upper.localPosition.z, middleZ, "upper string joins limb to captured nock");
                 Close(lower.localPosition.z, middleZ, "lower string joins limb to captured nock");
                 return;

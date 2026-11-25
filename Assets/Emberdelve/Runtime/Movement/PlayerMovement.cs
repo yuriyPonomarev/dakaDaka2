@@ -451,8 +451,49 @@ namespace Emberdelve.Movement
         /// </summary>
         public bool ExternalDriven { get; set; }
 
+        // ---- A dead body is scenery ------------------------------------------------------------------------------------------
+        // The capsule of a dead character used to stay solid, so a corpse blocked everybody (user report, 25 Nov 2026). The body
+        // drops to the floor, then its controller is switched off; it comes back when the character is set up for a new run.
+        private bool _corpse, _corpseDisabledController;
+        private float _corpseSince;
+        /// <summary>Longest a dead body keeps its capsule while it falls (seconds).</summary>
+        public const float CorpseSettleLimit = 3f;
+        public bool IsCorpse => _corpse;
+
+        public void BeginCorpse()
+        {
+            if (_corpse) return;
+            _corpse = true;
+            _corpseSince = 0f;
+            _verticalVelocity = Mathf.Min(_verticalVelocity, 0f);
+            IsMoving = false;
+            DesiredMoveIntent = Vector3.zero;
+        }
+
+        public void EndCorpse()
+        {
+            if (!_corpse) return;
+            _corpse = false;
+            if (_corpseDisabledController && controller != null) controller.enabled = true;
+            _corpseDisabledController = false;
+        }
+
+        private void SettleCorpse(float dt)
+        {
+            if (controller == null || !controller.enabled) return;
+            _corpseSince += dt;
+            _verticalVelocity = Mathf.Max(-50f, _verticalVelocity + gravity * dt);
+            controller.Move(Vector3.up * (_verticalVelocity * dt));
+            if (controller.isGrounded || _corpseSince >= CorpseSettleLimit)
+            {
+                controller.enabled = false;
+                _corpseDisabledController = true;
+            }
+        }
+
         private void Update()
         {
+            if (_corpse) { SettleCorpse(Time.deltaTime); return; }
             if (ExternalDriven) return;
             if (_class == null || input == null) return;
 
@@ -482,7 +523,7 @@ namespace Emberdelve.Movement
         /// </summary>
         public void Step(in MoveInputFrame frame, float dt)
         {
-            if (_class == null || controller == null) return;
+            if (_class == null || controller == null || _corpse) return;
             if (float.IsNaN(dt) || float.IsInfinity(dt) || dt < 0f) return;
             StepCore(in frame, dt, false);
         }

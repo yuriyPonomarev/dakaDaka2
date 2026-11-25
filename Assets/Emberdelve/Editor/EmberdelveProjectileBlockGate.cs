@@ -398,8 +398,22 @@ namespace Emberdelve.EditorTools
             Check(bowBlock.GuardBladeContact && bowBlock.Location == HitLocation.Unspecified && !bowBlock.Headshot,
                 "D1c3: a blade-intercepted arrow is stopped before any body location is decided (Unspecified, no headshot)");
 
+            // A raised blade deflects a projectile that passes within GuardBladePose.ProjectileCatchRadius of it (user decision,
+            // 25 Nov 2026: "arrows are not parried"): an arrow at the chest of a guarding swordsman from the front is stopped.
             _defender.SetGuardHeld(false);
-            Vector3 bowBodyOrigin = _defender.CombatCenter + _defender.transform.forward * 8f;
+            Vector3 bowFrontOrigin = _defender.CombatCenter + _defender.transform.forward * 8f;
+            Shooter bowFront = MakeShooter(bowFrontOrigin, (_defender.CombatCenter - bowFrontOrigin).normalized, _bow);
+            _defender.SetGuardHeld(true);
+            ResetHealth();
+            Check(Launch(bowFront, 1), "frontal bow body-line launch is accepted");
+            DamageInfo bowFrontHit = ResolveDamage(bowFront, 1f);
+            Check(bowFrontHit.IsValid && bowFrontHit.Blocked && bowFrontHit.GuardBladeContact,
+                "a frontal torso-line arrow is deflected by the raised blade (catch radius)");
+
+            // From the open side the same torso line is outside the blade's reach.
+            _defender.SetGuardHeld(false);
+            Vector3 openSide = Quaternion.AngleAxis(-60f, Vector3.up) * _defender.transform.forward;
+            Vector3 bowBodyOrigin = _defender.CombatCenter + openSide * 8f;
             Shooter bowNearMiss = MakeShooter(bowBodyOrigin, (_defender.CombatCenter - bowBodyOrigin).normalized, _bow);
             _defender.SetGuardHeld(true);
             ResetHealth();
@@ -421,8 +435,8 @@ namespace Emberdelve.EditorTools
             DamageInfo caught = ResolveDamage(raisingShooter, 1f);
             Check(caught.IsValid && caught.Blocked, "raising the blade during flight blocks at live blade contact");
 
-            // Correct facing alone cannot stop a shot through the torso that misses the physically narrow blade.
-            Vector3 bodyForward = _defender.transform.forward;
+            // Correct facing alone cannot stop a shot through the torso that passes outside the blade's catch radius (the open side).
+            Vector3 bodyForward = Quaternion.AngleAxis(-60f, Vector3.up) * _defender.transform.forward;
             Vector3 bodyOrigin = _defender.CombatCenter + bodyForward * 8f;
             Shooter nearMiss = MakeShooter(bodyOrigin, (_defender.CombatCenter - bodyOrigin).normalized);
             ResetHealth();

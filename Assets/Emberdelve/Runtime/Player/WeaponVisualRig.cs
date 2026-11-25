@@ -604,7 +604,7 @@ namespace Emberdelve.Player
             float p = Mathf.Clamp01(progress);
             DrawProgress = p;
             var bow = GetComponentInChildren<BowPresentation>();
-            if (bow != null) bow.SetDraw(p);
+            if (bow != null) bow.SetDraw(BowPresentation.StringDraw(p));   // the first part of the draw is the nocking
 
             if (_arrow != null)
             {

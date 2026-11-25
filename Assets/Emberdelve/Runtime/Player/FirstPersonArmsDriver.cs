@@ -778,7 +778,8 @@ namespace Emberdelve.Player
                     : _visual.DrawProgress;
                 if (bow != null)
                 {
-                    PoseBow(frame, bow, _bowDraw);
+                    RangedCombat bowRanged = _rig != null ? _rig.GetComponent<RangedCombat>() : null;
+                    PoseBow(frame, bow, _bowDraw, bowRanged != null && bowRanged.IsReloading ? Mathf.Clamp01(bowRanged.ReloadProgress) : -1f);
                 }
                 return;
             }
@@ -1137,7 +1138,12 @@ namespace Emberdelve.Player
             if (!ResolveBones() || frame == null || bow == null) return;
             PoseFingers(false, 0f);
             EnsureWeaponGrips();
+            _bowCant = 0f;
+            bow.transform.localPosition = Vector3.zero;
+            bow.transform.localRotation = Quaternion.identity;
             bow.SetDraw(0f);
+            bow.ShowArrow(false);
+            bow.PlaceBundle(default, default, false);
             SolveArmWithWrist(_upperL, _lowerL, _handL, _leftWeaponGrip, bow.transform.TransformPoint(BowGuardPose.LeftGrip),
                 bow.transform.rotation, frame.rotation * LeftPole);
             SolveArmWithWrist(_upperR, _lowerR, _handR, gripRight, bow.transform.TransformPoint(BowGuardPose.RightGrip),
@@ -1151,12 +1157,39 @@ namespace Emberdelve.Player
         public static readonly Vector3 BowStringHandEuler = new Vector3(0f, 25f, 90f);
         public const float BowHandOnStringAt = .18f;
 
-        public void PoseBow(Transform frame, BowPresentation bow, float draw)
+        // ---- Nocking and reloading (aim frame; our own motion on the reference's timing) -------------------------------------
+        /// <summary>The quiver on the right hip and the pack behind the right shoulder: both outside the picture.</summary>
+        public static readonly Vector3 BowQuiver = new Vector3(.40f, -.62f, .18f), BowPack = new Vector3(.36f, .34f, -.02f);
+        /// <summary>
+        /// Which way an arrow points while it is carried by its nock end: forward and towards the bow, so the shaft is in the
+        /// picture (hanging tip-down it was below it), and a handful of arrows on its way to the quiver: tips down.
+        /// </summary>
+        public static readonly Vector3 BowArrowCarry = new Vector3(-.34f, .12f, .93f), BowBundleCarry = new Vector3(-.12f, -.80f, .58f);
+        /// <summary>A reload lowers and cants the bow (bow space) while the string hand works.</summary>
+        public static readonly Vector3 BowReloadDrop = new Vector3(.02f, -.10f, -.03f), BowReloadCantEuler = new Vector3(8f, 0f, -26f);
+        /// <summary>
+        /// Reload, as fractions of its time: the hand has reached the pack, comes back with a handful of arrows, has put them
+        /// into the hip quiver, is back at rest. The reference recurve reload lasts 2.5 s with sound cues at its start and at
+        /// 1.08 s (0.43): the arrows appear at that cue. The reference keeps its spare arrows at the bow; with the quiver on the
+        /// hip (user decision) a reload refills that quiver.
+        /// </summary>
+        public const float BowReloadReachBy = .30f, BowReloadBundleAt = .43f, BowReloadStowBy = .78f, BowReloadDoneBy = .90f;
+        private Vector3 _bowHandLocal;
+        private float _bowHandOn, _bowCant;
+        private bool _bowHandSet;
+
+        public void PoseBow(Transform frame, BowPresentation bow, float draw, float reload = -1f)
         {
             if (!ResolveBones() || frame == null || bow == null) return;
-            PoseFingers(true, draw);
+            bool reloading = reload >= 0f;
+            float stringDraw = reloading ? 0f : BowPresentation.StringDraw(draw);
+            PoseFingers(true, stringDraw);
             EnsureWeaponGrips();
-            bow.SetDraw(draw);
+            float cant = reloading ? Mathf.SmoothStep(0f, 1f, reload / .15f) * (1f - Mathf.SmoothStep(0f, 1f, (reload - .85f) / .15f)) : 0f;
+            _bowCant = Application.isPlaying ? Mathf.MoveTowards(_bowCant, cant, Time.deltaTime * 6f) : cant;
+            bow.transform.localPosition = BowReloadDrop * _bowCant;
+            bow.transform.localRotation = Quaternion.Euler(BowReloadCantEuler * _bowCant);
+            bow.SetDraw(stringDraw);
             // Bow handle and string are vertical; the sword's +90-degree mapping is wrong here.
             SolveArmWithWrist(_upperL, _lowerL, _handL, _leftWeaponGrip, bow.transform.position,
                 bow.transform.rotation, frame.rotation * LeftPole);
@@ -1169,15 +1202,57 @@ namespace Emberdelve.Player
             var middle = animator.GetBoneTransform(HumanBodyBones.RightMiddleDistal);
             _stringGrip.position = index != null && middle != null ? Vector3.Lerp(index.position, middle.position, .5f) : gripRight.position;
             _stringGrip.rotation = gripRight.rotation;
-            // Not drawing: the string hand waits low on the right instead of lying on the bow hand (the nock at rest is just
-            // behind the grip). It comes onto the string over the first part of the draw.
-            float onString = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(draw / BowHandOnStringAt));
-            Vector3 nock = bow.transform.TransformPoint(bow.Nock);
-            Vector3 target = Vector3.Lerp(frame.TransformPoint(BowStringHandRest), nock, onString);
+            // Not drawing: the string hand waits low on the right. A draw begins at the quiver on the right hip: the hand goes
+            // down for an arrow, brings it up by its nock end and sets it on the string, then pulls. After the release the hand
+            // eases back from where it let go. A reload fetches a handful of arrows from the pack and drops them into the quiver.
+            Vector3 nockLocal = frame.InverseTransformPoint(bow.transform.TransformPoint(bow.Nock));
+            Vector3 hand = BowStringHandRest;
+            float onString = 0f, turn = 0f;
+            bool arrowInHand = false, bundleInHand = false;
+            if (reloading)
+            {
+                if (reload < BowReloadReachBy) hand = Vector3.Lerp(BowStringHandRest, BowPack, Mathf.SmoothStep(0f, 1f, reload / BowReloadReachBy));
+                else if (reload < BowReloadBundleAt) hand = BowPack;
+                else if (reload < BowReloadStowBy)
+                {
+                    float k = Mathf.SmoothStep(0f, 1f, (reload - BowReloadBundleAt) / (BowReloadStowBy - BowReloadBundleAt));
+                    // Through the picture on the way down, so the arrows are seen.
+                    hand = Vector3.Lerp(BowPack, BowQuiver, k) + new Vector3(-.16f, 0f, .30f) * Mathf.Sin(Mathf.PI * k);
+                    bundleInHand = true;
+                }
+                else if (reload < BowReloadDoneBy) hand = BowQuiver;
+                else hand = Vector3.Lerp(BowQuiver, BowStringHandRest, Mathf.SmoothStep(0f, 1f, (reload - BowReloadDoneBy) / (1f - BowReloadDoneBy)));
+            }
+            else if (draw > 0f)
+            {
+                if (draw < BowPresentation.ArrowTakenAt)
+                    hand = Vector3.Lerp(BowStringHandRest, BowQuiver, Mathf.SmoothStep(0f, 1f, draw / BowPresentation.ArrowTakenAt));
+                else if (draw < BowPresentation.ArrowNockedAt)
+                {
+                    float k = Mathf.SmoothStep(0f, 1f, (draw - BowPresentation.ArrowTakenAt) / (BowPresentation.ArrowNockedAt - BowPresentation.ArrowTakenAt));
+                    hand = Vector3.Lerp(BowQuiver, nockLocal, k) + new Vector3(.05f, .04f, 0f) * Mathf.Sin(Mathf.PI * k);
+                    onString = k; turn = k; arrowInHand = true;
+                }
+                else { hand = nockLocal; onString = 1f; }
+            }
+            if (reloading || draw > 0f || !Application.isPlaying || !_bowHandSet)
+            {
+                _bowHandLocal = hand; _bowHandOn = onString; _bowHandSet = true;
+            }
+            else
+            {
+                _bowHandLocal = Vector3.Lerp(_bowHandLocal, hand, 1f - Mathf.Exp(-9f * Time.deltaTime));
+                _bowHandOn = Mathf.MoveTowards(_bowHandOn, 0f, Time.deltaTime * 4f);
+            }
             // The drawing hand comes onto the string from the right, back of the hand up, fingers hooked over the string.
             Quaternion across = bow.transform.rotation * Quaternion.Euler(BowStringHandEuler);
-            Quaternion rotation = Quaternion.Slerp(frame.rotation * Quaternion.Euler(BowStringHandRestEuler), across, onString);
-            SolveArmWithWrist(_upperR, _lowerR, _handR, _stringGrip, target, rotation, frame.rotation * RightPole);
+            Quaternion rotation = Quaternion.Slerp(frame.rotation * Quaternion.Euler(BowStringHandRestEuler), across, _bowHandOn);
+            SolveArmWithWrist(_upperR, _lowerR, _handR, _stringGrip, frame.TransformPoint(_bowHandLocal), rotation, frame.rotation * RightPole);
+
+            Quaternion carried = frame.rotation * Quaternion.LookRotation(BowArrowCarry.normalized, Vector3.up);
+            if (arrowInHand) bow.PlaceArrow(_stringGrip.position, Quaternion.Slerp(carried, bow.ArrowOnStringRotation, turn * turn));
+            else bow.ShowArrow(!reloading && draw >= BowPresentation.ArrowNockedAt);
+            bow.PlaceBundle(_stringGrip.position, frame.rotation * Quaternion.LookRotation(BowBundleCarry.normalized, Vector3.up), bundleInHand);
         }
 
         /// <summary>

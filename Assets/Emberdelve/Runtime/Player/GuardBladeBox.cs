@@ -110,6 +110,15 @@ namespace Emberdelve.Player
         // The first-person sword model is held at its grip (the root) and its blade runs about 1.05 m along +forward, so the
         // shared contact box covers that blade, starting just above the cross-guard and ending at the tip.
         // The fist sits right under the cross-guard, so the blade runs from just above the root to about 0.96 m.
+        /// <summary>
+        /// A raised blade deflects a projectile that passes within this distance of it (metres). OUR OWN tuning, not a decoded
+        /// value: the blade box is 5.5 cm wide and, seen from the front, lies beside the body's middle line, so an arrow aimed at
+        /// the chest of a guarding swordsman always slipped past it ("arrows are not parried", user, 25 Nov 2026). With this
+        /// radius the one-handed guard covers the face and the chest of its holder against a shot from the front (the hilt is
+        /// 0.22 m beside the eyes, the tip 0.5 m below them); legs, flanks and the back stay open. Melee contact keeps the exact
+        /// box, and a shot straight into the hand on the grip is still a hit on the arm.
+        /// </summary>
+        public const float ProjectileCatchRadius = 0.24f;
         public static readonly Vector3 BladeLocalCenter = new Vector3(0f, 0f, 0.52f);
         public static readonly Vector3 BladeSize = new Vector3(0.055f, 0.03f, 0.88f);
 
