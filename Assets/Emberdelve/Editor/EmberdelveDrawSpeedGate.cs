@@ -202,10 +202,10 @@ namespace Emberdelve.EditorTools
                 float progress = rig.GetComponent<RangedCombat>().Charge;
                 Close(visual.DrawProgress, progress, "viewmodel consumes captured draw progress");
                 Close(bow.Draw, progress, "limbs consume captured draw progress");
-                Close(nocked.localPosition.x, .024f + .15f * progress, "nock lateral draw");
-                Close(nocked.localPosition.z, -.16f - .22f * progress, "arrow consumes captured draw progress");
+                Close(nocked.localPosition.x, .024f + BowPresentation.FirstPersonDrawSide * progress, "nock lateral draw");
+                Close(nocked.localPosition.z, -.16f - BowPresentation.FirstPersonDrawDepth * progress, "arrow consumes captured draw progress");
                 float tipZ = -.055f - .085f * progress;
-                float middleZ = (tipZ + (-.16f - .22f * progress)) * .5f;
+                float middleZ = (tipZ + (-.16f - BowPresentation.FirstPersonDrawDepth * progress)) * .5f;
                 Close(upper.localPosition.z, middleZ, "upper string joins limb to captured nock");
                 Close(lower.localPosition.z, middleZ, "lower string joins limb to captured nock");
                 return;

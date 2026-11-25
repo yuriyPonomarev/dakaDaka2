@@ -163,6 +163,7 @@ namespace Emberdelve.EditorTools
                 var clip=EmberdelveEnemyVisualFactory.FindClip(clips[i]);if(clip==null)throw new Exception("Missing clip "+clips[i]);
                 var state=sm.AddState(states[i]);state.motion=clip;if(i==0)sm.defaultState=state;
             }
+            EmberdelveAvatarArmLayer.Ensure(controller);
             EditorUtility.SetDirty(controller);return controller;
         }
         static Mesh SaveMesh(Mesh mesh,string name)

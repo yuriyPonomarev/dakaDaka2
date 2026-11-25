@@ -10,7 +10,13 @@ namespace Emberdelve.Player
         Vector3[] _vertices = new Vector3[Rings * Sides * 2];
         Transform _upperString, _lowerString, _arrow;
         public float Draw { get; private set; }
-        public Vector3 Nock => new Vector3(.024f + .15f * Draw, .015f, -.16f - .22f * Draw);
+        // How far a full draw moves the nock in bow space: sideways and straight back. The defaults are the shape the avatars and
+        // the skeleton archer's baked clip were made for; the first-person bow draws deeper and straight back (review 25 Nov 2026:
+        // the default read as the string being pushed 15 cm to the side).
+        public const float FirstPersonDrawSide = 0f, FirstPersonDrawDepth = .30f;
+        float _drawSide = .15f, _drawDepth = .22f;
+        public Vector3 Nock => new Vector3(.024f + _drawSide * Draw, .015f, -.16f - _drawDepth * Draw);
+        public void SetDrawShape(float side, float depth) { _drawSide = side; _drawDepth = depth; SetDraw(Draw); }
         public static BowPresentation Build(Transform parent, WeaponData weapon)
         {
             var root = new GameObject("CarvedRecurveBow");

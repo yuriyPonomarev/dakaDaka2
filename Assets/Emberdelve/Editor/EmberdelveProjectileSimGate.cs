@@ -357,11 +357,11 @@ namespace Emberdelve.EditorTools
 
         private void AuthoredData()
         {
-            Near(42f, _bow.projectileSpeed, 1e-4f, "bow muzzle speed 42 m/s (unchanged)");
-            Near(9.81f, _bow.projectileGravity, 1e-4f, "bow gravity 9.81 m/s^2");
+            Near(38f, _bow.projectileSpeed, 1e-4f, "bow muzzle speed 38 m/s (slowed from 42 on the user's request, 25 Nov 2026)");
+            Near(9.6f, _bow.projectileGravity, 1e-4f, "bow gravity 9.6 m/s^2 (reference scale 0.98)");
             Near(1.6f, _bow.projectileMaxFlightTime, 1e-4f, "bow maximum flight time 1.6 s");
             Near(54f, _crossbow.projectileSpeed, 1e-4f, "crossbow muzzle speed 54 m/s (unchanged)");
-            Near(9.81f, _crossbow.projectileGravity, 1e-4f, "crossbow gravity 9.81 m/s^2");
+            Near(9.6f, _crossbow.projectileGravity, 1e-4f, "crossbow gravity 9.6 m/s^2 (the arrow's scale)");
             Near(1.2f, _crossbow.projectileMaxFlightTime, 1e-4f, "crossbow maximum flight time 1.2 s");
             Check(_crossbow.projectileSpeed > _bow.projectileSpeed && Mathf.Abs(_crossbow.projectileGravity - _bow.projectileGravity) < 1e-4f,
                 "the crossbow is faster under the same gravity as the bow");
@@ -437,7 +437,7 @@ namespace Emberdelve.EditorTools
                 int i = FirstStepAtDistance(bow, from, d);
                 Check(i >= 0, $"bow reaches {d:F0} m");
                 if (i >= 0)
-                    Near(ProjectileBallistics.TimeAlongAimLine(42f, d), (i + 1) * Dt, Dt + 1e-4f, $"bow time of flight to {d:F0} m is {d}/42 s, to within one step");
+                    Near(ProjectileBallistics.TimeAlongAimLine(_bow.projectileSpeed, d), (i + 1) * Dt, Dt + 1e-4f, $"bow time of flight to {d:F0} m is {d}/{_bow.projectileSpeed:F0} s, to within one step");
             }
             foreach (float d in new[] { 20f, 30f })
             {
@@ -560,10 +560,11 @@ namespace Emberdelve.EditorTools
             float bowDrop = from.y - bow.Positions[ib].y;
             float crossbowDrop = from.y - crossbow.Positions[ic].y;
             Check(crossbowDrop < bowDrop, $"the crossbow is flatter: {crossbowDrop:F2} m of drop at 30 m against the bow's {bowDrop:F2} m");
-            Near((42f / 54f) * (42f / 54f), crossbowDrop / bowDrop, .03f, "drop ratio follows squared muzzle-speed ratio under shared gravity");
+            float speedRatio = _bow.projectileSpeed / _crossbow.projectileSpeed;
+            Near(speedRatio * speedRatio, crossbowDrop / bowDrop, .03f, "drop ratio follows squared muzzle-speed ratio under shared gravity");
             Check((ic + 1) * Dt < (ib + 1) * Dt, $"...and gets there sooner ({(ic + 1) * Dt:F3} s against {(ib + 1) * Dt:F3} s)");
-            Near(ProjectileBallistics.DropBelowAimLine(54f, 9.81f, crossbow.Positions[ic].z - from.z), crossbowDrop, 0.5f * 9.81f * Dt * (ic + 1) * Dt + 0.005f,
-                "the crossbow's drop equals the closed form for 54 m/s and 9.81 m/s^2");
+            Near(ProjectileBallistics.DropBelowAimLine(_crossbow.projectileSpeed, _crossbow.projectileGravity, crossbow.Positions[ic].z - from.z), crossbowDrop,
+                0.5f * _crossbow.projectileGravity * Dt * (ic + 1) * Dt + 0.005f, "the crossbow's drop equals the closed form for its own speed and gravity");
         }
 
         private void FormulaPosition()

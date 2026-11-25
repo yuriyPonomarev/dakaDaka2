@@ -54,6 +54,7 @@ MonoBehaviour:
   projectileSpeed: 30
   projectileRadius: 0.05
   projectileLength: 0.8
+  projectileTrailMaterial: {fileID: 2100000, guid: f7920b32ca5c58345afaa7b757cc9827, type: 2}
   recoveredAmmo: {fileID: 0}
   drawTime: 1
   minChargeToFire: 0.2

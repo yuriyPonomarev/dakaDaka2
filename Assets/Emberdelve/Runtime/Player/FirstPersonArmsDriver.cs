@@ -95,6 +95,7 @@ namespace Emberdelve.Player
 
         /// <summary>Elbow hints (aim frame): below and a little outwards.</summary>
         private static readonly Vector3 RightPole = new Vector3(0.7f, -1f, -0.4f);
+        private static readonly Vector3 SwingPole = new Vector3(0.12f, -1f, -0.15f);
         private static readonly Vector3 LeftPole = new Vector3(-0.7f, -1f, -0.4f);
         private static Material _guardDirectionMaterial;
         private static Mesh _guardDirectionMesh;
@@ -279,6 +280,7 @@ namespace Emberdelve.Player
                 if (!_trailOn)
                 {
                     if (_trail == null) _trail = SwingTrail.Create();
+                    _trail.SetSpace(_camera != null ? _camera.transform : null);
                     _trail.Begin(_visual.ActiveTrailMaterial);
                     _trailOn = true;
                 }
@@ -288,7 +290,7 @@ namespace Emberdelve.Player
             }
             else if (_trailOn)
             {
-                _trail.EndStroke();
+                if (_trail != null) _trail.EndStroke();   // the ribbon lives under the camera and goes with it
                 _trailOn = false;
             }
         }
@@ -642,6 +644,9 @@ namespace Emberdelve.Player
             _presentedBase = localBase;
             _presentedRotation = localRotation;
             _hasPresentedPose = true;
+            SwingPatternData shownPattern = null; SwingTiming shownTiming = default; float shownTime = 0f;
+            bool shown = _visual != null && _mainData != null && !_mainData.IsRanged && _visual.TryGetSwing(out shownPattern, out shownTiming, out shownTime);
+            _swingView = _cut.Step(shown, shownPattern, shownTiming, shownTime, _mainData != null && _mainData.twoHanded, dt);
             Pose(frame, _camera, localBase, localRotation, _guardBlend, bob + _joltRight, bob + _joltLeft);
             UpdateViewTrail();
         }
@@ -653,10 +658,81 @@ namespace Emberdelve.Player
         /// anchor, then solves the right arm onto the weapon grip target and the left arm onto the shield / second grip.
         /// <paramref name="localBase"/> / <paramref name="localRotation"/> are the weapon rig's pose in the aim frame.
         /// </summary>
+        /// <summary>The shown motion of a cut for this frame (<see cref="SwingMotion"/>, first-person frame).</summary>
+        public struct SwingView
+        {
+            public bool Valid; public Vector3 Hand; public Quaternion Rotation; public float Weight;
+            public static SwingView Sample(SwingPatternData pattern, in SwingTiming timing, float time, bool twoHanded = false)
+            {
+                if (!SwingMotion.TrySample(pattern, timing, time, SwingMotion.For(false, twoHanded), out Vector3 hand, out Vector3 blade, out Vector3 travel, out float weight))
+                    return default;
+                return new SwingView { Valid = true, Hand = hand, Rotation = SwingMotion.BladeRotation(blade, travel), Weight = weight };
+            }
+        }
+        private SwingView _swingView;
+        private CutBlend _cut;
+
+        /// <summary>
+        /// Carries the shown pose from one swing into the next. A swing starts from wherever the hand is shown at that moment
+        /// (the ready pose for the first one, the end of the previous strike inside a combo), and the hand goes back to the
+        /// ready pose only when no swing follows. Blending every swing out of and back into the ready pose made the sword
+        /// flash in its idle pose between the steps of a combo (user recording of 25 Nov 2026, 14:29).
+        /// </summary>
+        public struct CutBlend
+        {
+            /// <summary>Seconds to take up a new swing, to wait after the last one before returning, and to return to the ready pose.</summary>
+            public const float TakeUp = 0.20f, ReturnDelay = 0.06f, Return = 0.30f;
+            /// <summary>Between two swings the hand goes round by the weapon side and below the picture, so the way from the end of one strike to the next wind-up stays outside it.</summary>
+            public static readonly Vector3 ChainDetour = new Vector3(0.30f, -0.42f, -0.04f);
+            /// <summary>The blade on that way: point down and back towards the player, out of the picture wherever the hand is.</summary>
+            public static readonly Quaternion Stowed = Quaternion.LookRotation(new Vector3(0.3f, -0.5f, -0.8f).normalized);
+            private bool _has, _swinging, _chained;
+            private SwingPatternData _pattern;
+            private float _lastTime, _in, _out;
+            private Vector3 _fromHand, _hand, _lastHand;
+            private Quaternion _fromRotation, _rotation, _lastRotation;
+
+            public SwingView Step(bool swinging, SwingPatternData pattern, in SwingTiming timing, float time, bool twoHanded, float dt)
+            {
+                bool begins = swinging && (!_swinging || pattern != _pattern || time < _lastTime - 0.02f);
+                if (begins) _chained = _has;
+                if (swinging && SwingMotion.TrySample(pattern, timing, time, SwingMotion.For(false, twoHanded), out Vector3 hand, out Vector3 blade, out Vector3 travel, out _, _chained))
+                {
+                    if (begins)
+                    {
+                        _fromHand = _has ? _hand : SwordReadyHand;
+                        _fromRotation = _has ? _rotation : SwordReadyRotation;
+                        _in = 0f;
+                    }
+                    _swinging = true; _pattern = pattern; _lastTime = time; _out = 0f; _has = true;
+                    _in += dt;
+                    float w = Mathf.SmoothStep(0f, 1f, _in / TakeUp);
+                    _hand = Vector3.Lerp(_fromHand, hand, w);
+                    if (_chained) _hand += ChainDetour * Mathf.Sin(Mathf.PI * w);
+                    // Inside a combo the blade keeps pointing away until the hand is on its way up again.
+                    Quaternion target = SwingMotion.BladeRotation(blade, travel);
+                    _rotation = !_chained ? Quaternion.Slerp(_fromRotation, target, w)
+                        : w < 0.5f ? Quaternion.Slerp(_fromRotation, Stowed, Mathf.SmoothStep(0f, 1f, w * 2f))
+                        : Quaternion.Slerp(Stowed, target, Mathf.SmoothStep(0f, 1f, w * 2f - 1f));
+                    _lastHand = _hand; _lastRotation = _rotation;
+                    return new SwingView { Valid = true, Hand = _hand, Rotation = _rotation, Weight = 1f };
+                }
+                _swinging = false;
+                if (!_has) return default;
+                _out += dt;
+                float back = Mathf.SmoothStep(0f, 1f, (_out - ReturnDelay) / Return);
+                if (back >= 1f) { _has = false; return default; }
+                _hand = Vector3.Lerp(_lastHand, SwordReadyHand, back);
+                _rotation = Quaternion.Slerp(_lastRotation, SwordReadyRotation, back);
+                return new SwingView { Valid = true, Hand = _hand, Rotation = _rotation, Weight = 1f - back };
+            }
+        }
+
         public void Pose(Transform frame, Camera camera, Vector3 localBase, Quaternion localRotation, float guardBlend, Vector3 offsetRight, Vector3 offsetLeft,
-            float? swingBlend = null, float? strikeBlend = null, float? shieldLower = null, float? swingTrail = null)
+            float? swingBlend = null, float? strikeBlend = null, float? shieldLower = null, float? swingTrail = null, SwingView? swingView = null)
         {
             if (!ResolveBones() || frame == null) return;
+            SwingView view = swingView ?? _swingView;
             CaptureRestHands();
             float poseSwingWeight = swingBlend ?? _swingWeight;
             float trail = swingTrail ?? _swingTrail;
@@ -720,7 +796,15 @@ namespace Emberdelve.Player
                 float ready = (1f - Mathf.SmoothStep(0f, 1f, swordGuard)) * (1f - swing);
                 // Swings: a wide arc close to the camera that leaves the frame between strikes (not clamped into the view).
                 float swingShown = swing * (1f - Mathf.SmoothStep(0f, 1f, swordGuard));
-                if (!_mainData.twoHanded)
+                if (view.Valid)
+                {
+                    // A swing or the way back from one (CutBlend): the shown pose is complete, only a raised blade guard overrides it.
+                    float shownCut = 1f - Mathf.SmoothStep(0f, 1f, swordGuard);
+                    handLocal = Vector3.Lerp(handLocal, view.Hand + offsetRight, shownCut);
+                    localRotation = Quaternion.Slerp(localRotation, view.Rotation, shownCut);
+                    ready = 0f;
+                }
+                else if (!_mainData.twoHanded)
                 {
                     handLocal = Vector3.Lerp(handLocal, SwingHand(localBase, strike) + offsetRight, swingShown);
                     localRotation = SwingBladeRotation(localRotation, trail * Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(strike)), swingShown);
@@ -784,7 +868,9 @@ namespace Emberdelve.Player
             }
             Quaternion gripRotation = frame.rotation * localRotation * GripFromRig;
             Vector3 gripPosition = frame.TransformPoint(handLocal);
-            Vector3 rightPole = RightPole;
+            // In a cut the elbow hangs below the hand (the forearm stands upright in the view) instead of out to the side.
+            float cutting = view.Valid && _mainData != null && !_mainData.IsRanged && _utilityItem == null ? view.Weight : 0f;
+            Vector3 rightPole = Vector3.Lerp(RightPole, SwingPole, cutting);
             if (gripRight != null)
             {
                 SolveArmWithWrist(_upperR, _lowerR, _handR, gripRight, gripPosition, gripRotation, frame.rotation * rightPole);
@@ -974,7 +1060,7 @@ namespace Emberdelve.Player
                         {
                             // Index above the arrow, middle/ring below; thumb stays clear of the string.
                             float hook = finger == 0 ? -.3f : joint == 0 ? .05f : joint == 1 ? -.9f : -.6f;
-                            curl = Mathf.Lerp(finger == 0 ? .4f : .65f, hook, Mathf.Lerp(.65f, 1f, Mathf.Clamp01(draw)));
+                            curl = Mathf.Lerp(finger == 0 ? .4f : .65f, hook, Mathf.Lerp(.85f, 1f, Mathf.Clamp01(draw)));
                         }
                         // An authored grip (baked from a free hand-pose clip) wins over the generic curl.
                         if (selectedGrip != null && selectedGrip.TryGet(index, out float authored)) curl = authored;
@@ -1058,6 +1144,13 @@ namespace Emberdelve.Player
                 bow.transform.rotation, frame.rotation * RightPole);
         }
 
+        // First-person string hand (aim frame): where it waits when the bow is not drawn, how its grip is turned there and on
+        // the string, and the draw fraction by which it has reached the string.
+        public static readonly Vector3 BowStringHandRest = new Vector3(.24f, -.26f, .42f);
+        public static readonly Vector3 BowStringHandRestEuler = new Vector3(-15f, 20f, 90f);
+        public static readonly Vector3 BowStringHandEuler = new Vector3(0f, 25f, 90f);
+        public const float BowHandOnStringAt = .18f;
+
         public void PoseBow(Transform frame, BowPresentation bow, float draw)
         {
             if (!ResolveBones() || frame == null || bow == null) return;
@@ -1076,8 +1169,15 @@ namespace Emberdelve.Player
             var middle = animator.GetBoneTransform(HumanBodyBones.RightMiddleDistal);
             _stringGrip.position = index != null && middle != null ? Vector3.Lerp(index.position, middle.position, .5f) : gripRight.position;
             _stringGrip.rotation = gripRight.rotation;
-            SolveArmWithWrist(_upperR, _lowerR, _handR, _stringGrip, bow.transform.TransformPoint(bow.Nock),
-                bow.transform.rotation, frame.rotation * RightPole);
+            // Not drawing: the string hand waits low on the right instead of lying on the bow hand (the nock at rest is just
+            // behind the grip). It comes onto the string over the first part of the draw.
+            float onString = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(draw / BowHandOnStringAt));
+            Vector3 nock = bow.transform.TransformPoint(bow.Nock);
+            Vector3 target = Vector3.Lerp(frame.TransformPoint(BowStringHandRest), nock, onString);
+            // The drawing hand comes onto the string from the right, back of the hand up, fingers hooked over the string.
+            Quaternion across = bow.transform.rotation * Quaternion.Euler(BowStringHandEuler);
+            Quaternion rotation = Quaternion.Slerp(frame.rotation * Quaternion.Euler(BowStringHandRestEuler), across, onString);
+            SolveArmWithWrist(_upperR, _lowerR, _handR, _stringGrip, target, rotation, frame.rotation * RightPole);
         }
 
         /// <summary>

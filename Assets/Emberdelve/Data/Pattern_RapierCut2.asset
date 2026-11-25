@@ -1,0 +1,72 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cb55b4f173a010344bfb125cbedb5e60, type: 3}
+  m_Name: Pattern_RapierCut2
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.SwingPatternData
+  patternId: rapier_cut_2
+  kind: 0
+  windupTime: 0.669
+  activeTime: 0.079
+  recoveryTime: 0.18
+  wallRecoilTime: 0.7
+  damageMultiplier: 1
+  impactPowerScale: 1
+  windupMoveMultiplier: 0.875
+  activeMoveMultiplier: 0.75
+  recoveryMoveMultiplier: 0.875
+  maxTargets: 2
+  reachScale: 0.79
+  reachInset: 0.94
+  sweepRadius: 0.15
+  contactWindow: 0.02
+  trailMaterial: {fileID: 2100000, guid: f7920b32ca5c58345afaa7b757cc9827, type: 2}
+  restBase: {x: 0.26, y: -0.2, z: 0.3}
+  restYaw: 12
+  restPitch: -8
+  restRoll: 14
+  keys:
+  - t: 0
+    basePos: {x: 0.005661279, y: -0.022455603, z: 0.68775845}
+    bladeYaw: -65.69728
+    bladePitch: -52.46526
+  - t: 0.125
+    basePos: {x: 0.02165626, y: -0.045298755, z: 0.7606885}
+    bladeYaw: -47.981018
+    bladePitch: -46.695415
+  - t: 0.25
+    basePos: {x: 0.046526834, y: -0.08081764, z: 0.82562155}
+    bladeYaw: -34.22448
+    bladePitch: -38.77292
+  - t: 0.375
+    basePos: {x: 0.0790353, y: -0.12724452, z: 0.8793261}
+    bladeYaw: -23.41546
+    bladePitch: -29.576628
+  - t: 0.5
+    basePos: {x: 0.117563784, y: -0.1822689, z: 0.91912955}
+    bladeYaw: -14.483795
+    bladePitch: -19.656149
+  - t: 0.625
+    basePos: {x: 0.16019487, y: -0.2431524, z: 0.94305086}
+    bladeYaw: -6.6185894
+    bladePitch: -9.347493
+  - t: 0.75
+    basePos: {x: 0.20480692, y: -0.306865, z: 0.9498997}
+    bladeYaw: 0.7870802
+    bladePitch: 1.1238874
+  - t: 0.875
+    basePos: {x: 0.24917977, y: -0.37023598, z: 0.93933505}
+    bladeYaw: 8.2464485
+    bladePitch: 11.576387
+  - t: 1
+    basePos: {x: 0.29110506, y: -0.43011153, z: 0.91188276}
+    bladeYaw: 16.28378
+    bladePitch: 21.823412

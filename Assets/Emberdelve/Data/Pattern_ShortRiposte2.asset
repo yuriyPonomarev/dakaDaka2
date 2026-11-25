@@ -1,0 +1,72 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cb55b4f173a010344bfb125cbedb5e60, type: 3}
+  m_Name: Pattern_ShortRiposte2
+  m_EditorClassIdentifier: Assembly-CSharp::Emberdelve.Data.SwingPatternData
+  patternId: short_riposte_2
+  kind: 0
+  windupTime: 0.382
+  activeTime: 0.179
+  recoveryTime: 0.192
+  wallRecoilTime: 0.7
+  damageMultiplier: 1
+  impactPowerScale: 1
+  windupMoveMultiplier: 0.85
+  activeMoveMultiplier: 0.85
+  recoveryMoveMultiplier: 0.85
+  maxTargets: 3
+  reachScale: 0.79
+  reachInset: 0.94
+  sweepRadius: 0.15
+  contactWindow: 0.02
+  trailMaterial: {fileID: 2100000, guid: f7920b32ca5c58345afaa7b757cc9827, type: 2}
+  restBase: {x: 0.26, y: -0.2, z: 0.3}
+  restYaw: 12
+  restPitch: -8
+  restRoll: 14
+  keys:
+  - t: 0
+    basePos: {x: -0.086703226, y: -0.29999998, z: 0.80075175}
+    bladeYaw: -55.000004
+    bladePitch: -0.0000041030967
+  - t: 0.125
+    basePos: {x: -0.030771047, y: -0.29999998, z: 0.8631439}
+    bladeYaw: -41.250008
+    bladePitch: -0.0000033026345
+  - t: 0.25
+    basePos: {x: 0.03838797, y: -0.3, z: 0.9104538}
+    bladeYaw: -27.500004
+    bladePitch: -0.000002312879
+  - t: 0.375
+    basePos: {x: 0.116809934, y: -0.3, z: 0.9399698}
+    bladeYaw: -13.750002
+    bladePitch: -0.0000011905584
+  - t: 0.5
+    basePos: {x: 0.19999999, y: -0.3, z: 0.95000005}
+    bladeYaw: -0.0000019073486
+    bladePitch: -1.6674571e-13
+  - t: 0.625
+    basePos: {x: 0.28319004, y: -0.3, z: 0.9399698}
+    bladeYaw: 13.749998
+    bladePitch: 0.000001190558
+  - t: 0.75
+    basePos: {x: 0.36161202, y: -0.3, z: 0.9104538}
+    bladeYaw: 27.5
+    bladePitch: 0.0000023128785
+  - t: 0.875
+    basePos: {x: 0.43077105, y: -0.30000004, z: 0.8631439}
+    bladeYaw: 41.25
+    bladePitch: 0.0000033026342
+  - t: 1
+    basePos: {x: 0.48670322, y: -0.30000004, z: 0.8007518}
+    bladeYaw: 55
+    bladePitch: 0.0000041030967

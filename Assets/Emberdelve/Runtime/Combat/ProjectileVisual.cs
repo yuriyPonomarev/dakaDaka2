@@ -31,11 +31,44 @@ namespace Emberdelve.Combat
             float length = Mathf.Max(0.2f, weapon.projectileLength);
             GameObject arrow = CreateModel(weapon, length);
             arrow.name = "Arrow_Visual";
+            MakeFlightReadable(arrow, weapon, length);
 
             ProjectileVisual visual = arrow.AddComponent<ProjectileVisual>();
             visual.Configure(start, delta.normalized, end, Mathf.Max(2f, weapon.projectileSpeed), length);
             visual._authorityDriven = authorityDriven;
             return visual;
+        }
+
+        // A 1.2 cm shaft at 40 m/s is a few pixels for a few frames. In flight the model is drawn thicker than the nocked or stuck
+        // arrow and leaves a short pale streak; both are cosmetic (the authority's collision radius is weapon data).
+        private const float FlightThickness = 2.2f;
+        private const float StreakSeconds = 0.28f;
+        private const float StreakWidth = 0.06f;
+
+        private static void MakeFlightReadable(GameObject arrow, WeaponData weapon, float length)
+        {
+            arrow.transform.localScale = new Vector3(FlightThickness, FlightThickness, 1f);
+            if (weapon.projectileTrailMaterial == null) return;
+
+            var tail = new GameObject("FlightStreak");
+            tail.transform.SetParent(arrow.transform, false);
+            tail.transform.localPosition = new Vector3(0f, 0f, -length * 0.5f);
+            int ignore = LayerMask.NameToLayer("Ignore Raycast");
+            if (ignore >= 0) tail.layer = ignore;
+            TrailRenderer streak = tail.AddComponent<TrailRenderer>();
+            streak.sharedMaterial = weapon.projectileTrailMaterial;
+            streak.time = StreakSeconds;
+            streak.minVertexDistance = 0.05f;
+            streak.widthMultiplier = 1f;
+            streak.widthCurve = new AnimationCurve(new Keyframe(0f, StreakWidth), new Keyframe(1f, 0f));
+            var gradient = new Gradient();
+            gradient.SetKeys(
+                new[] { new GradientColorKey(new Color(1f, 0.95f, 0.80f), 0f), new GradientColorKey(new Color(1f, 0.80f, 0.55f), 1f) },
+                new[] { new GradientAlphaKey(0.85f, 0f), new GradientAlphaKey(0f, 1f) });
+            streak.colorGradient = gradient;
+            streak.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            streak.receiveShadows = false;
+            streak.autodestruct = false;
         }
 
         private static Material _fallbackMaterial;

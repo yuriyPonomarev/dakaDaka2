@@ -75,7 +75,8 @@ namespace Emberdelve.EditorTools
         private WeaponData _claw;
         private HitLocationTable _table;
 
-        private const int Slash = 1;       // sword patterns (Dark and Darker order): 0 = right to left, 1 = left to right, 2 = overhead
+        // Patterns of the flat-arc FIXTURE sword (_arcSword): 0 = right to left, 1 = left to right, 2 = overhead.
+        private const int Slash = 1;
         private const int SlashBack = 0;
         private const int Overhead = 2;
 
@@ -215,6 +216,8 @@ namespace Emberdelve.EditorTools
         {
             Check(Mathf.Abs(expected - actual) <= tolerance, $"{label} (expected {expected:F4}, got {actual:F4})");
         }
+
+        private WeaponData _arcSword;
 
         private Scenario NewScenario(WeaponData weapon, Vector3? eye = null, float yaw = 0f, float pitch = 0f)
         {
@@ -392,11 +395,12 @@ namespace Emberdelve.EditorTools
         private void SetupAndData()
         {
             _sword = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_AshenShortSword.asset");
+            _arcSword = EmberdelveDarkerCombat.FlatArcFixture(_sword);   // mechanics scenarios swing flat arcs with the sword's own timing
             _rapier = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberRapier.asset");
             _crossbow = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberCrossbow.asset");
             _claw = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_HollowClaw.asset");
-            Check(_sword != null && _rapier != null && _crossbow != null && _claw != null, "weapon assets are available");
-            if (_sword == null || _rapier == null || _crossbow == null || _claw == null) throw new InvalidOperationException("weapon assets missing");
+            Check(_arcSword != null && _rapier != null && _crossbow != null && _claw != null, "weapon assets are available");
+            if (_arcSword == null || _rapier == null || _crossbow == null || _claw == null) throw new InvalidOperationException("weapon assets missing");
 
             GameConfig sceneConfig = AssetDatabase.LoadAssetAtPath<GameConfig>(EmberdelvePaths.Data + "/EmberdelveGameConfig.asset");
             Check(sceneConfig != null && sceneConfig.hitLocations != null, "the game config references a hit-location table asset");
@@ -424,15 +428,16 @@ namespace Emberdelve.EditorTools
             _authority.ImpactZonesEnabled = false;
 
             // ---- pattern data
-            Check(_sword.UsesSweptMelee && _sword.swingPatterns.Length == 4, "the sword has four swing patterns (three chain patterns and the riposte cut)");
-            Check(_rapier.UsesSweptMelee && _rapier.swingPatterns.Length == 1, "the rapier has one swing pattern");
+            Check(_sword.UsesSweptMelee && _sword.swingPatterns.Length == 7, "the sword has seven swing patterns (two chain cuts and the closing thrust, two riposte cuts, the library overhead and the reference third cut kept outside the chain)");
+            Check(_rapier.UsesSweptMelee && _rapier.swingPatterns.Length == 5, "the rapier has five swing patterns (a thrust, three cuts and the riposte cut)");
             Check(_claw.UsesSweptMelee && _claw.swingPatterns.Length == 2 && !_crossbow.UsesSweptMelee, "D1c4: the enemy claw has two swing patterns (diagonal chop + vertical overhead, each a swept telegraph wedge) and the crossbow has none");
             Check(_claw.swingPatterns.Length == 2 && _claw.swingPatterns[0] != null && _claw.swingPatterns[0].kind == SwingKind.HorizontalRightToLeft
                   && _claw.swingPatterns[1] != null && _claw.swingPatterns[1].kind == SwingKind.Overhead && _claw.swingPatterns[0].Validate(out _) && _claw.swingPatterns[1].Validate(out _),
                 "the claw's pattern 0 is the diagonal chop and pattern 1 the overhead, both valid");
-            Check(_sword.swingPatterns[0].kind == SwingKind.HorizontalRightToLeft && _sword.swingPatterns[1].kind == SwingKind.HorizontalLeftToRight
-                  && _sword.swingPatterns[2].kind == SwingKind.Overhead && _rapier.swingPatterns[0].kind == SwingKind.Thrust,
-                "sword = slash R->L, slash L->R, overhead (Dark and Darker order); rapier = thrust");
+            Check(_sword.swingPatterns[0].kind == SwingKind.HorizontalLeftToRight && _sword.swingPatterns[1].kind == SwingKind.HorizontalRightToLeft
+                  && _sword.swingPatterns[2].kind == SwingKind.Thrust && _sword.swingPatterns[6].kind == SwingKind.HorizontalRightToLeft
+                  && _rapier.swingPatterns[0].kind == SwingKind.Thrust,
+                "sword = cut down to the right (left-to-right by its measured path), a cut to the left, a closing thrust (our choice; the reference third cut stays at index 6); rapier opens with a thrust");
 
             foreach (WeaponData w in new[] { _sword, _rapier })
             {
@@ -459,22 +464,22 @@ namespace Emberdelve.EditorTools
             // "mirrors the weapon timing" equality no longer holds. What must hold is that every consumer of the weapon's timing (card, tooltip,
             // HUD) reads the pattern, and that the swing-length floor derives from it.
             {
-                SwingPatternData slash0 = _sword.swingPatterns[0];
-                Near(slash0.windupTime, _sword.DisplayWindup, 1e-5f, "slash display windup is the pattern's, not the weapon seed's");
-                Near(slash0.activeTime, _sword.DisplayActive, 1e-5f, "slash display active is the pattern's");
-                Near(slash0.recoveryTime, _sword.DisplayRecovery, 1e-5f, "slash display recovery is the pattern's");
+                SwingPatternData slash0 = _arcSword.swingPatterns[0];
+                Near(slash0.windupTime, _arcSword.DisplayWindup, 1e-5f, "slash display windup is the pattern's, not the weapon seed's");
+                Near(slash0.activeTime, _arcSword.DisplayActive, 1e-5f, "slash display active is the pattern's");
+                Near(slash0.recoveryTime, _arcSword.DisplayRecovery, 1e-5f, "slash display recovery is the pattern's");
                 SwingPatternData thrust0 = _rapier.swingPatterns[0];
                 Near(thrust0.windupTime, _rapier.DisplayWindup, 1e-5f, "thrust display windup is the pattern's");
-                Check(slash0.windupTime >= _sword.windupTime - 1e-5f && slash0.recoveryTime >= _sword.recoveryTime - 1e-5f,
+                Check(slash0.windupTime >= _arcSword.windupTime - 1e-5f && slash0.recoveryTime >= _arcSword.recoveryTime - 1e-5f,
                     "the canonical slash pattern is at least as slow as the weapon's authoring seed (the seed is a floor, never faster than the swing)");
             }
 
             // ---- reach numbers (effective reach from the eye)
-            Near(2.291f, _sword.swingPatterns[0].EffectiveReach(_sword), 1e-3f, "sword effective reach is about 2.3 m at the eye (H1 retune)");
-            Near(1.2f, _sword.swingPatterns[0].BladeLength(_sword), 0.01f, "sword damage segment is about 1.2 m");
-            Near(0.204f, _sword.swingPatterns[0].activeTime, 1e-4f, "sword slash active phase is the reference arming sword hit window, 0.204 s");
+            Near(2.291f, _arcSword.swingPatterns[0].EffectiveReach(_arcSword), 1e-3f, "sword effective reach is about 2.3 m at the eye (H1 retune)");
+            Near(1.2f, _arcSword.swingPatterns[0].BladeLength(_arcSword), 0.01f, "sword damage segment is about 1.2 m");
+            Near(0.120f, _sword.swingPatterns[0].activeTime, 1e-4f, "the sword's opening cut has the reference short sword hit window, 0.120 s");
             Near(2.331f, _rapier.swingPatterns[0].EffectiveReach(_rapier), 1e-3f, "rapier thrust reach is about 2.3 m");
-            Near(_sword.swingPatterns[0].EffectiveReach(_sword), _sword.swingPatterns[0].BladeLength(_sword) + _sword.swingPatterns[0].sweepRadius + _sword.swingPatterns[0].reachInset, 1e-4f,
+            Near(_arcSword.swingPatterns[0].EffectiveReach(_arcSword), _arcSword.swingPatterns[0].BladeLength(_arcSword) + _arcSword.swingPatterns[0].sweepRadius + _arcSword.swingPatterns[0].reachInset, 1e-4f,
                 "sword blade length + sweep radius + inset = effective reach");
 
             // ---- the location table is data, our own tunables
@@ -517,25 +522,25 @@ namespace Emberdelve.EditorTools
             // sword slash: targets in front at ordinary distances are hit
             foreach (float d in new[] { 0.9f, 1.4f, 1.8f, 2.2f })
             {
-                Check(Hits(_sword, Slash, new Vector3(0f, 1.5f, d)), $"sword slash L->R hits a target {d:F1} m in front");
-                Check(Hits(_sword, SlashBack, new Vector3(0f, 1.5f, d)), $"sword slash R->L hits a target {d:F1} m in front");
+                Check(Hits(_arcSword, Slash, new Vector3(0f, 1.5f, d)), $"sword slash L->R hits a target {d:F1} m in front");
+                Check(Hits(_arcSword, SlashBack, new Vector3(0f, 1.5f, d)), $"sword slash R->L hits a target {d:F1} m in front");
             }
 
             // off to the sides inside the swept sector
-            Check(Hits(_sword, Slash, new Vector3(1.56f, 1.5f, 0.9f)), "sword slash hits a target 60 degrees to the right at 1.8 m");
-            Check(Hits(_sword, Slash, new Vector3(-1.56f, 1.5f, 0.9f)), "sword slash hits a target 60 degrees to the left at 1.8 m");
+            Check(Hits(_arcSword, Slash, new Vector3(1.56f, 1.5f, 0.9f)), "sword slash hits a target 60 degrees to the right at 1.8 m");
+            Check(Hits(_arcSword, Slash, new Vector3(-1.56f, 1.5f, 0.9f)), "sword slash hits a target 60 degrees to the left at 1.8 m");
 
             // beyond reach and behind
-            Check(!Hits(_sword, Slash, new Vector3(0f, 1.5f, 3.6f)), "sword misses a target whose surface is beyond the 2.9 m reach");
-            Check(!Hits(_sword, Slash, new Vector3(0f, 1.5f, 4.5f)), "sword misses a target at 4.5 m");
-            Check(!Hits(_sword, Slash, new Vector3(0f, 1.5f, -1.5f)), "sword misses a target directly behind the attacker");
-            Check(!Hits(_sword, Slash, new Vector3(0f, 1.5f, -0.5f)), "sword misses a target just behind the attacker");
-            Check(!Hits(_sword, Overhead, new Vector3(0f, 1.5f, -1.5f)), "the overhead misses a target behind the attacker");
-            Check(!Hits(_sword, Slash, new Vector3(0f, 1.5f, 1.8f) + Vector3.up * 3f), "sword misses a target 3 m above the line of fire");
+            Check(!Hits(_arcSword, Slash, new Vector3(0f, 1.5f, 3.6f)), "sword misses a target whose surface is beyond the 2.9 m reach");
+            Check(!Hits(_arcSword, Slash, new Vector3(0f, 1.5f, 4.5f)), "sword misses a target at 4.5 m");
+            Check(!Hits(_arcSword, Slash, new Vector3(0f, 1.5f, -1.5f)), "sword misses a target directly behind the attacker");
+            Check(!Hits(_arcSword, Slash, new Vector3(0f, 1.5f, -0.5f)), "sword misses a target just behind the attacker");
+            Check(!Hits(_arcSword, Overhead, new Vector3(0f, 1.5f, -1.5f)), "the overhead misses a target behind the attacker");
+            Check(!Hits(_arcSword, Slash, new Vector3(0f, 1.5f, 1.8f) + Vector3.up * 3f), "sword misses a target 3 m above the line of fire");
 
             // yaw of the attacker rotates the whole sweep (the sweep is in the aim frame)
             {
-                Scenario s = NewScenario(_sword, yaw: 90f);
+                Scenario s = NewScenario(_arcSword, yaw: 90f);
                 Dummy right = AddBody(s, new Vector3(1.8f, 1.5f, 0f));
                 Dummy behindNow = AddBody(s, new Vector3(0f, 1.5f, 1.8f));
                 MeleeSwingStatus st = RunSwing(s, Slash);
@@ -560,7 +565,7 @@ namespace Emberdelve.EditorTools
             Check(!Hits(_rapier, 0, new Vector3(0f, 1.6f, -1.2f)), "rapier misses a target behind");
             Check(!Hits(_rapier, 0, new Vector3(2.0f * Mathf.Sin(25f * Mathf.Deg2Rad), 1.6f, 2.0f * Mathf.Cos(25f * Mathf.Deg2Rad))),
                 "rapier misses a target 25 degrees off the line at 2.0 m (0.85 m to the side)");
-            Check(Hits(_sword, Slash, new Vector3(2.0f * Mathf.Sin(25f * Mathf.Deg2Rad), 1.5f, 2.0f * Mathf.Cos(25f * Mathf.Deg2Rad))),
+            Check(Hits(_arcSword, Slash, new Vector3(2.0f * Mathf.Sin(25f * Mathf.Deg2Rad), 1.5f, 2.0f * Mathf.Cos(25f * Mathf.Deg2Rad))),
                 "control: the sword slash does hit that same 25-degree-off target (an arc)");
         }
 
@@ -570,14 +575,14 @@ namespace Emberdelve.EditorTools
 
         private void LocationsAndArmour()
         {
-            float baseDamage = _sword.baseDamage;
+            float baseDamage = _arcSword.baseDamage;
             HitLocation[] all = { HitLocation.Head, HitLocation.Body, HitLocation.Arms, HitLocation.Hands, HitLocation.Legs, HitLocation.Feet };
             float[] mult = { 1.5f, 1.0f, 0.8f, 0.7f, 0.6f, 0.5f };
 
             for (int i = 0; i < all.Length; i++)
             {
                 // armour 0
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy d = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.3f, all[i]);
                 MeleeSwingStatus st = RunSwing(s, Slash);
                 bool hit = d.Received.Count == 1;
@@ -595,7 +600,7 @@ namespace Emberdelve.EditorTools
                 s.Dispose();
 
                 // armour 100 (final = amount * 100 / (100 + rating)), applied after the location multiplier
-                Scenario sa = NewScenario(_sword);
+                Scenario sa = NewScenario(_arcSword);
                 Dummy da = AddBody(sa, new Vector3(0f, 1.5f, 1.8f), 0.3f, all[i]);
                 da.Armor = 100f;
                 RunSwing(sa, Slash);
@@ -610,7 +615,7 @@ namespace Emberdelve.EditorTools
 
             // a different rating, still after the multiplier
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy d = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.3f, HitLocation.Head);
                 d.Armor = 50f;
                 RunSwing(s, Slash);
@@ -627,14 +632,14 @@ namespace Emberdelve.EditorTools
                 custom.feet = 0.25f;
                 _config.hitLocations = custom;
 
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy head = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.3f, HitLocation.Head);
                 RunSwing(s, Slash);
                 Near(baseDamage * 1.8f, head.Received.Count == 1 ? head.Received[0].Amount : -1f, 1e-3f, "a custom head value of 2.0 is capped at 1.8");
                 Cooldown(2f);
                 s.Dispose();
 
-                Scenario sf = NewScenario(_sword);
+                Scenario sf = NewScenario(_arcSword);
                 Dummy foot = AddBody(sf, new Vector3(0f, 1.5f, 1.8f), 0.3f, HitLocation.Feet);
                 RunSwing(sf, Slash);
                 Near(baseDamage * 0.25f, foot.Received.Count == 1 ? foot.Received[0].Amount : -1f, 1e-3f, "a custom feet value of 0.25 is read from the table asset");
@@ -642,7 +647,7 @@ namespace Emberdelve.EditorTools
                 sf.Dispose();
 
                 _config.hitLocations = _table;
-                Scenario st = NewScenario(_sword);
+                Scenario st = NewScenario(_arcSword);
                 Dummy again = AddBody(st, new Vector3(0f, 1.5f, 1.8f), 0.3f, HitLocation.Feet);
                 RunSwing(st, Slash);
                 Near(baseDamage * 0.5f, again.Received.Count == 1 ? again.Received[0].Amount : -1f, 1e-3f, "the shipped table asset gives feet 0.5");
@@ -653,10 +658,10 @@ namespace Emberdelve.EditorTools
 
             // pattern damage multiplier and the rapier base
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy d = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.3f, HitLocation.Body);
                 RunSwing(s, Overhead);
-                Near(baseDamage * _sword.swingPatterns[2].damageMultiplier, d.Received.Count == 1 ? d.Received[0].Amount : -1f, 1e-3f,
+                Near(baseDamage * _arcSword.swingPatterns[2].damageMultiplier, d.Received.Count == 1 ? d.Received[0].Amount : -1f, 1e-3f,
                     "the overhead's own damage multiplier (data) applies");
                 Cooldown(2f);
                 s.Dispose();
@@ -679,7 +684,7 @@ namespace Emberdelve.EditorTools
         {
             // one target, several overlapping volumes touched over many samples -> exactly one hit
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy d = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.4f, HitLocation.Body);
                 d.Shapes.Add(new HitShape(HitLocation.Arms, new Vector3(-0.3f, 1.5f, 1.8f), new Vector3(-0.3f, 1.9f, 1.8f), 0.3f));
                 d.Shapes.Add(new HitShape(HitLocation.Legs, new Vector3(0.3f, 1.2f, 1.8f), new Vector3(0.3f, 1.6f, 1.8f), 0.3f));
@@ -695,10 +700,10 @@ namespace Emberdelve.EditorTools
 
             // cleave: five targets across the arc, the slash can hit at most maxTargets of them, in sweep order
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 float[] xs = { -1.2f, -0.6f, 0f, 0.6f, 1.2f };
                 foreach (float x in xs) AddBody(s, new Vector3(x, 1.5f, 1.7f), 0.3f);
-                int limit = _sword.swingPatterns[0].maxTargets;
+                int limit = _arcSword.swingPatterns[0].maxTargets;
                 MeleeSwingStatus st = RunSwing(s, Slash);
                 Check(st.Hits.Count == limit, $"a slash cleaves exactly maxTargets={limit} of five targets ({st.Hits.Count})");
                 bool ordered = st.Hits.Count == limit;
@@ -722,7 +727,7 @@ namespace Emberdelve.EditorTools
 
             // three targets, all inside the sweep: three are hit by a slash with room for four
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 AddBody(s, new Vector3(-0.8f, 1.5f, 1.6f), 0.3f);
                 AddBody(s, new Vector3(0f, 1.5f, 1.6f), 0.3f);
                 AddBody(s, new Vector3(0.8f, 1.5f, 1.6f), 0.3f);
@@ -734,11 +739,11 @@ namespace Emberdelve.EditorTools
 
             // the overhead has a smaller limit
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 AddBody(s, new Vector3(0f, 1.5f, 1.0f), 0.3f);
                 AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.3f);
                 AddBody(s, new Vector3(0f, 1.5f, 2.4f), 0.3f);
-                int limit = _sword.swingPatterns[2].maxTargets;
+                int limit = _arcSword.swingPatterns[2].maxTargets;
                 MeleeSwingStatus st = RunSwing(s, Overhead);
                 Check(limit == 2 && st.Hits.Count == 2, $"the overhead stops at its own maxTargets={limit} ({st.Hits.Count} hits on three targets in line)");
                 Cooldown(2f);
@@ -747,7 +752,7 @@ namespace Emberdelve.EditorTools
 
             // friendly and dead entities are never hit, the attacker never hits itself
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy friend = AddBody(s, new Vector3(0f, 1.5f, 1.6f), 0.3f);
                 friend.TeamId = CombatTeams.PlayerTeam;
                 Dummy corpse = AddBody(s, new Vector3(-0.6f, 1.5f, 1.6f), 0.3f);
@@ -764,7 +769,7 @@ namespace Emberdelve.EditorTools
 
             // an entity that exposes no hit volumes cannot be struck by the sweep
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 PoselessAttacker blind = new PoselessAttacker { CombatId = CombatRegistry.AllocateId(), Point = Origin + new Vector3(0f, 1.5f, 1.8f), Weapon = _claw };
                 CombatRegistry.Register(blind.CombatId, blind);
                 s.Registered.Add(blind);
@@ -781,7 +786,7 @@ namespace Emberdelve.EditorTools
 
         private Scenario WallScenario(bool withWall, out Dummy left, out Dummy right, out Dummy behind, out Dummy behind2)
         {
-            Scenario s = NewScenario(_sword);
+            Scenario s = NewScenario(_arcSword);
             left = AddBody(s, new Vector3(-0.8f, 1.5f, 1.0f), 0.3f);
             right = AddBody(s, new Vector3(0.8f, 1.5f, 1.0f), 0.3f);
             behind = AddBody(s, new Vector3(0f, 1.5f, 2.0f), 0.3f);
@@ -819,7 +824,7 @@ namespace Emberdelve.EditorTools
 
                 // the stop cost the swinger the rest of the sweep, and the cooldown still applies
                 // Either the weapon cooldown still holds, or the wall recoil itself outlasted the repeat floor (reference: a wall hit costs more time than a clean swing).
-                float wallStopFloor = Mathf.Max(0.8f * _sword.cooldown, _sword.swingPatterns[Slash].Timing.Total);
+                float wallStopFloor = Mathf.Max(0.8f * _arcSword.cooldown, _arcSword.swingPatterns[Slash].Timing.Total);
                 bool refusedAfterWall = !Begin(s, SlashBack, out _, out string reason);
                 Check(refusedAfterWall ? reason.Contains("cooldown") : st.Timing.Windup + st.Timing.WallRecoil >= wallStopFloor - 1e-4f,
                     "after a wall stop the next swing is never earlier than the repeat floor (" + reason + ")");
@@ -829,7 +834,7 @@ namespace Emberdelve.EditorTools
 
             // the wall hits exactly what stands in front of it: the nearer target is damaged, its twin behind is not
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy front = AddBody(s, new Vector3(-0.8f, 1.5f, 1.0f), 0.3f);
                 Dummy back = AddBody(s, new Vector3(-0.8f, 1.5f, 2.0f), 0.3f);
                 AddWall(s, new Vector3(0f, 1.8f, 1.65f), new Vector3(4f, 4f, 0.3f));
@@ -841,7 +846,7 @@ namespace Emberdelve.EditorTools
 
             // standing against a wall: the base is inside the wall, the swing ends on its first sample
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy beyond = AddBody(s, new Vector3(0f, 1.5f, 1.5f), 0.3f);
                 AddWall(s, new Vector3(0f, 1.8f, 0.75f), new Vector3(4f, 4f, 0.3f));     // the hand starts inside it (z 0.6..0.9)
                 MeleeSwingStatus st = RunSwing(s, Slash);
@@ -853,7 +858,7 @@ namespace Emberdelve.EditorTools
 
             // a wall that is not between the weapon and the target changes nothing
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy t = AddBody(s, new Vector3(0f, 1.5f, 1.6f), 0.3f);
                 AddWall(s, new Vector3(0f, 1.8f, -3f), new Vector3(8f, 4f, 0.3f));
                 MeleeSwingStatus st = RunSwing(s, Slash);
@@ -864,7 +869,7 @@ namespace Emberdelve.EditorTools
 
             // a side wall the blade moves AWAY from clips the segment but does not end the swing; swinging INTO it does
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy mid = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.3f);
                 AddWall(s, new Vector3(-1.2f, 1.8f, 1.5f), new Vector3(0.3f, 4f, 6f));     // left wall, face at x = -1.05
                 MeleeSwingStatus lr = RunSwing(s, Slash);
@@ -884,7 +889,7 @@ namespace Emberdelve.EditorTools
 
             // M3a: the blade travels ALONG/away from a side wall with a target behind that wall: clipping must keep it unhurt
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy mid = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.3f);
                 Dummy behindWall = AddBody(s, new Vector3(-1.6f, 1.5f, 1.2f), 0.3f);       // beyond the left wall, where the blade points at the start
                 AddWall(s, new Vector3(-1.2f, 1.8f, 1.5f), new Vector3(0.3f, 4f, 6f));
@@ -897,7 +902,7 @@ namespace Emberdelve.EditorTools
 
             // M3a (mirror): the right-to-left slash starts against a RIGHT wall and moves away from it
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy mid = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.3f);
                 Dummy behindWall = AddBody(s, new Vector3(1.6f, 1.5f, 1.2f), 0.3f);
                 AddWall(s, new Vector3(1.2f, 1.8f, 1.5f), new Vector3(0.3f, 4f, 6f));
@@ -910,7 +915,7 @@ namespace Emberdelve.EditorTools
 
             // M3a (ceiling): the overhead starts pointing up into a ceiling and moves away from it; a target above is not hit
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy front = AddBody(s, new Vector3(0f, 1.5f, 1.4f), 0.3f);
                 Dummy above = AddBody(s, new Vector3(0.15f, 3.9f, 0.6f), 0.3f);
                 AddWall(s, new Vector3(0f, 3.55f, 1f), new Vector3(6f, 0.5f, 6f));      // slab y 3.3..3.8, underside above the raised blade
@@ -924,14 +929,14 @@ namespace Emberdelve.EditorTools
 
             // M-a: a swing cannot start around an outside corner (the line from the eye to the hand is walled)
             {
-                Scenario control = NewScenario(_sword);
+                Scenario control = NewScenario(_arcSword);
                 Dummy seen = AddBody(control, new Vector3(0.6f, 1.5f, 1.6f), 0.3f);
                 MeleeSwingStatus open = RunSwing(control, Slash);
                 Check(WasHit(open, seen), "corner control: without the wall the target at the right is hit");
                 Cooldown(2f);
                 control.Dispose();
 
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy hidden = AddBody(s, new Vector3(0.6f, 1.5f, 1.6f), 0.3f);
                 AddWall(s, new Vector3(-1.425f, 1.8f, 0.375f), new Vector3(3.15f, 4f, 0.15f));   // spans x -3..0.15, z 0.30..0.45: ends just right of the eye, clear of the hand (z 0.59)
                 MeleeSwingStatus st = RunSwing(s, Slash);
@@ -973,7 +978,7 @@ namespace Emberdelve.EditorTools
             string reference = null;
             for (int p = 0; p < TickPlans.Length; p++)
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 foreach (float x in new[] { -1.2f, -0.6f, 0f, 0.6f, 1.2f }) AddBody(s, new Vector3(x, 1.5f, 1.7f), 0.3f);
                 string summary = Summarize(RunSwing(s, Slash, TickPlans[p]), s);
                 if (reference == null) reference = summary;
@@ -998,7 +1003,7 @@ namespace Emberdelve.EditorTools
             reference = null;
             for (int p = 0; p < TickPlans.Length; p++)
             {
-                Scenario s = NewScenario(_sword, pitch: 23f);
+                Scenario s = NewScenario(_arcSword, pitch: 23f);
                 AddHumanoid(s, new Vector3(0f, 0f, 1.5f));
                 string summary = Summarize(RunSwing(s, Overhead, TickPlans[p]), s);
                 if (reference == null) reference = summary;
@@ -1008,10 +1013,10 @@ namespace Emberdelve.EditorTools
             }
 
             // 4. a thin target (radius 0.01) against a pattern with a thin sweep (0.02): no tunnelling at any tick
-            WeaponData thinWeapon = Instantiate(_sword);
+            WeaponData thinWeapon = Instantiate(_arcSword);
             thinWeapon.weaponId = "thin_test_sword";
             SwingPatternData thinPattern = ScriptableObject.CreateInstance<SwingPatternData>();
-            EditorJsonUtility.FromJsonOverwrite(EditorJsonUtility.ToJson(_sword.swingPatterns[0]), thinPattern);
+            EditorJsonUtility.FromJsonOverwrite(EditorJsonUtility.ToJson(_arcSword.swingPatterns[0]), thinPattern);
             thinPattern.patternId = "thin_test";
             thinPattern.sweepRadius = 0.02f;
             thinWeapon.swingPatterns = new[] { thinPattern };
@@ -1020,8 +1025,8 @@ namespace Emberdelve.EditorTools
 
             float bladeLength = thinPattern.BladeLength(thinWeapon);
             SwingFrame frame = new SwingFrame(new Vector3(0f, 1.8f, 0f), 0f, 0f);
-            Check(SwingGeometry.SampleCount(thinPattern, thinWeapon) > SwingGeometry.SampleCount(_sword.swingPatterns[0], _sword),
-                $"a thinner sweep needs a denser sample grid ({SwingGeometry.SampleCount(thinPattern, thinWeapon)} vs {SwingGeometry.SampleCount(_sword.swingPatterns[0], _sword)})");
+            Check(SwingGeometry.SampleCount(thinPattern, thinWeapon) > SwingGeometry.SampleCount(_arcSword.swingPatterns[0], _arcSword),
+                $"a thinner sweep needs a denser sample grid ({SwingGeometry.SampleCount(thinPattern, thinWeapon)} vs {SwingGeometry.SampleCount(_arcSword.swingPatterns[0], _arcSword)})");
 
             foreach (float u in new[] { 0.15f, 0.5f, 0.85f })
             {
@@ -1103,7 +1108,23 @@ namespace Emberdelve.EditorTools
                     Check((p.Evaluate(p.windupTime).Base - p.keys[0].basePos).magnitude < 1e-4f, $"{p.patternId}: the active phase begins on the first key");
                     Check((p.Evaluate(p.windupTime + p.activeTime).Base - p.keys[p.keys.Length - 1].basePos).magnitude < 1e-4f, $"{p.patternId}: the active phase ends on the last key");
 
-                    // the AUTHORITY sweeps that same segment: a thin probe on the blade at several u values is hit at about that sample
+                    // the AUTHORITY sweeps that same segment: a thin probe on the blade at several u values is hit at about that sample.
+                    // The swept capsule reaches a probe before the blade's centre line does: by (sweep radius + probe radius) of the
+                    // distance that point of the blade travels. A long flat arc keeps that lead under 0.13 of the sweep; a short
+                    // steep cut travels less, so its lead is a larger share, measured here from the pattern itself.
+                    float travelled = 0f;
+                    {
+                        ExpectedSegment(p, length, new Vector3(0f, 1.8f, 0f), 0f, 0f, 0f, out Vector3 pb, out Vector3 pt);
+                        Vector3 last = Vector3.Lerp(pb, pt, 0.6f);
+                        for (int k = 1; k <= 32; k++)
+                        {
+                            ExpectedSegment(p, length, new Vector3(0f, 1.8f, 0f), 0f, 0f, k / 32f, out pb, out pt);
+                            Vector3 next = Vector3.Lerp(pb, pt, 0.6f);
+                            travelled += (next - last).magnitude;
+                            last = next;
+                        }
+                    }
+                    float lead = Mathf.Max(0.13f, travelled > 1e-3f ? (p.sweepRadius + 0.03f) / travelled + 0.03f : 0.13f);
                     float previousFirst = -1f;
                     foreach (float u in new[] { 0.1f, 0.3f, 0.5f, 0.7f, 0.9f })
                     {
@@ -1121,7 +1142,7 @@ namespace Emberdelve.EditorTools
                             float first = HitOn(st, d).FirstSample / (float)Mathf.Max(1, st.SampleCount);
                             bool consistent = p.kind == SwingKind.Thrust
                                 ? first >= 0f && first <= 1f
-                                : first >= u - 0.13f && first <= u + 0.01f;
+                                : first >= u - lead && first <= u + 0.01f;
                             Check(consistent, $"{p.patternId}: the probe at u={u:F2} was first touched at {first:F3} of the sweep");
                             if (p.kind != SwingKind.Thrust) Check(first > previousFirst, $"{p.patternId}: probes later on the path are touched later ({first:F3} > {previousFirst:F3})");
                             previousFirst = first;
@@ -1182,7 +1203,7 @@ namespace Emberdelve.EditorTools
 
             // humanoid at 1.5 m, aim at the chest: the slash lands on the body, the overhead comes down on the head
             {
-                Scenario s = NewScenario(_sword, pitch: pitchToChest);
+                Scenario s = NewScenario(_arcSword, pitch: pitchToChest);
                 // D1c2: the arm volumes are switched off here. The left-to-right slash arrives from the left and its first touch is
                 // the left arm (x -0.43, r 0.10): the 210-sample grid finds that touch at sample 51 and the 20 ms window closes while
                 // the arm is still the deepest volume, whereas the old 66-sample grid rounded the window up to 22.7 ms and let the
@@ -1197,7 +1218,7 @@ namespace Emberdelve.EditorTools
                 if (slash.Hits.Count == 1 && over.Hits.Count == 1)
                 {
                     float ratio = over.Hits[0].Amount / slash.Hits[0].Amount;
-                    Near(1.5f * _sword.swingPatterns[2].damageMultiplier, ratio, 1e-3f, "overhead head hit / slash body hit = head 1.5 x the overhead pattern's own multiplier (data)");
+                    Near(1.5f * _arcSword.swingPatterns[2].damageMultiplier, ratio, 1e-3f, "overhead head hit / slash body hit = head 1.5 x the overhead pattern's own multiplier (data)");
                 }
                 Cooldown(2f);
                 s.Dispose();
@@ -1214,7 +1235,7 @@ namespace Emberdelve.EditorTools
             // a high, thin target above the line of fire: only the overhead reaches it
             {
                 Vector3 high = new Vector3(0f, 1.8f + 0.35f, 1.7f);
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy d = AddBody(s, high, 0.12f);
                 MeleeSwingStatus slash = RunSwing(s, Slash);
                 Check(!WasHit(slash, d), "a small target 0.35 m above the eye line is missed by the horizontal slash");
@@ -1231,12 +1252,12 @@ namespace Emberdelve.EditorTools
             // a low aim puts the slash on the legs or feet (multiplier at most 0.6)
             {
                 float pitchToFeet = Mathf.Atan2(1.8f - 0.3f, 1.5f) * Mathf.Rad2Deg;
-                Scenario s = NewScenario(_sword, pitch: pitchToFeet);
+                Scenario s = NewScenario(_arcSword, pitch: pitchToFeet);
                 AddHumanoid(s, new Vector3(0f, 0f, 1.5f));
                 MeleeSwingStatus low = RunSwing(s, Slash);
                 bool lowOk = low.Hits.Count == 1 && (low.Hits[0].Location == HitLocation.Legs || low.Hits[0].Location == HitLocation.Feet);
                 Check(lowOk, $"aimed at the feet, the slash lands on the legs or feet ({(low.Hits.Count > 0 ? low.Hits[0].Location.ToString() : "none")})");
-                if (low.Hits.Count == 1) Check(low.Hits[0].Amount <= _sword.baseDamage * 0.6f + 1e-3f, $"and deals at most 0.6 of base damage ({low.Hits[0].Amount:F2})");
+                if (low.Hits.Count == 1) Check(low.Hits[0].Amount <= _arcSword.baseDamage * 0.6f + 1e-3f, $"and deals at most 0.6 of base damage ({low.Hits[0].Amount:F2})");
                 Cooldown(2f);
                 s.Dispose();
             }
@@ -1248,7 +1269,7 @@ namespace Emberdelve.EditorTools
 
         private void ForgedIntents()
         {
-            Scenario s = NewScenario(_sword);
+            Scenario s = NewScenario(_arcSword);
             Dummy t = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.3f);
             Swinger who = s.Who;
 
@@ -1306,8 +1327,8 @@ namespace Emberdelve.EditorTools
             Check(!Try(Intent(who, 0), out r) && r.Contains("in progress"), "begin while the previous swing still runs is rejected (" + r + ")");
             // The repeat interval is the larger of the weapon cooldown x the authority grace (0.8) and the full length of the swing that was
             // begun (windup + active + recovery of the pattern step 0 uses), derived from the loaded data so a retune cannot stale this number.
-            float slashTotal = _sword.swingPatterns[0].Timing.Total;
-            float repeatFloor = Mathf.Max(0.8f * _sword.cooldown, slashTotal);
+            float slashTotal = _arcSword.swingPatterns[0].Timing.Total;
+            float repeatFloor = Mathf.Max(0.8f * _arcSword.cooldown, slashTotal);
             _clock += repeatFloor + 0.02f - 0.50f; _authority.StepSwings();      // the swing is over and the interval floor has passed
             Check(_authority.ActiveSwingCount == 0, $"the swing is over after its {slashTotal:F2} s");
             Check(Try(Intent(who, 0), out r), $"{repeatFloor + 0.02f:F2} s after the begin a new swing is accepted ({r})");
@@ -1335,7 +1356,7 @@ namespace Emberdelve.EditorTools
 
             // an unregistered (gone) instigator
             {
-                Scenario gone = NewScenario(_sword);
+                Scenario gone = NewScenario(_arcSword);
                 AddBody(gone, new Vector3(0f, 1.5f, 1.8f), 0.3f);
                 Check(Begin(gone, Slash, out int id, out r), "begin a swing for an entity that will vanish");
                 CombatRegistry.Unregister(gone.Who.CombatId, gone.Who);
@@ -1357,12 +1378,12 @@ namespace Emberdelve.EditorTools
                 Check(_authority.TryGetMeleeSwingStatus(clawSwing, out MeleeSwingStatus clawStatus) && clawStatus.Finished && clawStatus.Hits.Count == 0, "and a claw swing at nothing runs to its end without a hit");
                 Cooldown(2f);
                 Scenario rapier = NewScenario(_rapier);
-                Check(!_authority.TryBeginMeleeSwingAsOwner(Intent(rapier.Who, 1), out _, out r) && r.Contains("not allowed"), "the rapier has no pattern 1 (a sword pattern index does not carry over) (" + r + ")");
+                Check(!_authority.TryBeginMeleeSwingAsOwner(Intent(rapier.Who, _rapier.swingPatterns.Length), out _, out r) && r.Contains("not allowed"), "the rapier has no pattern beyond its own list (" + r + ")");
                 Check(!_authority.TryBeginMeleeSwingAsOwner(Intent(rapier.Who, 0, weaponId: "ashen_short_sword"), out _, out r) && r.Contains("not the equipped weapon"), "claiming the sword while holding the rapier is rejected");
-                PoselessAttacker poseless = new PoselessAttacker { CombatId = CombatRegistry.AllocateId(), Weapon = _sword };
+                PoselessAttacker poseless = new PoselessAttacker { CombatId = CombatRegistry.AllocateId(), Weapon = _arcSword };
                 CombatRegistry.Register(poseless.CombatId, poseless);
                 s.Registered.Add(poseless);
-                MeleeSwingIntent pi = new MeleeSwingIntent(poseless.CombatId, _sword.weaponId, 0, 0, 0f, 0f, CombatRegistry.NextSequence(poseless.CombatId));
+                MeleeSwingIntent pi = new MeleeSwingIntent(poseless.CombatId, _arcSword.weaponId, 0, 0, 0f, 0f, CombatRegistry.NextSequence(poseless.CombatId));
                 Check(!_authority.TryBeginMeleeSwingAsOwner(pi, out _, out r) && r.Contains("aim pose"), "an entity with no authoritative aim pose cannot swing (" + r + ")");
                 who.HasPose = false;
                 Check(!Try(Intent(who, 0), out r) && r.Contains("aim pose"), "a pose that cannot be read is rejected (" + r + ")");
@@ -1372,7 +1393,7 @@ namespace Emberdelve.EditorTools
             // the swing a client starts is placed from the authority's pose, never from the client's aim claim
             {
                 Cooldown(2f);
-                Scenario p = NewScenario(_sword, yaw: 0f);
+                Scenario p = NewScenario(_arcSword, yaw: 0f);
                 Dummy straight = AddBody(p, new Vector3(0f, 1.5f, 1.8f), 0.3f);
                 Dummy rightSide = AddBody(p, new Vector3(1.8f, 1.5f, 0f), 0.3f);
                 // the client claims it looks 8 degrees right (within tolerance), the authority holds yaw 0
@@ -1397,35 +1418,35 @@ namespace Emberdelve.EditorTools
         {
             // guard from the front, through the real DamageResolver path
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy g = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.3f);
                 g.GuardArc = 120f;
                 g.GuardReduction = 0.5f;
                 g.GuardForward = new Vector3(0f, 0f, -1f);   // faces the attacker at the origin
                 RunSwing(s, Slash);
                 Check(g.Received.Count == 1 && g.Received[0].Blocked, "a swing from the guarded front is blocked");
-                if (g.Received.Count == 1) Near(_sword.baseDamage * 0.5f, g.Received[0].Amount, 1e-3f, "the block halves the damage (existing guard rule)");
+                if (g.Received.Count == 1) Near(_arcSword.baseDamage * 0.5f, g.Received[0].Amount, 1e-3f, "the block halves the damage (existing guard rule)");
                 Cooldown(2f);
                 s.Dispose();
 
                 // the same guard, attacker behind the defender
-                Scenario behind = NewScenario(_sword, eye: new Vector3(0f, 1.8f, 3.6f), yaw: 180f);
+                Scenario behind = NewScenario(_arcSword, eye: new Vector3(0f, 1.8f, 3.6f), yaw: 180f);
                 Dummy g2 = AddBody(behind, new Vector3(0f, 1.5f, 1.8f), 0.3f);
                 g2.GuardArc = 120f;
                 g2.GuardReduction = 0.5f;
                 g2.GuardForward = new Vector3(0f, 0f, -1f);   // still faces -Z; the attacker is at +Z, behind it
                 RunSwing(behind, Slash);
                 Check(g2.Received.Count == 1 && !g2.Received[0].Blocked, "a swing from behind the guard is not blocked");
-                if (g2.Received.Count == 1) Near(_sword.baseDamage, g2.Received[0].Amount, 1e-3f, "and deals full damage");
+                if (g2.Received.Count == 1) Near(_arcSword.baseDamage, g2.Received[0].Amount, 1e-3f, "and deals full damage");
                 Cooldown(2f);
                 behind.Dispose();
             }
 
             // the legacy arc-less melee path: refused for an entity with a swing pose, unchanged for an enemy
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy t = AddBody(s, new Vector3(0f, 1.5f, 1.5f), 0.3f);
-                AttackIntent forged = new AttackIntent(s.Who.CombatId, EntityKind.LocalPlayer, _sword, 1f, s.Who.CombatCenter,
+                AttackIntent forged = new AttackIntent(s.Who.CombatId, EntityKind.LocalPlayer, s.Who.Weapon, 1f, s.Who.CombatCenter,
                     Vector3.forward, 2.9f, CombatRegistry.NextSequence(s.Who.CombatId), 0f);
                 Check(!_authority.SubmitAttackAsOwner(forged, new HitCandidate(t.CombatId, t.Center, true), out string reason) && reason.Contains("swept swing"),
                     "a melee SubmitAttack from an entity with a swing pose is refused (" + reason + ")");
@@ -1477,11 +1498,11 @@ namespace Emberdelve.EditorTools
             _authority.ImpactZonesEnabled = true;
             try
             {
-                Near(26f, _sword.baseDamage, 1e-4f, "production: the sword's base damage is the literal 26");
+                Near(26f, _arcSword.baseDamage, 1e-4f, "production: the sword's base damage is the literal 26");
 
                 // the overhead cannot be picked at step 0 any more
                 {
-                    Scenario s = NewScenario(_sword);
+                    Scenario s = NewScenario(_arcSword);
                     AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                     bool ok = _authority.TryBeginMeleeSwingAsOwner(Intent(s.Who, Overhead), out int id, out string why);
                     Check(!ok && id == 0 && why.Contains("chain"), $"production: the overhead is refused at combo step 0 ({why})");
@@ -1493,7 +1514,7 @@ namespace Emberdelve.EditorTools
 
                 // the three chain steps, real selection, zones on: damage = 26 x step x body 1.0 x literal zone of the measured contact t
                 {
-                    Scenario s = NewScenario(_sword);
+                    Scenario s = NewScenario(_arcSword);
                     Dummy d = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                     float[] step = { 1.00f, 1.05f, 1.10f };
                     int[] pattern = { SlashBack, Slash, Overhead };   // the chain opens right-to-left (Dark and Darker order)
@@ -1517,7 +1538,7 @@ namespace Emberdelve.EditorTools
                         // A quick chain step (short recovery scale) can be over before the repeat interval of the swing (the weapon cooldown x the
                         // authority grace 0.8, or the step's own length if longer) has passed; the authority refuses an earlier follow-up. The
                         // interval is derived from the loaded weapon and pattern, so a retune cannot stale it. Both are inside the combo window.
-                        float repeatFloor = Mathf.Max(0.8f * _sword.cooldown, _sword.ComboTiming(i, _sword.swingPatterns[pattern[i]]).Total);
+                        float repeatFloor = Mathf.Max(0.8f * _arcSword.cooldown, _arcSword.ComboTiming(i, _arcSword.swingPatterns[pattern[i]]).Total);
                         if (_clock - begun < repeatFloor) { _clock = begun + repeatFloor + 0.005f; _authority.StepSwings(); }
 
                         Check(st.ComboStep == i && Mathf.Abs(st.StepMultiplier - step[i]) < 1e-5f, $"production: step {i + 1} carries the chain multiplier x{step[i]:F2} ({st.StepMultiplier:F2})");
@@ -1544,7 +1565,7 @@ namespace Emberdelve.EditorTools
                     float nearZone = -1f, farZone = -1f;
                     foreach ((float z, bool isNear) c in new[] { (1.0f, true), (2.0f, false) })
                     {
-                        Scenario s = NewScenario(_sword);
+                        Scenario s = NewScenario(_arcSword);
                         Dummy d = AddBody(s, new Vector3(0f, 1.5f, c.z), 0.3f);
                         MeleeSwingStatus st = RunSwing(s, SlashBack);   // the chain's opening slash (right-to-left)
                         bool hit = d.Received.Count == 1 && st.Hits.Count == 1;
@@ -1573,7 +1594,7 @@ namespace Emberdelve.EditorTools
         {
             // swap during the windup (0.24 s): the swing ends, nothing is ever hit, even when the sword comes back
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy left = AddBody(s, new Vector3(-0.8f, 1.5f, 1.0f), 0.3f);
                 Check(Begin(s, Slash, out int id, out string reason), "swap test: begin (" + reason + ")");
                 _clock += 0.10f; _authority.StepSwings();
@@ -1581,7 +1602,7 @@ namespace Emberdelve.EditorTools
                 _clock += 0.02f; _authority.StepSwings();
                 _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus st);
                 Check(st.Finished && st.EndReason == SwingEndReason.WeaponChanged, $"a weapon swap during the windup ends the swing ({st.EndReason})");
-                s.Who.Weapon = _sword;
+                s.Who.Weapon = _arcSword;
                 for (int i = 0; i < 200; i++) { _clock += 0.01f; _authority.StepSwings(); }
                 Check(left.Received.Count == 0 && st.Hits.Count == 0, "no hit lands after the swap, not even when the sword is back in hand");
                 Check(_authority.ActiveSwingCount == 0, "the swapped swing is gone");
@@ -1591,11 +1612,11 @@ namespace Emberdelve.EditorTools
 
             // swap during the active phase: a hit made before the swap is kept, nothing after it
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy left = AddBody(s, new Vector3(-0.8f, 1.5f, 1.0f), 0.3f);      // touched at the very start of the sweep
                 Dummy right = AddBody(s, new Vector3(0.8f, 1.5f, 1.0f), 0.3f);      // touched late in the sweep
                 Check(Begin(s, Slash, out int id, out string reason), "swap test 2: begin (" + reason + ")");
-                SwingTiming swapTiming = _sword.swingPatterns[Slash].Timing;
+                SwingTiming swapTiming = _arcSword.swingPatterns[Slash].Timing;
                 _clock += swapTiming.Windup + swapTiming.Active * 0.37f; _authority.StepSwings();   // a good third into the active phase
                 Check(left.Received.Count == 1, "the target touched before the swap has been hit");
                 s.Who.Weapon = _crossbow;
@@ -1603,7 +1624,7 @@ namespace Emberdelve.EditorTools
                 _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus st);
                 Check(st.Finished && st.EndReason == SwingEndReason.WeaponChanged, $"a weapon swap during the active phase ends the swing ({st.EndReason})");
                 Check(left.Received.Count == 1 && right.Received.Count == 0, "the earlier hit is kept and the later target is never hit");
-                s.Who.Weapon = _sword;
+                s.Who.Weapon = _arcSword;
                 Cooldown(2f);
                 s.Dispose();
             }
@@ -1631,18 +1652,18 @@ namespace Emberdelve.EditorTools
                 s.Dispose();
 
                 // a wall stop ends the swing early (about 0.61 s) but the next swing still waits the full 0.84 s of the pattern
-                Scenario w = NewScenario(_sword);
+                Scenario w = NewScenario(_arcSword);
                 AddBody(w, new Vector3(0f, 1.5f, 2.0f), 0.3f);
                 AddWall(w, new Vector3(0f, 1.8f, 1.65f), new Vector3(4f, 4f, 0.3f));
                 Check(Begin(w, Slash, out id, out reason), "floor test: begin (" + reason + ")");
                 // A wall-stopped swing is certainly over once the whole active phase plus the wall recoil has passed.
-                SwingTiming wallTiming = _sword.swingPatterns[Slash].Timing;
+                SwingTiming wallTiming = _arcSword.swingPatterns[Slash].Timing;
                 float wallProbe = wallTiming.ActiveEnd + wallTiming.WallRecoil + 0.02f;
                 _clock += wallProbe; _authority.StepSwings();
                 _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus st);
                 Check(st.WallStopped && st.Finished, $"the swing was stopped by the wall and is over at {wallProbe:F2} s ({st.EndReason})");
                 // The floor after a wall stop is the full swing length of the pattern (derived from the data), never less than 0.8 x the weapon cooldown.
-                float wallFloor = Mathf.Max(0.8f * _sword.cooldown, wallTiming.Total);
+                float wallFloor = Mathf.Max(0.8f * _arcSword.cooldown, wallTiming.Total);
                 if (wallFloor > wallProbe + 0.06f)
                 {
                     Check(!Begin(w, SlashBack, out _, out reason) && reason.Contains("cooldown"), $"{wallProbe:F2} s: refused (cooldown, " + reason + ")");
@@ -1748,7 +1769,8 @@ namespace Emberdelve.EditorTools
             // and 0.15 s of it has just been spent above, so the follow-up press comes on the next frame instead of after another pause.
             yield return null;
             Check(_authority.TryGetExpectedComboStep(rig.CombatId, out int expectedStep) && expectedStep == 1, "the authority expects combo step 1 next");
-            Check(melee.TryBeginSwing() && melee.ComboStep == 1 && melee.ActivePattern.kind == SwingKind.HorizontalLeftToRight, "the next press is combo step 1, the left-to-right back slash");
+            Check(melee.TryBeginSwing() && melee.ComboStep == 1 && melee.ActivePattern == _sword.swingPatterns[_sword.comboSteps[1].patternIndex],
+                "the next press is combo step 1, the chain's second cut");
             guard = 0f;
             while (melee.IsSwinging && guard < 3f) { guard += Time.deltaTime; yield return null; }
             Check(target.Received.Count == 2, "the reverse slash hits the same target again (a new swing)");

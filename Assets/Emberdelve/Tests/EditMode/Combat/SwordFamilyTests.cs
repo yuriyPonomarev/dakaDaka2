@@ -97,10 +97,10 @@ namespace Emberdelve.Combat.Tests
         public void Patterns_AreTheAuthoredCombos_AndAllValid()
         {
             Assert.That(_arming.swingPatterns.Length, Is.EqualTo(5), "right-left, left-right, overhead, thrust, riposte cut");
-            Assert.That(_great.swingPatterns.Length, Is.EqualTo(5), "wide left-right, wide right-left, overhead, thrust, riposte cut");
-            Assert.That(_arming.swingPatterns[_arming.riposteSwingPatterns[0]].patternId, Is.EqualTo("sword_riposte_cut"), "the riposte opens with the high diagonal cut");
+            Assert.That(_great.swingPatterns.Length, Is.EqualTo(6), "wide left-right, wide right-left, overhead, thrust, riposte cut, the directed third cut");
+            Assert.That(_arming.swingPatterns[_arming.riposteSwingPatterns[0]].patternId, Is.EqualTo("arming_riposte"), "the riposte opens with the high diagonal cut");
             Assert.That(_great.swingPatterns[_great.riposteSwingPatterns[0]].patternId, Is.EqualTo("great_riposte_cut"));
-            Assert.That(_short.swingPatterns[_short.riposteSwingPatterns[0]].patternId, Is.EqualTo("sword_riposte_cut"));
+            Assert.That(_short.swingPatterns[_short.riposteSwingPatterns[0]].patternId, Is.EqualTo("short_riposte_1"));
             foreach (WeaponData w in new[] { _arming, _great })
             {
                 Assert.That(w.UsesSweptMelee, Is.True, w.weaponId);
@@ -115,8 +115,11 @@ namespace Emberdelve.Combat.Tests
                     Assert.That(step.patternIndex, Is.InRange(0, w.swingPatterns.Length - 1), w.weaponId + " combo step points at a pattern it owns");
             }
 
-            Assert.That(_arming.swingPatterns[0], Is.SameAs(_short.swingPatterns[0]), "the arming sword reuses the short sword's slashes");
-            Assert.That(_arming.swingPatterns[1], Is.SameAs(_short.swingPatterns[1]));
+            // Reference directions: each sword swings its own directed cuts (arming -60 / 230, short -122 / 375), so nothing is shared.
+            Assert.That(_arming.swingPatterns[0], Is.Not.SameAs(_short.swingPatterns[0]), "the arming sword has its own opening cut");
+            Assert.That(_arming.swingPatterns[1], Is.Not.SameAs(_short.swingPatterns[1]));
+            Assert.That(_arming.swingPatterns[0].patternId, Is.EqualTo("arming_cut_1"));
+            Assert.That(_short.swingPatterns[0].patternId, Is.EqualTo("short_cut_1"));
         }
 
         [Test]
@@ -129,7 +132,7 @@ namespace Emberdelve.Combat.Tests
             Assert.That(_great.windupTime, Is.GreaterThan(_arming.windupTime), "slower");
             Assert.That(_great.recoveryTime, Is.GreaterThan(_arming.recoveryTime));
             Assert.That(_great.cooldown, Is.GreaterThan(_arming.cooldown));
-            Assert.That(_arming.windupTime, Is.EqualTo(_short.windupTime).Within(0.08f), "standard speed");
+            Assert.That(_arming.windupTime, Is.LessThanOrEqualTo(_short.windupTime), "reference: the arming sword opens no slower than the short sword (0.399 vs 0.513 s)");
         }
 
         [Test]

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
+using Emberdelve.Core;
 using Emberdelve.Data;
 using Emberdelve.Player;
 
@@ -11,31 +12,64 @@ namespace Emberdelve.EditorTools
     {
         public const string Folder = "Logs/review/combo";
 
+        /// <summary>Batch entry for the test mirror (a batch Editor starts in an unsaved scene, which the capture cannot add to).</summary>
+        public static void RenderBatch()
+        {
+            if (EditorBuildSettings.scenes.Length > 0)
+                UnityEditor.SceneManagement.EditorSceneManager.OpenScene(EditorBuildSettings.scenes[0].path, UnityEditor.SceneManagement.OpenSceneMode.Single);
+            Render();
+        }
+
         [MenuItem("Emberdelve/Debug/Render Combo And Block Review (Edit Mode)")]
         public static void Render()
         {
             if (EditorApplication.isPlaying) { Debug.LogError("[ComboReview] leave Play mode first"); return; }
-            WeaponData sword = EmberdelveViewmodelPreview.FindWeapon("ashen_short_sword");
-            WeaponData shield = EmberdelveViewmodelPreview.FindWeapon("emberbulwark_shield");
+            Render("ashen_short_sword", "emberbulwark_shield", "sheet");
+            Render("arming_sword", null, "sheet-arming");
+            Render("ember_rapier", null, "sheet-rapier");
+            Render("two_handed_sword", null, "sheet-two");
+        }
+
+        private static void Render(string swordId, string shieldId, string sheet)
+        {
+            WeaponData sword = EmberdelveViewmodelPreview.FindWeapon(swordId);
+            WeaponData shield = shieldId != null ? EmberdelveViewmodelPreview.FindWeapon(shieldId) : null;
+            if (sword == null || sword.comboSteps == null) { Debug.LogWarning("[ComboReview] no weapon " + swordId); return; }
+            string Folder = EmberdelveComboReview.Folder + "/" + swordId;
             var files = new List<string>();
             // Block: rest then raised (the second frame is the eased entry halfway).
-            files.Add(EmberdelveViewmodelPreview.FirstPersonPattern(Folder + "/rest.png", sword.weaponId, shield.weaponId, null, -1f, 0f, 70f, 640, 360));
-            files.Add(EmberdelveViewmodelPreview.FirstPersonPattern(Folder + "/block.png", sword.weaponId, shield.weaponId, null, -1f, 1f, 70f, 640, 360));
-            // Combo: every step from where the previous strike ended, a frame every 0.1 s.
-            Vector3 startBase = FirstPersonArmsDriver.PatternRest;
-            Quaternion startRotation = WeaponVisualRig.ReadyRotation;
-            int n = 0;
-            for (int step = 0; step < sword.comboSteps.Length; step++)
+            files.Add(EmberdelveViewmodelPreview.FirstPersonPattern(Folder + "/rest.png", sword.weaponId, shieldId, null, -1f, 0f, 70f, 640, 360));
+            files.Add(EmberdelveViewmodelPreview.FirstPersonPattern(Folder + "/block.png", sword.weaponId, shieldId, null, -1f, 1f, 70f, 640, 360));
+            // Combo: the steps chained the way a held attack chains them (each starts when the previous one ends), then half a
+            // second with no swing. The driver's own blender (CutBlend) is stepped at 60 Hz, so a frame shows what the game shows
+            // at that moment, including the change from one step to the next and the return to the ready pose.
+            const float dt = 1f / 60f;
+            float fov = 68f;
+            GameConfig config = AssetDatabase.LoadAssetAtPath<GameConfig>("Assets/Emberdelve/Data/EmberdelveGameConfig.asset");
+            if (config != null) fov = config.fieldOfView;
+            var cut = new FirstPersonArmsDriver.CutBlend();
+            int n = 0, tick = 0;
+            float shieldLower = 0f, swingWeight = 0f;
+            for (int step = 0; step <= sword.comboSteps.Length; step++)
             {
-                ComboStep cs = sword.comboSteps[step];
-                SwingPatternData pattern = sword.swingPatterns[cs.patternIndex];
-                SwingTiming timing = pattern.TimingFor(cs.windupScale, cs.recoveryScale, step == sword.comboSteps.Length - 1 ? sword.comboFinisherRecovery : 0f);
-                for (float t = 0f; t < timing.Total; t += 0.1f)
+                bool tail = step == sword.comboSteps.Length;
+                SwingPatternData pattern = null; SwingTiming timing = default;
+                if (!tail)
                 {
-                    string path = Folder + "/combo-" + (n++).ToString("00") + "-s" + step + ".png";
-                    Vector3 sb = startBase; Quaternion sr = startRotation;
-                    float time = t;
-                    EmberdelveViewmodelPreview.Capture(path, 640, 360, 70f, true, (root, camera) =>
+                    ComboStep cs = sword.comboSteps[step];
+                    pattern = sword.swingPatterns[cs.patternIndex];
+                    timing = pattern.TimingFor(cs.windupScale, cs.recoveryScale, step == sword.comboSteps.Length - 1 ? sword.comboFinisherRecovery : 0f, cs.activeScale);
+                }
+                float length = tail ? 0.5f : timing.Total;
+                for (float t = 0f; t < length; t += dt, tick++)
+                {
+                    FirstPersonArmsDriver.SwingView view = cut.Step(!tail, pattern, timing, t, sword.twoHanded, dt);
+                    shieldLower = Mathf.MoveTowards(shieldLower, tail ? 0f : 1f, (tail ? FirstPersonArmsDriver.ShieldReturnRate : FirstPersonArmsDriver.ShieldDropRate) * dt);
+                    swingWeight = Mathf.MoveTowards(swingWeight, tail ? 0f : 1f, (tail ? 6f : 10f) * dt);
+                    if (tick % 2 != 0) continue;   // a frame every 1/30 s: a strike lasts 0.1-0.2 s
+                    string path = Folder + "/combo-" + (n++).ToString("000") + "-s" + step + ".png";
+                    float lowerNow = shieldLower, weightNow = swingWeight;
+                    EmberdelveViewmodelPreview.Capture(path, 640, 360, fov, true, (root, camera) =>
                     {
                         camera.transform.SetPositionAndRotation(EmberdelveViewmodelPreview.Origin + new Vector3(0f, 1.66f, 0f), Quaternion.identity);
                         WeaponViewModelSet set = WeaponViewModelSet.Load();
@@ -46,16 +80,13 @@ namespace Emberdelve.EditorTools
                         driver.SetWeapons(sword, shield);
                         driver.SetBlock(false);
                         EmberdelveFirstPersonArms.PoseInstance(arms, AssetDatabase.LoadAssetAtPath<AnimationClip>(EmberdelveFirstPersonArms.ClipPath(FirstPersonArmsDriver.IdleState)), 0.3f);
-                        WeaponVisualRig.SamplePresentation(pattern, timing, time, sb, sr, false, out Vector3 p, out Quaternion r);
-                        if (time > timing.ActiveEnd) { SwingPose end = pattern.Evaluate(timing.ActiveEnd, timing); p = end.Base; r = end.LocalRotation; }
-                        driver.Pose(camera.transform, camera, p, r, 0f, Vector3.zero, Vector3.zero, swingBlend: 1f);
+                        driver.Pose(camera.transform, camera, FirstPersonArmsDriver.PatternRest, WeaponVisualRig.ReadyRotation, 0f, Vector3.zero, Vector3.zero,
+                            swingBlend: weightNow, strikeBlend: 0f, shieldLower: lowerNow, swingTrail: 0f, swingView: view);
                     }, 0.05f);
                     files.Add(path);
                 }
-                SwingPose last = pattern.Evaluate(timing.ActiveEnd, timing);
-                startBase = last.Base; startRotation = last.LocalRotation;
             }
-            EmberdelveViewmodelPreview.Sheet(Folder + "/sheet.png", files, 4, 640, 360);
+            EmberdelveViewmodelPreview.Sheet(EmberdelveComboReview.Folder + "/" + sheet + ".png", files, 8, 640, 360);
             Debug.Log("[ComboReview] rendered " + files.Count + " frames to " + Folder);
         }
     }

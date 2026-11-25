@@ -529,8 +529,8 @@ namespace Emberdelve.Net
         {
             // Blocks are physical: put the left-hand shield into the incoming slash by turning towards the side it comes from
             // (right-to-left: turn left, left-to-right: turn right; the CombatFlow gate measures both windows).
-            _turnIntoStrike = TurnIntoStrike(other, _turnIntoStrike, ShieldTurnIntoStrike, ShieldTurnIntoStrike);
-            Drive(0f, YawTo(_owner.transform.position, other.transform.position) + (_phase == 2 ? _turnIntoStrike : 0f), 0f);
+            _turnIntoStrike = TurnIntoStrike(other, _rig != null ? _rig.ActiveWeapon : null, _turnIntoStrike, ShieldTurnIntoStrike, ShieldTurnIntoStrike, ShieldTurnIntoHighCut, 0f, ref _pitchIntoStrike);
+            Drive(0f, YawTo(_owner.transform.position, other.transform.position) + (_phase == 2 ? _turnIntoStrike : 0f), _phase == 2 ? _pitchIntoStrike : 0f);
             bool dead = _rig != null && _rig.IsDead;
             int myId = _owner.ServerPlayerId.Value;
 
@@ -582,28 +582,63 @@ namespace Emberdelve.Net
         // Turn (degrees) that puts the blade / the shield into a horizontal slash; the sign follows the side the slash comes from.
         // Measured by the CombatFlow gate at 1.1 m and 1.5 m: a right-hand blade needs a deep left turn against a right-to-left slash.
         private const float BladeTurnLeft = 70f, BladeTurnRight = 50f, ShieldTurnIntoStrike = 40f;
-        // The sword chain opens right-to-left, so a defender expecting the opener starts turned to its left.
-        private float _turnIntoStrike = float.NaN;
+        // A steep cut (Overhead by its measured path, like the reference short sword's opener) comes down from above: the guard is
+        // raised into it. Measured by the CombatFlow gate ("REAL ... guard catches") at 1.1 m and 1.5 m: the blade catches it looking
+        // 40 degrees up and 0-20 degrees to the right (re-measured 25 Nov after the cut poses changed: blade at pitch -40 catches
+        // at yaw -5..20 at 1.1 m and -30..20 at 1.5 m), the shield looking 40 degrees up straight at the attacker (yaw -40..80).
+        private const float HighGuardPitch = -40f, BladeTurnIntoHighCut = 5f, ShieldTurnIntoHighCut = 0f;
+        // A cut "comes down from above" when its hit window opens with the blade raised this far (degrees, negative = up),
+        // whatever kind its whole path is classified as.
+        private const float RaisedBladePitch = -30f;
 
-        /// <summary>Which way to turn for the attacker's current swing: left for a right-to-left slash, right for a left-to-right one.</summary>
-        private static float TurnIntoStrike(NetPlayerRig attacker, float current, float leftTurn, float rightTurn)
+        private static bool ComesDownFromAbove(Emberdelve.Data.SwingPatternData pattern) =>
+            pattern.kind == Emberdelve.Data.SwingKind.Overhead
+            || (pattern.kind != Emberdelve.Data.SwingKind.Thrust && pattern.keys != null && pattern.keys.Length > 1 && pattern.keys[0].bladePitch <= RaisedBladePitch);
+        // Before the attacker has swung, the defender expects the opener of the attacker's chain.
+        private float _turnIntoStrike = float.NaN;
+        private float _pitchIntoStrike = float.NaN;
+
+        /// <summary>
+        /// The guard pose for the attacker's current swing (or, before it swings, the opener of its chain): the turn for a
+        /// right-to-left or left-to-right slash, and a raised view for a steep cut. <paramref name="pitch"/> is the view pitch to hold.
+        /// </summary>
+        private static float TurnIntoStrike(NetPlayerRig attacker, Emberdelve.Data.WeaponData sameKitWeapon, float current, float leftTurn, float rightTurn, float highCutTurn, float flatPitch, ref float pitch)
         {
-            if (float.IsNaN(current)) current = -leftTurn;
-            if (attacker == null) return current;
-            AvatarCombatWire pose = attacker.AvatarCombat.Value;
-            if (!pose.Swing) return current;
-            string id = pose.Pattern.ToString();
-            Emberdelve.Data.WeaponData weapon = attacker.Rig != null ? attacker.Rig.ActiveWeapon : null;
-            if (weapon != null && weapon.swingPatterns != null)
-                foreach (Emberdelve.Data.SwingPatternData p in weapon.swingPatterns)
+            // A client does not always hold the remote attacker's real weapon data (a remote rig can report its default kit); the duel
+            // scripts give both players the same class kit, so the defender's own weapon names the same patterns and the same chain.
+            Emberdelve.Data.WeaponData theirs = attacker != null && attacker.Rig != null ? attacker.Rig.ActiveWeapon : null;
+            Emberdelve.Data.SwingPatternData incoming = null;
+            string id = null;
+            if (attacker != null)
+            {
+                AvatarCombatWire pose = attacker.AvatarCombat.Value;
+                if (pose.Swing) id = pose.Pattern.ToString();
+            }
+            foreach (Emberdelve.Data.WeaponData weapon in new[] { theirs, sameKitWeapon })
+            {
+                if (incoming != null || weapon == null || weapon.swingPatterns == null) continue;
+                if (id != null)
                 {
-                    if (p == null || p.patternId != id) continue;
-                    if (p.kind == Emberdelve.Data.SwingKind.HorizontalRightToLeft) return -leftTurn;
-                    if (p.kind == Emberdelve.Data.SwingKind.HorizontalLeftToRight) return rightTurn;
-                    return current;
+                    foreach (Emberdelve.Data.SwingPatternData p in weapon.swingPatterns)
+                        if (p != null && p.patternId == id) { incoming = p; break; }
                 }
-            if (id.EndsWith("_rl")) return -leftTurn;
-            if (id.EndsWith("_lr")) return rightTurn;
+                else if (float.IsNaN(current) && weapon.HasComboChain)
+                {
+                    int opener = weapon.comboSteps[0].patternIndex;
+                    if (opener >= 0 && opener < weapon.swingPatterns.Length) incoming = weapon.swingPatterns[opener];
+                }
+            }
+            if (float.IsNaN(current)) { current = -leftTurn; pitch = flatPitch; }
+            if (float.IsNaN(pitch)) pitch = flatPitch;
+            if (incoming != null)
+            {
+                if (ComesDownFromAbove(incoming)) { pitch = HighGuardPitch; return highCutTurn; }
+                if (incoming.kind == Emberdelve.Data.SwingKind.HorizontalRightToLeft) { pitch = flatPitch; return -leftTurn; }
+                if (incoming.kind == Emberdelve.Data.SwingKind.HorizontalLeftToRight) { pitch = flatPitch; return rightTurn; }
+                return current;
+            }
+            if (id != null && id.EndsWith("_rl")) { pitch = flatPitch; return -leftTurn; }
+            if (id != null && id.EndsWith("_lr")) { pitch = flatPitch; return rightTurn; }
             return current;
         }
 
@@ -622,8 +657,8 @@ namespace Emberdelve.Net
             }
             // Blocks are physical: the defender catches the chain's right-to-left opener on its blade by turning into the strike
             // (the CombatFlow gate measures the catching window, about 35-80 degrees to the left); squarely facing takes it in the side.
-            _turnIntoStrike = TurnIntoStrike(other, _turnIntoStrike, BladeTurnLeft, BladeTurnRight);
-            Drive(0f, YawTo(_owner.transform.position, other.transform.position) + (_phase <= 2 ? _turnIntoStrike : 0f), _phase <= 2 ? 21.6f : 0f);
+            _turnIntoStrike = TurnIntoStrike(other, _rig != null ? _rig.ActiveWeapon : null, _turnIntoStrike, BladeTurnLeft, BladeTurnRight, BladeTurnIntoHighCut, 21.6f, ref _pitchIntoStrike);
+            Drive(0f, YawTo(_owner.transform.position, other.transform.position) + (_phase <= 2 ? _turnIntoStrike : 0f), _phase <= 2 ? _pitchIntoStrike : 0f);
             int myId = _owner.ServerPlayerId.Value;
             switch (_phase)
             {

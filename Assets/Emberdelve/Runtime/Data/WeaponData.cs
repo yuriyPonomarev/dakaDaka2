@@ -164,6 +164,8 @@ namespace Emberdelve.Data
         public float projectileSpeed = 36f;
         public float projectileRadius = 0.07f;
         public float projectileLength = 0.9f;
+        [Tooltip("Material of the streak a flying projectile leaves so it can be followed by eye. A project asset reference keeps its shader in the build; empty = no streak.")]
+        public Material projectileTrailMaterial;
         [Tooltip("One spent round returned after an ammunition-paid flight ends.")]
         public ItemData recoveredAmmo;
         [Range(0.1f, 3f)] public float drawTime = 0.8f;

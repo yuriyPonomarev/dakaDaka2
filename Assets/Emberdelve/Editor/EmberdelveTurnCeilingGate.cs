@@ -125,6 +125,8 @@ namespace Emberdelve.EditorTools
             }
         }
 
+        private WeaponData _arcSword;
+
         private Scenario NewScenario(WeaponData weapon, float yaw = 0f, float pitch = 0f)
         {
             Scenario s = new Scenario();
@@ -228,6 +230,7 @@ namespace Emberdelve.EditorTools
         private void Setup()
         {
             _sword = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_AshenShortSword.asset");
+            _arcSword = EmberdelveDarkerCombat.FlatArcFixture(_sword);   // mechanics scenarios swing flat arcs with the sword's own timing
             _rapier = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberRapier.asset");
             Check(_sword != null && _rapier != null, "weapon assets are available");
             if (_sword == null || _rapier == null) throw new InvalidOperationException("weapon assets missing");
@@ -373,7 +376,7 @@ namespace Emberdelve.EditorTools
             int referenceFirst = -1;
             for (int p = 0; p < plans.Length; p++)
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 float yawTarget = 40f * Mathf.Deg2Rad;
                 Dummy d = AddBody(s, new Vector3(Mathf.Sin(yawTarget) * 1.8f, 1.5f, Mathf.Cos(yawTarget) * 1.8f));
                 MeleeSwingStatus st = Drive(s, 0, plans[p], (tick, el) => new Vector2(100f * el, 0f));
@@ -393,7 +396,7 @@ namespace Emberdelve.EditorTools
             // 600 deg/s (honest, fast) is below the ceiling: never clamped at any tick length
             for (int p = 0; p < plans.Length; p++)
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 MeleeSwingStatus st = Drive(s, 0, plans[p], (tick, el) => new Vector2(600f * el, 0f));
                 Check(Mathf.Approximately(st.TurnClampedDegrees, 0f), $"a 600 deg/s turn is under the ceiling: nothing clamped, tick plan {p} ({st.TurnClampedDegrees:F3})");
                 s.Dispose();
@@ -401,7 +404,7 @@ namespace Emberdelve.EditorTools
 
             // 900 deg/s is above it: clamped, and the amount is positive (the follower falls behind and the excess is dropped)
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 MeleeSwingStatus st = Drive(s, 0, new[] { 0.01f }, (tick, el) => new Vector2(900f * el, 0f));
                 Check(st.TurnClampedDegrees > 30f, $"a 900 deg/s turn is clamped ({st.TurnClampedDegrees:F1} degrees held back over the swing)");
                 s.Dispose();
@@ -409,7 +412,7 @@ namespace Emberdelve.EditorTools
 
             // a turn that changes direction (yaw and pitch together, honest speed) stays unclamped
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 MeleeSwingStatus st = Drive(s, 0, new[] { 0.02f }, (tick, el) => new Vector2(60f * Mathf.Sin(el * 6f), 30f * Mathf.Sin(el * 5f)));
                 Check(Mathf.Approximately(st.TurnClampedDegrees, 0f), $"an honest wobble in yaw and pitch is not clamped ({st.TurnClampedDegrees:F3})");
                 s.Dispose();

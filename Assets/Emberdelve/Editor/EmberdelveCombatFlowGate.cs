@@ -229,6 +229,8 @@ namespace Emberdelve.EditorTools
             Check(Mathf.Abs(expected - actual) <= tolerance, $"{label} (expected {expected:F4}, got {actual:F4})");
         }
 
+        private WeaponData _arcSword;
+
         private Scenario NewScenario(WeaponData weapon, Vector3? eye = null, float yaw = 0f, float pitch = 0f)
         {
             Scenario s = new Scenario();
@@ -293,7 +295,7 @@ namespace Emberdelve.EditorTools
 
         // Real-time marks of the sword's first chain step, derived from its data: a press just inside the recovery, and a moment
         // shortly after the whole swing (well inside the 0.5 s press buffer).
-        private SwingTiming FirstStepTiming => _sword.ComboTiming(0, _sword.swingPatterns[_sword.comboSteps[0].patternIndex]);
+        private SwingTiming FirstStepTiming => _arcSword.ComboTiming(0, _arcSword.swingPatterns[_arcSword.comboSteps[0].patternIndex]);
         private float RecoveryPressAt => FirstStepTiming.ActiveEnd + 0.25f * FirstStepTiming.Recovery;
         private float AfterFirstSwing => FirstStepTiming.Total + 0.22f;
 
@@ -427,14 +429,15 @@ namespace Emberdelve.EditorTools
         private void SetupAndData()
         {
             _sword = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_AshenShortSword.asset");
+            _arcSword = EmberdelveDarkerCombat.FlatArcFixture(_sword);   // mechanics scenarios swing flat arcs with the sword's own timing
             _rapier = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberRapier.asset");
             _shield = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberbulwarkShield.asset");
             _crossbow = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_EmberCrossbow.asset");
             _bow = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_HollowBow.asset");
             _claw = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_HollowClaw.asset");
             _maul = AssetDatabase.LoadAssetAtPath<WeaponData>(EmberdelvePaths.Data + "/Weapon_WardenMaul.asset");
-            Check(_sword != null && _rapier != null && _shield != null && _crossbow != null && _bow != null && _claw != null && _maul != null, "weapon assets are available");
-            if (_sword == null || _rapier == null || _shield == null || _crossbow == null || _bow == null || _claw == null || _maul == null) throw new InvalidOperationException("weapon assets missing");
+            Check(_arcSword != null && _rapier != null && _shield != null && _crossbow != null && _bow != null && _claw != null && _maul != null, "weapon assets are available");
+            if (_arcSword == null || _rapier == null || _shield == null || _crossbow == null || _bow == null || _claw == null || _maul == null) throw new InvalidOperationException("weapon assets missing");
 
             GameConfig sceneConfig = AssetDatabase.LoadAssetAtPath<GameConfig>(EmberdelvePaths.Data + "/EmberdelveGameConfig.asset");
             _table = sceneConfig != null && sceneConfig.hitLocations != null ? sceneConfig.hitLocations : HitLocationTable.Default;
@@ -461,19 +464,22 @@ namespace Emberdelve.EditorTools
             _authority.GuardReadyDelayEnabled = false;  // sections raise a guard and strike in the same instant; BladeDefenseOnRig proves the delay
 
             // ---- sword chain data: slash, slash, overhead at 1.00 / 1.05 / 1.10
-            Check(_sword.HasComboChain && _sword.comboSteps.Length == 3, "the sword has a three-step combo chain");
-            Check(_sword.comboSteps[0].patternIndex == 0 && _sword.comboSteps[1].patternIndex == 1 && _sword.comboSteps[2].patternIndex == 2,
+            Check(_arcSword.HasComboChain && _arcSword.comboSteps.Length == 3, "the sword has a three-step combo chain");
+            Check(_arcSword.comboSteps[0].patternIndex == 0 && _arcSword.comboSteps[1].patternIndex == 1 && _arcSword.comboSteps[2].patternIndex == 2,
                 "sword chain patterns: slash L->R, slash R->L, overhead");
-            Near(1.00f, _sword.comboSteps[0].damageMultiplier, 1e-6f, "sword step 1 multiplier 1.00");
-            Near(1.05f, _sword.comboSteps[1].damageMultiplier, 1e-6f, "sword step 2 multiplier 1.05");
-            Near(1.10f, _sword.comboSteps[2].damageMultiplier, 1e-6f, "sword step 3 multiplier 1.10");
+            Near(1.00f, _arcSword.comboSteps[0].damageMultiplier, 1e-6f, "sword step 1 multiplier 1.00");
+            Near(1.05f, _arcSword.comboSteps[1].damageMultiplier, 1e-6f, "sword step 2 multiplier 1.05");
+            Near(1.10f, _arcSword.comboSteps[2].damageMultiplier, 1e-6f, "sword step 3 multiplier 1.10");
             // Reference short sword (Docs/Tasks/DARKER_COMBAT_PORT_20261124.md): the window is ComboWindow.Close - Collision.Off of step 1;
             // the last step's pattern already holds its full recovery, so there is no extra finisher recovery.
-            Near(0.36f, _sword.comboWindow, 1e-6f, "sword combo window 0.36 s after the recovery begins");
-            Near(0f, _sword.comboFinisherRecovery, 1e-6f, "sword finisher recovery is part of the last pattern");
-            Check(_sword.swingPatterns[0].kind == SwingKind.HorizontalRightToLeft && _sword.swingPatterns[1].kind == SwingKind.HorizontalLeftToRight
-                  && _sword.swingPatterns[2].kind == SwingKind.Overhead, "the chain's patterns are the slash R->L, the back slash L->R and the overhead (Dark and Darker order)");
-            foreach (SwingPatternData p in _sword.swingPatterns)
+            Near(0.36f, _arcSword.comboWindow, 1e-6f, "sword combo window 0.36 s after the recovery begins");
+            Near(0f, _arcSword.comboFinisherRecovery, 1e-6f, "sword finisher recovery is part of the last pattern");
+            // Reference short sword directions for the first two: -122 (down to the right), 375 (to the left, rising). The third
+            // attack is a thrust by the user's decision of 25 Nov 2026 (the reference's third cut, 340, is kept outside the chain).
+            Check(_sword.swingPatterns[0].kind == SwingKind.HorizontalLeftToRight && _sword.swingPatterns[1].kind == SwingKind.HorizontalRightToLeft
+                  && _sword.swingPatterns[2].kind == SwingKind.Thrust && _sword.comboSteps[2].patternIndex == 2,
+                "the chain's patterns are a cut down to the right (left-to-right by its measured path), a cut to the left, then a thrust");
+            foreach (SwingPatternData p in _arcSword.swingPatterns)
             {
                 Near(1f, p.damageMultiplier, 1e-6f, p.patternId + ": the pattern shape is x1 (the multiplier is the chain's)");
                 // The reference slows an attacker to one "prepare" factor around the hit window and a lower (or equal) one inside it.
@@ -482,37 +488,39 @@ namespace Emberdelve.EditorTools
                 Check(p.activeMoveMultiplier >= 0.5f && p.windupMoveMultiplier <= 1f, p.patternId + ": move factors stay inside 0.5..1");
             }
 
-            Check(_rapier.HasComboChain && _rapier.comboSteps.Length == 4 && _rapier.comboSteps[0].patternIndex == 0 && _rapier.comboSteps[1].patternIndex == 0
-                  && _rapier.comboSteps[2].patternIndex == 0 && _rapier.comboSteps[3].patternIndex == 0, "the rapier chain is four thrusts (reference rapier)");
+            Check(_rapier.HasComboChain && _rapier.comboSteps.Length == 4 && _rapier.comboSteps[0].patternIndex == 0 && _rapier.comboSteps[1].patternIndex == 1
+                  && _rapier.comboSteps[2].patternIndex == 2 && _rapier.comboSteps[3].patternIndex == 3
+                  && _rapier.swingPatterns[0].kind == SwingKind.Thrust && _rapier.swingPatterns[2].kind == SwingKind.Overhead,
+                "the rapier chain is a thrust and three cuts, the third straight down (reference rapier)");
             Near(1.15f, _rapier.comboSteps[3].damageMultiplier, 1e-6f, "rapier step 4 multiplier 1.15");
             Near(1.00f, _rapier.comboSteps[0].damageMultiplier, 1e-6f, "rapier step 1 multiplier 1.00");
             Near(1.05f, _rapier.comboSteps[1].damageMultiplier, 1e-6f, "rapier step 2 multiplier 1.05");
             Near(1.10f, _rapier.comboSteps[2].damageMultiplier, 1e-6f, "rapier step 3 multiplier 1.10");
 
             // ---- the other D1b data
-            Near(0.7f, _sword.ImpactMultiplier(0f), 1e-6f, "sword zone: hilt end 0.7");
-            Near(0.7f, _sword.ImpactMultiplier(0.34f), 1e-6f, "sword zone: still 0.7 just below 0.35");
-            Near(0.9f, _sword.ImpactMultiplier(0.35f), 1e-6f, "sword zone: 0.9 from 0.35");
-            Near(0.9f, _sword.ImpactMultiplier(0.69f), 1e-6f, "sword zone: 0.9 up to 0.7");
-            Near(1.0f, _sword.ImpactMultiplier(0.70f), 1e-6f, "sword zone: the tip band is full damage from 0.7");
-            Near(1.0f, _sword.ImpactMultiplier(1f), 1e-6f, "sword zone: tip");
-            Near(0.7f, _sword.ImpactMultiplier(float.NaN), 1e-6f, "a NaN contact parameter falls back to the first band");
+            Near(0.7f, _arcSword.ImpactMultiplier(0f), 1e-6f, "sword zone: hilt end 0.7");
+            Near(0.7f, _arcSword.ImpactMultiplier(0.34f), 1e-6f, "sword zone: still 0.7 just below 0.35");
+            Near(0.9f, _arcSword.ImpactMultiplier(0.35f), 1e-6f, "sword zone: 0.9 from 0.35");
+            Near(0.9f, _arcSword.ImpactMultiplier(0.69f), 1e-6f, "sword zone: 0.9 up to 0.7");
+            Near(1.0f, _arcSword.ImpactMultiplier(0.70f), 1e-6f, "sword zone: the tip band is full damage from 0.7");
+            Near(1.0f, _arcSword.ImpactMultiplier(1f), 1e-6f, "sword zone: tip");
+            Near(0.7f, _arcSword.ImpactMultiplier(float.NaN), 1e-6f, "a NaN contact parameter falls back to the first band");
             Near(1.0f, _crossbow.ImpactMultiplier(0.1f), 1e-6f, "a weapon without bands does full damage everywhere");
-            Near(0.9f, _sword.hitSlowMultiplier, 1e-6f, "sword hit slow x0.9");
-            Near(0.6f, _sword.hitSlowDuration, 1e-6f, "sword hit slow 0.6 s");
+            Near(0.9f, _arcSword.hitSlowMultiplier, 1e-6f, "sword hit slow x0.9");
+            Near(0.6f, _arcSword.hitSlowDuration, 1e-6f, "sword hit slow 0.6 s");
             Near(0.75f, _maul.hitSlowMultiplier, 1e-6f, "maul hit slow x0.75");
             Near(1.5f, _maul.hitSlowDuration, 1e-6f, "maul hit slow 1.5 s");
-            Near(10f, _sword.heldMoveSpeedPenalty, 1e-6f, "sword held penalty 10 points");
+            Near(10f, _arcSword.heldMoveSpeedPenalty, 1e-6f, "sword held penalty 10 points");
             Near(17f, _rapier.heldMoveSpeedPenalty, 1e-6f, "rapier held penalty 17 points (reference rapier)");
             Near(8f, _shield.heldMoveSpeedPenalty, 1e-6f, "shield held penalty 8 points");
             // B1: ranged weapons use the same rule (1 - points / 300); authored in EmberdelveAssetLibrary.ApplyCombatFlow
             Near(4f, _bow.heldMoveSpeedPenalty, 1e-6f, "B1: bow held penalty 4 points (light)");
             Near(12f, _crossbow.heldMoveSpeedPenalty, 1e-6f, "B1: crossbow held penalty 12 points (heavier than the sword's 10)");
-            Check(_bow.heldMoveSpeedPenalty < _rapier.heldMoveSpeedPenalty && _crossbow.heldMoveSpeedPenalty > _sword.heldMoveSpeedPenalty, "B1: ordering bow < rapier < sword < crossbow");
+            Check(_bow.heldMoveSpeedPenalty < _rapier.heldMoveSpeedPenalty && _crossbow.heldMoveSpeedPenalty > _arcSword.heldMoveSpeedPenalty, "B1: ordering bow < rapier < sword < crossbow");
             Near(1f - 4f / 300f, CombatFlowRules.HeldFactor(_bow, null, false), 1e-6f, "B1: bow held factor 1 - 4/300 = 0.98667");
             Near(1f - 12f / 300f, CombatFlowRules.HeldFactor(_crossbow, null, false), 1e-6f, "B1: crossbow held factor 1 - 12/300 = 0.96");
             Near(1f - 12f / 300f, CombatFlowRules.HeldFactor(_crossbow, _shield, false), 1e-6f, "B1: a shield that does not contribute (two-handed crossbow) adds nothing");
-            Near(10f, _sword.impactPower, 1e-6f, "sword impact power 10");
+            Near(10f, _arcSword.impactPower, 1e-6f, "sword impact power 10");
             Near(20f, _shield.impactResist, 1e-6f, "heater shield impact resist 20");
             Near(30f, _maul.impactPower, 1e-6f, "maul impact power 30");
             Check(!_shield.CanParry && !_shield.EffectiveCapabilities.HasFlag(DefenseCapability.Parry), "the shield cannot parry (data)");
@@ -522,8 +530,8 @@ namespace Emberdelve.EditorTools
             Check(!CombatFlowRules.IsGuardBroken(30f, 20f) && !CombatFlowRules.IsGuardBroken(20f, 20f) && !CombatFlowRules.IsGuardBroken(19.99f, 20f),
                 "guard break rule: impact power never breaks a guard");
             Check(!CombatFlowRules.IsGuardBroken(0f, 0f) && !CombatFlowRules.IsGuardBroken(0f, 20f), "a source with no impact power (a skill) never breaks a guard");
-            Near(1f - 18f / 300f, CombatFlowRules.HeldFactor(_sword, _shield, true), 1e-6f, "held factor sword + shield = 1 - 18/300");
-            Near(1f - 10f / 300f, CombatFlowRules.HeldFactor(_sword, _shield, false), 1e-6f, "a shield that does not contribute adds no penalty");
+            Near(1f - 18f / 300f, CombatFlowRules.HeldFactor(_arcSword, _shield, true), 1e-6f, "held factor sword + shield = 1 - 18/300");
+            Near(1f - 10f / 300f, CombatFlowRules.HeldFactor(_arcSword, _shield, false), 1e-6f, "a shield that does not contribute adds no penalty");
         }
 
         // ------------------------------------------------------------------------------------------------
@@ -533,12 +541,12 @@ namespace Emberdelve.EditorTools
         private void ComboChain()
         {
             ZonesOff();
-            float baseDamage = _sword.baseDamage;
+            float baseDamage = _arcSword.baseDamage;
             float[] steps = { 1.00f, 1.05f, 1.10f };
 
             // full chain on one body target, zero armour: damage = base x step multiplier, exactly, through the real damage path
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy d = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                 for (int step = 0; step < 3; step++)
                 {
@@ -571,7 +579,7 @@ namespace Emberdelve.EditorTools
             // with armour: the step multiplier is applied before the armour rule, so the number is exact
             foreach (float armour in new[] { 50f, 100f })
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy d = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                 d.Armor = armour;
                 SwingStep(s, 0, out _, out _);
@@ -590,21 +598,21 @@ namespace Emberdelve.EditorTools
             // timing: each step's windup / recovery are the pattern's scaled by that step's authored scales (read from the canonical weapon data,
             // Docs/Tasks/SWORD_DATA_CANONICAL_20261124.md), the finisher adds comboFinisherRecovery
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                 MeleeSwingStatus a = SwingStep(s, 0, out _, out _);
                 MeleeSwingStatus b = SwingStep(s, 1, out _, out _);
                 float startOfThird = _clock;
                 Check(Begin(s, 2, out int thirdId, out _), "timing: step 3 accepted");
                 _authority.TryGetMeleeSwingStatus(thirdId, out MeleeSwingStatus third);
-                SwingPatternData p0 = _sword.swingPatterns[0], p1 = _sword.swingPatterns[1], p2 = _sword.swingPatterns[2];
-                Near(p0.windupTime * _sword.comboSteps[0].windupScale, a.Timing.Windup, 1e-5f, "step 1 winds up at its authored scale of the shared pattern");
-                ComboStep c1 = _sword.comboSteps[1], c2 = _sword.comboSteps[2];
+                SwingPatternData p0 = _arcSword.swingPatterns[0], p1 = _arcSword.swingPatterns[1], p2 = _arcSword.swingPatterns[2];
+                Near(p0.windupTime * _arcSword.comboSteps[0].windupScale, a.Timing.Windup, 1e-5f, "step 1 winds up at its authored scale of the shared pattern");
+                ComboStep c1 = _arcSword.comboSteps[1], c2 = _arcSword.comboSteps[2];
                 Check(c1.windupScale > 0f, $"step 2 has an authored windup scale (x{c1.windupScale:F2})");
                 Near(p1.windupTime * c1.windupScale, b.Timing.Windup, 1e-5f, $"step 2 winds up at its authored x{c1.windupScale:F2}");
                 Near(p1.recoveryTime * c1.recoveryScale, b.Timing.Recovery, 1e-5f, $"step 2 recovery is the pattern's at its authored x{c1.recoveryScale:F2}");
-                Near(p2.recoveryTime * c2.recoveryScale + _sword.comboFinisherRecovery, third.Timing.Recovery, 1e-5f, "step 3 (the finisher) recovers comboFinisherRecovery longer");
-                Near(p2.windupTime * c2.windupScale + p2.activeTime + p2.recoveryTime * c2.recoveryScale + _sword.comboFinisherRecovery, third.Timing.Total, 1e-5f,
+                Near(p2.recoveryTime * c2.recoveryScale + _arcSword.comboFinisherRecovery, third.Timing.Recovery, 1e-5f, "step 3 (the finisher) recovers comboFinisherRecovery longer");
+                Near(p2.windupTime * c2.windupScale + p2.activeTime + p2.recoveryTime * c2.recoveryScale + _arcSword.comboFinisherRecovery, third.Timing.Total, 1e-5f,
                     "the finisher's whole swing is its scaled pattern plus exactly the finisher recovery");
 
                 // the authority holds the next swing back for the finisher's full length
@@ -621,13 +629,13 @@ namespace Emberdelve.EditorTools
 
             // the combo window opens when the RECOVERY begins and lasts comboWindow
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                 float t0 = _clock;
                 Check(Begin(s, 0, out int id, out _), "window: step 1 accepted");
                 MeleeSwingStatus st = Finish(id);
                 float recoveryStart = t0 + st.Timing.ActiveEnd;
-                float windowEnd = recoveryStart + _sword.comboWindow;
+                float windowEnd = recoveryStart + _arcSword.comboWindow;
 
                 _clock = windowEnd - 0.02f;
                 Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int inside) && inside == 1, "window: 20 ms before the window ends the authority still expects step 2");
@@ -641,7 +649,7 @@ namespace Emberdelve.EditorTools
 
                 // continuing inside the window works, even right at the end of it
                 _authority.TryGetMeleeSwingStatus(fresh, out MeleeSwingStatus freshStatus);
-                float lastMoment = tFresh + freshStatus.Timing.ActiveEnd + _sword.comboWindow - 0.01f;
+                float lastMoment = tFresh + freshStatus.Timing.ActiveEnd + _arcSword.comboWindow - 0.01f;
                 _clock = lastMoment;
                 Check(Begin(s, 1, out int late2, out string lateWhy), $"window: step 2 accepted 10 ms before the window closes ({lateWhy})");
                 Finish(late2);
@@ -651,9 +659,9 @@ namespace Emberdelve.EditorTools
 
             // a hit taken does NOT reset the chain (documented rule); another entity's chain is independent
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
-                Scenario other = NewScenario(_sword, new Vector3(40f, 1.8f, 0f));
+                Scenario other = NewScenario(_arcSword, new Vector3(40f, 1.8f, 0f));
                 SwingStep(s, 0, out _, out _);
                 s.Who.ApplyDamage(new DamageInfo(30f, Vector3.zero, Vector3.forward, Vector3.zero, 999, EntityKind.Enemy, DamageType.Physical, false, false, 0f));
                 Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int still) && still == 1, "taking a hit does not reset the chain (it still expects step 2)");
@@ -678,7 +686,7 @@ namespace Emberdelve.EditorTools
 
             // 1. IsSwingInProgress is evaluated against Now, with no step in between
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                 Check(Begin(s, 0, out int id, out _), "in-progress: step 1 begins");
                 _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus st);
@@ -700,12 +708,12 @@ namespace Emberdelve.EditorTools
 
             // 2. A-B-A inside one frame: the weapon in hand is the same again, the chain must still be gone
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                 SwingStep(s, 0, out _, out _);
                 Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int e) && e == 1, "A-B-A: step 2 expected before the swap");
                 s.Who.WeaponChangeCount += 2; // sword -> rapier -> sword with no step in between: Weapon is unchanged
-                Check(s.Who.Weapon == _sword, "A-B-A: the weapon in hand is the sword again");
+                Check(s.Who.Weapon == _arcSword, "A-B-A: the weapon in hand is the sword again");
                 Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out e) && e == 0, "A-B-A: the expected step is 0 (the chain is not live)");
                 Check(!BeginForged(s.Who, 1, 1, out string r) && r.Contains("weapon changed"), $"A-B-A: step 2 is refused ({r})");
                 Check(Begin(s, 0, out int fresh, out string why), $"A-B-A: step 1 starts a fresh chain ({why})");
@@ -720,7 +728,7 @@ namespace Emberdelve.EditorTools
 
             // A-B-A in the middle of a swing ends it as WeaponChanged
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                 Check(Begin(s, 0, out int id, out _), "A-B-A mid-swing: step 1 begins");
                 Advance(0.1f);
@@ -739,7 +747,7 @@ namespace Emberdelve.EditorTools
                 _authority.StepSwings();
                 int floors = _authority.SwingFloorEntryCount;
                 int chains = _authority.ChainEntryCount;
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                 SwingStep(s, 0, out _, out _);
                 _authority.StepSwings();
@@ -762,7 +770,7 @@ namespace Emberdelve.EditorTools
             // a swing whose time is over is not "in progress" even if no tick ran since (found in the real-time smoke: the
             // finisher's length equals the client cooldown, so a press one frame after it was refused until the next fixed step)
             ZonesOff();
-            Scenario s = NewScenario(_sword);
+            Scenario s = NewScenario(_arcSword);
             AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
             Check(Begin(s, 0, out int id, out _), "no tick: step 1 begins");
             _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus st);
@@ -782,7 +790,7 @@ namespace Emberdelve.EditorTools
         private void ForgedSteps()
         {
             ZonesOff();
-            Scenario s = NewScenario(_sword);
+            Scenario s = NewScenario(_arcSword);
             Dummy d = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
             Swinger who = s.Who;
 
@@ -827,7 +835,7 @@ namespace Emberdelve.EditorTools
             Cooldown(3f);
             SwingStep(s, 0, out ok, out why);
             int lastSequence = _authority.LastSequenceFor(who.CombatId);
-            MeleeSwingIntent replay = new MeleeSwingIntent(who.CombatId, _sword.weaponId, 1, 1, who.Yaw, who.Pitch, lastSequence);
+            MeleeSwingIntent replay = new MeleeSwingIntent(who.CombatId, _arcSword.weaponId, 1, 1, who.Yaw, who.Pitch, lastSequence);
             Check(!_authority.TryBeginMeleeSwingAsOwner(replay, out _, out r) && r.Contains("stale"), $"a replayed command sequence is refused on a chain step ({r})");
             Cooldown(3f);
 
@@ -835,7 +843,7 @@ namespace Emberdelve.EditorTools
             {
                 Scenario rs = NewScenario(_rapier);
                 AddBody(rs, new Vector3(0f, 1.6f, 1.8f), 0.33f);
-                Check(!BeginForged(rs.Who, 1, 0, out r) && r.Contains("no running combo chain"), $"rapier step 2 without step 1 is refused ({r})");
+                Check(!BeginForged(rs.Who, 1, _rapier.comboSteps[1].patternIndex, out r) && r.Contains("no running combo chain"), $"rapier step 2 without step 1 is refused ({r})");
                 Check(!BeginForged(rs.Who, 0, 2, out r), $"a sword pattern index on the rapier is refused ({r})");
                 Check(!BeginForged(rs.Who, 0, 0, out r, "ashen_short_sword") && r.Contains("not the equipped weapon"), $"the sword's id on the rapier is refused ({r})");
                 rs.Dispose();
@@ -854,14 +862,14 @@ namespace Emberdelve.EditorTools
 
             // weapon swap between swings
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                 SwingStep(s, 0, out _, out _);
                 Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int e) && e == 1, "swap: step 2 expected before the swap");
                 s.Who.Weapon = _rapier;
                 _authority.StepSwings();
                 Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out e) && e == 0, "swap: with another weapon in hand the expected step is 0");
-                s.Who.Weapon = _sword;
+                s.Who.Weapon = _arcSword;
                 _authority.StepSwings();
                 Check(!BeginForged(s.Who, 1, 1, out string r) && r.Contains("no running combo chain"), $"swap: swapping back does not restore the chain ({r})");
                 Check(Begin(s, 0, out int id, out _), "swap: step 1 starts a fresh chain");
@@ -872,7 +880,7 @@ namespace Emberdelve.EditorTools
 
             // weapon swap in the middle of a swing
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                 Check(Begin(s, 0, out int id, out _), "mid-swing swap: step 1 begins");
                 Advance(0.1f);
@@ -880,7 +888,7 @@ namespace Emberdelve.EditorTools
                 Advance(0.05f);
                 _authority.TryGetMeleeSwingStatus(id, out MeleeSwingStatus st);
                 Check(st.Finished && st.EndReason == SwingEndReason.WeaponChanged, "mid-swing swap: the swing ended as WeaponChanged");
-                s.Who.Weapon = _sword;
+                s.Who.Weapon = _arcSword;
                 _authority.StepSwings();
                 Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int e) && e == 0, "mid-swing swap: no chain survives");
                 Cooldown(3f);
@@ -889,7 +897,7 @@ namespace Emberdelve.EditorTools
 
             // death between swings and during a swing
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                 SwingStep(s, 0, out _, out _);
                 s.Who.Dead = true;
@@ -909,9 +917,9 @@ namespace Emberdelve.EditorTools
                 s.Dispose();
             }
 
-            // review D1b: a swing stopped by a wall does NOT break the combo; its window restarts when the recoil ends
+            // user decision 25 Nov 2026: a swing stopped by a wall ENDS the combo (the next attack starts the chain again)
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 AddBody(s, new Vector3(0f, 1.5f, 3.0f), 0.33f);
                 SwingStep(s, 0, out _, out _);
                 Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out int e) && e == 1, "wall: control, the chain continues after a free swing");
@@ -922,14 +930,12 @@ namespace Emberdelve.EditorTools
                 Check(st.WallStopped, $"wall: the swing was stopped by the wall ({st.EndReason})");
                 float stopTime = st.Timing.Windup + st.Timing.Active * st.WallContactSample / Mathf.Max(1, st.SampleCount);
                 float recoilEnd = t0 + stopTime + st.Timing.WallRecoil;
-                float windowEnd = recoilEnd + _sword.ComboWindowAfter(1);   // the stopped swing was chain step 2 (index 1): its own window applies
-                _clock = windowEnd - 0.02f;
-                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out e) && e == 2, "wall: the combo survived the wall stop; 20 ms before the window (measured from the recoil end) closes step 3 is still expected");
-                _clock = windowEnd + 0.05f;
-                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out e) && e == 0, "wall: 50 ms after the window (from the recoil end) the chain has reset");
-                _clock = windowEnd - 0.02f;
-                Check(Begin(s, 2, out int third, out string thirdWhy), $"wall: step 3 is accepted inside the window after a wall stop ({thirdWhy})");
-                Finish(third);
+                Check(_authority.TryGetExpectedComboStep(s.Who.CombatId, out e) && e == 0, "wall: the wall stop ended the combo, the chain expects step 1 again");
+                _clock = recoilEnd + 0.02f;
+                _authority.StepSwings();
+                Check(!Begin(s, 2, out _, out string thirdWhy) && thirdWhy.Contains("chain"), $"wall: step 3 is refused right after the recoil, inside what used to be the combo window ({thirdWhy})");
+                Check(Begin(s, 0, out int restart, out string restartWhy), $"wall: the next attack starts the chain again at step 1 ({restartWhy})");
+                Finish(restart);
                 Cooldown(3f);
                 s.Dispose();
             }
@@ -961,7 +967,7 @@ namespace Emberdelve.EditorTools
 
             foreach ((string label, string layer, bool trigger, bool blocks) c in cases)
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy target = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                 if (c.layer != null) AddProp(s, new Vector3(0f, 1.8f, 1.0f), new Vector3(8f, 4f, 0.3f), c.layer, c.trigger);
                 MeleeSwingStatus st = SwingStep(s, 0, out bool accepted, out string why);
@@ -978,7 +984,7 @@ namespace Emberdelve.EditorTools
             Check(_authority.SwingBlockerMask.value == levelBits, "D1c5 props: a widened level mask still derives the level layer alone");
             foreach (string layer in new[] { GameConfig.InteractLayerName, GameConfig.LootLayerName })
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy target = AddBody(s, new Vector3(0f, 1.5f, 1.8f), 0.33f);
                 AddProp(s, new Vector3(0f, 1.8f, 1.0f), new Vector3(8f, 4f, 0.3f), layer, false);
                 MeleeSwingStatus st = SwingStep(s, 0, out bool accepted, out _);
@@ -1008,7 +1014,7 @@ namespace Emberdelve.EditorTools
 
         private void DisplayTimingFromPattern()
         {
-            foreach ((WeaponData weapon, string label) c in new[] { (_sword, "sword"), (_rapier, "rapier"), (_claw, "claw"), (_maul, "maul") })
+            foreach ((WeaponData weapon, string label) c in new[] { (_arcSword, "sword"), (_rapier, "rapier"), (_claw, "claw"), (_maul, "maul") })
             {
                 SwingPatternData first = c.weapon.swingPatterns[0];
                 Near(first.windupTime, c.weapon.DisplayWindup, 1e-6f, $"D1c5 display: {c.label} windup is the first pattern's");
@@ -1024,12 +1030,12 @@ namespace Emberdelve.EditorTools
             }
 
             // a weapon whose serialized fields disagree with its pattern shows the pattern
-            SwingPatternData pattern = UnityEngine.Object.Instantiate(_sword.swingPatterns[0]);
+            SwingPatternData pattern = UnityEngine.Object.Instantiate(_arcSword.swingPatterns[0]);
             _cleanup.Add(pattern);
             pattern.windupTime = 0.50f;
             pattern.activeTime = 0.21f;
             pattern.recoveryTime = 0.77f;
-            WeaponData clone = UnityEngine.Object.Instantiate(_sword);
+            WeaponData clone = UnityEngine.Object.Instantiate(_arcSword);
             _cleanup.Add(clone);
             clone.windupTime = 0.01f;
             clone.activeWindow = 0.02f;
@@ -1055,7 +1061,7 @@ namespace Emberdelve.EditorTools
                 MeleeSwingStatus st = SwingStep(s, step, out bool ok, out string why);
                 Check(ok && st.Hits.Count == 1, $"rapier step {step + 1} accepted and hits ({why})");
                 if (st.Hits.Count == 1) Near(_rapier.baseDamage * steps[step], st.Hits[0].Amount, 1e-3f, $"rapier thrust {step + 1} damage = base x {steps[step]:F2}");
-                float expectedWindup = _rapier.swingPatterns[0].windupTime * _rapier.comboSteps[step].windupScale;
+                float expectedWindup = _rapier.swingPatterns[_rapier.comboSteps[step].patternIndex].windupTime * _rapier.comboSteps[step].windupScale;
                 Near(expectedWindup, st.Timing.Windup, 1e-4f, $"rapier step {step + 1} windup follows the chain data (x{_rapier.comboSteps[step].windupScale:F2})");
                 Advance(0.1f);
             }
@@ -1090,7 +1096,7 @@ namespace Emberdelve.EditorTools
                 new SwingKey(0f, new Vector3(0f, 0f, 0.30f), 0f, 0f),
                 new SwingKey(1f, new Vector3(0f, 0f, 0.30f), 0f, 0f)
             };
-            WeaponData blade = UnityEngine.Object.Instantiate(_sword);
+            WeaponData blade = UnityEngine.Object.Instantiate(_arcSword);
             _cleanup.Add(blade);
             blade.weaponId = "flow_gate_blade";
             blade.comboSteps = new ComboStep[0];
@@ -1124,13 +1130,13 @@ namespace Emberdelve.EditorTools
 
             // the sword's own slash: a target near the hilt end is hit weaker than one at the tip, by the reported contact
             {
-                Scenario near = NewScenario(_sword);
+                Scenario near = NewScenario(_arcSword);
                 Dummy dn = AddBody(near, new Vector3(0f, 1.5f, 1.0f), 0.3f);
                 MeleeSwingStatus sn = SwingStep(near, 0, out _, out _);
                 Cooldown(3f);
                 near.Dispose();
 
-                Scenario far = NewScenario(_sword);
+                Scenario far = NewScenario(_arcSword);
                 Dummy df = AddBody(far, new Vector3(0f, 1.5f, 2.0f), 0.3f);
                 MeleeSwingStatus sf = SwingStep(far, 0, out _, out _);
                 Cooldown(3f);
@@ -1141,10 +1147,10 @@ namespace Emberdelve.EditorTools
                 {
                     Debug.Log($"{Tag} sword slash contact near T={sn.Hits[0].ContactT:F3} zone={sn.Hits[0].ZoneMultiplier:F2} amount={sn.Hits[0].Amount:F3}; far T={sf.Hits[0].ContactT:F3} zone={sf.Hits[0].ZoneMultiplier:F2} amount={sf.Hits[0].Amount:F3}");
                     Check(sn.Hits[0].ContactT < sf.Hits[0].ContactT, "sword slash: the near target is struck lower on the blade than the far one");
-                    Near(_sword.ImpactMultiplier(sn.Hits[0].ContactT), sn.Hits[0].ZoneMultiplier, 1e-6f, "sword slash near: zone = the sword's band at the reported contact");
-                    Near(_sword.ImpactMultiplier(sf.Hits[0].ContactT), sf.Hits[0].ZoneMultiplier, 1e-6f, "sword slash far: zone = the sword's band at the reported contact");
-                    Near(_sword.baseDamage * sn.Hits[0].ZoneMultiplier, sn.Hits[0].Amount, 1e-3f, "sword slash near: damage = base x zone");
-                    Near(_sword.baseDamage * sf.Hits[0].ZoneMultiplier, sf.Hits[0].Amount, 1e-3f, "sword slash far: damage = base x zone");
+                    Near(_arcSword.ImpactMultiplier(sn.Hits[0].ContactT), sn.Hits[0].ZoneMultiplier, 1e-6f, "sword slash near: zone = the sword's band at the reported contact");
+                    Near(_arcSword.ImpactMultiplier(sf.Hits[0].ContactT), sf.Hits[0].ZoneMultiplier, 1e-6f, "sword slash far: zone = the sword's band at the reported contact");
+                    Near(_arcSword.baseDamage * sn.Hits[0].ZoneMultiplier, sn.Hits[0].Amount, 1e-3f, "sword slash near: damage = base x zone");
+                    Near(_arcSword.baseDamage * sf.Hits[0].ZoneMultiplier, sf.Hits[0].Amount, 1e-3f, "sword slash far: damage = base x zone");
                     Check(sn.Hits[0].ZoneMultiplier < sf.Hits[0].ZoneMultiplier, "sword slash: a hit lower on the blade does less damage than a hit near the tip");
                 }
             }
@@ -1164,7 +1170,7 @@ namespace Emberdelve.EditorTools
 
             // zone x chain step 3 on armour 0: tip contact keeps the full 1.10 (the same number the chain test pinned with zones off)
             {
-                WeaponData tipSword = UnityEngine.Object.Instantiate(_sword);
+                WeaponData tipSword = UnityEngine.Object.Instantiate(_arcSword);
                 _cleanup.Add(tipSword);
                 tipSword.swingPatterns = new[] { straight, straight, straight };
                 tipSword.reach = 1.0f;
@@ -1215,7 +1221,7 @@ namespace Emberdelve.EditorTools
 
             // one hit: slow x0.9 for 0.6 s, applied once
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy d = AddSlowable(s, new Vector3(0f, 1.5f, 1.8f));
                 int appliedBefore = _authority.HitSlowsApplied;
                 SwingStep(s, 0, out _, out _);
@@ -1251,7 +1257,7 @@ namespace Emberdelve.EditorTools
 
             // cleave: every struck target is slowed once; the data comes from the weapon, not from the intent
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy a = AddSlowable(s, new Vector3(-0.6f, 1.5f, 1.7f), 0.3f);
                 Dummy b = AddSlowable(s, new Vector3(0.6f, 1.5f, 1.7f), 0.3f);
                 int before = _authority.HitSlowsApplied;
@@ -1268,7 +1274,7 @@ namespace Emberdelve.EditorTools
 
             // a hit fully blocked by a plain guard does not slow
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy d = AddSlowable(s, new Vector3(0f, 1.5f, 1.8f));
                 d.GuardReduction = 0.5f;
                 MeleeSwingStatus st = SwingStep(s, 0, out _, out _);
@@ -1280,7 +1286,7 @@ namespace Emberdelve.EditorTools
 
             // the maul's heavier slow (data) on a target
             {
-                WeaponData maul = UnityEngine.Object.Instantiate(_sword);
+                WeaponData maul = UnityEngine.Object.Instantiate(_arcSword);
                 _cleanup.Add(maul);
                 maul.hitSlowMultiplier = _maul.hitSlowMultiplier;
                 maul.hitSlowDuration = _maul.hitSlowDuration;
@@ -1295,7 +1301,7 @@ namespace Emberdelve.EditorTools
 
             // a weapon with no hit slow slows nobody
             {
-                WeaponData plain = UnityEngine.Object.Instantiate(_sword);
+                WeaponData plain = UnityEngine.Object.Instantiate(_arcSword);
                 _cleanup.Add(plain);
                 plain.hitSlowDuration = 0f;
                 plain.hitSlowMultiplier = 1f;
@@ -1392,7 +1398,7 @@ namespace Emberdelve.EditorTools
             _rig.Health.Heal(1000f);
 
             float walk = _rig.Movement.ResolveWalkSpeed();
-            float held = 1f - (_sword.heldMoveSpeedPenalty + _shield.heldMoveSpeedPenalty) / 300f;
+            float held = 1f - (_arcSword.heldMoveSpeedPenalty + _shield.heldMoveSpeedPenalty) / 300f;
             float idleWalk = _rig.Movement.ResolveGroundSpeed(false, false);
             float idleSprint = _rig.Movement.ResolveGroundSpeed(true, false);
             Near(walk * held, idleWalk, 1e-4f, $"held weapon: walk = {walk:F3} x (1 - (10 + 8)/300) = x{held:F3}");
@@ -1403,12 +1409,12 @@ namespace Emberdelve.EditorTools
             _authority.SetClock(() => _clock);
             _rig.TryGetAimPose(out _, out float yaw, out float pitch);
             float t0 = _clock;
-            MeleeSwingIntent intent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+            MeleeSwingIntent intent = new MeleeSwingIntent(_rig.CombatId, _arcSword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
             Check(_authority.TryBeginMeleeSwingAsOwner(intent, out int swingId, out string why), $"move phases: the rig's swing is accepted ({why})");
 
-            SwingPatternData slash = _sword.swingPatterns[0];
+            SwingPatternData slash = _arcSword.swingPatterns[0];
             // the rig swings chain step 1: the pattern's timing as the authority resolves it (the combo step scales applied)
-            SwingTiming stepOne = _sword.ComboTiming(0, slash);
+            SwingTiming stepOne = _arcSword.ComboTiming(0, slash);
             float w = stepOne.Windup, a = stepOne.Active, r = stepOne.Recovery;
 
             float prepare = slash.windupMoveMultiplier, hit = slash.activeMoveMultiplier, recover = slash.recoveryMoveMultiplier;
@@ -1426,10 +1432,10 @@ namespace Emberdelve.EditorTools
 
             // chain step 2 has its own phase boundaries (its step scales): the slowdown follows THAT step's windup and hit window
             float t1 = _clock;
-            MeleeSwingIntent second = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 1, 1, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+            MeleeSwingIntent second = new MeleeSwingIntent(_rig.CombatId, _arcSword.weaponId, 1, 1, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
             Check(_authority.TryBeginMeleeSwingAsOwner(second, out int secondId, out why), $"move phases: step 2 accepted ({why})");
-            SwingPatternData backSlash = _sword.swingPatterns[1];
-            SwingTiming stepTwo = _sword.ComboTiming(1, backSlash);
+            SwingPatternData backSlash = _arcSword.swingPatterns[1];
+            SwingTiming stepTwo = _arcSword.ComboTiming(1, backSlash);
             _clock = t1 + stepTwo.Windup * 0.5f;
             Near(idleWalk * backSlash.windupMoveMultiplier, _rig.Movement.ResolveGroundSpeed(false, false), 1e-4f, "step 2: its own windup is still the prepare slowdown");
             _clock = t1 + stepTwo.Windup + stepTwo.Active * 0.5f;
@@ -1494,21 +1500,21 @@ namespace Emberdelve.EditorTools
             Near(20f, _rig.Defense.ImpactResist, 1e-4f, "guard: the kit's impact resist is the heater shield's 20");
             float reduction = _rig.Defense.BlockReduction;
 
-            WeaponData heavy = UnityEngine.Object.Instantiate(_sword);
+            WeaponData heavy = UnityEngine.Object.Instantiate(_arcSword);
             _cleanup.Add(heavy);
             heavy.impactPower = 30f;
-            WeaponData edge = UnityEngine.Object.Instantiate(_sword);
+            WeaponData edge = UnityEngine.Object.Instantiate(_arcSword);
             _cleanup.Add(edge);
             edge.impactPower = 20f;
-            WeaponData justUnder = UnityEngine.Object.Instantiate(_sword);
+            WeaponData justUnder = UnityEngine.Object.Instantiate(_arcSword);
             _cleanup.Add(justUnder);
             justUnder.impactPower = 19.9f;
             WeaponData buckler = UnityEngine.Object.Instantiate(_shield);
             _cleanup.Add(buckler);
-            buckler.impactResist = _sword.impactResist + 1f;   // a buckler guards better than the bare blade kit, below the heater shield
+            buckler.impactResist = _arcSword.impactResist + 1f;   // a buckler guards better than the bare blade kit, below the heater shield
 
             // control: no guard raised
-            DamageInfo? control = SwingAtRig(_sword, true);
+            DamageInfo? control = SwingAtRig(_arcSword, true);
             Check(control.HasValue && !control.Value.Blocked && !control.Value.GuardBroken, "guard control: with the guard down the hit is neither blocked nor broken");
             float unguarded = control.HasValue ? control.Value.Amount : 0f;
             float shieldContactDamage = control.HasValue
@@ -1517,7 +1523,7 @@ namespace Emberdelve.EditorTools
 
             // 1. sword (10) against the heater shield (20): blocked normally
             _rig.SetGuardHeld(true);
-            DamageInfo? light = SwingAtRig(_sword, true);
+            DamageInfo? light = SwingAtRig(_arcSword, true);
             Check(light.HasValue && light.Value.Blocked && !light.Value.GuardBroken, "sword vs heater shield: blocked, not broken");
             if (light.HasValue)
             {
@@ -1557,7 +1563,7 @@ namespace Emberdelve.EditorTools
             Cooldown(3f);
 
             // 4. the overhead's impact scale does not break what the slash only blocks either
-            WeaponData borderline = UnityEngine.Object.Instantiate(_sword);
+            WeaponData borderline = UnityEngine.Object.Instantiate(_arcSword);
             _cleanup.Add(borderline);
             borderline.impactPower = 17f;
             _rig.SetGuardHeld(true);
@@ -1578,7 +1584,7 @@ namespace Emberdelve.EditorTools
             _rig.SetOffhandWeapon(buckler);
             Near(buckler.impactResist, _rig.Defense.ImpactResist, 1e-4f, "buckler: the kit's impact resist is the buckler's " + buckler.impactResist);
             _rig.SetGuardHeld(true);
-            DamageInfo? swordVsBuckler = SwingAtRig(_sword, true);
+            DamageInfo? swordVsBuckler = SwingAtRig(_arcSword, true);
             Check(swordVsBuckler.HasValue && swordVsBuckler.Value.Blocked && !swordVsBuckler.Value.GuardBroken, "sword (10) vs buckler: blocked");
             Cooldown(3f);
             _rig.SetGuardHeld(true);
@@ -1645,7 +1651,7 @@ namespace Emberdelve.EditorTools
                         {
                             _rig.Look.ApplyAimPose(yaw, pitch);
                             _rig.SetGuardHeld(true);
-                            DamageInfo? hit = SwingAtRig(_sword, true, pattern, legacyPattern: pattern != 0, distance: distance);
+                            DamageInfo? hit = SwingAtRig(_arcSword, true, pattern, legacyPattern: pattern != 0, distance: distance);
                             bool contact = shield ? hit.HasValue && hit.Value.GuardShieldContact : hit.HasValue && hit.Value.GuardBladeContact;
                             if (hit.HasValue && hit.Value.Blocked && contact)
                             {
@@ -1656,10 +1662,40 @@ namespace Emberdelve.EditorTools
                             Cooldown(3f);
                         }
                     }
-                    Debug.Log(Tag + " " + (shield ? "shield" : "blade") + " guard catches " + _sword.swingPatterns[pattern].kind + " at " + distance.ToString("0.0") + " m, yaw/pitch: " + string.Join(", ", caught));
+                    Debug.Log(Tag + " " + (shield ? "shield" : "blade") + " guard catches " + _arcSword.swingPatterns[pattern].kind + " at " + distance.ToString("0.0") + " m, yaw/pitch: " + string.Join(", ", caught));
                 }
             }
             Check(bladeOpenerCaught > 0, "blade guard: turning into the right-to-left opener catches it on the blade");
+
+            // The shipped sword's own cuts (reference directions): the steep opener comes down from the defender's upper side, so the
+            // guard has to be raised into it. Measured here so the answer is data, and logged for the network scripts' poses.
+            foreach (bool shield in new[] { false, true })
+            {
+                _rig.SetOffhandWeapon(shield ? _rig.Class.offhandShield : null);
+                for (int step = 0; step < 2; step++)
+                {
+                    int pattern = _sword.comboSteps[step].patternIndex;
+                    foreach (float distance in new[] { 1.1f, 1.5f })
+                    {
+                        var caught = new List<string>();
+                        foreach (float pitch in new[] { -70f, -55f, -40f, -20f, 0f, 20f })
+                        {
+                            for (float yaw = -80f; yaw <= 80f; yaw += 5f)
+                            {
+                                _rig.Look.ApplyAimPose(yaw, pitch);
+                                _rig.SetGuardHeld(true);
+                                DamageInfo? hit = SwingAtRig(_sword, true, pattern, legacyPattern: step != 0, distance: distance);
+                                bool contact = shield ? hit.HasValue && hit.Value.GuardShieldContact : hit.HasValue && hit.Value.GuardBladeContact;
+                                if (hit.HasValue && hit.Value.Blocked && contact) caught.Add(yaw.ToString("0") + "/" + pitch.ToString("0"));
+                                _rig.SetGuardHeld(false);
+                                Cooldown(3f);
+                            }
+                        }
+                        Debug.Log(Tag + " REAL " + (shield ? "shield" : "blade") + " guard catches " + _sword.swingPatterns[pattern].patternId + " at " + distance.ToString("0.0") + " m, yaw/pitch: " + string.Join(", ", caught));
+                        if (step == 0) Check(caught.Count > 0, "guard vs the reference opener: some raised pose catches it on the " + (shield ? "shield" : "blade") + " at " + distance.ToString("0.0") + " m");
+                    }
+                }
+            }
             _rig.SetOffhandWeapon(_rig.Class.offhandShield);
             _rig.Look.ApplyAimPose(0f, 0f);
             _clock += 2f;
@@ -1676,7 +1712,7 @@ namespace Emberdelve.EditorTools
             Cooldown(3f);
 
             // fake instigator that reports a raised guard
-            Scenario s = NewScenario(_sword, new Vector3(30f, 1.8f, 0f));      // 30 m from the rig
+            Scenario s = NewScenario(_arcSword, new Vector3(30f, 1.8f, 0f));      // 30 m from the rig
             s.Who.Guarding = true;
             MeleeSwingIntent forged = Intent(s.Who, 0, 0);
             int rejectedBefore = _authority.RejectedCount;
@@ -1705,7 +1741,7 @@ namespace Emberdelve.EditorTools
             _rig.SetGuardHeld(true);
             Check(_rig.IsGuarding, "D1c5 guard: the rig guard is up");
             activeBefore = _authority.ActiveSwingCount;
-            MeleeSwingIntent rigIntent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+            MeleeSwingIntent rigIntent = new MeleeSwingIntent(_rig.CombatId, _arcSword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
             ok = _authority.TryBeginMeleeSwingAsOwner(rigIntent, out id, out why);
             Check(!ok && why.Contains("guarding"), $"D1c5 guard: the real rig cannot begin a swing while guarding ({why})");
             Check(_authority.ActiveSwingCount == activeBefore && !_authority.IsSwingInProgress(_rig.CombatId), "D1c5 guard: the refused rig swing left no swing behind");
@@ -1723,7 +1759,7 @@ namespace Emberdelve.EditorTools
             Check(!_rig.TryGetGuardReduction(front, out _), "D1c5 guard: ... and no plain block reduction either (TryGetGuardReduction)");
 
             // end to end: an enemy swing lands on the rig while the rig's own swing is still running
-            Scenario attacker = NewScenario(_sword);
+            Scenario attacker = NewScenario(_arcSword);
             attacker.Who.Kind = EntityKind.Enemy;
             attacker.Who.TeamId = CombatTeams.MonsterTeam;
             attacker.Who.Eye = _rig.transform.position + new Vector3(0f, 1.65f, 1.5f);
@@ -1933,9 +1969,9 @@ namespace Emberdelve.EditorTools
 
             _rig.TryGetAimPose(out _, out float yaw, out float pitch);
             float t0 = _clock;
-            MeleeSwingIntent intent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+            MeleeSwingIntent intent = new MeleeSwingIntent(_rig.CombatId, _arcSword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
             Check(_authority.TryBeginMeleeSwingAsOwner(intent, out int swingId, out string why), $"swap lock: a swing begins ({why})");
-            SwingTiming p = _sword.ComboTiming(0, _sword.swingPatterns[0]);   // chain step 1 as the authority resolves it
+            SwingTiming p = _arcSword.ComboTiming(0, _arcSword.swingPatterns[0]);   // chain step 1 as the authority resolves it
             _authority.TryGetExpectedComboStep(_rig.CombatId, out int comboBefore);
             int acceptedBefore = _authority.AcceptedCount;
 
@@ -1989,7 +2025,7 @@ namespace Emberdelve.EditorTools
             _clock += 3f;
             _authority.StepSwings();
             _rig.TryGetAimPose(out _, out yaw, out pitch);
-            MeleeSwingIntent again = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+            MeleeSwingIntent again = new MeleeSwingIntent(_rig.CombatId, _arcSword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
             Check(_authority.TryBeginMeleeSwingAsOwner(again, out int forcedId, out why), $"swap lock: another swing begins ({why})");
             _clock += 0.1f;
             Check(loadout.ForceSwitchToSlot(1) && _rig.ActiveWeapon == _crossbow, "swap lock: a forced change goes through");
@@ -2004,7 +2040,7 @@ namespace Emberdelve.EditorTools
             {
                 int countBefore = _rig.WeaponChangeCount;
                 _rig.TryGetAimPose(out _, out yaw, out pitch);
-                MeleeSwingIntent first = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+                MeleeSwingIntent first = new MeleeSwingIntent(_rig.CombatId, _arcSword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
                 Check(_authority.TryBeginMeleeSwingAsOwner(first, out int abaId, out why), $"A-B-A rig: a swing begins ({why})");
                 _authority.TryGetMeleeSwingStatus(abaId, out MeleeSwingStatus abaSt);
                 _clock += abaSt.Timing.Total + 0.01f;
@@ -2014,14 +2050,14 @@ namespace Emberdelve.EditorTools
                 Check(_rig.WeaponChangeCount == countBefore + 2, $"A-B-A rig: the weapon-change counter went up by two ({_rig.WeaponChangeCount - countBefore})");
                 Check(_authority.TryGetExpectedComboStep(_rig.CombatId, out int expectedAfter) && expectedAfter == 0, "A-B-A rig: the chain is gone although the sword is in hand again");
                 _rig.TryGetAimPose(out _, out yaw, out pitch);
-                MeleeSwingIntent forged = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 1, 1, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+                MeleeSwingIntent forged = new MeleeSwingIntent(_rig.CombatId, _arcSword.weaponId, 1, 1, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
                 Check(!_authority.TryBeginMeleeSwingAsOwner(forged, out _, out why) && why.Contains("weapon changed"), $"A-B-A rig: step 2 is refused ({why})");
 
                 // and mid swing (forced path, the player swap itself is locked)
                 _clock += 3f;
                 _authority.StepSwings();
                 _rig.TryGetAimPose(out _, out yaw, out pitch);
-                MeleeSwingIntent midIntent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+                MeleeSwingIntent midIntent = new MeleeSwingIntent(_rig.CombatId, _arcSword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
                 Check(_authority.TryBeginMeleeSwingAsOwner(midIntent, out int midId, out why), $"A-B-A rig mid-swing: a swing begins ({why})");
                 _clock += 0.1f;
                 Check(loadout.ForceSwitchToSlot(1) && loadout.ForceSwitchToSlot(0) && _rig.ActiveWeapon == _sword, "A-B-A rig mid-swing: forced away and back");
@@ -2142,7 +2178,7 @@ namespace Emberdelve.EditorTools
             // through the authority: a sword hit onto a longer, weaker slow
             ZonesOff();
             {
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 Dummy d = AddSlowable(s, new Vector3(0f, 1.5f, 1.8f));
                 d.Status.enabled = false;
                 d.Status.ApplyStatus(new StatusSpec(StatusKind.Slow, 5f, 0.95f), 9);
@@ -2208,7 +2244,7 @@ namespace Emberdelve.EditorTools
             _toasts.Clear();
             Check(!loadout.SwitchToSlot(0) && !loadout.SwitchWeapon(), "reload lock: SwitchToSlot and SwitchWeapon are refused");
             Check(_toasts.Exists(t => t.Contains("while reloading")), "reload lock: the player is told it is the reload");
-            WeaponData other = UnityEngine.Object.Instantiate(_sword);
+            WeaponData other = UnityEngine.Object.Instantiate(_arcSword);
             _cleanup.Add(other);
             Check(loadout.TryReplaceWeaponSlot(1, other) == null && _rig.ActiveWeapon == _crossbow && loadout.Secondary == _crossbow, "reload lock: replacing the weapon in hand is refused too");
             _rig.Input.SwapPressedOverride = true;
@@ -2346,13 +2382,13 @@ namespace Emberdelve.EditorTools
             if (blade == null) yield break;
             Check(EmberdelveTestCatalog.Adopt(ref _testCatalog, _rig.Inventory, blade, out string adoptReason), "follow-ups: the blade is registered (" + adoptReason + ")");
             Check(_rig.Inventory.TryAdd(blade, 1), "follow-ups: the blade is in the bag");
-            WeaponData other = UnityEngine.Object.Instantiate(_sword);
+            WeaponData other = UnityEngine.Object.Instantiate(_arcSword);
             _cleanup.Add(other);
             int filledBefore = _rig.Equipment.FilledCount; // U5A: the kit items are worn already
 
             _rig.TryGetAimPose(out _, out float yaw, out float pitch);
             float t0 = _clock;
-            MeleeSwingIntent intent = new MeleeSwingIntent(_rig.CombatId, _sword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
+            MeleeSwingIntent intent = new MeleeSwingIntent(_rig.CombatId, _arcSword.weaponId, 0, 0, yaw, pitch, CombatRegistry.NextSequence(_rig.CombatId));
             Check(_authority.TryBeginMeleeSwingAsOwner(intent, out int swingId, out string why), $"follow-ups: a swing begins ({why})");
             foreach (float at in new[] { 0.1f, 0.4f, 0.7f })
             {
@@ -2364,7 +2400,7 @@ namespace Emberdelve.EditorTools
             }
             Check(_rig.Inventory.TotalUnits >= 1, "follow-ups: the blade is still in the bag");
 
-            _clock = t0 + _sword.swingPatterns[0].TotalTime + 0.05f;
+            _clock = t0 + _arcSword.swingPatterns[0].TotalTime + 0.05f;
             _authority.StepSwings();
             bool equippedAfter = _rig.Equipment.TryEquipItem(blade, out string afterWhy);
             Check(equippedAfter && _rig.ActiveWeapon == blade.grantedWeapon, $"follow-ups: after the swing the weapon item equips ({afterWhy})");
@@ -2587,7 +2623,7 @@ namespace Emberdelve.EditorTools
             yield return new WaitForSeconds(0.3f);
             DamageInfo? hit = null;
             float slowed = 0f, slowAtHit = 1f;
-            yield return Cruise(0.9f, 0.55f, v => slowed = v, 0.3f, () => { hit = SwingAtRig(_sword, true); slowAtHit = _rig.Status.SpeedMultiplier; });
+            yield return Cruise(0.9f, 0.55f, v => slowed = v, 0.3f, () => { hit = SwingAtRig(_arcSword, true); slowAtHit = _rig.Status.SpeedMultiplier; });
             Check(hit.HasValue, "hit slow walk: the enemy sword hit the player");
             Near(0.9f, slowAtHit, 1e-4f, "hit slow walk: x0.9 on the player right after the hit");
             Near(_rig.Movement.ResolveWalkSpeed() * (1f - 18f / 300f) * 0.9f, slowed, 0.35f, "hit slow walk: the cruise speed is about the held-weapon walk speed x0.9");
@@ -2616,7 +2652,7 @@ namespace Emberdelve.EditorTools
                 agent.RefreshDormantHitPose(null);
                 agent.transform.position = Origin + new Vector3(0f, 0f, 20f);
                 Physics.SyncTransforms();
-                Scenario s = NewScenario(_sword);
+                Scenario s = NewScenario(_arcSword);
                 s.Who.Eye = agent.transform.position + new Vector3(0f, 1.65f, -1.6f);
                 Check(agent.GetComponentInChildren<HitVolume>(true) != null, "chase: the enemy has hit volumes");
                 float chase = agent.EffectiveChaseSpeed;

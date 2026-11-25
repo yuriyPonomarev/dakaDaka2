@@ -54,6 +54,7 @@ MonoBehaviour:
   projectileSpeed: 54
   projectileRadius: 0.05
   projectileLength: 0.5
+  projectileTrailMaterial: {fileID: 2100000, guid: f7920b32ca5c58345afaa7b757cc9827, type: 2}
   recoveredAmmo: {fileID: 11400000, guid: bdaefd2c952e45e1a8478a4fdfb09b57, type: 2}
   drawTime: 0.3
   minChargeToFire: 0.12
@@ -64,7 +65,7 @@ MonoBehaviour:
   falloffStartRange: 12
   falloffEndRange: 34
   falloffMinScale: 0.5
-  projectileGravity: 9.81
+  projectileGravity: 9.6
   projectileMaxFlightTime: 1.2
   projectileFalloff:
   - time: 0

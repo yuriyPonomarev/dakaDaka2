@@ -75,6 +75,30 @@ Other attack facts:
 - Impact power / own impact resistance: arming sword 3 / 3; short sword 2 / 3; rapier 2 / 3; longsword 4 / 3;
   zweihander 4 / 4; every riposte hit 4 (rapier 2); recurve and longbow arrows 3; crossbow bolt 4.
 
+## Attack directions (source: `Item/Weapon/<Name>/GameplayAbility/GA_<Name>Attack0N`, property `ChangeCrosshairAngle`)
+
+Each attack ability stores the angle (degrees) the crosshair line turns to while the attack runs. Abilities without
+the value are the thrusts (arming sword 3, rapier 1, spear 1-2).
+
+| Weapon | Attack 1 | Attack 2 | Attack 3 | Attack 4 | Riposte 1 / 2 |
+|---|---:|---:|---:|---:|---|
+| ArmingSword | -60 | 230 | none (pierce) | | -115 |
+| ShortSword | -122 | 375 | 340 | | 340 / 180 |
+| Rapier | none | -125 | -90 | 180 | -65 / none |
+| Longsword | none | -177 | -35 | | none / none |
+| Zweihander | -5 | -175 | none | 310 (secondary) | -65 |
+| Falchion | -25 | 160 | -70 | | -65 |
+| WarMaul | 10 | 165 | 10 | | 15 / -100 |
+| BattleAxe | -70 | -98 | -5 (secondary) | | -45 |
+
+INFERENCE (the widget that applies the angle is not decoded): the value is the travel direction of the blade across
+the view, 0 = right to left, -90 = straight down, 180 = left to right. It fits what is known from play: the zweihander
+opens with a flat right-to-left sweep (-5) and answers left to right (-175); most cuts and all ripostes point
+downward. If the sign were the other way round every cut would rise instead of fall.
+
+NOT decoded: the animations themselves (bone tracks), so hand, arm and weapon poses, the bow hold and draw pose and
+camera motion are unknown. They are the game's artwork and are not copied into this project either way.
+
 ## Guard, block reactions, parry
 
 - Guard montage (every weapon): `Default` 0.2 s -> `PreLoop` 0.2 s -> `Loop`; `guardReady` at 0.150 s after the press;

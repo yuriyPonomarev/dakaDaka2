@@ -1,6 +1,6 @@
 # Skeleton archer (Hollow Bowman) - 24 Nov 2026
 
-User request: "make a skeleton archer" (together with restoring raid monsters, done in 572b24e98).
+User request: "make a skeleton archer" (together with restoring raid monsters, done in 5069f94c1).
 
 ## Behaviour
 

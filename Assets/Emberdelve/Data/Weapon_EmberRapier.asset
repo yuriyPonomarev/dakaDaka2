@@ -20,40 +20,44 @@ MonoBehaviour:
   finesse: 1
   windupTime: 0.433
   activeWindow: 0.069
-  recoveryTime: 0.18
+  recoveryTime: 0.112
   cooldown: 0.61
   reach: 2.7
   arcAngle: 70
   hitSphereRadius: 0.45
   swingPatterns:
   - {fileID: 11400000, guid: 08fe873fcd3983f4cb52b3a9dc84da5b, type: 2}
+  - {fileID: 11400000, guid: 5b296cd18ab0ff249991c83c59811e7f, type: 2}
+  - {fileID: 11400000, guid: 2450d616a64f20047bcd2e2ea29ab193, type: 2}
+  - {fileID: 11400000, guid: c874a969e9a6463428c16856c82ba84c, type: 2}
+  - {fileID: 11400000, guid: 3e6f4a4ffea34b04e9d24c0a7012907d, type: 2}
   comboSteps:
   - patternIndex: 0
     damageMultiplier: 1
     windupScale: 1
-    recoveryScale: 0.62222224
+    recoveryScale: 1
     activeScale: 1
     comboWindow: 0.327
-  - patternIndex: 0
+  - patternIndex: 1
     damageMultiplier: 1.05
-    windupScale: 1.5450348
+    windupScale: 1
     recoveryScale: 1
-    activeScale: 1.1449276
+    activeScale: 1
     comboWindow: 0.392
-  - patternIndex: 0
+  - patternIndex: 2
     damageMultiplier: 1.1
-    windupScale: 1.5034642
-    recoveryScale: 1.3333333
-    activeScale: 1.1594203
-    comboWindow: 0.509
-  - patternIndex: 0
-    damageMultiplier: 1.15
-    windupScale: 1.3764435
+    windupScale: 1
     recoveryScale: 1
-    activeScale: 1.2028985
+    activeScale: 1
+    comboWindow: 0.509
+  - patternIndex: 3
+    damageMultiplier: 1.15
+    windupScale: 1
+    recoveryScale: 1
+    activeScale: 1
     comboWindow: 0
   comboWindow: 0.33
-  comboFinisherRecovery: 0.258
+  comboFinisherRecovery: 0
   impactZones:
   - from: 0
     multiplier: 0.7
@@ -76,7 +80,7 @@ MonoBehaviour:
   riposteWindow: 1
   riposteDamageMultiplier: 1.5
   parryBladeRegion: {x: 0, y: 1}
-  riposteSwingPatterns: 0000000000000000
+  riposteSwingPatterns: 0400000000000000
   riposteStrikeGap: 0.1
   twoHanded: 0
   isUnarmed: 0
@@ -85,6 +89,7 @@ MonoBehaviour:
   projectileSpeed: 36
   projectileRadius: 0.07
   projectileLength: 0.9
+  projectileTrailMaterial: {fileID: 0}
   recoveredAmmo: {fileID: 0}
   drawTime: 0.8
   minChargeToFire: 0.18

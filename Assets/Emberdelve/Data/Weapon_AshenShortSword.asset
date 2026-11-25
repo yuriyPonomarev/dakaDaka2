@@ -18,30 +18,33 @@ MonoBehaviour:
   baseDamage: 26
   damageType: 0
   finesse: 0
-  windupTime: 0.399
-  activeWindow: 0.204
-  recoveryTime: 0.234
+  windupTime: 0.513
+  activeWindow: 0.12
+  recoveryTime: 0.1
   cooldown: 0.73
   reach: 2.3
   arcAngle: 120
   hitSphereRadius: 0.6
   swingPatterns:
-  - {fileID: 11400000, guid: f92bd604f752381419b12cc34e62da40, type: 2}
-  - {fileID: 11400000, guid: 8fbc6866b582f2c49b352eb2f0940258, type: 2}
+  - {fileID: 11400000, guid: 0787999f376edc94f8eeaac80b2ad9af, type: 2}
+  - {fileID: 11400000, guid: 71dd5394f51dec044b627c9f30a61d99, type: 2}
+  - {fileID: 11400000, guid: 518cd21a59254dae9ac9523acd41fbe7, type: 2}
+  - {fileID: 11400000, guid: 5390bcbea8819f7409ac04c792d02b18, type: 2}
+  - {fileID: 11400000, guid: 71f9db021904d3a4f8f91e69a95d094c, type: 2}
   - {fileID: 11400000, guid: b4dfd12693cf8af43813a792e31eb4f7, type: 2}
-  - {fileID: 11400000, guid: 820063adc0321f14c9b4205fdd4441de, type: 2}
+  - {fileID: 11400000, guid: 14969ce4516f54f4eb9fbfebf0cd4943, type: 2}
   comboSteps:
   - patternIndex: 0
     damageMultiplier: 1
-    windupScale: 1.2857144
-    recoveryScale: 0.42735043
-    activeScale: 0.5882353
+    windupScale: 1
+    recoveryScale: 1
+    activeScale: 1
     comboWindow: 0.357
   - patternIndex: 1
     damageMultiplier: 1.05
-    windupScale: 1.25
-    recoveryScale: 0.53191495
-    activeScale: 0.84713376
+    windupScale: 1
+    recoveryScale: 1
+    activeScale: 1
     comboWindow: 0.492
   - patternIndex: 2
     damageMultiplier: 1.1
@@ -73,7 +76,7 @@ MonoBehaviour:
   riposteWindow: 1
   riposteDamageMultiplier: 1.5
   parryBladeRegion: {x: 0, y: 1}
-  riposteSwingPatterns: 0300000001000000
+  riposteSwingPatterns: 0300000004000000
   riposteStrikeGap: 0.1
   twoHanded: 0
   isUnarmed: 0
@@ -82,6 +85,7 @@ MonoBehaviour:
   projectileSpeed: 36
   projectileRadius: 0.07
   projectileLength: 0.9
+  projectileTrailMaterial: {fileID: 0}
   recoveredAmmo: {fileID: 0}
   drawTime: 0.8
   minChargeToFire: 0.18

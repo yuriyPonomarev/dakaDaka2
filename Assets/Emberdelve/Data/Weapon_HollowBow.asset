@@ -51,9 +51,10 @@ MonoBehaviour:
   isUnarmed: 0
   ammoDisplayName: Arrows
   rangedRange: 46
-  projectileSpeed: 42
+  projectileSpeed: 38
   projectileRadius: 0.05
   projectileLength: 0.85
+  projectileTrailMaterial: {fileID: 2100000, guid: f7920b32ca5c58345afaa7b757cc9827, type: 2}
   recoveredAmmo: {fileID: 11400000, guid: 186aae3048b949b589180ae5c174f61c, type: 2}
   drawTime: 1.5
   minChargeToFire: 0.2

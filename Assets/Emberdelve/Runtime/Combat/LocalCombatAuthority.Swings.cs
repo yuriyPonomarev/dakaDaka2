@@ -1017,11 +1017,9 @@ namespace Emberdelve.Combat
                 }
                 rec.Stopped = true;
                 rec.StopTs = sampleTime;
-                // A wall stop only cuts the swing short with a recoil: the combo survives, and its window restarts when the recoil ends.
-                if (_chains.TryGetValue(rec.InstigatorId, out ChainState kept) && kept.Weapon == rec.Weapon)
-                {
-                    kept.WindowEnd = rec.StartTime + sampleTime + rec.Timing.WallRecoil + rec.Weapon.ComboWindowAfter(rec.ComboStep);
-                }
+                // A swing that ends in an obstacle ends the combo (user decision 25 Nov 2026, as in the reference: the stuck attack
+                // is cut short with its recoil and the next attack starts the chain again).
+                _chains.Remove(rec.InstigatorId);
                 rec.WallSample = sample;
                 rec.WallPoint = wallPoint;
                 rec.WallNormal = wallNormal;
@@ -1111,6 +1109,9 @@ namespace Emberdelve.Combat
             rec.Hit.Add(target.CombatId);
             target.ApplyDamage(damage);
             bool parried = NoteMeleeResult(rec.InstigatorId, target, damage);
+            // A hit that a guard took ends the attacker's combo, whichever way the block was resolved (a physical guard contact
+            // also stops the sweep; a block without one lets the sweep finish but not the chain).
+            if (damage.Blocked) _chains.Remove(rec.InstigatorId);
             if (parried)
             {
                 float deflected = rec.Weapon != null && rec.Weapon.twoHanded ? FlowTuning.deflectedTwoHandedSeconds : FlowTuning.deflectedSeconds;
@@ -1144,7 +1145,7 @@ namespace Emberdelve.Combat
             rec.Pending.Clear();
 
             // A swing that did not complete (the wielder died or left, the weapon was swapped) ends the combo. A wall stop does not.
-            if (reason != SwingEndReason.Completed && reason != SwingEndReason.WallStop) _chains.Remove(rec.InstigatorId);
+            if (reason != SwingEndReason.Completed) _chains.Remove(rec.InstigatorId);
 
             _activeSwings.Remove(rec);
             if (_swingByInstigator.TryGetValue(rec.InstigatorId, out SwingRecord current) && current == rec)

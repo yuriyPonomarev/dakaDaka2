@@ -34,4 +34,4 @@ ActionSpeed follow-up (coordinator): "a slow actor legitimately needs longer tha
 
 Run 20261124-183929-950: SweptMelee 732/0, CombatFlow 589/0, Riposte 144/0, BladeDefense 361/0, CombatData 22/0, D3Content 53/0, Hands 92/0, CombatAuthority 51/0, TurnCeiling 122/0, DrawSpeed 253/0, ReloadSpeed 171/0, EnemySweep 194/0, NetCombat 397/0; RuntimeSmokeTest.RunCombatFlow 264/2 (baseline HUD passives / skill cooldown only). ActionSpeed 196/0 after the follow-up (run 20261124-184927-727).
 
-History note: commit 830c64fb0 briefly regenerated the Data from the stale library (reverting the tuning); it was reverted in 063119fa3.
+History note: commit dbae7c9fd briefly regenerated the Data from the stale library (reverting the tuning); it was reverted in 571eb7859.

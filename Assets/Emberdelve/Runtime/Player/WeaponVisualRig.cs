@@ -360,6 +360,16 @@ namespace Emberdelve.Player
             BeginRelease();
         }
 
+        /// <summary>The swing being shown and how far into it (a held chain stays at the strike's end). False between swings and in a recoil.</summary>
+        public bool TryGetSwing(out SwingPatternData pattern, out SwingTiming timing, out float time)
+        {
+            pattern = _pattern; timing = _timing; time = 0f;
+            if (_pattern == null) return false;
+            if (_swinging) { time = Time.time - _swingStart; return true; }
+            if (_holding && !_guardHeld) { time = _timing.ActiveEnd; return true; }
+            return false;
+        }
+
         public static void SampleRecoil(SwingPatternData pattern, float stopFraction, float progress,
             bool guarding, out Vector3 position, out Quaternion rotation, bool twoHanded = false)
         {
@@ -618,6 +628,11 @@ namespace Emberdelve.Player
 
     public static class WeaponVisualBuilder
     {
+        // First-person bow at rest: right of the view centre, below it and canted (top limb to the right), so the middle of the screen stays
+        // clear for aiming. It used to stand upright through the centre (review 25 Nov 2026).
+        public static readonly Vector3 BowRestPosition = new Vector3(.09f, -.10f, .72f);
+        public static readonly Quaternion BowRestRotation = Quaternion.Euler(0f, -3f, -17f);
+
         public static WeaponVisualRig Build(WeaponData weapon, Transform parent, Transform aimFrame = null)
         {
             if (weapon == null || parent == null) return null;
@@ -631,10 +646,11 @@ namespace Emberdelve.Player
             // depth to avoid an oversized stock end. Its muzzle remains attached to this
             // same physical model on owner and authority; raised guard has its own pose.
             root.transform.localPosition = !ranged ? GuardBladePose.RootRestPosition
-                : weapon.weaponId == "hollow_bow" ? new Vector3(-.18f, -.13f, .75f)
+                : weapon.weaponId == "hollow_bow" ? BowRestPosition
                 : weapon.weaponId == "ember_crossbow" ? CrossbowGuardPose.ReadyPosition
                 : new Vector3(.20f, -.17f, .30f);
-            root.transform.localRotation = ranged ? (weapon.weaponId == "ember_crossbow" ? CrossbowGuardPose.ReadyRotation : Quaternion.Euler(0f, -8f, 0f)) : WeaponVisualRig.ReadyRotation;
+            root.transform.localRotation = ranged ? (weapon.weaponId == "ember_crossbow" ? CrossbowGuardPose.ReadyRotation
+                : weapon.weaponId == "hollow_bow" ? BowRestRotation : Quaternion.Euler(0f, -8f, 0f)) : WeaponVisualRig.ReadyRotation;
             if (ignoreLayer >= 0) root.layer = ignoreLayer;
 
             Transform muzzle;
@@ -667,7 +683,7 @@ namespace Emberdelve.Player
                 }
                 else
                 {
-                    BowPresentation.Build(root.transform, weapon);
+                    BowPresentation.Build(root.transform, weapon).SetDrawShape(BowPresentation.FirstPersonDrawSide, BowPresentation.FirstPersonDrawDepth);
                     muzzle = BuildPart(root.transform, "Bow_Muzzle", new Vector3(0f, 0f, .30f), Vector3.one * .001f, Quaternion.identity, null);
                 }
             }
@@ -799,9 +815,31 @@ namespace Emberdelve.Player
             gameObject.SetActive(false);
         }
 
+        private Transform _space;
+
+        /// <summary>
+        /// Keeps the ribbon in <paramref name="space"/> (points are still given in world space). The player's own stroke is kept
+        /// in the camera's space: it moves and turns with the player, like the arms. In world space it stayed where the swing
+        /// began while the player walked or turned (user recording of 25 Nov 2026, 15:05). Null = world space.
+        /// </summary>
+        public void SetSpace(Transform space)
+        {
+            if (_space == space && transform.parent == space) return;
+            _space = space;
+            transform.SetParent(space, false);
+            transform.localPosition = Vector3.zero;
+            transform.localRotation = Quaternion.identity;
+            transform.localScale = Vector3.one;
+        }
+
         public void Add(Vector3 basePoint, Vector3 tipPoint)
         {
             if (!_open || _count >= MaxPoints) return;
+            if (_space != null)
+            {
+                basePoint = transform.InverseTransformPoint(basePoint);
+                tipPoint = transform.InverseTransformPoint(tipPoint);
+            }
 
             _vertices[_count * 2] = basePoint;
             _vertices[_count * 2 + 1] = tipPoint;

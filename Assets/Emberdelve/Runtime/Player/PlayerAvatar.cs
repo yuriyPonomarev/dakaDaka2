@@ -27,6 +27,9 @@ namespace Emberdelve.Player
         private bool _hasLocoScale;
         private Vector3 _velocity;
         private float _bodyTurn;
+        private int _armLayer=-1;
+        private string _armState;
+        private float _armWeight;
         private static readonly int LocoScaleHash=Animator.StringToHash(LocomotionGait.ScaleParameter);
         public void PresentArmor(string head, string chest, string legs, string hands, string feet, string back)
         {
@@ -67,6 +70,7 @@ namespace Emberdelve.Player
             if(_weapons==null) _weapons=gameObject.AddComponent<RemoteWeaponPresentation>();
             _weapons.Bind(_rig,_model);
             _lastPosition=transform.position; _state=null;
+            _armLayer=_animator!=null ? _animator.GetLayerIndex(AvatarArms.Layer) : -1; _armState=null; _armWeight=0f;
         }
         private void LateUpdate()
         {
@@ -84,8 +88,19 @@ namespace Emberdelve.Player
             bool fighting=_remoteGuard || _rig.IsGuarding || _remoteSwing;
             // Speed-matched gait (LocomotionGait): run from 1.9 m/s instead of walking a 1 m/s loop at full player speed, the loop's rate follows
             // the ground speed (backward for a retreat), and the body turns toward a sideways move unless it is guarding or swinging.
-            string next=_rig.IsDead ? "Death" : (_remoteGuard || _rig.IsGuarding) ? "Block" : _remoteSwing ? "Idle"
-                : speed>LocomotionGait.RunFrom ? "Run" : speed>LocomotionGait.StandBelow ? "Walk" : "Idle";
+            bool guarding=_remoteGuard || _rig.IsGuarding;
+            string gait=speed>LocomotionGait.RunFrom ? "Run" : speed>LocomotionGait.StandBelow ? "Walk" : "Idle";
+            // With the arm layer the legs keep their gait under a guard or a strike (they used to stand still and slide); the arms
+            // take the weapon stance or the guard from the layer. A controller without it keeps the whole-body states.
+            string next=_rig.IsDead ? "Death" : _armLayer>=0 ? gait : guarding ? "Block" : _remoteSwing ? "Idle" : gait;
+            if(_armLayer>=0)
+            {
+                string arms=_rig.IsDead || _weapons==null || !_weapons.HoldsMelee ? AvatarArms.Free
+                    : guarding ? (_weapons.HoldsShield ? AvatarArms.ShieldGuard : AvatarArms.Guard) : AvatarArms.Armed;
+                if(arms!=_armState) { _armState=arms; _animator.CrossFadeInFixedTime(arms,AvatarArms.Fade,_armLayer); }
+                _armWeight=Mathf.MoveTowards(_armWeight,arms==AvatarArms.Free ? 0f : 1f,dt*AvatarArms.WeightRate);
+                _animator.SetLayerWeight(_armLayer,_armWeight);
+            }
             if(next!=_state)
             {
                 _state=next;
