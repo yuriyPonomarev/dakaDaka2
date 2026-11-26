@@ -15,6 +15,7 @@ namespace Emberdelve.EditorTools
     {
         public const string GroupName = "Layout_Lighting";
         const string CandleName = "Authored_Candlelight";
+        const int MaxSconces = 10;
         const string SconcePath = MeshyMapDressing.Folder + "/WallTorch/WallSconce.prefab";
 
         public static void Apply(GameObject room)
@@ -30,6 +31,9 @@ namespace Emberdelve.EditorTools
 
             foreach(Transform shelf in furniture)
                 if(shelf.name=="Floor_wooden_bookshelf_worn") LightShelf(shelf);
+            // Placeholder props (DungeonPrimitiveProps) mark their flame with an empty LightSocket.
+            foreach (var socket in furniture.GetComponentsInChildren<Transform>().Where(t => t.name == "LightSocket").ToArray())
+                LightSocket(socket);
 
             // One source on the closed back wall of each side chamber, aimed into it.
             var mounts = new List<Vector3>();
@@ -51,6 +55,15 @@ namespace Emberdelve.EditorTools
                 Mount(room, group, origin, new[] { -item.forward, item.right, -item.right, item.forward }, 3.5f, mounts);
                 if (mounts.Count >= 6) break;
             }
+            // Perimeter lanterns: the reference keeps a wall light every few metres, so walk
+            // each outer wall and mount where masonry supports it (spacing and door checks in Mount).
+            foreach (float along in new[] { -12f, -6.5f, 6.5f, 12f })
+                foreach (var (inward, axis) in new[] { (Vector3.forward, Vector3.right), (Vector3.back, Vector3.right), (Vector3.right, Vector3.forward), (Vector3.left, Vector3.forward) })
+                {
+                    if (mounts.Count >= MaxSconces) break;
+                    Vector3 local = -inward * 14.5f + axis * along + Vector3.up * 2.3f;
+                    Mount(room, group, room.transform.TransformPoint(local), new[] { room.transform.TransformDirection(-inward) }, 4f, mounts);
+                }
             if(room.GetComponent<Emberdelve.Level.DungeonModuleDefinition>().Kind==Emberdelve.Level.DungeonModuleKind.Shrine)
                 foreach(float side in new[]{-1f,1f})
                     if(!Mount(room,group,room.transform.TransformPoint(new Vector3(side*8,2.25f,8)),new[]{room.transform.right*-side},2,mounts))
@@ -90,31 +103,46 @@ namespace Emberdelve.EditorTools
             // Keep the anchor at the same physical location as the model, with unit scale.
             var pose=model.position;anchor.position=seat;model.position=pose;
             LightCandle(anchor);
-            var light=anchor.Find(CandleName).GetComponent<Light>();light.intensity=.65f;light.range=2.8f;
+            var light=anchor.Find(CandleName).GetComponent<Light>();
             ConfigureFlicker(light,.065f,3.1f);
+            DungeonLightPalette.Configure(light,DungeonLightPalette.Kind.ShelfCandle);
         }
 
-        static void LightCandle(Transform candle)
+        static void LightSocket(Transform socket)
         {
-            var old = candle.Find(CandleName);
+            bool brazier = socket.GetComponentsInParent<Transform>().Any(t => t.name.Contains("Brazier"));
+            string name = brazier ? DungeonLightPalette.SocketBrazierName : DungeonLightPalette.SocketCandlesName;
+            var old = socket.Find(name);
             if (old != null) Object.DestroyImmediate(old.gameObject);
-            var b = BoundsOf(candle.Find("Model"));
-            var lightRoot = new GameObject(CandleName).transform;
-            lightRoot.SetParent(candle, false);
-            lightRoot.position = new Vector3(b.center.x, b.max.y + .035f, b.center.z);
+            var lightRoot = new GameObject(name).transform;
+            lightRoot.SetParent(socket, false);
             var light = lightRoot.gameObject.AddComponent<Light>();
             light.type = LightType.Point;
-            light.color = new Color(1, .72f, .42f);
-            light.intensity = 1.15f;
-            light.range = 3.6f;
-            light.shadows = LightShadows.None;
-            ConfigureFlicker(light, .07f, 3.2f);
-            // Existing appearance setup respects this authored child; a candle does not
-            // receive the generic 1.4m torch haze sphere at runtime.
+            ConfigureFlicker(light, brazier ? .12f : .07f, brazier ? 3.6f : 3.2f);
+            DungeonLightPalette.Configure(light, brazier ? DungeonLightPalette.Kind.SocketBrazier : DungeonLightPalette.Kind.SocketCandles);
+            // Authored child: no generic 1.4 m runtime haze ball around this flame.
             new GameObject("LocalLightHaze").transform.SetParent(lightRoot, false);
+            var flame = Flame(lightRoot, "Socket_Flame");
+            if (brazier)
+            {
+                var ps = flame.GetComponent<ParticleSystem>();
+                var main = ps.main;
+                main.startLifetime = new ParticleSystem.MinMaxCurve(.35f, .6f);
+                main.startSpeed = new ParticleSystem.MinMaxCurve(.25f, .45f);
+                main.startSize = new ParticleSystem.MinMaxCurve(.14f, .26f);
+                main.maxParticles = 40;
+                var emission = ps.emission; emission.rateOverTime = 45;
+                var shape = ps.shape; shape.radius = .16f; shape.angle = 8;
+                var noise = ps.noise; noise.strength = .06f; noise.frequency = .9f;
+            }
+        }
+
+        // The wall sconce's flame particle, stripped of its light and children, sized as a candle.
+        static Transform Flame(Transform parent, string name)
+        {
             var source = AssetDatabase.LoadAssetAtPath<GameObject>(SconcePath).transform.Find("Flame");
-            var flame = Object.Instantiate(source.gameObject, lightRoot).transform;
-            flame.name = "Candle_Flame";
+            var flame = Object.Instantiate(source.gameObject, parent).transform;
+            flame.name = name;
             flame.localPosition = new Vector3(0, -.025f, 0);
             flame.localScale = Vector3.one;
             foreach (var inherited in flame.GetComponents<Light>()) Object.DestroyImmediate(inherited);
@@ -131,15 +159,34 @@ namespace Emberdelve.EditorTools
             var emission=ps.emission; emission.rateOverTime=28;
             var shape=ps.shape;shape.radius=.003f;shape.angle=3;
             var noise=ps.noise;noise.strength=.008f;noise.frequency=1.2f;
+            return flame;
+        }
+
+        static void LightCandle(Transform candle)
+        {
+            var old = candle.Find(CandleName);
+            if (old != null) Object.DestroyImmediate(old.gameObject);
+            var b = BoundsOf(candle.Find("Model"));
+            var lightRoot = new GameObject(CandleName).transform;
+            lightRoot.SetParent(candle, false);
+            lightRoot.position = new Vector3(b.center.x, b.max.y + .035f, b.center.z);
+            var light = lightRoot.gameObject.AddComponent<Light>();
+            ConfigureFlicker(light, .07f, 3.2f);
+            DungeonLightPalette.Configure(light, DungeonLightPalette.Kind.Candle);
+            // Existing appearance setup respects this authored child; a candle does not
+            // receive the generic 1.4m torch haze sphere at runtime.
+            new GameObject("LocalLightHaze").transform.SetParent(lightRoot, false);
+            Flame(lightRoot, "Candle_Flame");
         }
 
         static bool Mount(GameObject room, Transform group, Vector3 origin, Vector3[] directions, float reach, List<Vector3> mounts)
         {
-            var walls = room.GetComponentsInChildren<BoxCollider>(true).Where(c => !c.isTrigger && c.enabled
+            // Ruin walls are mesh colliders; sconces may hang on any solid wall collider.
+            var walls = room.GetComponentsInChildren<Collider>(true).Where(c => (c is BoxCollider || c is MeshCollider) && !c.isTrigger && c.enabled
                 && c.bounds.size.y >= 2.8f && !c.transform.IsChildOf(room.transform.Find(DungeonLayoutFurnishing.GroupName))).ToArray();
             foreach (var direction in directions)
             {
-                RaycastHit nearest=default; BoxCollider support=null; float distance=reach;
+                RaycastHit nearest=default; Collider support=null; float distance=reach;
                 foreach (var wall in walls)
                     if (wall.Raycast(new Ray(origin,direction),out var hit,reach) && hit.distance>.15f && hit.distance<distance)
                     { nearest=hit;support=wall;distance=hit.distance; }
@@ -157,8 +204,6 @@ namespace Emberdelve.EditorTools
                 { Object.DestroyImmediate(sconce.gameObject);continue; }
                 var light=sconce.GetComponentInChildren<Light>();
                 light.type=LightType.Point;
-                light.color=new Color(1,.67f,.36f);
-                light.intensity=1.8f;light.range=6f;
                 light.spotAngle=145;light.innerSpotAngle=100;
                 light.transform.rotation=Quaternion.LookRotation((sconce.forward-Vector3.up*.55f).normalized,Vector3.up);
                 // Rotation belongs to the light, not the flame particle cone.
@@ -173,19 +218,10 @@ namespace Emberdelve.EditorTools
                 Object.DestroyImmediate(particles);
                 foreach(Transform child in light.transform.Cast<Transform>().ToArray())
                     if(child!=flameVisual)Object.DestroyImmediate(child.gameObject);
-                light.shadows=LightShadows.Soft;
-                var urp=light.gameObject.AddComponent<UniversalAdditionalLightData>();
-                var urpSettings=new SerializedObject(urp);
-                urpSettings.FindProperty("m_AdditionalLightsShadowResolutionTier").intValue=UniversalAdditionalLightData.AdditionalLightsShadowResolutionTierCustom;
-                urpSettings.ApplyModifiedPropertiesWithoutUndo();
-                // URP's custom tier reads shadowResolution as a pixel count (its own
-                // Light inspector uses the same representation), not shadowCustomResolution.
-                var lightSettings=new SerializedObject(light);
-                lightSettings.FindProperty("m_Shadows.m_Resolution").intValue=128;
-                lightSettings.ApplyModifiedPropertiesWithoutUndo();
-                urp.usePipelineSettings=false;
-                light.shadowCustomResolution=128;light.shadowBias=.025f;light.shadowNormalBias=.12f;light.shadowNearPlane=.08f;
+                // Palette adds the 128-texel custom-tier wall shadow (URP reads the custom
+                // tier from m_Shadows.m_Resolution as a pixel count, not shadowCustomResolution).
                 ConfigureFlicker(light,.10f,4.1f);
+                DungeonLightPalette.Configure(light,DungeonLightPalette.Kind.Torch);
                 mounts.Add(nearest.point);
                 return true;
             }
@@ -222,7 +258,7 @@ namespace Emberdelve.EditorTools
             var group=room.transform.Find(GroupName);
             if(group==null || group.GetComponentsInChildren<Collider>().Length!=0)throw new InvalidOperationException("Lighting must not add physical obstacles");
             foreach(var light in group.GetComponentsInChildren<Light>())
-                if(light.type!=LightType.Point || light.shadows==LightShadows.None || light.range>6.1f
+                if(light.type!=LightType.Point || light.shadows==LightShadows.None || light.range>8.1f
                     || light.GetComponent<UniversalAdditionalLightData>()?.additionalLightsShadowResolutionTier!=UniversalAdditionalLightData.AdditionalLightsShadowResolutionTierCustom || (int)light.shadowResolution!=128)
                     throw new InvalidOperationException("Sconces need bounded, wall-occluded light");
             foreach(var candle in room.GetComponentsInChildren<Transform>().Where(t=>t.name=="Top_wooden_candlestick" || t.name=="Shelf_Candlestick"))

@@ -133,7 +133,7 @@ namespace Emberdelve.EditorTools
             Group(lever, "SecretChestAnchor", new Vector3(4, -1.25f, 6)); // room-local (15,0,15), exact grid centre
             DungeonRoomProps.Model(chamber, "wooden_crate_02", new Vector3(13, 0, 16.5f), .65f, 8);
             var lamp = Group(chamber, "Cache_Lamp", new Vector3(14, 2.8f, 15.5f)).gameObject.AddComponent<Light>();
-            lamp.type = LightType.Point; lamp.color = new Color(1, .65f, .32f); lamp.intensity = 4; lamp.range = 6;
+            DungeonLightPalette.Configure(lamp, DungeonLightPalette.Kind.CacheLamp);
         }
 
         private static void Stairs(Transform root, string name, Vector3 basePosition, float yaw, float height, float width, Material material)

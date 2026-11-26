@@ -1,12 +1,16 @@
 # DakaDaka - current work
 
-Updated 24 November 2026. The ONLY development checkout is `C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff`. Legacy `../DakaDaka` is read-only; `../DakaDaka_ci` is the disposable verification mirror. Keep the user's primary Editor open. Reviews use isolated saves and owned mirror Editors; record/deliver MP4 with game audio.
+Updated 26 November 2026. The ONLY development checkout is `C:/Users/yrapa/OneDrive/Desktop/Unity_DakaDaka/DakaDaka_clean_handoff`. Legacy `../DakaDaka` is read-only; `../DakaDaka_ci` is the disposable verification mirror. Keep the user's primary Editor open. Reviews use isolated saves and owned mirror Editors; record/deliver MP4 with game audio.
 
 ## Completed slices (24 Nov)
 
 - **Skeleton archer "Hollow Bowman"** - [SKELETON_ARCHER_20261124](Tasks/SKELETON_ARCHER_20261124.md). Ranged undead: keeps 6-14 m with line of sight, backs off (1.5 s flee budget, then point blank), visible 1.1 s draw + aim strip, real server arrow through `LaunchProjectile` (16 Pierce, 30 m/s, gravity, ballistic aim). Draw bound to its target; refused when aimed > 40 deg off facing. Procedural bow (`EnemyBowRig`) and a generated two-arm IK bow clip. Two layout records (floor 1 created by the modular assembler when the scene authors monsters; floors 2-3 by `FloorContentSpawner`). Presentation wire v6 (ArcherKind), protocol 49; enemy arrows now replicate to clients. Brain fix: a windup ends when its target dies or leaves.
 - **Speed-matched locomotion** - [LOCOMOTION_GAIT_20261124](Tasks/LOCOMOTION_GAIT_20261124.md). Loops play at the measured ground speed (per-model strides from planted feet), reverse for a retreat, the body turns toward sideways motion; monsters (server + client proxies) and other players / rival bots (`PlayerAvatar`). Planted-foot slide: Servitor chase 2.20 -> 0.46 m/s, rival bot at 3 m/s 1.89 -> 0.48, archer backing off 6.55 -> 0.41. Minion walk/run now Walk_Loop / Jog_Fwd_Loop.
 - Earlier today: Servitor overhead attack ([SKELETON_OVERHEAD_20261124](Tasks/SKELETON_OVERHEAD_20261124.md)), sword combo data canonical ([SWORD_DATA_CANONICAL_20261124](Tasks/SWORD_DATA_CANONICAL_20261124.md)), raid AI population restored.
+
+## Dungeon look: light + module furnishing (26 Nov, UNCOMMITTED, awaiting in-game review)
+
+[DUNGEON_LOOK_20261126](Tasks/DUNGEON_LOOK_20261126.md). Target = the user's recording `Videos/Captures/Dark and Darker   2026-11-25 23-39-37.mp4` (golden pools, cool dark night). One fire palette (`DungeonLightPalette`): the old 22-intensity unshadowed orange braziers are now local and wall-occluded; up to 10 wall lanterns per room; the entry environment adopts the scene moon and sets a cool fill through a Custom ambient probe (the Trilight change never reached surfaces); softer grade. 24 primitive placeholder props (`PH_*`, `DungeonPrimitiveProps`) and per-kind furnishing (guard post, barracks, library, prison, catacomb, pit, chapel, treasury, ritual, ruin; 32-43 items per room) with a runtime-nav contract check in the furnisher. Gates: run `Logs/runs/20261126-011821-541` NetMovement 198/0, NetFinal 172/0, NetDoor 49/0, Visual 216/0, EditMode 10 failures outside this slice. Not reviewed in Play; floors 2-3 still darker than the reference.
 
 ## Committed, awaiting in-game review: Dark and Darker combat port, passes 1-2 (separate session, 24 Nov)
 
@@ -38,6 +42,6 @@ Lighting 55c5379ed, furnishing 6f00729f8, layouts b59f72dc5. `EmberdelveAssetLib
 
 ## Next three actions
 
-1. User plays a raid: archers (range, damage, retreat), monster and bot movement, Servitor overhead, and the reference weapon timings (sword chains, rapier, two-hander, 1.5 s bow draw); accept or adjust.
+1. User plays a raid and judges the new dungeon light and furnishing against the reference recording (and the earlier items: archers (range, damage, retreat), monster and bot movement, Servitor overhead, and the reference weapon timings (sword chains, rapier, two-hander, 1.5 s bow draw)); accept or adjust.
 2. Address concrete feedback with focused gates; revisit remodelling only if the models themselves look wrong after the gait fix.
 3. Resume authorized unfinished gameplay work from ROADMAP.

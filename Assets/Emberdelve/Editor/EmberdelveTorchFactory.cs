@@ -62,12 +62,8 @@ namespace Emberdelve.EditorTools
             var flame = BuildFlame(sconce.transform, material, flamePosition);
             flame.localScale = Vector3.one * .75f;
             var light = flame.gameObject.AddComponent<Light>();
-            light.type = LightType.Point;
-            light.color = new Color(1f, .61f, .29f);
-            light.range = 5f;
-            light.intensity = 2f;
-            light.shadows = LightShadows.None;
             flame.gameObject.AddComponent<TorchFlicker>();
+            DungeonLightPalette.Configure(light, DungeonLightPalette.Kind.WallTorch);
             return sconce;
         }
 

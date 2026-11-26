@@ -230,10 +230,13 @@ namespace Emberdelve.EditorTools
             bloom.highQualityFiltering.Override(true);
 
             ColorAdjustments grade = GetOrAdd<ColorAdjustments>(profile);
+            // Dark-but-readable pass (25 Nov), matched to the user's reference recording:
+            // golden fire pools against a cool night. The old strong warm filter plus
+            // contrast turned every pool red-orange; keep moderate contrast and saturation.
             grade.postExposure.Override(0.6f);
-            grade.contrast.Override(6f);
-            grade.saturation.Override(-12f);
-            grade.colorFilter.Override(new Color(1f, 0.93f, 0.84f, 1f));
+            grade.contrast.Override(4f);
+            grade.saturation.Override(-8f);
+            grade.colorFilter.Override(new Color(1f, 0.98f, 0.95f, 1f));
 
             Vignette vignette = GetOrAdd<Vignette>(profile);
             vignette.color.Override(Color.black);
