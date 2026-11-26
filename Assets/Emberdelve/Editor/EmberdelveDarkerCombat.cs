@@ -150,21 +150,25 @@ namespace Emberdelve.EditorTools
             WeaponData great = Weapon("Weapon_TwoHandedSword");
             if (great != null && greatLR != null && greatOverhead != null && greatThrust != null && greatRiposte != null)
             {
-                // Reference Longsword (two-handed, ripostes): attack 1 has no direction value, attack 2 is -177 (flat, left to
-                // right), attack 3 is -35 (to the left and down). An attack without the value is a thrust by the rule above, and
+                // Reference Longsword (two-handed, ripostes): attack 1 has no direction value, attack 2 is -177 (a level line),
+                // attack 3 is -35 (to the left and down). An attack without the value is a thrust by the rule above, and
                 // the user asked for a thrust as the opening attack (25 Nov 2026): the chain opens with the thrust, on attack 1's
-                // timing. The right-to-left slash keeps the same timing and stays in the list outside the chain (index 1).
+                // timing.
                 // Move multipliers are the zweihander's: the longsword rows did not decode.
                 Time(greatThrust, 0.932f, 0.229f, 0.283f, 0.825f, 0.65f);    // attack 1: hit 0.932-1.161, transition 1.444
-                Time(greatRL, 0.932f, 0.229f, 0.283f, 0.825f, 0.65f);
-                Time(greatLR, 0.679f, 0.234f, 0.054f, 0.825f, 0.65f);        // attack 2: hit 0.679-0.913, transition 0.967
+                // Attack 2 goes from the right shoulder to the LEFT: seen in the user's recording of the reference two-handed sword
+                // (25 Nov 2026, 23:35). The crosshair angle (-177) is only the tilt of a line and does not say which way along it the
+                // blade travels; the earlier reading "left to right" was wrong for this attack. The left-to-right slash keeps the same
+                // timing and stays in the list outside the chain (index 0).
+                Time(greatRL, 0.679f, 0.234f, 0.054f, 0.825f, 0.65f);        // attack 2: hit 0.679-0.913, transition 0.967
+                Time(greatLR, 0.679f, 0.234f, 0.054f, 0.825f, 0.65f);
                 SwingPatternData cut3 = Cut(great, "Pattern_GreatCut3", "great_cut_3", greatRL, -35f, true, 3, 0.757f, 0.233f, 0.727f, 0.825f, 0.65f);   // attack 3: hit 0.757-0.990, blend out at 1.717
                 Time(greatRiposte, 0.333f, 0.167f, 0.333f, 0.85f, 0.85f);    // riposte 1: hit 0.333-0.500, transition 0.833
                 Assign(great, greatLR, greatRL, greatOverhead, greatThrust, greatRiposte, cut3);
                 great.comboSteps = new[]
                 {
                     new ComboStep(3, 1.00f, comboWindow: 0.733f),   // the thrust; 1.894 - 1.161
-                    new ComboStep(0, 1.05f, comboWindow: 0.392f),   // 1.305 - 0.913
+                    new ComboStep(1, 1.05f, comboWindow: 0.392f),   // the right-to-left slash; 1.305 - 0.913
                     new ComboStep(5, 1.10f)
                 };
                 great.comboWindow = 0.39f;               // default for a step without its own window

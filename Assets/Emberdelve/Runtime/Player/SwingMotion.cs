@@ -34,6 +34,10 @@ namespace Emberdelve.Player
             public Vector3 CockPoint, CockOffSide, CockAbove;
             /// <summary>A thrust: the hand drawn back beside the body, and at full extension (moved with the thrust's own direction).</summary>
             public Vector3 ThrustCock, ThrustEnd;
+            /// <summary>The player's own view of a weapon held in both hands: its own motion (<see cref="SampleBothHands"/>).</summary>
+            public bool BothHandsInView;
+            /// <summary>Shift of that motion for this viewer (a body holds the hands lower than the camera sees them).</summary>
+            public Vector3 BothHandsOffset;
             /// <summary>How far below the eye line the point of a thrust is aimed (a body thrusts from the chest, not from the eyes).</summary>
             public float ThrustDrop;
         }
@@ -47,6 +51,7 @@ namespace Emberdelve.Player
         /// <summary>The player's own view with both hands on the handle: a narrower path; drawn back, the hands wait low on the weapon side, below the picture (up beside the head the second forearm lies across the whole view).</summary>
         public static readonly Frame FirstPersonTwoHanded = new Frame
         { Centre = new Vector3(0.10f, -0.02f, 0.32f), HalfLength = 0.16f, HalfHeight = 0.16f, Bulge = 0.07f, CockDepth = 0.06f, CockRise = 0.22f, CockOut = 0.45f, ThroughDepth = 0.10f,
+          BothHandsInView = true,
           CockBesideCamera = true, CockPoint = new Vector3(0.34f, -0.36f, 0.24f), CockOffSide = new Vector3(-0.04f, -0.42f, 0.22f), CockAbove = new Vector3(0.26f, 0.44f, 0.22f),
           ThrustCock = new Vector3(0.28f, -0.26f, 0.14f), ThrustEnd = new Vector3(0.06f, -0.17f, 0.60f) };
 
@@ -58,7 +63,9 @@ namespace Emberdelve.Player
         /// <summary>A body with both hands on the handle: closer to the middle so the second hand keeps its grip.</summary>
         public static readonly Frame BodyTwoHanded = new Frame
         { Centre = new Vector3(0.04f, -0.38f, 0.42f), HalfLength = 0.28f, HalfHeight = 0.30f, Bulge = 0.12f, CockDepth = 0.30f, CockRise = 0.26f, CockOut = 0.16f, ThroughDepth = 0.14f,
-          ThrustCock = new Vector3(0.22f, -0.50f, 0.06f), ThrustEnd = new Vector3(0.04f, -0.32f, 0.62f), ThrustDrop = 0.34f };
+          ThrustCock = new Vector3(0.22f, -0.50f, 0.06f), ThrustEnd = new Vector3(0.04f, -0.32f, 0.62f), ThrustDrop = 0.34f,
+          // The same attacks as the player sees of their own (thrust from low in the middle, cuts from the shoulder), a little lower.
+          BothHandsInView = true, BothHandsOffset = new Vector3(0f, -0.14f, 0.02f) };
 
         public static Frame For(bool body, bool twoHanded) =>
             body ? (twoHanded ? BodyTwoHanded : Body) : (twoHanded ? FirstPersonTwoHanded : FirstPerson);
@@ -117,6 +124,14 @@ namespace Emberdelve.Player
             float inside = Mathf.Clamp01(u);
             float before = Mathf.Max(0f, -u) / CockBack;
             float after = Mathf.Max(0f, u - 1f) / FollowThrough;
+            if (frame.BothHandsInView)
+            {
+                // The player's own view never blends to the ready pose here (the caller chains the attacks); a body does.
+                if (frame.CockBesideCamera) weight = 1f;
+                SampleBothHands(pattern, timing, time, thrust, travel, inside, after, out hand, out blade);
+                hand += frame.BothHandsOffset;
+                return true;
+            }
             if (thrust)
             {
                 if (frame.CockBesideCamera)
@@ -206,6 +221,98 @@ namespace Emberdelve.Player
             float lag = u < 0f ? 1f + 0.6f * before : Mathf.Lerp(1f, -0.9f, inside) - 0.4f * after;
             blade = (-travel * lag + Vector3.up * 0.75f + Vector3.forward * (0.2f + 0.6f * inside - 0.5f * before)).normalized;
             return true;
+        }
+
+        // ---- A weapon held in both hands, the player's own view ----------------------------------------------------------------
+        // After the user's reference recording of 25 Nov 2026 (23:35, a two-handed sword: thrust, cut from the right shoulder to the
+        // left, cut down to the left), read at every frame. Unlike the one-handed cut the hands STAY in the picture:
+        //  - thrust: the sword sinks low in the middle with its point forward (the hands are below the picture, the front of the
+        //    blade is seen at the bottom); the strike pushes both hands up into the bottom of the picture, the blade short and
+        //    pointing at the crosshair; then the sword is pulled back to the lower weapon side;
+        //  - cut: both fists rise on the weapon side, large, the blade laid back over the shoulder; the blade then sweeps level
+        //    across the upper half of the picture and ends pointing to the far side with the arms across the view, where it
+        //    stays until the next attack; a descending cut drops out at the lower far side instead, its blade trailing upwards.
+        // Positions are the right hand's (aim frame); the second hand follows the handle. Our own motion, no reference asset.
+        public static readonly Vector3 BothHandsThrustCock = new Vector3(0.12f, -0.44f, 0.16f), BothHandsThrustEnd = new Vector3(0.04f, -0.24f, 0.52f),
+            BothHandsThrustBack = new Vector3(0.30f, -0.42f, 0.22f);
+        public static readonly Vector3 BothHandsRaised = new Vector3(0.26f, 0.00f, 0.34f), BothHandsHigh = new Vector3(0.33f, 0.08f, 0.29f),
+            BothHandsEnd = new Vector3(-0.24f, -0.06f, 0.42f);
+        /// <summary>The point a thrust aims at lies this far ahead; it is aimed this far below the eye line while drawn back and in the strike.</summary>
+        public const float BothHandsAimAt = 2.2f, BothHandsDropDrawn = 0.60f, BothHandsDropStrike = 0.15f;
+
+        private static void SampleBothHands(SwingPatternData pattern, in SwingTiming timing, float time, bool thrust, Vector3 travel,
+            float inside, float after, out Vector3 hand, out Vector3 blade)
+        {
+            bool winding = time < timing.Windup;
+            float k = timing.Windup > 0f ? Mathf.Clamp01(time / timing.Windup) : 1f;
+            if (thrust)
+            {
+                Vector3 line = (pattern.Evaluate(timing.Windup + timing.Active * 0.5f, timing).LocalRotation * Vector3.forward).normalized;
+                hand = winding ? BothHandsThrustCock : Vector3.Lerp(BothHandsThrustCock, BothHandsThrustEnd, 1f - (1f - inside) * (1f - inside));
+                hand = Vector3.Lerp(hand, BothHandsThrustBack, Mathf.SmoothStep(0f, 1f, after));
+                float drop = winding ? BothHandsDropDrawn : Mathf.Lerp(BothHandsDropDrawn, BothHandsDropStrike, Mathf.SmoothStep(0f, 1f, inside * 2f));
+                blade = (line * BothHandsAimAt + Vector3.down * drop - hand).normalized;
+                return;
+            }
+
+            float side = travel.x > 0.3f ? -1f : 1f;                    // a cut from the off side is the mirror image
+            float falling = Mathf.Clamp01(-travel.y * 1.4f);            // 0 = level, 1 = steeply down
+            Vector3 raised = new Vector3(BothHandsRaised.x * side, BothHandsRaised.y + 0.08f * falling, BothHandsRaised.z);
+            Vector3 high = new Vector3(BothHandsHigh.x * side, BothHandsHigh.y + 0.08f * falling, BothHandsHigh.z);
+            Vector3 end = new Vector3(BothHandsEnd.x * side, BothHandsEnd.y - 0.30f * falling, BothHandsEnd.z);
+            float yaw, tilt;
+            if (winding)
+            {
+                // Raised beside the shoulder, then lifted a little further back just before the strike.
+                hand = Vector3.Lerp(raised, high, Mathf.SmoothStep(0f, 1f, (k - 0.65f) / 0.35f));
+                yaw = 115f; tilt = 0.75f;
+            }
+            else
+            {
+                // Well out in front on the way across: closer in, the forearms pass right before the camera.
+                hand = Vector3.Lerp(high, end, inside) + Vector3.forward * (0.18f * Mathf.Sin(Mathf.PI * inside));
+                // A level cut turns the blade right round to the far side; a falling one leaves it trailing upwards behind the hands.
+                yaw = Mathf.Lerp(115f, Mathf.Lerp(-75f, 40f, falling), Mathf.SmoothStep(0f, 1f, inside));
+                tilt = Mathf.Lerp(0.75f, Mathf.Lerp(0.12f, 0.70f, falling), inside);
+                hand += new Vector3(-0.04f * side, -0.05f - 0.30f * falling, 0f) * after;
+                // A falling cut ends below the picture; its blade follows it down instead of standing up into the view.
+                tilt -= 1.1f * falling * after;
+                yaw = Mathf.Lerp(yaw, -60f, falling * after);
+            }
+            float radians = yaw * Mathf.Deg2Rad;
+            blade = new Vector3(Mathf.Sin(radians) * side, tilt, Mathf.Cos(radians)).normalized;
+        }
+
+        // ---- The shoulder girdle follows the hands -----------------------------------------------------------------------------
+        // An arm does not move from a fixed shoulder. The chest turns towards the side the weapon hand is on and brings the weapon
+        // shoulder forward as the hand reaches out; each shoulder (the collar bone) swings a part of the way towards the point its
+        // hand is going to. User, 25 Nov 2026: "the shoulders must move too, as anatomically right as possible, for bots as well".
+        /// <summary>Part of the hand's bearing the chest takes up, the chest's limit (degrees) and degrees per metre of reach.</summary>
+        public const float GirdleYawGain = 0.55f, GirdleYawLimit = 28f, GirdleReachGain = 35f, GirdleNeutralReach = 0.35f;
+        /// <summary>Part of the way a collar bone swings towards its hand's target, and its limit (degrees).</summary>
+        public const float ClavicleFollow = 0.28f, ClavicleLimit = 22f;
+
+        /// <summary>
+        /// How far the chest turns (degrees about the body's up axis, positive = to the right) for the weapon hand at
+        /// <paramref name="hand"/> in the aim frame (right-handed weapon side).
+        /// </summary>
+        public static float GirdleYaw(Vector3 hand)
+        {
+            float toward = Mathf.Atan2(hand.x, Mathf.Max(0.2f, hand.z)) * Mathf.Rad2Deg * GirdleYawGain;
+            float reach = -(hand.z - GirdleNeutralReach) * GirdleReachGain;
+            return Mathf.Clamp(toward + reach, -GirdleYawLimit, GirdleYawLimit);
+        }
+
+        /// <summary>Swings a collar bone towards the point its hand is going to (within <see cref="ClavicleLimit"/>).</summary>
+        public static void SwingClavicle(Transform clavicle, Transform upperArm, Vector3 handTarget, float weight)
+        {
+            if (clavicle == null || upperArm == null || weight <= 0f) return;
+            Vector3 now = upperArm.position - clavicle.position, wanted = handTarget - clavicle.position;
+            if (now.sqrMagnitude < 1e-6f || wanted.sqrMagnitude < 1e-6f) return;
+            Vector3 axis = Vector3.Cross(now, wanted);
+            if (axis.sqrMagnitude < 1e-8f) return;
+            float angle = Mathf.Min(Vector3.Angle(now, wanted) * ClavicleFollow, ClavicleLimit) * Mathf.Clamp01(weight);
+            clavicle.rotation = Quaternion.AngleAxis(angle, axis.normalized) * clavicle.rotation;
         }
 
         /// <summary>Weapon rig rotation (blade along forward) for a shown blade direction, the edge towards the cut.</summary>

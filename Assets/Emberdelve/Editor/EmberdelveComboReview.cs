@@ -52,7 +52,7 @@ namespace Emberdelve.EditorTools
             FirstPersonArmsDriver.ReadyPoseFor(sword, null, out Vector3 readyHand, out Quaternion readyRotation);
             cut.SetReady(readyHand, readyRotation);
             int n = 0, tick = 0;
-            float shieldLower = 0f, swingWeight = 0f;
+            float shieldLower = 0f, swingWeight = 0f, worstMiss = 0f;
             // A weapon without a chain (the torch) is swung three times in a row: its attack repeats as soon as the last one ends.
             bool chain = sword.comboSteps.Length > 0;
             int steps = chain ? sword.comboSteps.Length : 3;
@@ -93,12 +93,21 @@ namespace Emberdelve.EditorTools
                         EmberdelveFirstPersonArms.PoseInstance(arms, AssetDatabase.LoadAssetAtPath<AnimationClip>(EmberdelveFirstPersonArms.ClipPath(FirstPersonArmsDriver.IdleState)), 0.3f);
                         driver.Pose(camera.transform, camera, FirstPersonArmsDriver.PatternRest, WeaponVisualRig.ReadyRotation, 0f, Vector3.zero, Vector3.zero,
                             swingBlend: weightNow, strikeBlend: 0f, shieldLower: lowerNow, swingTrail: 0f, swingView: view);
+                        // The second hand must be ON the handle in every frame: a miss is a defect, so it is measured, not judged by eye.
+                        if (sword.twoHanded)
+                        {
+                            worstMiss = Mathf.Max(worstMiss, driver.SecondGripMiss);
+                            if (driver.SecondGripMiss > 0.01f)
+                                Debug.LogWarning("[ComboReview] " + System.IO.Path.GetFileName(path) + " second hand off the handle by " +
+                                    (driver.SecondGripMiss * 100f).ToString("F1") + " cm, arm extended " + driver.SecondGripStretch.ToString("F3"));
+                        }
                     }, 0.05f);
                     files.Add(path);
                 }
             }
             EmberdelveViewmodelPreview.Sheet(EmberdelveComboReview.Folder + "/" + sheet + ".png", files, 8, 640, 360);
-            Debug.Log("[ComboReview] rendered " + files.Count + " frames to " + Folder);
+            Debug.Log("[ComboReview] rendered " + files.Count + " frames to " + Folder +
+                (sword.twoHanded ? "; second hand worst miss " + (worstMiss * 100f).ToString("F1") + " cm" : ""));
         }
     }
 }

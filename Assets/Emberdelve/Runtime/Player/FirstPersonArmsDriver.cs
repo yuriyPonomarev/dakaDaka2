@@ -201,6 +201,11 @@ namespace Emberdelve.Player
         private Vector3 _joltRight;
         private Vector3 _joltLeft;
         private Transform _upperR, _lowerR, _handR, _upperL, _lowerL, _handL;
+        // The shoulder girdle: collar bones (optional on a rig) and the turn of the whole upper body with a swing.
+        private Transform _clavR, _clavL;
+        private Quaternion _clavRestR, _clavRestL, _modelRestRotation;
+        private bool _girdleRestKnown;
+        private float _girdleYaw;
 
         public Animator Animator => animator;
         public Transform GripRight => gripRight;
@@ -698,6 +703,8 @@ namespace Emberdelve.Player
             public const float TakeUp = 0.20f, ReturnDelay = 0.06f, Return = 0.30f;
             /// <summary>Between two swings the hand goes round by the weapon side and below the picture, so the way from the end of one strike to the next wind-up stays outside it.</summary>
             public static readonly Vector3 ChainDetour = new Vector3(0.30f, -0.42f, -0.04f);
+            /// <summary>The same for a weapon in both hands: a low arc, the arms stay in the picture.</summary>
+            public static readonly Vector3 BothHandsChainDetour = new Vector3(0.04f, -0.14f, 0f);
             /// <summary>The blade on that way: point down and back towards the player, out of the picture wherever the hand is.</summary>
             public static readonly Quaternion Stowed = Quaternion.LookRotation(new Vector3(0.3f, -0.5f, -0.8f).normalized);
             private bool _has, _swinging, _chained, _ownReady;
@@ -728,10 +735,11 @@ namespace Emberdelve.Player
                     _in += dt;
                     float w = Mathf.SmoothStep(0f, 1f, _in / TakeUp);
                     _hand = Vector3.Lerp(_fromHand, hand, w);
-                    if (_chained) _hand += ChainDetour * Mathf.Sin(Mathf.PI * w);
-                    // Inside a combo the blade keeps pointing away until the hand is on its way up again.
+                    if (_chained) _hand += (twoHanded ? BothHandsChainDetour : ChainDetour) * Mathf.Sin(Mathf.PI * w);
+                    // Inside a combo the blade keeps pointing away until the hand is on its way up again. A weapon in both hands
+                    // stays in the picture between its attacks (reference recording): it is simply carried to the next wind-up.
                     Quaternion target = SwingMotion.BladeRotation(blade, travel);
-                    _rotation = !_chained ? Quaternion.Slerp(_fromRotation, target, w)
+                    _rotation = !_chained || twoHanded ? Quaternion.Slerp(_fromRotation, target, w)
                         : w < 0.5f ? Quaternion.Slerp(_fromRotation, Stowed, Mathf.SmoothStep(0f, 1f, w * 2f))
                         : Quaternion.Slerp(Stowed, target, Mathf.SmoothStep(0f, 1f, w * 2f - 1f));
                     _lastHand = _hand; _lastRotation = _rotation;
@@ -767,6 +775,22 @@ namespace Emberdelve.Player
 
             // Scale the mannequin and hold the middle of the shoulders at its viewmodel anchor.
             Transform model = animator.transform;
+            // The upper body turns with a swing (SwingMotion.GirdleYaw): the shoulders are not a fixed pair of points.
+            if (!_girdleRestKnown)
+            {
+                _modelRestRotation = model.localRotation;
+                if (_clavR != null) _clavRestR = _clavR.localRotation;
+                if (_clavL != null) _clavRestL = _clavL.localRotation;
+                _girdleRestKnown = true;
+            }
+            float girdleTarget = view.Valid && _mainData != null && !_mainData.IsRanged && _utilityItem == null
+                ? SwingMotion.GirdleYaw(view.Hand) * view.Weight : 0f;
+            _girdleYaw = Application.isPlaying ? Mathf.Lerp(_girdleYaw, girdleTarget, 1f - Mathf.Exp(-14f * Time.deltaTime)) : girdleTarget;
+            model.localRotation = _modelRestRotation;
+            model.rotation = Quaternion.AngleAxis(_girdleYaw, frame.up) * model.rotation;
+            // The collar bones start every pose from their rest (an animator that is not running would not reset them).
+            if (_clavR != null) _clavR.localRotation = _clavRestR;
+            if (_clavL != null) _clavL.localRotation = _clavRestL;
             model.localScale = Vector3.one * modelScale;
             Vector3 mid = (_upperR.position + _upperL.position) * 0.5f;
             model.position += frame.TransformPoint(ShoulderCenter) - mid;
@@ -901,6 +925,7 @@ namespace Emberdelve.Player
             // In a cut the elbow hangs below the hand (the forearm stands upright in the view) instead of out to the side.
             float cutting = view.Valid && _mainData != null && !_mainData.IsRanged && _utilityItem == null ? view.Weight : 0f;
             Vector3 rightPole = Vector3.Lerp(RightPole, SwingPole, cutting);
+            SwingMotion.SwingClavicle(_clavR, _upperR, gripPosition, cutting);
             if (gripRight != null)
             {
                 SolveArmWithWrist(_upperR, _lowerR, _handR, gripRight, gripPosition, gripRotation, frame.rotation * rightPole);
@@ -969,10 +994,31 @@ namespace Emberdelve.Player
             else if (_mainData != null && _mainData.twoHanded && gripRight != null && gripLeft != null)
             {
                 Vector3 axis = _mainHand != null ? _mainHand.transform.up : gripRight.up;
-                Vector3 second = gripRight.position - axis * (SecondGripOffset * WeaponScale);
+                // The point on the HANDLE under the main fist. The model is shifted sideways in the main grip (HeldPalmCentre), so
+                // the handle does not run through the grip's own origin: measured from that origin the second hand closed 5 cm
+                // beside the handle (user, 26 Nov 2026, with a frame: "the hand is still off the handle").
+                Vector3 onHandle = _mainHand != null
+                    ? _mainHand.transform.position + axis * Vector3.Dot(gripRight.position - _mainHand.transform.position, axis)
+                    : gripRight.position;
+                Vector3 second = onHandle - axis * (SecondGripOffset * WeaponScale);
+                SwingMotion.SwingClavicle(_clavL, _upperL, second, cutting);
                 // Solve the palm's authored grip, not the wrist. Keep its grasp aligned with the
                 // handle throughout the swing instead of preserving the idle wrist rotation.
-                SolveArmWithWrist(_upperL, _lowerL, _handL, _leftWeaponGrip, second, gripRight.rotation, frame.rotation * LeftPole);
+                // The second hand holds the same handle from its own side. It used to be given the main hand's orientation, which
+                // turned its palm away from the handle and wrung the wrist (user, 26 Nov 2026: "the left hand looks very bad").
+                // The handle's direction is fixed by the weapon; around it the hand is rolled until its knuckles continue its
+                // own forearm (a straight wrist), starting from the mirror image of the main hand (palms facing each other).
+                Quaternion leftGrip = gripRight.rotation * Quaternion.AngleAxis(180f, Vector3.up);
+                for (int pass = 0; pass < 3; pass++)
+                {
+                    SolveArmWithWrist(_upperL, _lowerL, _handL, _leftWeaponGrip, second, leftGrip, frame.rotation * LeftPole);
+                    leftGrip = RollToForearm(leftGrip, (_handL.position - _lowerL.position).normalized, _handL, _leftWeaponGrip);
+                }
+                SolveArmWithWrist(_upperL, _lowerL, _handL, _leftWeaponGrip, second, leftGrip, frame.rotation * LeftPole);
+                // Measured against the handle's own line, not against the target the hand was sent to.
+                SecondGripMiss = Vector3.ProjectOnPlane(_leftWeaponGrip.position - onHandle, axis).magnitude;
+                float leftArm = Vector3.Distance(_upperL.position, _lowerL.position) + Vector3.Distance(_lowerL.position, _handL.position);
+                SecondGripStretch = leftArm > 1e-4f ? Vector3.Distance(_upperL.position, _handL.position) / leftArm : 0f;
             }
 
             // Spread the grip roll along each solved forearm so the wrist is not wrung (a held weapon or a utility item in the right hand).
@@ -1311,18 +1357,25 @@ namespace Emberdelve.Player
         private Vector3 _fingerLocalR;
 
         /// <summary>Turns <paramref name="target"/> about its handle axis (+Y) so the hand's finger direction follows the forearm.</summary>
+        /// <summary>After a pose with a weapon in both hands: how far the second hand's grip is from the handle (m) and how far its arm is extended (1 = straight).</summary>
+        public float SecondGripMiss { get; private set; }
+        public float SecondGripStretch { get; private set; }
+        private Vector3 _fingerLocalL;
         private Quaternion RollToForearm(Quaternion target, Vector3 forearm, Transform hand, Transform effector)
         {
-            if (_fingerLocalR == Vector3.zero)
+            bool left = hand == _handL;
+            Vector3 fingerLocal = left ? _fingerLocalL : _fingerLocalR;
+            if (fingerLocal == Vector3.zero)
             {
-                Transform middle = animator != null ? animator.GetBoneTransform(HumanBodyBones.RightMiddleProximal) : null;
+                Transform middle = animator != null ? animator.GetBoneTransform(left ? HumanBodyBones.LeftMiddleProximal : HumanBodyBones.RightMiddleProximal) : null;
                 if (middle == null) return target;
-                _fingerLocalR = Quaternion.Inverse(hand.rotation) * (middle.position - hand.position);
+                fingerLocal = Quaternion.Inverse(hand.rotation) * (middle.position - hand.position);
+                if (left) _fingerLocalL = fingerLocal; else _fingerLocalR = fingerLocal;
             }
             Quaternion effectorLocal = Quaternion.Inverse(hand.rotation) * effector.rotation;
             Quaternion handRotation = target * Quaternion.Inverse(effectorLocal);
             Vector3 axis = target * Vector3.up;
-            Vector3 fingers = Vector3.ProjectOnPlane(handRotation * _fingerLocalR, axis);
+            Vector3 fingers = Vector3.ProjectOnPlane(handRotation * fingerLocal, axis);
             Vector3 wanted = Vector3.ProjectOnPlane(forearm, axis);
             if (fingers.sqrMagnitude < 1e-8f || wanted.sqrMagnitude < 1e-8f) return target;
             return Quaternion.AngleAxis(Vector3.SignedAngle(fingers, wanted, axis), axis) * target;
@@ -1339,6 +1392,8 @@ namespace Emberdelve.Player
             _upperL = animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
             _lowerL = animator.GetBoneTransform(HumanBodyBones.LeftLowerArm);
             _handL = animator.GetBoneTransform(HumanBodyBones.LeftHand);
+            _clavR = animator.GetBoneTransform(HumanBodyBones.RightShoulder);
+            _clavL = animator.GetBoneTransform(HumanBodyBones.LeftShoulder);
             return _upperR != null && _lowerR != null && _handR != null && _upperL != null && _lowerL != null && _handL != null;
         }
 

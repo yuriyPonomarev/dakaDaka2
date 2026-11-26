@@ -550,3 +550,116 @@ Bodies (bots, other players) still carry the torch on the old path (`RemoteWeapo
 No motion proof.
 
 Evidence: mirror run `Logs/runs/20261125-164638-103`: Visual 216/0, Hands 92/0, CombatFlow 615/0, SweptMelee 1066/0; EditMode 1680, the same 12 known unrelated failures by name.
+
+## Pass 7: the two-handed sword after the user's reference recording (25-26 Nov)
+
+User, with `C:/Users/yrapa/Videos/Captures/Dark and Darker   2026-11-25 23-35-21.mp4` (15.8 s, first person, a two-handed sword,
+the three-attack chain twice): "this is how the two-handed attack animation must look, do the same".
+
+Read at every frame, enlarged (27 fps; first chain 3.3-7.0 s):
+- Attack 1, a thrust. 3.3-3.8 s: the blade leaves the ready pose, tilts forward and sinks; until 4.1 s only the front of the blade
+  is seen low in the middle, pointing forward (hands below the picture). 4.1-4.4 s: both hands push up into the bottom of the
+  picture, the blade short, pointing at the crosshair. 4.4-4.65 s: pulled back to the lower right, the blade a long diagonal.
+- Attack 2, a cut from the right shoulder to the LEFT. 4.75-5.1 s: both fists rise on the right, large, the blade laid back over
+  the right shoulder. 5.1-5.25 s: the blade sweeps level across the upper half and points left. 5.25-5.6 s: the arms are across
+  the view (the left arm fills the right half), the blade's point on the left; it stays there until the next attack.
+- Attack 3, a cut down to the left. 5.65-6.1 s: the forearms pass low across the picture back to the right. 6.1-6.37 s: the hands
+  go from the right down to the lower left, the blade trailing up and to the right; out at the bottom left. Then about 0.6 s of
+  nothing, and the sword comes back to the ready pose from the left (7.0 s).
+
+Correction of an earlier reading: the reference's second longsword attack has the crosshair angle -177. Pass 3 read that as
+"left to right". The recording shows right to left. The angle is the tilt of a line and does not tell the direction along it
+(0 and 180 are the same line), so every direction taken from the sign of that angle alone is unconfirmed; only attacks seen in a
+recording are known (short sword and this sword).
+
+Changes:
+- Data: the chain's second step is the right-to-left slash (`great_slash_rl`, index 1) on attack 2's timing (0.679 / 0.234 /
+  0.054); the left-to-right slash stays in the list outside the chain. The working Editor was not reachable, so
+  `Pattern_GreatSlashRL` and `Weapon_TwoHandedSword` were written by hand with the builder's values; `EmberdelveDarkerCombat` builds
+  the same (not re-run).
+- Motion (`SwingMotion.SampleBothHands`, frame `FirstPersonTwoHanded.BothHandsInView`; our own motion): unlike the one-handed cut
+  the hands stay in the picture. Thrust: drawn back low in the middle with the point forward, pushed up into the bottom of the
+  picture aiming at the crosshair, pulled back to the lower weapon side. Cut: fists raised on the weapon side with the blade over
+  the shoulder, the blade swept level across to the far side, arms across the view, held there; a falling cut ends below the
+  picture on the far side with the blade trailing upwards, then follows it down.
+- `CutBlend`: between the attacks of a weapon in both hands the sword is carried on a low arc and simply turned to the next
+  wind-up (no stowing below the picture).
+
+Compared frame by frame with the reference (stills at 1/30 s through the driver's own blender, game field of view):
+`Logs/review/combo/two-thrust.png`, `two-cut-left.png`, `two-cut-down.png` next to `reference-two-thrust.png`,
+`reference-two-cut-left.png`. Differences I can see: our viewmodel has bare arms where the reference has armour, so the arms read
+thinner; in attack 2 the reference's blade is level and high while ours passes through "pointing forward" lower; the reference
+turns the whole torso (its left shoulder fills the right half), ours only moves the arms. No motion proof.
+Bodies (bots) still use the pass 5c two-handed motion.
+
+Evidence: mirror run `Logs/runs/20261126-000046-066`: CombatFlow, SweptMelee 1066/0, CombatData 22/0, Riposte 147/0, Visual 216/0,
+Hands 92/0 pass. NOT GREEN: NetCombat 76/2, first failure "parry: server loaded the dungeon and logged 'ready'"; EditMode 38
+failures instead of the known 12, the 26 new ones all in dungeon layout / portal / royale stage tests. At the time of this run the
+working tree also held another session's uncommitted dungeon work (crypt module prefabs, `CryptRoomArchitecture`,
+`DungeonRoomExpansion`, furnishing, lighting), which the runner synchronizes to the mirror with everything else. This pass touches
+only `SwingMotion`, `FirstPersonArmsDriver`, `EmberdelveDarkerCombat` and two sword data assets, so I attribute those failures to
+that work, but I did NOT prove it (no run on a tree without it). Earlier run 20261125-235347-649 (before the motion tweak, same
+data): CombatFlow 615/0, SweptMelee 1066/0, CombatData 22/0.
+
+### Pass 7b: the shoulder girdle moves, for the player and for bodies (user, 26 Nov)
+
+User: "the shoulders must move too, the motion must be as close to anatomically right as possible, for bots as well".
+Before: every arm was solved from a fixed shoulder point; in first person the whole arm model never turned, on bodies only a
+pattern-driven spine twist existed.
+- `SwingMotion.GirdleYaw(hand)`: the chest turns towards the side the weapon hand is on (0.55 of its bearing) and brings the
+  weapon shoulder forward as the hand reaches out (35 degrees per metre from 0.35 m), within 28 degrees.
+  `SwingMotion.SwingClavicle`: a collar bone swings 0.28 of the way towards the point its hand is going to, at most 22 degrees.
+  All numbers are our own tuning, not measured from anything.
+- First person (`FirstPersonArmsDriver.Pose`): the arm model turns about the view's up axis by the girdle yaw (eased, 14/s), the
+  collar bones (`HumanBodyBones.Right/LeftShoulder`, when the rig has them) swing towards the grips before the arms are solved.
+- Bodies (`RemoteWeaponPresentation`): `TurnGirdle` turns the chest by the same rule from the shown hand (the neck is turned
+  back, so the head keeps looking where it looked) and swings the weapon-side collar bone; the second hand's collar bone
+  follows the handle. It replaces the pattern-driven `TwistSpine` for bodies that hold the weapon in the fist. With a bow raised
+  the chest turns 32 degrees side-on (`BowStanceYaw`) and the bow shoulder swings to the grip.
+- Bodies now use the pass 7 two-handed attack shapes too (`BodyTwoHanded.BothHandsInView`, 0.14 m lower than the camera sees them).
+Stills: `Logs/review/avatar/bot-two-handed.png` (thrust / cut to the left / cut down-left, six moments each),
+`Logs/review/avatar/bot-sword-shield.png`, `Logs/review/combo/two-with-shoulders.png`. The turn is visible on bodies in the wind-up
+frames; in first person it shows as the arms entering from a slightly different angle and I cannot judge from stills whether it
+reads as shoulder motion. No motion proof.
+
+Evidence (passes 7 and 7b together): mirror run `Logs/runs/20261126-004247-326`: CombatFlow 615/0, SweptMelee 1066/0, CombatData 22/0,
+EnemySweep 210/0, Visual 216/0, Hands 92/0, NetCombat 396/0 (it passes again; the failure in run 000046-066 was the dungeon not
+loading on the server at that moment, not this work). EditMode 1683, 38 failures: the same 38 names as in run 000046-066, i.e.
+the 12 known ones plus 26 dungeon layout / portal / royale stage tests. Those 26 appeared between the runs of 25 Nov 16:46 and
+26 Nov 00:00 together with another session's uncommitted dungeon work in the tree; attribution to that work is not proven.
+
+### Pass 7c: the second hand of a two-handed grip (user, 26 Nov)
+
+User: "what is with the left hand in the two-handed attack - it looks very bad".
+Seen in the enlarged frames: the left fist was beside the handle with the handle lying across its knuckles, the palm turned away
+and the wrist bent at a right angle; mid-swing the hand looked like an open claw.
+Cause, first person: the second hand was solved with the MAIN hand's grip rotation (`SolveArmWithWrist(.., gripRight.rotation, ..)`).
+With the prefab's `supportGripRoll` -90 that turns the back of the left hand the same way as the back of the right hand, i.e.
+the left palm away from the handle it is supposed to hold. I did not look at this hand in passes 5-7; the defect is older than
+the new motion but the new motion keeps the hands in the picture, so it shows.
+Fix: the handle's direction is the weapon's; around it the left hand starts as the mirror image of the main hand (palms facing
+each other) and is rolled until its knuckles continue its own forearm (`RollToForearm`, now for either hand, three passes).
+Cause, bodies: `RemoteWeaponPresentation` only moved the left WRIST next to the handle; the hand was neither turned nor closed.
+Fix: `GripSecondHand`: knuckle line along the handle (index towards the blade), fingers continuing the forearm, the wrist placed
+so that the handle runs through the fist (`SecondHandBelow` 0.15 m under the main fist), fingers closed (`CloseFist` for either
+hand, left finger bones bound).
+Stills: `Logs/review/combo/two-left-hand-windup.png`, `two-left-hand-strike.png`, `Logs/review/avatar/bot-two-hands-closeup.png`.
+Still visible: in the two frames of the level cut where the handle points at the camera the hands are seen end-on and the fingers
+read as loosely curled round a thin handle (the finger curl is the shared authored grip pose; the sword models were replaced by
+another session and their handles are thinner). Not changed.
+
+Follow-up the same day (user, with a frame of the level cut: "better, but in the second frame the hand is still off the handle").
+Second cause, first person: the target for the second hand was measured from the main grip's ORIGIN, but the weapon model is
+shifted 0.05 sideways in that grip (`HeldPalmCentre`, commit 5ad27402c), so the handle does not pass through that origin and the
+left fist closed about 5 cm beside it. It only shows when the hands are seen end-on, which is why the wind-up frames looked
+right. Fix: the target is the point on the model's own handle line under the main fist.
+Check that does not depend on my eyes: `FirstPersonArmsDriver.SecondGripMiss` = distance of the second grip from the handle's
+line, logged by `EmberdelveComboReview` for every rendered frame of a two-handed weapon; worst over the 142 frames of the chain
+after the fix: 0.0 cm. (I did not measure the value before the fix; 5 cm is derived from the code.)
+What is still not right in that frame: the fingers make a ring wider than the thin handle and the thumb stands off; the finger
+curl is the shared authored grip pose and was not changed.
+
+Evidence: mirror run `Logs/runs/20261126-010315-584` (shoulder girdle, both second-hand fixes for the roll and for bodies, BEFORE
+the handle-line fix): Visual 216/0, Hands 92/0, NetCombat 396/0; EditMode 1683 with 10 failures, all among the 12 known ones
+(the 26 dungeon failures of the two earlier runs are gone; the other session's dungeon work changed in between). The
+handle-line fix was compiled and rendered on the mirror (batch render, miss 0.0 cm).

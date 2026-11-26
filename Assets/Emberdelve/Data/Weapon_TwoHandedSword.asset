@@ -39,7 +39,7 @@ MonoBehaviour:
     recoveryScale: 1
     activeScale: 1
     comboWindow: 0.733
-  - patternIndex: 0
+  - patternIndex: 1
     damageMultiplier: 1.05
     windupScale: 1
     recoveryScale: 1

@@ -12,6 +12,10 @@ namespace Emberdelve.Player
         private PotionDrinkPresentation _drink;
         private float _drinkRaise;
         private Transform _right, _left, _rightElbow, _leftElbow, _rightShoulder, _leftShoulder;
+        private Transform _rightClavicle, _leftClavicle, _neck;
+        // The second hand of a two-handed grip: its knuckles and finger joints (index, middle, ring, little x three joints).
+        private Transform _leftIndex, _leftLittle, _leftMiddle;
+        private readonly Transform[] _leftFingers=new Transform[12];
         private Transform _spine;
         private AttackTelegraphVisual _attackTell;
         private SwingPatternData _tellPattern;
@@ -72,6 +76,7 @@ namespace Emberdelve.Player
         {
             _models=WeaponViewModelSet.Load();
             _right=_left=_rightElbow=_leftElbow=_rightShoulder=_leftShoulder=_spine=null;
+            _rightClavicle=_leftClavicle=_neck=null; _leftIndex=_leftLittle=_leftMiddle=null;
             _index=_little=_middle=null; _holdWeight=0f; _swivelSet=false; _rightArm=default; _leftArm=default;
             var animator=model.GetComponentInChildren<Animator>();
             if(animator!=null && animator.isHuman)
@@ -80,10 +85,18 @@ namespace Emberdelve.Player
                 _rightElbow=animator.GetBoneTransform(HumanBodyBones.RightLowerArm); _leftElbow=animator.GetBoneTransform(HumanBodyBones.LeftLowerArm);
                 _rightShoulder=animator.GetBoneTransform(HumanBodyBones.RightUpperArm); _leftShoulder=animator.GetBoneTransform(HumanBodyBones.LeftUpperArm);
                 _spine=animator.GetBoneTransform(HumanBodyBones.Chest) ?? animator.GetBoneTransform(HumanBodyBones.Spine);
+                _rightClavicle=animator.GetBoneTransform(HumanBodyBones.RightShoulder); _leftClavicle=animator.GetBoneTransform(HumanBodyBones.LeftShoulder);
+                _neck=animator.GetBoneTransform(HumanBodyBones.Neck) ?? animator.GetBoneTransform(HumanBodyBones.Head);
                 _index=animator.GetBoneTransform(HumanBodyBones.RightIndexProximal);
                 _little=animator.GetBoneTransform(HumanBodyBones.RightLittleProximal);
                 _middle=animator.GetBoneTransform(HumanBodyBones.RightMiddleProximal);
                 if(_index==null || _little==null || _middle==null) _index=_little=_middle=null;
+                _leftIndex=animator.GetBoneTransform(HumanBodyBones.LeftIndexProximal);
+                _leftLittle=animator.GetBoneTransform(HumanBodyBones.LeftLittleProximal);
+                _leftMiddle=animator.GetBoneTransform(HumanBodyBones.LeftMiddleProximal);
+                if(_leftIndex==null || _leftLittle==null || _leftMiddle==null) _leftIndex=_leftLittle=_leftMiddle=null;
+                for(int finger=0;finger<4;finger++) for(int joint=0;joint<3;joint++)
+                    _leftFingers[finger*3+joint]=animator.GetBoneTransform(HumanBodyBones.LeftIndexProximal+finger*3+joint);
                 for(int finger=0;finger<4;finger++) for(int joint=0;joint<3;joint++)
                     _fingers[finger*3+joint]=animator.GetBoneTransform(HumanBodyBones.RightIndexProximal+finger*3+joint);
                 return;
@@ -412,6 +425,9 @@ namespace Emberdelve.Player
             float progress=draw ? _drawProgress : 0f;
             bow.SetDraw(BowPresentation.StringDraw(progress)*raised);
             Vector3 animatedHand=_right!=null ? _right.position : grip;
+            // Side-on to the target with the bow up: the bow shoulder forward, the string shoulder back.
+            TurnChest(BowStanceYaw*raised);
+            if(_leftClavicle!=null) { Remember(_leftClavicle); SwingMotion.SwingClavicle(_leftClavicle,_leftShoulder,grip,raised); }
             HoldPoint(_leftShoulder,_leftElbow,_left,grip,BowArmHint,1f);
             PlaceQuiver();
             if(draw && progress<BowPresentation.ArrowNockedAt)
@@ -478,6 +494,8 @@ namespace Emberdelve.Player
         {
             bool posing = _bot && _pattern != null && (_recoil || (_swing && _elapsed < _timing.Total));
             if (!posing || _spine == null) return;
+            // A body that holds its weapon in the fist turns its chest with the shown hand instead (TurnGirdle, from PoseMelee).
+            if (HasHandFrame && _main != null && !_main.IsRanged && _main.weaponId != HandheldTorchVisual.WeaponId) return;
             SwingPose rest = _pattern.RestPose;
             SwingPose swing = _recoil
                 ? SwingPose.Lerp(_pattern.ActivePose(_stopFraction), rest, _recoilProgress)
@@ -508,17 +526,17 @@ namespace Emberdelve.Player
         private Vector3 PalmCentre => Vector3.Lerp(_right.position,_middle.position,.8f)+PalmNormal*.025f;
 
         // Closes the right hand's fingers around the handle: every segment is turned from the hand's finger direction towards the palm.
-        private void CloseFist()
+        private void CloseFist() => CloseFist(_fingers,Vector3.ProjectOnPlane(_middle.position-_right.position,KnuckleAxis).normalized,PalmNormal);
+
+        private void CloseFist(Transform[] fingers,Vector3 along,Vector3 palm)
         {
-            Vector3 along=Vector3.ProjectOnPlane(_middle.position-_right.position,KnuckleAxis).normalized;
-            Vector3 palm=PalmNormal;
             for(int finger=0;finger<4;finger++)
             {
                 for(int joint=0;joint<3;joint++)
                 {
-                    Transform bone=_fingers[finger*3+joint];
+                    Transform bone=fingers[finger*3+joint];
                     if(bone==null) break;
-                    Transform next=joint<2 ? _fingers[finger*3+joint+1] : (bone.childCount>0 ? bone.GetChild(0) : null);
+                    Transform next=joint<2 ? fingers[finger*3+joint+1] : (bone.childCount>0 ? bone.GetChild(0) : null);
                     Remember(bone);
                     float angle=FistCurl[joint]*Mathf.Deg2Rad;
                     Vector3 wanted=along*Mathf.Cos(angle)+palm*Mathf.Sin(angle);
@@ -597,6 +615,8 @@ namespace Emberdelve.Player
 
             if(_holdWeight>0f)
             {
+                // The chest and the weapon shoulder go with the hand before the arm is solved from that shoulder.
+                TurnGirdle(_body.TransformPoint(_holdGrip),Mathf.SmoothStep(0f,1f,_holdWeight));
                 Remember(_rightShoulder); Remember(_rightElbow); Remember(_right);
                 Quaternion shoulder=_rightShoulder.localRotation, elbow=_rightElbow.localRotation, hand=_right.localRotation;
                 CarryTo(_body.TransformPoint(_holdGrip),_body.TransformDirection(_holdBlade).normalized,_holdReach);
@@ -619,10 +639,65 @@ namespace Emberdelve.Player
 
             if(_main.twoHanded && _left!=null && _leftElbow!=null && _leftShoulder!=null)
             {
+                Vector3 second=PalmCentre-along*SecondHandBelow;
+                if(_leftClavicle!=null) { Remember(_leftClavicle); SwingMotion.SwingClavicle(_leftClavicle,_leftShoulder,second,1f); }
                 Remember(_leftShoulder); Remember(_leftElbow); Remember(_left);
-                ReachArm(_leftShoulder,_leftElbow,_left,PalmCentre-along*.15f,_body.TransformDirection(LeftElbowHint));
+                GripSecondHand(second,along);
             }
         }
+
+        // The shoulder girdle of a body: the chest turns with the weapon hand (the head keeps looking where it looked) and the
+        // weapon shoulder swings towards the hand's target. See SwingMotion.GirdleYaw.
+        private void TurnGirdle(Vector3 hand,float weight)
+        {
+            if(weight<=0f) return;
+            TurnChest(SwingMotion.GirdleYaw(Quaternion.Inverse(_frame.Rotation)*(hand-_frame.Eye))*weight);
+            if(_rightClavicle!=null) { Remember(_rightClavicle); SwingMotion.SwingClavicle(_rightClavicle,_rightShoulder,hand,weight); }
+        }
+
+        private void TurnChest(float yaw)
+        {
+            if(_spine==null || Mathf.Abs(yaw)<.01f) return;
+            Quaternion turn=Quaternion.AngleAxis(yaw,_body.up);
+            Remember(_spine);
+            _spine.rotation=turn*_spine.rotation;
+            if(_neck!=null) { Remember(_neck); _neck.rotation=Quaternion.Inverse(turn)*_neck.rotation; }
+        }
+
+        /// <summary>How far below the main fist the second hand holds a two-handed weapon (metres along the handle).</summary>
+        public const float SecondHandBelow=.15f;
+
+        // The second hand closes round the handle at `point`. Its knuckle line lies along the handle (index towards the blade), its
+        // fingers continue its own forearm (a straight wrist) and the handle runs through the fist. It used to be only a wrist
+        // moved next to the handle, hand open and unturned (user, 26 Nov 2026: "the left hand looks very bad").
+        private void GripSecondHand(Vector3 point,Vector3 handle)
+        {
+            Vector3 hint=_body.TransformDirection(LeftElbowHint);
+            if(_leftMiddle==null) { ReachArm(_leftShoulder,_leftElbow,_left,point,hint); return; }
+            Vector3 wristTarget=point;
+            for(int pass=0;pass<3;pass++)
+            {
+                ReachArm(_leftShoulder,_leftElbow,_left,wristTarget,hint);
+                Vector3 forearm=_left.position-_leftElbow.position;
+                Vector3 fingers=Vector3.ProjectOnPlane(forearm,handle);
+                if(fingers.sqrMagnitude<1e-6f) fingers=Vector3.ProjectOnPlane(_body.forward,handle);
+                fingers.Normalize();
+                Vector3 nowK=(_leftIndex.position-_leftLittle.position).normalized;
+                Vector3 nowF=Vector3.ProjectOnPlane(_leftMiddle.position-_left.position,nowK);
+                if(nowF.sqrMagnitude<1e-8f) return;
+                _left.rotation=Quaternion.LookRotation(handle,fingers)*Quaternion.Inverse(Quaternion.LookRotation(nowK,nowF.normalized))*_left.rotation;
+                // A left hand's palm is on the other side of (fingers x knuckles) than a right hand's.
+                Vector3 palm=-Vector3.Cross(fingers,handle).normalized;
+                float reach=Vector3.Distance(_left.position,_leftMiddle.position)*.8f;
+                wristTarget=point-(fingers*reach+palm*.025f);
+            }
+            Vector3 k=(_leftIndex.position-_leftLittle.position).normalized;
+            Vector3 f=Vector3.ProjectOnPlane(_leftMiddle.position-_left.position,k).normalized;
+            CloseFist(_leftFingers,f,-Vector3.Cross(f,k).normalized);
+        }
+
+        /// <summary>An archer stands side-on to the target: the chest turns this far (degrees) with the bow raised.</summary>
+        public const float BowStanceYaw=32f;
 
         /// <summary>Carries the fist's centre towards <paramref name="grip"/> (as far as <paramref name="reach"/> of the arm allows) with the blade along <paramref name="blade"/>.</summary>
         private void CarryTo(Vector3 grip,Vector3 blade,float reach)

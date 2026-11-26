@@ -14,9 +14,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: Emberdelve.Runtime::Emberdelve.Data.SwingPatternData
   patternId: great_slash_rl
   kind: 1
-  windupTime: 0.932
-  activeTime: 0.229
-  recoveryTime: 0.283
+  windupTime: 0.679
+  activeTime: 0.234
+  recoveryTime: 0.054
   wallRecoilTime: 0.7
   damageMultiplier: 1
   impactPowerScale: 1
